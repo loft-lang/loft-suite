@@ -1,0 +1,139 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+
+// Recursion-free generic tree walk — the full composition the sandbox-side
+// `walk` construction needs (bounded loop + grow-only worklist + `??` on
+// generic T + iterating an interface method's vector<Self> result).  The
+// grow-only single-vector shape is the leak-free one; the two-vector
+// stack/order variant currently orphans one store per call on the
+// interpreter (instantiated generics lose the retbuf borrow dep) — see the
+// issue filed from this probe family before promoting a stdlib walk.
+//
+//        1
+//      /   \
+//     2     3
+//    / \     \
+//   4   5     6   → level order 1,2,3,4,5,6
+
+interface GwKidded {
+  fn gw_kids(self: Self) -> vector<Self>
+  fn gw_worth(self: Self) -> integer
+}
+struct GwNode {
+  gwn_v: integer,
+  gwn_kids: vector<GwNode>,
+}
+fn gw_kids(self: GwNode) -> vector<GwNode> {
+  return self.gwn_kids;
+}
+fn gw_worth(self: GwNode) -> integer {
+  return self.gwn_v;
+}
+
+fn gw_walk < T: GwKidded > (gw_root: T, gw_cap: integer) -> vector<T> {
+  gw_order = [gw_root];
+  for gw_i in 0..gw_cap {
+    if gw_i >= len(gw_order) { gw_i#break; }
+    gw_cur = gw_order[gw_i] ?? gw_root;
+    for gw_kid in gw_cur.gw_kids() {
+      if len(gw_order) < gw_cap { gw_order += [gw_kid]; }
+    }
+  }
+  return gw_order;
+}
+
+fn test_generic_walk_level_order() {
+  gt_n4 = GwNode { gwn_v: 4, gwn_kids: [] };
+  gt_n5 = GwNode { gwn_v: 5, gwn_kids: [] };
+  gt_n6 = GwNode { gwn_v: 6, gwn_kids: [] };
+  gt_n2 = GwNode { gwn_v: 2, gwn_kids: [gt_n4, gt_n5] };
+  gt_n3 = GwNode { gwn_v: 3, gwn_kids: [gt_n6] };
+  gt_n1 = GwNode { gwn_v: 1, gwn_kids: [gt_n2, gt_n3] };
+  gt_seq = "";
+  for gt_w in gw_walk(gt_n1, 1000) { gt_seq = "{gt_seq}{gt_w.gwn_v},"; }
+  assert(gt_seq == "1,2,3,4,5,6,", "level order: {gt_seq}");
+}
+
+fn test_generic_walk_cap() {
+  gc_leaf = GwNode { gwn_v: 20, gwn_kids: [] };
+  gc_root = GwNode { gwn_v: 5, gwn_kids: [gc_leaf, gc_leaf, gc_leaf] };
+  gc_count = 0;
+  for gc_w in gw_walk(gc_root, 2) { gc_count += 1; }
+  assert(gc_count == 2, "cap: {gc_count}");
+}
+
+// ── The STDLIB construction: `tree_walk` over the `Walkable` bound ──────
+// Same contract as the local gw_walk above, provided by default/01_code.loft.
+// The stdlib landing was blocked by #483 (a generic template's parse
+// registered a placeholder vector row, shifting the runtime type table for
+// every later registration); `vector_of` now bakes the MAX sentinel inside
+// templates instead of registering.
+
+struct SwNode {
+  swn_v: integer,
+  swn_kids: vector<SwNode>,
+}
+fn children(self: SwNode) -> vector<SwNode> {
+  return self.swn_kids;
+}
+
+// @STD-006 — walk a tree breadth-first via the Walkable interface (a bare
+// `fn children(self: T) -> vector<T>` makes T Walkable; tree_walk returns
+// level order, bounded by the cap)
+fn test_stdlib_tree_walk_level_order() {
+  st_n4 = SwNode { swn_v: 4, swn_kids: [] };
+  st_n5 = SwNode { swn_v: 5, swn_kids: [] };
+  st_n6 = SwNode { swn_v: 6, swn_kids: [] };
+  st_n2 = SwNode { swn_v: 2, swn_kids: [st_n4, st_n5] };
+  st_n3 = SwNode { swn_v: 3, swn_kids: [st_n6] };
+  st_n1 = SwNode { swn_v: 1, swn_kids: [st_n2, st_n3] };
+  st_seq = "";
+  for st_w in tree_walk(st_n1, 1000) { st_seq = "{st_seq}{st_w.swn_v},"; }
+  assert(st_seq == "1,2,3,4,5,6,", "stdlib level order: {st_seq}");
+}
+
+fn test_stdlib_tree_walk_cap() {
+  sc_leaf = SwNode { swn_v: 20, swn_kids: [] };
+  sc_root = SwNode { swn_v: 5, swn_kids: [sc_leaf, sc_leaf, sc_leaf] };
+  sc_n = 0;
+  for sc_w in tree_walk(sc_root, 2) { sc_n += 1; }
+  assert(sc_n == 2, "stdlib cap: {sc_n}");
+}
+
+// ── The two-vector (stack + order) DFS variant — the #482 leak shape ────
+// Binding an interface method's vector<Self> result and appending its
+// elements into a second local leaked one store per call: the T-stub's
+// returned type carried no {__retbuf} dep (ref_return finalises it on
+// concrete impls), so the bind was OWNED instead of a borrow of the
+// caller-side buffer.  The wrap harness leak-checks this test.
+
+fn gw_walk_dfs < T: GwKidded > (gd_root: T, gd_cap: integer) -> vector<T> {
+  gd_order: vector<T> = [];
+  gd_stack = [gd_root];
+  for gd_i in 0..gd_cap {
+    gd_n = len(gd_stack);
+    if gd_n == 0 { gd_i#break; }
+    gd_cur = gd_stack[gd_n - 1] ?? gd_root;
+    gd_stack.remove(gd_n - 1);
+    gd_order += [gd_cur];
+    gd_kids = gd_cur.gw_kids();
+    gd_kn = len(gd_kids);
+    for gd_j in 0..gd_kn {
+      gd_kid = gd_kids[gd_kn - 1 - gd_j] ?? gd_cur;
+      gd_stack += [gd_kid];
+    }
+  }
+  return gd_order;
+}
+
+fn test_dfs_walk_preorder_no_leak() {
+  df_n4 = GwNode { gwn_v: 4, gwn_kids: [] };
+  df_n5 = GwNode { gwn_v: 5, gwn_kids: [] };
+  df_n6 = GwNode { gwn_v: 6, gwn_kids: [] };
+  df_n2 = GwNode { gwn_v: 2, gwn_kids: [df_n4, df_n5] };
+  df_n3 = GwNode { gwn_v: 3, gwn_kids: [df_n6] };
+  df_n1 = GwNode { gwn_v: 1, gwn_kids: [df_n2, df_n3] };
+  df_seq = "";
+  for df_w in gw_walk_dfs(df_n1, 1000) { df_seq = "{df_seq}{df_w.gwn_v},"; }
+  assert(df_seq == "1,2,4,5,3,6,", "dfs pre-order: {df_seq}");
+}

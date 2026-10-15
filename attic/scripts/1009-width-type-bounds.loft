@@ -1,0 +1,168 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// What a width type (`u8`, `i8`, `u16`, `i16`, `i32`, `u32`) bounds, and where each bound is
+// applied (loft#1009).
+//
+// The entry says each "holds whole numbers within fixed bounds".  There are three places that
+// could enforce it and they are not the same place: the DECLARATION refuses a value that does
+// not fit (`l: u8 = 300`), the written-out assignment refuses one it cannot prove fits
+// (`l = l + 10`), and STORAGE bounds the write.
+//
+// WHAT it leaves changed on 2026-08-31: the type's DEFAULT, not its minimum
+// (`formal/operational.md` (E-Uncomp-NN)).  The two coincide for `u8` and `u16`, whose floor
+// IS zero, which is why the original cells still read the same; they part for every signed
+// width, where the minimum is a large negative number that has nothing to do with the
+// calculation.  A result that cannot be computed is null, and where the slot cannot hold null
+// it takes the value it would have had if nobody had assigned — never one the machine's
+// representation chose.  A compound assignment into a LOCAL used to reach none of them: `a: u8 =
+// 250; a += 10;` answered 260 and `b: u8 = 5; b -= 10;` answered -5, a value the type cannot
+// represent at all, so one program held 260 in a `u8` local and 0 in the `u8` field beside it.
+//
+// The compile-time check could not have closed it. At the store site the value in hand is the
+// OPERAND — `10`, which fits a `u8` — and only the composed sum can be judged, at run time.
+// So the fix emits at the local what the store layer already did, and the cells below check
+// the two against each other rather than against a constant.
+//
+// The field half is loft#984's, already fixed: an out-of-range write leaves the type's
+// DEFAULT rather than a wrapped or aliased value, for the `u8` spelling and the
+// `integer limit(0, 255)` spelling alike.
+//
+// ⚠ "the type's DEFAULT" is the answer only where the type has NO code to spare for null.
+// loft#1296 split the six: `i32` reserves `i32::MIN` in either spelling, so C85's *"write
+// the reserved sentinel, which then reads as null"* applies to it and its two cells below
+// now assert `null`.  `u8`/`i8`/`u16`/`i16` fill their width, and `u32`'s spare code is the
+// TOP one, which no non-null read tests — those five keep the default.
+//
+// Sizes are pinned too, because "takes up less space" is the other half of the entry's
+// promise and it is the half that holds exactly.
+
+struct U1009 { a: u8, b: u16, c: i8 }
+struct L1009 { b: integer limit(0, 255) }
+
+// @FTR-043 — a width type's bounds: enforced at the declaration and in storage, and a local
+// reached by `+=` takes the default
+fn main() {
+  // Sizes: one, two and four bytes, and a struct is their packed sum.
+  assert(sizeof(u8) == 1, "sizeof(u8) = {sizeof(u8)}, want 1");
+  assert(sizeof(u16) == 2, "sizeof(u16) = {sizeof(u16)}, want 2");
+  assert(sizeof(i32) == 4 && sizeof(u32) == 4, "sizeof(i32/u32) = {sizeof(i32)}/{sizeof(u32)}, want 4/4");
+  assert(sizeof(integer) == 8, "sizeof(integer) = {sizeof(integer)}, want 8");
+  assert(sizeof(U1009) == 4, "sizeof(U1009) = {sizeof(U1009)}, want 1+2+1 = 4");
+
+  // A value inside the range is an ordinary number in every position.
+  level: u8 = 200;
+  year: u16 = 2026;
+  temp: i8 = -40;
+  assert("{level} {year} {temp}" == "200 2026 -40", "in-range values print plainly");
+
+  // Arithmetic WIDENS: the result of `u8 + integer` is an `integer`, which is why the
+  // written-out assignment back into the u8 needs a cast and gets a diagnostic.
+  widened = level + 10;
+  assert(widened == 210, "u8 + integer widens to integer, got {widened}");
+
+  // A vector of u8 is one byte per element — the storage promise, measured.
+  bytes: vector<u8> = [1, 2, 250];
+  assert(len(bytes) == 3, "len = {len(bytes)}");
+  assert(size(bytes) == 3, "one byte each, got {size(bytes)} bytes for 3 elements");
+  assert(bytes[2] == 250, "element value survives, got {bytes[2]}");
+
+  // A FIELD stepped past its range by its OWN arithmetic (`+=`, C85's overflow seam) keeps
+  // the type's default (loft#984).  Both spellings of the same type agree on that seam —
+  // and both REFUSE a plain store of an unranged value at compile time (loft#1593), which
+  // is why the out-of-range value arrives through `+=` here.
+  u = U1009 { a: 7, b: 0, c: 0 };
+  u.a += 253;
+  assert(u.a == 0, "a u8 FIELD written out of range reads its default, got {u.a}");
+  l = L1009 { b: 7 };
+  l.b += 253;
+  assert(l.b == 0, "the limit() spelling agrees, got {l.b}");
+
+  // And since loft#1009, a LOCAL agrees with it.  These cells were written when it did not —
+  // they pinned 260, -5, 200 and 66000 — and the fix is what turned them into these.  A local
+  // is a stack slot and reaches neither the compile-time narrowing check (which judges the
+  // OPERAND, and `10` fits a u8) nor the store's own guard, so the compound seam had no range
+  // check of any kind.
+  a1009: u8 = 250;
+  a1009 += 10;
+  assert(a1009 == 0, "a u8 local past its ceiling takes the type's default, got {a1009}");
+
+  b1009: u8 = 5;
+  b1009 -= 10;
+  assert(b1009 == 0, "and so does one that would go negative, got {b1009}");
+
+  c1009: i8 = 100;
+  c1009 += 100;
+  assert(c1009 == 0, "an i8 past its ceiling takes its DEFAULT, 0 — not its minimum -128, got {c1009}");
+
+  d1009: u16 = 65000;
+  d1009 += 1000;
+  assert(d1009 == 0, "a u16 past 65535, got {d1009}");
+
+  e1009: i16 = 32000;
+  e1009 += 1000;
+  assert(e1009 == 0, "an i16 past 32767 takes its DEFAULT, 0 — not -32768, got {e1009}");
+
+  // IN-RANGE compound assignment is untouched, which is what says the guard fires on the
+  // value rather than on the type.  Both directions, and exactly on the boundary.
+  f1009: u8 = 10;
+  f1009 += 5;
+  assert(f1009 == 15, "an in-range += is unaffected, got {f1009}");
+
+  g1009: i8 = -10;
+  g1009 -= 5;
+  assert(g1009 == -15, "and an in-range -=, got {g1009}");
+
+  h1009: u8 = 255;
+  h1009 -= 255;
+  assert(h1009 == 0, "0 and 255 are both inside a u8, got {h1009}");
+
+  // The local and the FIELD now answer the same thing, which is the pair the issue was
+  // about: one program used to hold 260 in a `u8` local and 0 in the `u8` field beside it.
+  i1009 = U1009 { a: 250, b: 0, c: 0 };
+  i1009.a += 10;
+  j1009: u8 = 250;
+  j1009 += 10;
+  assert(i1009.a == j1009, "field {i1009.a} and local {j1009} agree");
+
+  // `i32` was the one alias of the five the guard did not reach: the test it used to
+  // run, `is_signed32_template()`, reads like a guard against the plain `integer` type,
+  // but `integer` carries no `forced_size` and has already been let through by then — so
+  // the only spec left whose range IS the signed-32 range is the `i32` alias itself.
+  // The result was the exact shape this issue is about, four aliases later: a local
+  // holding a value its own type cannot represent.
+  // ⚠ These two cells CHANGED on 2026-09-02 (loft#1296), and the change is the rules
+  // correcting the guard rather than the other way round.  `formal/types.md` says an
+  // overflow yields `null`, and C85 says how a NON-null slot manages it: *"on overflow they
+  // write the reserved sentinel into that non-null slot — which then reads as null"*.  `i32`
+  // is `i32::MIN + 1 ..= i32::MAX` in either spelling — which is why `i32 = -2147483648` is
+  // refused as out of range — so it HAS that reserved code, and the bottom code is the one a
+  // non-null read already reports as null.  The four narrower aliases above fill their width
+  // and have no code to spare, which is why their cells still read `0`.
+  k1009: i32 = 2147483647;
+  k1009 += 1;
+  assert(k1009 == null, "an i32 past 2147483647 reads as null (C85), got {k1009}");
+
+  l1009: i32 = -2147483647;
+  l1009 -= 1;
+  assert(l1009 == null, "and one below its floor reads as null too, got {l1009}");
+
+  // In-range `i32` arithmetic is untouched, both directions — the guard fires on the
+  // VALUE, exactly as it does for the narrower four above.
+  n1009: i32 = 5;
+  n1009 += 3;
+  assert(n1009 == 8, "an in-range i32 += is unaffected, got {n1009}");
+
+  o1009: i32 = -5;
+  o1009 -= 3;
+  assert(o1009 == -8, "and an in-range i32 -=, got {o1009}");
+
+  // The negative control: plain `integer` is EIGHT bytes and carries no `forced_size`, so
+  // it must keep running past the 4-byte range.  Without this cell a guard that clamped
+  // every integer would pass every assertion above.
+  p1009: integer = 2147483647;
+  p1009 += 1;
+  assert(p1009 == 2147483648, "a plain integer is not clamped, got {p1009}");
+
+  println("width types: bounded where they are stored");
+}

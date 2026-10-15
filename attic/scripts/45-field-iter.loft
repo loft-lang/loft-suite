@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// A10: Field iteration — for f in s#fields
+
+struct Point {
+  x: float,
+  y: float,
+  z: float,
+}
+
+struct Mixed {
+  name: text,
+  count: integer,
+  active: boolean,
+  score: float,
+}
+
+// @FTR-045 — `for f in s#fields`: a compile-time loop over a struct's scalar fields,
+// reading each one's name and value
+fn main() {
+  // --- Iterate over uniform struct ---
+  p = Point { x: 1.0, y: 2.0, z: 3.0 };
+  pt_names = "";
+  pt_total = 0.0;
+  for pf in p#fields {
+    if pt_names != "" { pt_names += "," }
+    pt_names += pf.name;
+    if pf.value is FvFloat { v } { pt_total += v; }
+  }
+  assert(pt_names == "x,y,z", "point names: {pt_names}");
+  assert(pt_total == 6.0, "point total: {pt_total}");
+
+  // --- Iterate over mixed-type struct ---
+  m = Mixed { name: "test", count: 42, active: true, score: 9.5 };
+  mx_result = "";
+  for mf in m#fields {
+    if mx_result != "" { mx_result += "|" }
+    mx_result += mf.name;
+    mx_result += "=";
+    if mf.value is FvText { v } { mx_result += "'{v}'"; }
+    if mf.value is FvInt { v } { mx_result += "{v}"; }
+    if mf.value is FvBool { v } { mx_result += "{v}"; }
+    if mf.value is FvFloat { v } { mx_result += "{v}"; }
+  }
+  assert(mx_result == "name='test'|count=42|active=true|score=9.5", "mixed: {mx_result}");
+}

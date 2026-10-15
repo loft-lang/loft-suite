@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 Jurjen Stellingwerff
+# SPDX-License-Identifier: LGPL-3.0-or-later
+#
+# loft-suite — the black-box language suite's runner.
+#
+# One interface: a loft BINARY, a MODE (interpret / native / both) and a SELECTION (a rule,
+# a chapter, or everything).  Every cell is a self-contained `.loft` program run through
+# `loft --tests` — the runner loft ships to its users — one process per cell, no inner
+# pool, so the suite can never nest a worker pool inside a worker pool (loft @PLN193 P0).
+#
+#   loft-suite run                       every cell under rules/, interpreter
+#   loft-suite run @FR-B-Copy            one rule's cells (its refinements B-Copy-* too;
+#                                        --exact for the rule alone)
+#   loft-suite run --chapter ownership   one chapter
+#   loft-suite run --mode both --jobs 8  both backends
+#   loft-suite run --attic               the inherited corpus as well (nightly only)
+#   loft-suite list [SEL …]              the cells a selection names, one path per line
+#   loft-suite check                     every cell sits under a rule it cites
+#   loft-suite attic --unclaimed         attic programs no rule has claimed yet
+#
+# The tree IS the rule register: rules/<chapter>/<rule>/<cell>.loft, so a selection is a
+# directory, not a filter expression to get wrong.  A cell that cites a second rule in
+# its header is found by that rule's selection too.
+#
+# A cell's annotations are the ones `loft --tests` reads (`@EXPECT_ERROR`, `@EXPECT_WARNING`,
+# `@EXPECT_FAIL`, `@IGNORE`, `@ARGS`) plus `@STORE_LIMIT: n`, handed to the binary as
+# `LOFT_STORE_LIMIT`.  Every run arms `LOFT_LEAK_CHECK=1` (a store left behind by a function
+# that returned cleanly fails the cell); the native lane asks the compiled program the same
+# question.  A warning the cell does not claim is printed, not failed (see `run_cell`).
+
+import argparse
+import collections
+import concurrent.futures
+import os
+import re
+import resource
+import subprocess
+import sys
+import time
+import xml.sax.saxutils
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+RULES = os.path.join(ROOT, "rules")
+ATTIC = os.path.join(ROOT, "attic")
+
+# Boundary-exact, as loft's `scripts/rule_tags.py` matches a citation: `@FR-B-View` must not
+# match `@FR-B-View-Base` (21 of the rules are a prefix of another).
+CITE = re.compile(r"@FR-([A-Z][A-Za-z0-9-]*[A-Za-z0-9])(?![A-Za-z0-9-])")
+STORE_LIMIT = re.compile(r"^\s*//\s*@STORE_LIMIT:\s*(\d+)", re.M)
+
+
+def rule_name(sel):
+    return sel[4:] if sel.startswith("@FR-") else sel
+
+
+def all_cells(root=RULES):
+    out = []
+    for d, _, files in os.walk(root):
+        for f in files:
+            if f.endswith(".loft"):
+                out.append(os.path.join(d, f))
+    out.sort()
+    return out
+
+
+def citations(path):
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        head = fh.read()
+    return set(CITE.findall(head))
+
+
+def chapters():
+    return sorted(d for d in os.listdir(RULES) if os.path.isdir(os.path.join(RULES, d)))
+
+
+def rule_dirs():
+    """rule -> its directory under rules/ (one per defined rule that has a cell)."""
+    out = {}
+    for ch in chapters():
+        for r in os.listdir(os.path.join(RULES, ch)):
+            p = os.path.join(RULES, ch, r)
+            if os.path.isdir(p):
+                out[r] = p
+    return out
+
+
+def select(selections, chapter=None, exact=False, attic=False):
+    """The cells a selection names.  No selection and no chapter = every rule cell."""
+    cells = []
+    if not selections and chapter is None:
+        cells = all_cells()
+    if chapter is not None:
+        for ch in chapter:
+            p = os.path.join(RULES, ch)
+            if not os.path.isdir(p):
+                sys.exit(f"loft-suite: no chapter '{ch}' (have: {', '.join(chapters())})")
+            cells += all_cells(p)
+    if selections:
+        dirs = rule_dirs()
+        wanted = set()
+        for sel in selections:
+            r = rule_name(sel)
+            hits = [d for name, d in dirs.items() if name == r or (not exact and name.startswith(r + "-"))]
+            if not hits and r not in dirs:
+                # A defined rule with no cell is a visible gap, not an error — but a name
+                # that is no rule at all is a typo worth stopping on.
+                print(f"loft-suite: no cell sits under rule {r} (a gap, not a failure)", file=sys.stderr)
+            for d in hits:
+                cells += all_cells(d)
+            wanted.add(r)
+        # Cells elsewhere that cite the rule in their header.
+        for c in all_cells():
+            cited = citations(c)
+            if any(w == x or (not exact and x.startswith(w + "-")) for w in wanted for x in cited):
+                cells.append(c)
+    if attic:
+        cells += all_cells(ATTIC)
+    seen, out = set(), []
+    for c in cells:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def relpath(p):
+    return os.path.relpath(p, ROOT)
+
+
+class Result:
+    __slots__ = ("cell", "mode", "ok", "secs", "output", "store_limit")
+
+
+def run_cell(loft, cell, mode, timeout):
+    with open(cell, encoding="utf-8", errors="replace") as fh:
+        src = fh.read()
+    env = dict(os.environ)
+    env["LOFT_TIMEOUT"] = str(timeout)
+    env["LOFT_LEAK_CHECK"] = "1"
+    m = STORE_LIMIT.search(src)
+    if m:
+        env["LOFT_STORE_LIMIT"] = m.group(1)
+    cmd = [loft, "--tests"]
+    if mode == "native":
+        cmd.append("--native")
+    # No `--deny-warnings`: a warning the cell does not claim is printed, not failed, the
+    # contract the corpus runner in loft held (`tests/wrap.rs::check_diagnostics`, "other
+    # warnings are not fatal").  141 of the 711 seed cells carry an unclaimed warning —
+    # a never-read local is often the SHAPE a cell needs.  A claimed `@EXPECT_WARNING` that
+    # never fires still fails the cell.  A built-out chapter claims every warning it
+    # raises; that is the bar to raise here, chapter by chapter, not on day one.
+    cmd.append(cell)
+    r = Result()
+    r.cell, r.mode = cell, mode
+    t0 = time.monotonic()
+    try:
+        p = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True,
+                           errors="replace", timeout=timeout + 10)
+        r.ok = p.returncode == 0
+        r.output = p.stdout + p.stderr
+    except subprocess.TimeoutExpired as e:
+        r.ok = False
+        r.output = f"TIMEOUT after {timeout + 10}s\n" + (e.stdout or "") + (e.stderr or "")
+    r.secs = time.monotonic() - t0
+    return r
+
+
+def junit(path, results, mode_label):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write('<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n')
+        by = collections.defaultdict(list)
+        for r in results:
+            by[(r.mode, relpath(r.cell).split(os.sep)[1] if relpath(r.cell).startswith("rules") else "attic")].append(r)
+        for (mode, ch), rs in sorted(by.items()):
+            fails = sum(1 for r in rs if not r.ok)
+            fh.write(f'  <testsuite name="{mode}:{ch}" tests="{len(rs)}" failures="{fails}" '
+                     f'time="{sum(r.secs for r in rs):.3f}">\n')
+            for r in rs:
+                name = xml.sax.saxutils.quoteattr(relpath(r.cell))
+                fh.write(f'    <testcase classname="{mode}" name={name} time="{r.secs:.3f}"')
+                if r.ok:
+                    fh.write("/>\n")
+                else:
+                    fh.write(">\n      <failure>")
+                    fh.write(xml.sax.saxutils.escape(r.output[-8000:]))
+                    fh.write("</failure>\n    </testcase>\n")
+            fh.write("  </testsuite>\n")
+        fh.write("</testsuites>\n")
+
+
+def cmd_run(a):
+    cells = select(a.selection, a.chapter, a.exact, a.attic)
+    if not cells:
+        sys.exit("loft-suite: the selection names no cell")
+    loft = a.loft or os.environ.get("LOFT") or "loft"
+    modes = ["interpret", "native"] if a.mode == "both" else [a.mode]
+    jobs = [(c, m) for m in modes for c in cells]
+    print(f"loft-suite: {len(cells)} cell(s) × {len(modes)} mode(s) with {loft}, {a.jobs} at a time")
+    t0 = time.monotonic()
+    cpu0 = resource.getrusage(resource.RUSAGE_CHILDREN)
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
+        futs = [ex.submit(run_cell, loft, c, m, a.timeout) for c, m in jobs]
+        for f in concurrent.futures.as_completed(futs):
+            r = f.result()
+            results.append(r)
+            if not r.ok:
+                print(f"FAIL  {r.mode:9} {relpath(r.cell)}  ({r.secs:.1f}s)")
+                if a.verbose:
+                    print("      " + "\n      ".join(r.output.strip().splitlines()[-12:]))
+            elif a.verbose:
+                print(f"ok    {r.mode:9} {relpath(r.cell)}  ({r.secs:.1f}s)")
+    wall = time.monotonic() - t0
+    cpu1 = resource.getrusage(resource.RUSAGE_CHILDREN)
+    cpu = (cpu1.ru_utime - cpu0.ru_utime) + (cpu1.ru_stime - cpu0.ru_stime)
+    failed = [r for r in results if not r.ok]
+    results.sort(key=lambda r: (r.mode, r.cell))
+    if a.junit:
+        junit(a.junit, results, a.mode)
+    slow = sorted(results, key=lambda r: -r.secs)[:5]
+    print(f"loft-suite: {len(results) - len(failed)} passed, {len(failed)} failed, "
+          f"{wall:.0f} s wall, {cpu:.0f} CPU-s; slowest: "
+          + ", ".join(f"{relpath(r.cell).split('/')[-1]} {r.secs:.1f}s" for r in slow))
+    return 1 if failed else 0
+
+
+def cmd_list(a):
+    for c in select(a.selection, a.chapter, a.exact, a.attic):
+        print(relpath(c))
+    return 0
+
+
+def cmd_check(a):
+    """Every cell under rules/<chapter>/<rule>/ cites that rule; nothing sits loose."""
+    bad = 0
+    for c in all_cells():
+        parts = relpath(c).split(os.sep)
+        if len(parts) != 4:
+            print(f"{relpath(c)}: a cell sits at depth {len(parts) - 1}, not rules/<chapter>/<rule>/")
+            bad += 1
+            continue
+        rule = parts[2]
+        if rule not in citations(c):
+            print(f"{relpath(c)}: does not cite @FR-{rule}, the rule it sits under")
+            bad += 1
+    n = len(all_cells())
+    print(f"{n} cell(s) under {len(rule_dirs())} rule(s) in {len(chapters())} chapter(s), {bad} misplaced")
+    return 1 if bad else 0
+
+
+def cmd_attic(a):
+    cells = all_cells(ATTIC)
+    if a.unclaimed:
+        cells = [c for c in cells if not citations(c)]
+    for c in cells:
+        print(relpath(c))
+    print(f"{len(cells)} attic program(s)" + (" no rule has claimed" if a.unclaimed else ""), file=sys.stderr)
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="loft-suite", description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    def selection(p):
+        p.add_argument("selection", nargs="*", help="@FR-<rule> (or the bare rule name)")
+        p.add_argument("--chapter", action="append", help="a formal chapter (rules/<chapter>)")
+        p.add_argument("--exact", action="store_true", help="the rule alone, not its refinements")
+        p.add_argument("--attic", action="store_true", help="the inherited corpus too")
+
+    p = sub.add_parser("run", help="run a selection")
+    selection(p)
+    p.add_argument("--loft", help="the loft binary (default: $LOFT, else `loft` on PATH)")
+    p.add_argument("--mode", choices=["interpret", "native", "both"], default="interpret")
+    p.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
+    p.add_argument("--timeout", type=int, default=300, help="per cell, seconds (LOFT_TIMEOUT)")
+    p.add_argument("--junit", help="write a JUnit report here")
+    p.add_argument("-v", "--verbose", action="store_true")
+    p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("list", help="the cells a selection names")
+    selection(p)
+    p.set_defaults(fn=cmd_list)
+
+    p = sub.add_parser("check", help="every cell sits under a rule it cites")
+    p.set_defaults(fn=cmd_check)
+
+    p = sub.add_parser("attic", help="the inherited corpus")
+    p.add_argument("--unclaimed", action="store_true", help="programs citing no rule")
+    p.set_defaults(fn=cmd_attic)
+
+    a = ap.parse_args()
+    sys.exit(a.fn(a))
+
+
+if __name__ == "__main__":
+    main()
