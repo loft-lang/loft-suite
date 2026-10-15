@@ -35,6 +35,7 @@ import concurrent.futures
 import os
 import re
 import resource
+import shutil
 import subprocess
 import sys
 import time
@@ -194,6 +195,14 @@ def cmd_run(a):
     if not cells:
         sys.exit("loft-suite: the selection names no cell")
     loft = a.loft or os.environ.get("LOFT") or "loft"
+    # Cells run from this directory, so a path given relative to the caller's is made
+    # absolute here; a bare name is left to PATH.
+    if os.sep in loft or loft.startswith("."):
+        loft = os.path.abspath(loft)
+        if not os.access(loft, os.X_OK):
+            sys.exit(f"loft-suite: no loft binary at {loft}")
+    elif shutil.which(loft) is None:
+        sys.exit(f"loft-suite: no `{loft}` on PATH (--loft <binary>, or $LOFT)")
     modes = ["interpret", "native"] if a.mode == "both" else [a.mode]
     jobs = [(c, m) for m in modes for c in cells]
     print(f"loft-suite: {len(cells)} cell(s) × {len(modes)} mode(s) with {loft}, {a.jobs} at a time")
