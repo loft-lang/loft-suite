@@ -65,12 +65,16 @@ inside loft's own build job.  One process per cell, no inner pool.
 
 ## Where it runs
 
-1. On every loft PR, against the binary that PR's build job produced — a required check.
-2. Nightly, against loft `main`, rules and attic both (the attic is a report, never a gate).
+1. On every loft PR, against the release binary that PR builds — the `Language suite`
+   job in loft's `ci.yml`, a required check.  The same job runs on every push to loft
+   `main`, which is the nightly reading of the rules.
+2. Nightly, the attic too (`--attic`; a report, never a gate).
 3. Against each release bundle — the compatibility check an older version never had.
 
-loft pins the suite's commit the way it pins a library; a behaviour change is a loft PR
-plus a suite PR, and the loft PR bumps the pin.
+loft pins the suite's commit the way it pins a library: `tests/loft-suite.pin` in the loft
+repository names the commit its CI checks out.  A behaviour change is a loft PR plus a
+suite PR, and the loft PR bumps the pin.  From a loft checkout with this repository beside
+it, `make suite ARGS="@FR-B-Copy --mode both"` runs a selection against that tree's binary.
 
 ## The attic
 
