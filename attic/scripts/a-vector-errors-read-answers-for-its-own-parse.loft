@@ -117,8 +117,12 @@ fn a_field_holds_only_the_elements() {
   out = w.items;
   assert_eq("{len(w#errors)}{len(out#errors)}", "00", "a parse stored into a field, and read back");
   bad = vector<VecItem>.parse(`[{{"v":"x"}}]`);
+  // The element that did not fit is KEPT, its field at the default (loft#2028); a view of
+  // it answers for the whole it lies in, and a value built from it has none.
   first = bad[0];
-  assert_eq(len(first#errors), 0, "an element copied out");
+  assert_eq(len(first#errors), 1, "a view of an element answers for its vector");
+  built = VecItem { v: first.v };
+  assert_eq(len(built#errors), 0, "a value built from an element");
   kept = len(bad#errors);
   w.items = bad;
   assert_eq("{len(w#errors)}{kept}", "01", "a parsed variable assigned to the field");
