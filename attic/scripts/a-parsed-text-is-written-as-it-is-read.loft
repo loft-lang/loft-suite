@@ -8,8 +8,9 @@
 //     of it was read (and written) before the fault;
 //   - a fault in the text's form outranks a value that does not fit its field, wherever
 //     the two stand;
-//   - a value that does not fit keeps what was read before it and nothing after: an element
-//     being read is not appended, a field not yet reached keeps its default;
+//   - a value that does not fit leaves its own field at the type's default and nothing
+//     else: the members and elements around it are read as if it fit, an element that
+//     does not fit keeps its slot, and `#errors` names every such value (@C148, loft#2028);
 //   - the last of a repeated key stands, for a value and for a collection; a key the type
 //     does not have is read and dropped, whatever it holds;
 //   - a field no member names takes its default, in a record of more than 64 fields too.
@@ -65,23 +66,27 @@ fn a_fault_of_form_outranks_a_value_that_does_not_fit() {
   assert(v#errors[0] == "line 1:1 path:", "the unclosed vector is the one reported: {v#errors}");
 }
 
-fn a_value_that_does_not_fit_keeps_what_came_before() {
+fn a_value_that_does_not_fit_leaves_its_default_and_the_rest_is_read() {
   a = Row9.parse("{{\"name\":\"abc\",\"n\":\"five\",\"tags\":[\"p\"]}}");
   assert(a.name == "abc", "the name before the fault: {a.name}");
   assert(a.n == 0, "the field that did not fit: {a.n}");
-  assert(len(a.tags) == 0, "the tags after the fault were read: {a.tags}");
-  assert(a#errors[0] == "line 1:15 path:n", "the fault names its key: {a#errors}");
-  // In the second element: the first is in the vector, the second and third are not, and
-  // the member after the vector is not read.
+  assert(len(a.tags) == 1 && a.tags[0] == "p", "the tags after the fault are read: {a.tags}");
+  assert(len(a#errors) == 1 && a#errors[0] == "line 1:15 path:n", "the fault names its key: {a#errors}");
+  // In the second element's `x`: that field is left at its default and the element keeps
+  // its slot; the element after it and the member after the vector are read.
   b = Row9.parse("{{\"pts\":[{{\"x\":1,\"y\":2}},{{\"x\":true,\"y\":4}},{{\"x\":5,\"y\":6}}],\"n\":7}}");
-  assert(len(b.pts) == 1, "elements kept: {len(b.pts)}");
+  assert(len(b.pts) == 3, "elements kept: {len(b.pts)}");
   assert(b.pts[0].x == 1 && b.pts[0].y == 2, "the element before the fault: {b.pts}");
-  assert(b.n == 0, "the member after the fault was read: {b.n}");
-  assert(b#errors[0] == "line 1:24 path:pts[1].x", "the fault names its path: {b#errors}");
-  // A vector at the root: an element's fault is reported at the vector.
+  assert(b.pts[1].x == 0 && b.pts[1].y == 4, "the element with the fault keeps its slot, the field at its default: {b.pts}");
+  assert(b.pts[2].x == 5 && b.pts[2].y == 6, "the element after the fault: {b.pts}");
+  assert(b.n == 7, "the member after the fault is read: {b.n}");
+  assert(len(b#errors) == 1 && b#errors[0] == "line 1:24 path:pts[1].x", "the fault names its path: {b#errors}");
+  // A vector at the root: an element that is no record keeps its slot at the defaults,
+  // and its fault is reported at the vector.
   v = vector<Pt9>.parse("[{{\"x\":1,\"y\":2}},7,{{\"x\":3,\"y\":4}}]");
-  assert(len(v) == 1 && v[0].y == 2, "elements kept: {v}");
-  assert(v#errors[0] == "line 1:1 path:[1]", "the fault names its element: {v#errors}");
+  assert(len(v) == 3 && v[0].y == 2 && v[2].x == 3, "elements kept: {v}");
+  assert(v[1].x == 0 && v[1].y == 0, "the element that did not fit holds the defaults: {v}");
+  assert(len(v#errors) == 1 && v#errors[0] == "line 1:1 path:[1]", "the fault names its element: {v#errors}");
 }
 
 fn the_last_of_a_repeated_key_stands() {
@@ -119,7 +124,7 @@ fn the_loft_literal_reads_as_the_json_does() {
 fn main() {
   a_malformed_text_answers_the_defaults();
   a_fault_of_form_outranks_a_value_that_does_not_fit();
-  a_value_that_does_not_fit_keeps_what_came_before();
+  a_value_that_does_not_fit_leaves_its_default_and_the_rest_is_read();
   the_last_of_a_repeated_key_stands();
   a_wide_record_takes_each_member_and_each_default();
   the_loft_literal_reads_as_the_json_does();
