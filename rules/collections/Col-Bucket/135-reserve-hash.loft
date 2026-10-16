@@ -1,7 +1,7 @@
-// @observes: LOFT_NO_HALF_LOAD — it pins the reserved table's size (65536 slots for 20000 entries), which the load rule decides.
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @observes: LOFT_NO_POW2_BUCKETS — it asserts the reserved table's byte size, which the bucket-count rule decides.
+// @observes: LOFT_NO_HALF_LOAD — it pins the reserved table's size (65536 slots for 20000 entries), which the load rule decides.
 // @PLN135 arc C — `reserve(h, n)` sizes a hash's BUCKET TABLE for `n` entries up
 // front, so filling it does not rebuild the table on the way (a million inserts
 // rebuilt it 17 times).
