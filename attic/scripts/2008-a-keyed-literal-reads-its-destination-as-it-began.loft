@@ -1,3 +1,4 @@
+// @catches: LOFT_NO_APPEND_STAGING — c7 is loft#1548's shape: with the staging off, the literal's parts read the collection between the mint and the finish, and the switch restores that defect.
 // loft#2008 — a record literal appended to a KEYED collection it also reads.  `(E-Asgn-Compound)`
 // reduces the whole right-hand side before anything is appended, so every read sees the
 // collection as the statement began: a lookup of the key being replaced reads the old entry,

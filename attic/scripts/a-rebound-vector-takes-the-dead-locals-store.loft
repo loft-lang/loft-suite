@@ -1,3 +1,4 @@
+// @observes: LOFT_NO_CLEAR_RELEASE — it counts the live records a store holds across the rebinds, which the clear-release policy decides.
 // `(R-MoveLast)`'s local clause — `x = y` for vector locals, where `y` is built afresh in the
 // same block and never read again before its next build, gives `y`'s store up to `x`
 // (`OpCopyRecord`'s free-source form: the stores are exchanged where they can be) instead of
