@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Empty` — `for x in src { body }` runs body ZERO times when len(src) = 0, and falls
+// through.  Crossed with `@FR-I-For` (the body here APPENDS to another vector, so a round
+// that ran would leave a trace of length and value), `@FR-I-Comp` (a comprehension over an
+// empty source is the empty vector) and the `par(…)` clause (a `for` with a parallel worker
+// over an empty source dispatches no worker and runs no round).
+//
+// Sources: an empty vector local, an empty vector field, an empty hash field, an empty
+// sorted field, empty text, the ranges 5..5, 5..3, 3..=2, rev(4..4) and a runtime-empty
+// `0..n`.  After every loop a control round over [7] proves the appending body DOES leave a
+// trace when it runs (the cell would otherwise be vacuous).
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values and lengths.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+struct E { k: text, n: integer }
+struct K { k: integer }
+struct Box { v: vector<integer>, h: hash<E[k]>, s: sorted<K[k]> }
+
+fn k(n: integer) -> integer { n }
+fn dbl(x: integer) -> integer { x * 2 }
+
+fn test_empty_collections_run_no_round() {
+  out: vector<integer> = [];
+  e: vector<integer> = [];
+  b = Box { v: [], h: [], s: [] };
+  for x in e { out += [x]; }
+  for x in b.v { out += [x]; }
+  for r in b.h { out += [r.n]; }
+  for r in b.s { out += [r.k]; }
+  assert(len(out) == 0, "vector local, vector field, hash, sorted: zero rounds, got {out}");
+  for x in [7] { out += [x]; }
+  assert(len(out) == 1 && out[0] == 7, "control: a one-element source runs once: got {out}");
+}
+
+fn test_empty_text_runs_no_round() {
+  n = 0;
+  t = "";
+  for c in t { n += c as integer; }
+  assert(n == 0, "empty text: zero rounds, got n={n}");
+  for c in "a" { n += c as integer; }
+  assert(n == 97, "control: 'a' runs once with codepoint 97: got {n}");
+}
+
+fn test_empty_ranges_run_no_round() {
+  out: vector<integer> = [];
+  for i in 5..5 { out += [i]; }
+  for i in 5..3 { out += [i]; }
+  for i in 3..=2 { out += [i]; }
+  for i in rev(4..4) { out += [i]; }
+  m = k(0);
+  for i in 0..m { out += [i]; }
+  assert(len(out) == 0, "5..5, 5..3, 3..=2, rev(4..4), 0..0: zero rounds, got {out}");
+  for i in 3..=3 { out += [i]; }
+  assert(len(out) == 1 && out[0] == 3, "control: 3..=3 runs once: got {out}");
+}
+
+fn test_a_comprehension_over_an_empty_source_is_empty() {
+  e: vector<integer> = [];
+  a = [for x in e { x * 2 }];
+  b = [for i in 5..5 { i }];
+  c = [for ch in "" { ch }];
+  assert(len(a) == 0 && len(b) == 0 && len(c) == 0, "every empty comprehension: got {len(a)} {len(b)} {len(c)}");
+  d = [for x in [4] { x * 2 }];
+  assert(len(d) == 1 && d[0] == 8, "control: [for x in [4] {{ x*2 }}] is [8]: got {d}");
+}
+
+fn test_a_par_loop_over_an_empty_source_runs_no_round() {
+  e: vector<integer> = [];
+  s = 0;
+  rounds = 0;
+  for x in e par(b = dbl(x), 2) { s += b; rounds += 1; }
+  for x in 5..5 par(b = dbl(x), 2) { s += b; rounds += 1; }
+  assert(s == 0 && rounds == 0, "par over [] and 5..5: zero rounds, got s={s} rounds={rounds}");
+  for x in [3, 4] par(b = dbl(x), 2) { s += b; rounds += 1; }
+  assert(s == 14 && rounds == 2, "control: par over [3,4] sums 6+8 = 14 in 2 rounds: got s={s} rounds={rounds}");
+}

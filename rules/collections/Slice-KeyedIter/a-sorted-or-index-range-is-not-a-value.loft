@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SORTED OR INDEX RANGE IS NOT A VALUE (`@FR-Slice-KeyedIter`).  The value position is a static
+// error, measured here at a local bind (an argument and `len(…)` refuse alike); `[for x in c[lo..hi] { x }]` is the
+// spelling that materialises one.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; the refusal held on the
+//   tree it landed on.
+// CHANNEL: the expected diagnostic.
+// @EXPECT_ERROR: a keyed range slice is a `for`-loop iterator, not a value
+
+struct E { k: integer }
+
+fn main() {
+  s: sorted<E[k]> = [E { k: 1 }, E { k: 4 }];
+  x = s[1..3];
+  println("{x.k}");
+}

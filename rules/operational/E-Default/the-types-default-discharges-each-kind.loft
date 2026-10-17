@@ -1,0 +1,122 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Default` — `e?` steps to e's value when it is present and to
+// `construct_default(τ)` of e's STATIC type when it is null, and for a record or collection
+// that default is FRESH per evaluation.  Crossed with `@FR-N-Default` (`e? ≡ e ??
+// construct_default(τ)`, typed τ, `@FR-D-Scalar` / `@FR-D-Text` / `@FR-D-Coll` /
+// `@FR-D-Enum` / `@FR-D-Rec` give the values) and `@FR-Col-Insert-Absent` (the ONE write that
+// applies the default implicitly: `c += [...]` on an absent nullable collection instantiates
+// the empty one first, and a later `c?` then reads what was inserted, not a default).
+//
+// Character is left out on purpose: `construct_default(character)` is `'\0'`, which is also
+// the character null pattern (types.md, the documented `Char` collision), so a cell on it
+// would measure the collision, not this rule.
+//
+// Shapes: a present value passes through unchanged; each scalar kind and text; a record
+// twice (two distinct values — a write to one leaves the other at default); a vector and a
+// bare enum (first-declared variant); the rule's own precedence falsifier `a / b?` vs
+// `(a / b)?`; `?` on a call evaluates the call once; and Col-Insert-Absent on a vector
+// local, a struct field, a hash local, and a local set back to null.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values and lengths.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+struct P { x: integer, name: text }
+struct S { items: vector<integer>? }
+struct E { k: text, n: integer }
+enum Col { Red, Green, Blue }
+
+fn ni() -> integer? { null }
+fn nt() -> text? { null }
+fn nbool() -> boolean? { null }
+fn nf() -> float? { null }
+fn np() -> P? { null }
+fn nv() -> vector<integer>? { null }
+fn some(n: integer) -> integer? { n }
+
+fn test_a_present_value_passes_through() {
+  a = some(5)?;
+  t: text? = "hi";
+  b = t?;
+  assert(a == 5 && b == "hi", "present values are not replaced: got {a} '{b}', expected 5 'hi'");
+}
+
+fn test_each_scalar_kind_and_text() {
+  a = ni()?;
+  b = nt()?;
+  c = nbool()?;
+  d = nf()?;
+  assert(a == 0 && b == "" && len(b) == 0 && c == false && d == 0.0,
+    "integer 0, text \"\", boolean false, float 0.0: got {a} '{b}' {c} {d}");
+}
+
+fn test_a_record_default_is_fresh_each_time() {
+  p = np()?;
+  q = np()?;
+  assert(p.x == 0 && p.name == "", "every field defaulted: got {p.x} '{p.name}'");
+  p.x = 5;
+  p.name = "five";
+  assert(q.x == 0 && q.name == "", "a write to p does not reach q: got q.x={q.x} q.name='{q.name}'");
+  assert(p.x == 5 && p.name == "five", "p kept its writes: got {p.x} '{p.name}'");
+}
+
+fn test_a_collection_and_an_enum() {
+  v = nv()?;
+  assert(len(v) == 0, "vector default is empty: len {len(v)}");
+  v += [3];
+  w = nv()?;
+  assert(len(v) == 1 && len(w) == 0, "a second discharge is a new empty vector: got {len(v)} {len(w)}");
+  e: Col? = null;
+  c = e?;
+  assert(c == Col.Red, "bare enum default is the first-declared variant Red: got {c}");
+}
+
+fn test_the_precedence_falsifier() {
+  a = 10;
+  b = some(0)?;
+  r1 = a / b ?? 0;
+  r2 = (a / b)?;
+  r3: integer? = a / b?;
+  assert(r1 == 0 && r2 == 0 && r3 == null,
+    "`??` and `(…)?` discharge the division (0, 0); `a / b?` is `a / (b?)` = null: got {r1} {r2} {r3}");
+}
+
+fn test_a_call_under_default_is_evaluated_once() {
+  calls = 0;
+  f = fn() -> integer? { calls += 1; null };
+  r = f()?;
+  assert(r == 0 && calls == 1, "one call, then the default: got r={r} calls={calls}, expected 0 1");
+}
+
+fn test_insert_into_an_absent_vector_local() {
+  w: vector<integer>? = null;
+  w += [1, 2];
+  got = w?;
+  assert(len(got) == 2 && got[0] == 1 && got[1] == 2, "absent then += [1,2] holds [1,2]: got {got}");
+}
+
+fn test_insert_into_an_absent_field() {
+  s = S { items: null };
+  s.items += [7];
+  got = s.items?;
+  assert(len(got) == 1 && got[0] == 7, "absent field then += [7] holds [7]: got {got}");
+}
+
+fn test_insert_into_an_absent_hash() {
+  h: hash<E[k]>? = null;
+  h += [E { k: "a", n: 1 }, E { k: "b", n: 2 }];
+  got = h?;
+  assert(len(got) == 2 && (got["b"].n ?? -1) == 2, "absent hash then += two records: got len {len(got)}");
+}
+
+fn test_a_local_set_back_to_null_then_inserted() {
+  w: vector<integer>? = [5];
+  before = len(w?);
+  w = null;
+  w += [9];
+  got = w?;
+  assert(before == 1 && len(got) == 1 && got[0] == 9, "[5], re-nulled, then += [9] holds [9] only: got {before} {got}");
+}

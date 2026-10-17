@@ -41,6 +41,12 @@ oracle, and the annotations are the ones `loft test` reads:
 | `// @STORE_LIMIT: <n>` | a ceiling on live stores, handed to the binary as `LOFT_STORE_LIMIT` |
 | `// @falsified-at: <sha> — …` | the receipt that the cell FAILED on the build it was written to catch |
 
+Where an annotation sits decides its scope.  Everything before the file's first `fn`,
+`struct` or `enum` is the HEADER, and an annotation there applies to the whole file — so an
+`@IGNORE` written above the FIRST function of a file with no declarations before it ignores
+the file, not that function.  To ignore one function, put a declaration or another function
+above it.
+
 Every cell runs with `LOFT_LEAK_CHECK=1`: a store left behind by a function that returned
 cleanly fails it.  A warning the cell claims must fire; one it does not claim is printed,
 not failed — the inherited cells were never warning-clean, and a never-read local is often

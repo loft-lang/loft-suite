@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-RangeNull` — a range bound that is `null` at run time makes the range EMPTY in every
+// form (`a..b`, `a..=b`, `a..`, and each reversed): the body runs zero times, the bound
+// tested once before the first round.  Crossed with `@FR-I-For` (the body appends, so a
+// round would leave a trace), `@FR-I-Comp` (a comprehension over the range is empty) and
+// the `par(…)` clause.  The null END bound is the shape used everywhere below; the null
+// START bound is here too, as a counted sum (see `a-loop-variable-from-a-nullable-start-…`
+// for the vector-append shape, which carries a spurious warning).
+//
+// Every function ends with a control: the same loop with the bound PRESENT at run time,
+// hand-computed, so the body is shown to run.
+//   0..n, 0..=n, rev(0..n), rev(0..=n) with n = null → nothing;  with n = 3 → 0,1,2 / 0..3.
+//   n..5, n..=5, n.. with n = null → nothing;  n = 3 → 3+4 = 7 / 3+4+5 = 12.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values and lengths.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn opt(n: integer) -> integer? { if n >= 0 { n } else { null } }
+fn dbl(x: integer) -> integer { x * 2 }
+
+fn test_a_null_end_bound_runs_no_round() {
+  out: vector<integer> = [];
+  n = opt(-1);
+  for i in 0..n { out += [i]; }
+  for i in 0..=n { out += [i]; }
+  for i in rev(0..n) { out += [i]; }
+  for i in rev(0..=n) { out += [i]; }
+  assert(len(out) == 0, "a null end bound in each form: zero rounds, got {out}");
+  m = opt(3);
+  for i in 0..m { out += [i]; }
+  for i in rev(0..=m) { out += [i]; }
+  assert("{out}" == "[0,1,2,3,2,1,0]" && len(out) == 7, "control m = 3: 0..3 then rev(0..=3): got {out}");
+}
+
+fn test_a_null_start_bound_runs_no_round() {
+  s = 0;
+  rounds = 0;
+  n = opt(-1);
+  for i in n..5 { s += i; rounds += 1; }
+  for i in n..=5 { s += i; rounds += 1; }
+  for i in n.. { s += i; rounds += 1; if rounds > 100 { break; } }
+  assert(s == 0 && rounds == 0, "a null start in a..b, a..=b, a..: zero rounds, got s={s} rounds={rounds}");
+  m = opt(3);
+  for i in m..5 { s += i; }
+  assert(s == 7, "control m = 3: 3+4 = 7: got {s}");
+  for i in m..=5 { s += i; }
+  assert(s == 19, "control m..=5 adds 3+4+5 = 12, total 19: got {s}");
+}
+
+fn test_a_comprehension_over_a_null_bound_is_empty() {
+  n = opt(-1);
+  a = [for i in 0..n { i * 10 }];
+  b = [for i in 0..=n { i }];
+  assert(len(a) == 0 && len(b) == 0, "comprehensions over a null bound: got {a} {b}");
+  m = opt(2);
+  c = [for i in 0..=m { i * 10 }];
+  assert("{c}" == "[0,10,20]" && len(c) == 3, "control: [0,10,20]: got {c}");
+}
+
+fn test_a_par_loop_over_a_null_bound_runs_no_round() {
+  n = opt(-1);
+  s = 0;
+  rounds = 0;
+  for x in 0..n par(b = dbl(x), 2) { s += b; rounds += 1; }
+  assert(s == 0 && rounds == 0, "par over 0..null: zero rounds, got s={s} rounds={rounds}");
+  m = opt(4);
+  for x in 0..m par(b = dbl(x), 2) { s += b; rounds += 1; }
+  assert(s == 12 && rounds == 4, "control: par over 0..4 sums 0+2+4+6 = 12: got s={s} rounds={rounds}");
+}

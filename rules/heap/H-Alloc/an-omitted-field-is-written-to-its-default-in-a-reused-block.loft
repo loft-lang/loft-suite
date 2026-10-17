@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Alloc` crossed with `@FR-H-Claim` — a claimed block's bytes are UNDEFINED until written,
+// so every field a construction does not write from its source is WRITTEN to its type's default
+// (H-Alloc).  The defaults are a write, never the memory's state, which only shows on a block
+// that held something before.  So each cell builds a record with every field set, gives its
+// bytes back, and builds a record that omits fields in the same place: an element removed and
+// appended again, a keyed record removed and re-inserted, a struct-enum variant re-appended, an
+// inline struct field overwritten by a literal that omits a member, an element overwritten,
+// a loop alternating full and partial literals, and a call alternating them (a hidden return
+// buffer the ABI may reuse across calls, `@FR-H-ClearRelease`'s record clause).  `[0; n]` is the
+// zeroed claim the rule names as legitimate.  Each omitted field is checked against its type's
+// default — 0, "", [], 0.0, false, '\0', a defaulted inner record, null for `?` — so a stale byte
+// shows as a value.  `LOFT_POISON_CLAIM=1` fills every claim with 0xDEADBEEF; the answers are the
+// same under it on both backends (measured).
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument by default; `LOFT_POISON_CLAIM=1` is the sharper run.
+// HOLDS: leak and panic are clean on both backends.
+
+struct In { m: integer, s: text }
+struct P { x: integer, name: text, tags: vector<integer>, f: float, b: boolean, c: character, inner: In, opt: integer?, ot: text? }
+struct K { k: integer, name: text, tags: vector<integer> }
+enum Sh { Circle { r: float, label: text }, Sq { w: integer, items: vector<text> } }
+fn show(p: P) -> text { "{p.x}|{p.name}|{p.tags}|{p.f}|{p.b}|{(p.c as integer) ?? 0}|{p.inner.m}|{p.inner.s}|{p.opt ?? -1}|{p.ot ?? "N"}" }
+fn test_a_fresh_record_omitting_fields() { p = P { x: 1 }; t = show(p); assert(t == "1||[]|0|false|0|0||-1|N", "a1 {t}"); }
+fn test_an_element_removed_and_appended_again() {
+  v: vector<P> = [];
+  v += [P { x: 1, name: "full", tags: [1, 2, 3], f: 2.5, b: true, c: 'z', inner: In { m: 9, s: "in" }, opt: 4, ot: "t" }];
+  v.remove(0);
+  v += [P { x: 2 }];
+  t = show(v[0]);
+  assert(len(v) == 1 && t == "2||[]|0|false|0|0||-1|N", "a2 {t}");
+}
+fn test_a_keyed_record_removed_and_inserted_again() {
+  h: hash<K[k]> = [K { k: 1, name: "one", tags: [7, 8] }];
+  h[1] = null;
+  h += [K { k: 1 }];
+  r = h[1];
+  assert(len(h) == 1 && (r.name ?? "x") == "" && len(r.tags ?? [9]) == 0, "a3 {r.name ?? "x"}");
+}
+fn test_full_and_partial_literals_alternating_in_a_loop() {
+  s = 0;
+  for i in 0..100 {
+    p = if i % 2 == 0 { P { x: i, name: "n{i}", tags: [i], f: 1.5, b: true, c: 'q', inner: In { m: i, s: "s" }, opt: i, ot: "o" } } else { P { x: i } };
+    if i % 2 == 1 { assert(p.name == "" && len(p.tags) == 0 && p.inner.m == 0 && p.opt == null && !p.b, "a4 pass {i}: {show(p)}"); }
+    s += p.x;
+  }
+  assert(s == 4950, "a4 {s}");
+}
+fn test_a_variant_appended_again() {
+  v: vector<Sh> = [];
+  v += [Sq { w: 3, items: ["a", "b"] }];
+  v.remove(0);
+  v += [Sq { w: 4 }];
+  n = 0;
+  if v[0] is Sq { w, items } { n = w * 10 + len(items); }
+  assert(n == 40, "a5 {n}");
+}
+fn test_a_zeroed_repetition() {
+  z = [0; 5];
+  assert(len(z) == 5 && z[4] == 0, "a6 {z}");
+}
+struct O { inner: In, n: integer }
+fn part(i: integer) -> P { if i % 2 == 0 { P { x: i, name: "n{i}", tags: [i, i], f: 1.5, b: true, c: 'q', inner: In { m: i, s: "s{i}" }, opt: i, ot: "o" } } else { P { x: i } } }
+fn test_an_inline_field_overwritten_by_a_partial_literal() { o = O { inner: In { m: 9, s: "old" }, n: 1 }; o.inner = In { m: 3 }; assert(o.inner.m == 3 && o.inner.s == "" && o.n == 1, "a7 {o.inner.s}"); }
+fn test_a_call_alternating_full_and_partial_results() {
+  bad = 0;
+  for i in 0..60 { p = part(i); if i % 2 == 1 && show(p) != "{i}||[]|0|false|0|0||-1|N" { bad += 1; } }
+  assert(bad == 0, "a8 {bad}");
+}
+fn test_an_element_overwritten_by_a_partial_literal() {
+  v = [P { x: 1, name: "full", tags: [1, 2], f: 2.5, b: true, c: 'z', inner: In { m: 9, s: "in" }, opt: 4, ot: "t" }];
+  v[0] = P { x: 5 };
+  t = show(v[0]);
+  assert(len(v) == 1 && t == "5||[]|0|false|0|0||-1|N", "a9 {t}");
+}
+fn test_a_call_result_read_in_place_alternating() {
+  bad = 0;
+  for i in 0..60 { if i % 2 == 1 && show(part(i)) != "{i}||[]|0|false|0|0||-1|N" { bad += 1; } }
+  assert(bad == 0, "a10 {bad}");
+}

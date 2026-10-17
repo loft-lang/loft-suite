@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Copy-Refuse` crossed with `@FR-H-Move` — the legal half of
+// `a-copy-of-what-the-function-does-not-own-is-refused-where-a-move-is-not-refused.loft`.
+// What (H-Copy-Refuse) lists as legal, because no second structure is made: an owned local
+// placed once (a move), a value passed as an argument and then moved (passing binds without
+// copying, calls.md F-ParamHeap), a view of a member (`x = s.h`, B-View), an owned struct
+// moved whole into a tuple, an owned local chosen by a join arm or a `??` operand, an owned
+// struct returned, an owned struct moved on some loop passes and released at the pass end
+// on the others, and a `&` bind.  Each hook call and read is traced and every trace is worked
+// out by hand: each record released exactly once, at the death of whichever structure holds
+// it last, scope ends in reverse declaration order.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected trace, which fails that cell on both backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument — each hook call and read is written to this cell's trace file.
+// HOLDS: leak and panic are clean on both backends.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_copy_refuse_move_legal.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mk(i: integer) -> H { H { id: i } }
+struct S { h: H, tag: integer }
+
+fn peek(h: H) -> integer { h.id }
+
+fn l1() { a = mk(1); n = peek(a); s = S { h: a, tag: n }; note("R{s.h.id}"); note("T{s.tag}"); }
+fn l2() { s = S { h: mk(2), tag: 0 }; x = s.h; note("V{x.id}"); }
+fn l3() { s = S { h: mk(3), tag: 0 }; t = (s, 1); note("R{t.0.h.id}"); }
+fn l4(c: boolean) { a = mk(4); x = if c { a } else { mk(40) }; note("R{x.id}"); }
+fn l5() { a = mk(5); x = a ?? mk(50); note("R{x.id}"); }
+fn l6() -> S { s = S { h: mk(6), tag: 0 }; s }
+fn l7() {
+  v: vector<S> = [];
+  for i in 0..3 {
+    s = S { h: mk(70 + i), tag: i };
+    if i != 1 { v += [s]; }
+  }
+  note("L{len(v)}");
+}
+fn l8() { a = mk(8); r = &a; note("V{r.id}"); }
+fn take6() { s = l6(); note("R{s.h.id}"); }
+
+fn check(nm: text, want: text) {
+  got = drain();
+  assert(got == want, "{nm}: want {want}, got {got}");
+}
+
+fn test_passed_then_moved() { drain(); l1(); check("l1", "R1,T1,D1"); }
+fn test_a_view_of_a_member() { drain(); l2(); check("l2", "V2,D2"); }
+fn test_an_owned_struct_moved_whole_into_a_tuple() { drain(); l3(); check("l3", "R3,D3"); }
+fn test_an_owned_local_chosen_by_a_join_arm() {
+  drain(); l4(true); check("l4 chosen", "R4,D4");
+  l4(false); check("l4 not chosen", "R40,D40,D4");
+}
+fn test_an_owned_local_as_a_coalesce_operand() { drain(); l5(); check("l5", "R5,D5"); }
+fn test_an_owned_struct_returned() { drain(); take6(); check("l6", "R6,D6"); }
+fn test_moved_on_some_passes() { drain(); l7(); check("l7", "D71,L2,D70,D72"); }
+fn test_a_reference_bind() { drain(); l8(); check("l8", "V8,D8"); }

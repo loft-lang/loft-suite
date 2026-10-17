@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Spent` crossed with `@FR-H-Move` — a name whose value MOVED is spent from the end of
+// the moving statement, and reading it is a compile-time error naming where the value went.
+// The legal half is `rules/heap/H-Move/a-moved-local-is-spent-only-on-the-path-that-moved-it.loft`.
+// Each cell moves an owned local into one (H-Move) position and reads it on a later
+// statement: a literal's field, a tuple member, an append, a whole-value bind, a field write,
+// an element write; a read after the `if` whose arm moved it (spent on that path, so the read
+// is reachable from a spent name); and an append in a loop with no refill, where the second
+// pass reads what the first pass moved.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected substring, which fails the file on both backends.
+// CHANNEL: the expectations and the exit code, identically on both backends.
+// ARMED: no instrument — the refusal is on by default.
+// HOLDS: nothing runs on either backend.
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+fn mk(i: integer) -> H { H { id: i } }
+struct S { h: H, tag: integer }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e1_into_a_literal_field() { a = mk(1); s = S { h: a, tag: 0 }; print("{a.id}{s.tag}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e2_into_a_tuple_member() { a = mk(2); t = (a, 1); print("{a.id}{t.1}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e3_appended() { a = mk(3); v: vector<H> = []; v += [a]; print("{a.id}{len(v)}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e4_bound_whole() { a = mk(4); b = a; print("{a.id}{b.id}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e5_written_into_a_field() { s = S { h: mk(50), tag: 0 }; a = mk(5); s.h = a; print("{a.id}{s.h.id}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e6_written_into_an_element() { v = [mk(60)]; a = mk(6); v[0] = a; print("{a.id}{len(v)}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e7_read_after_the_arm_that_moved_it(c: boolean) { a = mk(7); if c { s = S { h: a, tag: 0 }; print("{s.tag}"); } print("{a.id}"); }
+
+// @EXPECT_ERROR: `a` is read after its value moved
+fn e8_appended_on_every_pass_without_a_refill() { a = mk(8); v: vector<H> = []; for _ in 0..2 { v += [a]; } print("{len(v)}"); }

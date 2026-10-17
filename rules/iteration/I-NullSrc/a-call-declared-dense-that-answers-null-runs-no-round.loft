@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-NullSrc` — the `nullref` half of the rule: a RUNTIME null of a NON-nullable type
+// iterates zero times with no guard and no fault.  The shallow way to make one is a call
+// whose declared `vector<integer>` return answers null; `@FR-N-Store` warns at that return
+// (claimed below), and the loop over the call needs nothing.  Crossed with `@FR-I-Comp`: a
+// comprehension over it is empty too.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values and lengths.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+// @EXPECT_WARNING: is stored into the return value of the non-null type `vector<integer>`
+fn nv() -> vector<integer> { null }
+
+fn test_a_null_dense_return_runs_no_round() {
+  out: vector<integer> = [];
+  for x in nv() { out += [x]; }
+  c = [for x in nv() { x }];
+  assert(len(out) == 0 && len(c) == 0, "nullref source: zero rounds, empty comprehension: got {out} {c}");
+  for x in [6] { out += [x]; }
+  assert(len(out) == 1 && out[0] == 6, "control: the body appends when it runs: got {out}");
+}

@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Null` — `null` is a VALUE, held in-band by one reserved bit pattern per width:
+// `integer` = `i64::MIN`, a narrow int its top value (`u8` = 255), `float` a reserved NaN,
+// `character` codepoint 0, `boolean?` a third state.  The pattern is EXCLUDED from the
+// type's non-null range — so a NULLABLE narrow cannot hold its top value, while the
+// non-null narrow holds it as a plain value.  Crossed with `@FR-E-NullArg` (`==` against
+// null is a definite presence test; `null == false` is false for a `boolean?`) and with
+// `@FR-E-Uncomp` (a result landing ON the pattern is the uncomputable one, so it reads null).
+//
+// Shapes: the checked cast `as u8?` of 255 and 254; a non-null `u8` holding 255; a float
+// NaN; a `character?` set to '\0' (the documented collision: it reads null); a `boolean?`
+// null that is not `false`; an integer subtraction landing on i64::MIN; a null element of a
+// `vector<integer?>` beside a present one, read back by index.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn k(n: integer) -> integer { n }
+fn fz() -> float { 0.0 }
+
+fn test_a_nullable_narrow_gives_up_its_top_value() {
+  a: u8? = k(255) as u8?;
+  b: u8? = k(254) as u8?;
+  assert(a == null, "u8? has no 255 — it is the null pattern: got {a}");
+  assert(b == 254, "254 is a plain u8? value: got {b}");
+  c: u8 = 255;
+  assert(c == 255 && c != null, "a NON-null u8 holds 255 as a value: got {c} {c == null}");
+}
+
+fn test_the_float_character_and_boolean_patterns() {
+  f: float? = fz() / fz();
+  assert(f == null, "a NaN is the float null: got {f}");
+  ch: character? = '\0';
+  assert(ch == null, "codepoint 0 is the character null (the documented collision)");
+  bo: boolean? = null;
+  assert(bo == null && bo != false && !(bo == true), "boolean? null is its own state: == null, != false, != true");
+}
+
+fn test_a_result_on_the_pattern_reads_null() {
+  i: integer? = k(-9223372036854775807) - k(1);
+  assert(i == null, "-MAX - 1 is i64::MIN, the reserved pattern: got {i}");
+  j: integer? = k(-9223372036854775807);
+  assert(j != null && j == -9223372036854775807, "-MAX is the lowest non-null integer: got {j}");
+}
+
+fn test_a_null_element_is_a_value_in_its_slot() {
+  v: vector<integer?> = [null, 3];
+  v += [null];
+  assert(len(v) == 3, "three slots, two holding null: len {len(v)}");
+  assert(v[0] == null && v[1] == 3 && v[2] == null, "read back by index: {v[0]} {v[1]} {v[2]}");
+}

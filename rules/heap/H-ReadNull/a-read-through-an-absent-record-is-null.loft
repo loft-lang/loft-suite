@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-ReadNull` — a read through a reference that names nothing yields null and the run
+// CONTINUES; with `@FR-H-Index`, an index past either end is such a read.  Walked over where the
+// absent record comes from — a null local, a null parameter, an element past the end, a key the
+// hash does not hold, a null `reference` field, a chain through two absents, a container a
+// callee returned or a parameter holds — and what is read
+// through it: an integer, a text and a vector field.  Every cell then keeps computing, so a read
+// that halted or answered a stale record would show in the value after it.  The container the
+// read went through must keep its length: a read is not a write.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value (`-7` to `-8` in c1), which fails c1 on both
+//   backends with the message below and leaves the other cells passing.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument.
+// HOLDS: leak and panic are clean on both backends.
+
+struct P { x: integer, name: text, tags: vector<integer> }
+struct E { k: integer, v: integer }
+struct Link { to: reference<P>?, n: integer }
+
+fn x_of(p: P?) -> integer { p.x ?? -11 }
+
+fn test_null_local() {
+  p: P? = null;
+  a = p.x ?? -7;
+  b = p.name ?? "none";
+  c = len(p.tags?);
+  d = a + 1;
+  assert(a == -7, "c1 a null local's integer field reads null: {a}");
+  assert(b == "none", "c1 a null local's text field reads null: {b}");
+  assert(c == 0, "c1 a null local's vector field, discharged, is empty: {c}");
+  assert(d == -6, "c1 the run continued: {d}");
+}
+
+fn test_null_argument() {
+  q: P? = null;
+  r = P { x: 4, name: "r", tags: [] };
+  assert(x_of(q) == -11, "c2 a null argument's field reads null: {x_of(q)}");
+  assert(x_of(r) == 4, "c2 a live argument's field reads its value: {x_of(r)}");
+}
+
+fn test_past_the_end() {
+  v = [P { x: 1, name: "a", tags: [5] }, P { x: 2, name: "b", tags: [] }];
+  a = v[2].x ?? -1;
+  b = v[-3].x ?? -2;
+  c = v[9].name ?? "gone";
+  d = v[-1].x;
+  assert(a == -1, "c3 v[2] of two names nothing: {a}");
+  assert(b == -2, "c3 v[-3] of two names nothing: {b}");
+  assert(c == "gone", "c3 a text field past the end: {c}");
+  assert(d == 2, "c3 v[-1] is the last element, not null: {d}");
+  assert(len(v) == 2, "c3 the reads left the length alone: {len(v)}");
+}
+
+fn test_absent_key() {
+  h: hash<E[k]> = [E { k: 3, v: 30 }, E { k: 5, v: 50 }];
+  a = h[4].v ?? -4;
+  b = h[5].v ?? -5;
+  assert(a == -4, "c4 an absent key's field reads null: {a}");
+  assert(b == 50, "c4 a present key's field reads its value: {b}");
+  assert(len(h) == 2, "c4 the read did not insert the key: {len(h)}");
+}
+
+fn test_null_reference_field() {
+  l = Link { to: null, n: 6 };
+  a = l.to.x ?? -9;
+  b = l.to.name ?? "nobody";
+  assert(a == -9 && b == "nobody", "c5 a null reference field reads null: {a} {b}");
+  assert(l.n == 6, "c5 the holder's own field is intact: {l.n}");
+}
+
+fn test_chain_of_absents() {
+  v: vector<Link> = [Link { to: null, n: 1 }];
+  a = v[0].to.x ?? -21;
+  b = v[4].to.x ?? -22;
+  assert(a == -21, "c6 an element's null reference reads null: {a}");
+  assert(b == -22, "c6 a null reference of an absent element reads null: {b}");
+  assert(len(v) == 1, "c6 length kept: {len(v)}");
+}
+
+fn test_in_a_loop() {
+  v = [P { x: 10, name: "a", tags: [] }, P { x: 20, name: "b", tags: [] }, P { x: 30, name: "c", tags: [] }];
+  s = 0;
+  for i in 0..5 { s += v[i].x ?? 100; }
+  // 10 + 20 + 30 + 100 + 100
+  assert(s == 260, "c7 two of five reads were past the end: {s}");
+  assert(len(v) == 3, "c7 length kept: {len(v)}");
+}
+
+fn mkv() -> vector<P> { [P { x: 1, name: "a", tags: [] }] }
+
+fn sum_past(h: hash<E[k]>, v: vector<P>) -> integer {
+  (h[9].v ?? 1000) + (v[3].x ?? 200) + (v[0].x ?? 30)
+}
+
+fn test_a_callee_returned_and_a_parameter_container() {
+  v = mkv();
+  a = v[1].x ?? -31;
+  h: hash<E[k]> = [E { k: 1, v: 10 }];
+  b = sum_past(h, v);
+  // 1000 (absent key) + 200 (past the end) + 1 (v[0].x)
+  assert(a == -31 && b == 1201, "c8 {a} {b}");
+  assert(len(v) == 1 && len(h) == 1, "c8 lengths kept");
+}

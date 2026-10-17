@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Or` — `e₁ || e₂` reduces e₁ first; when e₁ is true the form is true and e₂ is NOT
+// evaluated.  Crossed with `@FR-E-Truthy` (a null left operand reads false, so the right
+// operand runs and decides) and `@FR-E-Left` (what runs, runs in source order).  The `&&`
+// half, the word spellings, chains and the bounds guard sit beside it under `E-And/`.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values, and a side-effect counter on every right operand.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn nb() -> boolean? { null }
+
+fn test_or_skips_the_right_when_the_left_is_true() {
+  calls = 0;
+  t = fn(r: boolean) -> boolean { calls += 1; r };
+  a = true || t(false);
+  assert(a == true && calls == 0, "true || f(): true, f not run: got {a} calls={calls}");
+  b = false || t(true);
+  assert(b == true && calls == 1, "false || f(true): f runs: got {b} calls={calls}");
+  c = false || t(false);
+  assert(c == false && calls == 2, "false || f(false): false: got {c} calls={calls}");
+}
+
+fn test_a_null_left_operand_lets_the_right_decide() {
+  calls = 0;
+  t = fn(r: boolean) -> boolean { calls += 1; r };
+  n: boolean? = null;
+  a = n || t(false);
+  b = nb() || t(true);
+  assert(a == false && b == true && calls == 2, "null || f(r) runs f and answers r: got {a} {b} calls={calls}, expected false true 2");
+  log = "";
+  f = fn(tag: text, r: boolean) -> boolean { log += tag; r };
+  c = f("a", false) || f("b", false) || f("c", true) || f("d", true);
+  assert(c == true && log == "abc", "the first true stops the chain: got {c} '{log}', expected true 'abc'");
+}

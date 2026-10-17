@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-View-Drop` — the legal half of `a-disturbed-view-of-a-droppable-is-refused.loft`.  A
+// view of a member that owns a droppable STAYS a view: it is never turned into a copy, so the
+// hook runs once per record, at its container's death, and a write through the view reaches
+// the container.  Each cell views a droppable and leaves the container undisturbed while the
+// view is used: a plain read, a view whose last use precedes a growth (`@FR-B-Disturb` — a
+// disturbance after the last use is no disturbance of the view), a `hash` removal of ANOTHER
+// key (`@FR-Col-RemoveKeyed`: keys are not positions, nothing moves), and a view in a loop
+// body.  Every record's release is traced and every trace is worked out by hand: each id
+// exactly once (none for a keyed collection's records, `@FR-H-Drop-Not`), `R<id>` the read, and
+// a write through the view visible in the container.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected trace, which fails that cell on both backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument — each hook call and read is written to this cell's trace file.
+// HOLDS: leak and panic are clean on both backends.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_view_drop_legal.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer, n: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+struct KH { k: integer, h: H }
+
+fn g1() {
+  v = [H { id: 1, n: 0 }, H { id: 2, n: 0 }];
+  e = v[1];
+  note("R{e.id}");
+}
+
+fn g2() {
+  v = [H { id: 1, n: 0 }];
+  e = v[0];
+  e.n = 7;
+  note("R{e.id}");
+  v += [H { id: 2, n: 0 }];
+  note("N{v[0].n}");
+}
+
+fn g3() {
+  h: hash<KH[k]> = [KH { k: 1, h: H { id: 1, n: 0 } }, KH { k: 2, h: H { id: 2, n: 0 } }];
+  e = h[1];
+  h[2] = null;
+  e.h.n = 4;
+  note("R{e.h.id}");
+  note("N{h[1].h.n ?? -1}");
+  note("L{len(h)}");
+}
+
+fn g4() {
+  v = [H { id: 1, n: 0 }, H { id: 2, n: 0 }, H { id: 3, n: 0 }];
+  for i in 0..3 {
+    e = v[i];
+    e.n = 10 * (i + 1);
+  }
+  note("N{v[0].n + v[1].n + v[2].n}");
+}
+
+fn test_a_read_view_releases_once() {
+  drain();
+  g1();
+  t = drain();
+  assert(t == "R2,D1,D2", "c1 read then the vector's two members, once each: {t}");
+}
+
+fn test_a_view_used_before_a_growth_writes_through() {
+  drain();
+  g2();
+  t = drain();
+  assert(t == "R1,N7,D1,D2", "c2 the write reached the element, then each member once: {t}");
+}
+
+fn test_a_hash_removal_of_another_key_keeps_the_view() {
+  drain();
+  g3();
+  t = drain();
+  // a keyed collection's records are the author's to release (`@FR-H-Drop-Not`): no hook runs
+  assert(t == "R1,N4,L1", "c3 the view wrote through after another key left: {t}");
+}
+
+fn test_a_view_in_a_loop_body() {
+  drain();
+  g4();
+  t = drain();
+  assert(t == "N60,D1,D2,D3", "c4 three views wrote through, then each member once: {t}");
+}

@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-IfT` — `⟨if true { s } else { t }, σ⟩ → ⟨s, σ⟩`, and its E-IfF half (`t` for false):
+// an `if` runs exactly the arm its condition selected, and the other arm's effects never
+// happen.  Crossed with `@FR-E-Truthy` — the condition is a truthiness position, so a NULL
+// condition (a `boolean?`, an `integer?`, a `text?`, a call answering null) reads false and
+// takes ELSE — and `@FR-E-Truthy-1` — every PRESENT value is true there, so `0`, `""` and a
+// negative integer all take THEN.
+//
+// Shapes: a definite condition with a side effect in each arm (counted), `if` as an
+// expression, a null condition of each scalar kind, a present zero / empty text, an
+// `else if` chain whose first link is null, and an `if` without `else` on false.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values (which arm ran, counted by side effect).
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn nb() -> boolean? { null }
+fn ni() -> integer? { null }
+fn nt() -> text? { null }
+fn zero() -> integer? { 0 }
+
+fn test_a_definite_condition_runs_one_arm_only() {
+  then_runs = 0;
+  else_runs = 0;
+  for i in 0..4 {
+    if i % 2 == 0 { then_runs += 1; } else { else_runs += 1; }
+  }
+  assert(then_runs == 2 && else_runs == 2, "i=0,2 THEN; i=1,3 ELSE: got {then_runs} {else_runs}, expected 2 2");
+  a = if true { "t" } else { "f" };
+  b = if false { "t" } else { "f" };
+  assert(a == "t" && b == "f", "if as a value: got {a} {b}, expected t f");
+}
+
+fn test_a_null_condition_takes_else() {
+  b: boolean? = null;
+  r1 = if b { "then" } else { "else" };
+  r2 = if nb() { "then" } else { "else" };
+  r3 = if ni() { "then" } else { "else" };
+  r4 = if nt() { "then" } else { "else" };
+  assert("{r1} {r2} {r3} {r4}" == "else else else else",
+    "every null condition reads false: got {r1} {r2} {r3} {r4}");
+  hits = 0;
+  if b { hits += 1; }
+  assert(hits == 0, "no else and a null condition: the arm does not run, hits={hits}");
+}
+
+fn test_a_present_zero_and_empty_text_take_then() {
+  z = zero();
+  e = "";
+  r1 = if z { "then" } else { "else" };
+  r2 = if e { "then" } else { "else" };
+  r3 = if 0 - 5 { "then" } else { "else" };
+  assert("{r1} {r2} {r3}" == "then then then",
+    "a present value is true: 0, \"\", -5 all THEN; got {r1} {r2} {r3}");
+}
+
+fn test_an_else_if_chain_skips_a_null_link() {
+  b: boolean? = null;
+  path = "";
+  if b { path = "first"; } else if 3 > 2 { path = "second"; } else { path = "third"; }
+  assert(path == "second", "null link reads false, next true link runs: got {path}");
+  if false { path = "a"; } else if nb() { path = "b"; } else { path = "c"; }
+  assert(path == "c", "false then null: the final ELSE: got {path}");
+}
+
+fn test_an_if_without_else_on_false_leaves_state() {
+  n = 5;
+  if n > 9 { n = 0; }
+  assert(n == 5, "a false condition and no else: n unchanged, got {n}, expected 5");
+  if n > 4 { n = n * 2; }
+  assert(n == 10, "a true condition and no else: n doubled, got {n}, expected 10");
+}

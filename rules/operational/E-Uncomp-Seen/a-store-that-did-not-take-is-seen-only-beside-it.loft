@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Uncomp-Seen` — where `@FR-E-Uncomp-NN` gave a narrow non-nullable slot its default
+// (the value did not fit), the failure is OBSERVABLE two ways: `place op= v else { B }`
+// (`@FR-H-Write-Else`, B runs exactly when the write did not take), and `!place` in the
+// condition of the `if` that is the very next statement.  Either way NOTHING else changes —
+// the slot holds the same default it holds with no test written — and one statement further
+// apart the observation is gone.  Crossed with `@FR-E-And`: `!place && f()` in that `if`
+// reads the observation as the left operand, and `f()` runs only when it is true.
+//
+// Each flag is declared BEFORE its store, so the `if` really is the next statement (see
+// `heap/H-Write-Else/178-store-else.loft` and `types/N-Reserve/152-…` for the full width
+// matrix; this cell is the cross and the adjacency boundary).
+//   u8 250 += 10 → 260 does not fit → 0, `else` runs;  250 += 5 → 255 fits → `else` silent.
+//   `!z && f()` after a miss: true && f() — f runs once;  after a fit: `!255` is false, f skipped.
+//   A statement in between: `!z` reads the slot's 0, which is a present value, so false.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values and side-effect counters.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn test_else_runs_exactly_when_the_store_missed() {
+  seen = "";
+  x: u8 = 250;
+  x += 10 else { seen += "x" };
+  y: u8 = 250;
+  y += 5 else { seen += "y" };
+  assert(seen == "x", "only the store that missed runs its else: got '{seen}', expected 'x'");
+  assert(x == 0 && y == 255, "the slots hold the default and the fit: got {x} {y}, expected 0 255");
+}
+
+fn test_the_next_if_reads_it_through_a_short_circuit() {
+  calls = 0;
+  f = fn() -> boolean { calls += 1; true };
+  hit = 0;
+  z: u8 = 250;
+  z += 10;
+  if !z && f() { hit += 1; }
+  assert(hit == 1 && calls == 1 && z == 0, "a miss: !z is true, f runs: got hit={hit} calls={calls} z={z}");
+  w: u8 = 250;
+  w += 5;
+  if !w && f() { hit += 10; }
+  assert(hit == 1 && calls == 1 && w == 255, "a fit: !w is false, f skipped: got hit={hit} calls={calls} w={w}");
+}
+
+// The compiler agrees: one statement apart, `!z` on a non-null `u8` can only be false, and it
+// says so.
+fn test_one_statement_apart_it_is_not_observed() {
+  hit = 0;
+  z: u8 = 250;
+  z += 10;
+  hit += 0;
+  // @EXPECT_WARNING: '!' on a 'not null' u8 is always false
+  if !z { hit = 1; }
+  assert(hit == 0 && z == 0, "a statement between: !z reads the present 0, false: got hit={hit} z={z}");
+}

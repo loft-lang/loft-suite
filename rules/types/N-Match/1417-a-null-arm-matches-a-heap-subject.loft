@@ -17,11 +17,12 @@
 // variant of anything, and a match without a null arm still answers null for one — which is
 // what the last cell holds down.
 //
-// ⚠ NOT closed here: a BINDING arm over a plain struct (`match s { null => -1, x => x.a }`)
-// is still refused with *"'x' does not match struct type S"*.  Measured independently — the
-// same refusal fires with no null arm in the match at all — so it is a separate gap in the
-// binding-arm parser rather than part of this one, and asserting it here would tie two cures
-// to one guard.  The struct cells below use a wildcard, which is what works.
+// A BARE binding arm over a plain struct (`match s { null => -1, x => x.a }`) is refused with
+// *"'x' does not match struct type S"* BY DESIGN: at the arm root a bare lowercase name is a
+// refused misspelling on a struct or enum subject (`@FR-M-Unit`, matching-history D-match-22),
+// and `x: _ => x.a` is the spelling that binds (`@FR-P-Cap`).  The struct cells below use a
+// wildcard; the binding spelling is pinned in
+// `rules/collections/Col-Lookup/a-missed-lookup-discharges-and-propagates-at-every-kind.loft`.
 //
 // @falsified-at: 4ac66f6c — interpret exit 1 -> 0 and native exit 1 -> 0.  The control build
 //   does not compile the file at all (the arm loop breaks and the parse cascades), so no cell

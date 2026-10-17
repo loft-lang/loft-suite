@@ -1,0 +1,103 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INSTANTIATED COLLECTION REPLACES A REPEATED KEY (`@FR-Col-Insert-Absent`, `@FR-Col-Insert`).
+// An absent `<kind>?` destination is instantiated first and the records are then inserted
+// EXACTLY as (Col-Insert) says — so a key repeated inside the very insert that instantiated the
+// collection replaces at hash / sorted / index / trie, and spatial and vector keep both.  Axes
+// moved: the kind (all six), the destination (a local, a struct field), the repeat inside one
+// literal against a second `+=`, and a loop that resets the destination to null every pass.
+// The field cells give each collection its own record type: fields over ONE type are a linked
+// group (`@FR-Col-Group`), second routes to one record set, which is a different rule.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together
+//   (the documented-pairs measure, 2026-10-17); every cell answered right on both backends.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+struct E { k: integer, v: integer }
+struct W { t: text, n: integer }
+struct Pt { x: integer, y: integer, v: integer }
+struct F { k: integer, v: integer }
+struct G { k: integer, v: integer }
+struct J { k: integer, v: integer }
+// one record type per field: fields over ONE type are a linked group (second routes to its records)
+struct Box { h: hash<E[k]>?, s: sorted<F[k]>?, i: index<G[k]>?, l: vector<J>? }
+
+fn sumh(h: hash<E[k]>) -> integer { t = 0; for e in h { t += e.v; } t }
+
+fn test_hash_absent_then_duplicate() {
+  // Col-Insert-Absent then Col-Insert: the absent hash is instantiated, and a repeated key REPLACES
+  h: hash<E[k]>? = null;
+  h += [E { k: 1, v: 10 }, E { k: 2, v: 20 }, E { k: 1, v: 11 }];
+  hh = h ?? [];
+  assert(len(hh) == 2, "two keys: {len(hh)}");
+  assert((hh[1]?.v ?? -1) == 11, "the later k=1 replaced the first");
+  assert(sumh(hh) == 31, "11+20");
+}
+
+fn test_sorted_and_index_absent_then_duplicate() {
+  s: sorted<E[k]>? = null;
+  s += [E { k: 5, v: 1 }, E { k: 3, v: 2 }, E { k: 5, v: 3 }];
+  ss = s ?? [];
+  assert(len(ss) == 2 && (ss[5]?.v ?? -1) == 3, "sorted: replaced, len {len(ss)}");
+  o = "";
+  for e in ss { o += "{e.k}:{e.v},"; }
+  assert(o == "3:2,5:3,", "sorted order after replace: {o}");
+  ix: index<E[k]>? = null;
+  ix += [E { k: 9, v: 1 }];
+  ix += [E { k: 9, v: 2 }, E { k: 4, v: 7 }];
+  ii = ix ?? [];
+  assert(len(ii) == 2 && (ii[9]?.v ?? -1) == 2, "index: replaced, len {len(ii)}");
+}
+
+fn test_trie_absent_then_duplicate() {
+  t: trie<W[t]>? = null;
+  t += [W { t: "ab", n: 1 }, W { t: "a", n: 2 }, W { t: "ab", n: 3 }];
+  tt = t ?? [];
+  assert(len(tt) == 2 && (tt["ab"]?.n ?? -1) == 3, "trie: replaced, len {len(tt)}");
+}
+
+fn test_spatial_absent_keeps_both() {
+  // spatial is the one kind that keeps two records on one point
+  p: spatial<Pt[x, y]>? = null;
+  p += [Pt { x: 1, y: 1, v: 5 }, Pt { x: 1, y: 1, v: 6 }, Pt { x: 2, y: 0, v: 7 }];
+  pp = p ?? [];
+  assert(len(pp) == 3, "spatial keeps both: {len(pp)}");
+  s = 0;
+  for q in pp[(1, 1)..(1, 1)] { s += q.v; }
+  assert(s == 11, "the box over (1,1) answers both: {s}");
+}
+
+fn test_vector_absent_keeps_both() {
+  v: vector<E>? = null;
+  v += [E { k: 1, v: 1 }, E { k: 1, v: 2 }];
+  assert(len(v ?? []) == 2, "a vector has no key: both stay");
+}
+
+fn test_absent_fields_every_kind() {
+  // the same pair through a FIELD destination
+  b = Box { h: null, s: null, i: null, l: null };
+  b.h += [E { k: 1, v: 1 }, E { k: 1, v: 4 }];
+  b.s += [F { k: 2, v: 2 }, F { k: 2, v: 5 }];
+  b.i += [G { k: 3, v: 3 }, G { k: 3, v: 6 }];
+  b.l += [J { k: 4, v: 4 }, J { k: 4, v: 7 }];
+  assert(len(b.h ?? []) == 1 && (b.h[1]?.v ?? -1) == 4, "hash field");
+  assert(len(b.s ?? []) == 1 && (b.s[2]?.v ?? -1) == 5, "sorted field");
+  assert(len(b.i ?? []) == 1 && (b.i[3]?.v ?? -1) == 6, "index field");
+  assert(len(b.l ?? []) == 2, "vector field");
+}
+
+fn test_absent_in_loop_rebuilt() {
+  // each pass resets to null, inserts k = 0..p, then repeats k=0 with v=100: len stays p
+  total = 0;
+  for p in 1..4 {
+    h: hash<E[k]>? = null;
+    for k in 0..p { h += [E { k: k, v: k }]; }
+    h += [E { k: 0, v: 100 }];
+    hh = h ?? [];
+    total += len(hh) * 1000 + sumh(hh);
+  }
+  // p=1: len 1, sum 100 -> 1100; p=2: len 2, sum 100+1 -> 2101; p=3: len 3, sum 100+1+2 -> 3103
+  assert(total == 6304, "loop total {total}");
+}

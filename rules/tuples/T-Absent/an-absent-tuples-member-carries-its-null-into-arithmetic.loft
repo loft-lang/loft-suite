@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ABSENT TUPLE'S MEMBER CARRIES ITS NULL INTO ARITHMETIC (`@FR-T-Absent`, `@FR-N-Prop`,
+// `@FR-N-Opt`).  A missed read of a `vector<(integer, text)>` is the in-flight absent tuple; its
+// member is `τ?` and `+` carries the null.  Axes moved: the discharge (`??` on the tuple, on
+// the member, the sanctioned store into a member-nullable slot), present against absent under
+// the same spelling, and a loop reading past the end.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together
+//   (the documented-pairs measure, 2026-10-17); every cell answered right on both backends.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+fn pairs() -> vector<(integer, text)> { [(3, "c"), (5, "e")] }
+
+fn test_absent_member_into_arith() {
+  // T-Absent x N-Prop: a missed tuple read's member is τ?, and `+` carries its null
+  v = pairs();
+  i = 7;
+  t = v[i];
+  assert(((t.0 + 1) ?? -1) == -1, "absent member + 1 is null");
+  assert(((t.0 * 2 + t.0) ?? -1) == -1, "both operands absent");
+  i = 1;
+  u = v[i];
+  assert(((u.0 + 1) ?? -1) == 6, "present member: 5+1");
+  assert((u.1 ?? "?") == "e", "present text member");
+}
+
+fn test_absent_tuple_discharge() {
+  // T-Absent x N-Opt: `??` discharges an in-flight absent tuple; `?` gives the all-default one
+  v = pairs();
+  i = 9;
+  t = v[i] ?? (0, "none");
+  assert(t.0 == 0 && t.1 == "none", "coalesced tuple: {t.0} {t.1}");
+  i = 0;
+  u = v[i] ?? (0, "none");
+  assert(u.0 == 3 && u.1 == "c", "present tuple: {u.0} {u.1}");
+  i = 9;
+  w = v[i];
+  assert(w == null, "an absent tuple reads as null");
+  assert(v[0] != null, "a present tuple is not null");
+}
+
+fn test_absent_tuple_into_nullable_slot() {
+  // the sanctioned move: an in-flight tuple stored into a member-nullable slot
+  v = pairs();
+  i = 4;
+  s: (integer?, text?) = v[i];
+  assert(s.0 == null && s.1 == null, "both members null in the stored tuple");
+  assert(((s.0 + 10) ?? 77) == 77, "null member through + then discharged");
+  i = 1;
+  r: (integer?, text?) = v[i];
+  assert(((r.0 + 10) ?? 77) == 15, "present: 5+10");
+}
+
+fn test_absent_in_loop() {
+  // i = 0,1,2,3 over 2 elements: 3 + 5 + miss + miss with miss -> 100: 208
+  v = pairs();
+  s = 0;
+  for i in 0..4 {
+    k = i;
+    t = v[k];
+    s += t.0 ?? 100;
+  }
+  assert(s == 208, "loop sum {s}");
+}

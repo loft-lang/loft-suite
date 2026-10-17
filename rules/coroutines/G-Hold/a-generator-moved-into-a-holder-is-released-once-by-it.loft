@@ -1,0 +1,154 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-Hold` crossed with `@FR-H-Move` — a generator local given to a field, an element or a
+// literal MOVES there: it gives its own hold up, the holder owns the frame and releases it once,
+// and advancing through the holder advances that frame.  A PARAMETER stored in a field is not a
+// move: it takes a hold of its own beside the caller's, so the two advance ONE frame.  Walked
+// over where the local moves (an append, a literal's field, a tuple member, a field write over
+// a live generator, a returned literal), a move under a branch taken and not taken, a move with
+// a refill on every loop pass, a refill after the move (two frames, two holders), a parameter
+// stored in a field, and records holding moved generators with one removed.  Every generator
+// owns a heap local, so the leak gate reports a frame nobody released; every value is worked
+// out by hand from `patrol(id, n)` = `id * 100 + 0 .. id * 100 + n - 1`.
+//
+// @falsified-at: none — the walk found no defect in the values, so no earlier build answers
+//   wrong.  The control is a hand edit of one expected value, which fails that cell on both
+//   backends.
+// CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run); `LOFT_STRICT_STORES=1` agrees.
+// HOLDS: panic is clean on both backends.  The deviation at the bottom of this file is not run.
+
+fn patrol(id: integer, n: integer) -> iterator<integer> {
+  steps = [0, 1, 2, 3, 4, 5, 6, 7];
+  for s in steps {
+    if s >= n { break; }
+    yield id * 100 + s;
+  }
+}
+
+struct Task { g: iterator<integer>, id: integer }
+
+fn drain_all(g: iterator<integer>) -> text {
+  out = "";
+  for x in g { out += "{x},"; }
+  out
+}
+
+fn keep(p: iterator<integer>) -> Task { Task { g: p, id: 0 } }
+
+fn m8() -> Task { g = patrol(5, 3); return Task { g: g, id: 0 }; }
+
+fn m4(c: boolean) -> text {
+  g = patrol(4, 3);
+  out = "";
+  if c { t = Task { g: g, id: 1 }; out += "{next(t.g) ?? -1}"; } else { out += "{next(g) ?? -1}"; }
+  out
+}
+
+fn test_appended() {
+  g = patrol(1, 3);
+  v: vector<iterator<integer>> = [];
+  v += [g];
+  a = next(v[0]) ?? -1;
+  b = next(v[0]) ?? -1;
+  assert(a == 100 && b == 101 && len(v) == 1, "c1 {a} {b} {len(v)}");
+}
+
+fn test_into_a_literal_field() {
+  g = patrol(2, 2);
+  t = Task { g: g, id: 7 };
+  a = next(t.g) ?? -1;
+  assert(a == 200 && t.id == 7, "c2 {a} {t.id}");
+}
+
+fn test_into_a_tuple_member() {
+  g = patrol(3, 2);
+  t = (g, 5);
+  a = next(t.0) ?? -1;
+  b = next(t.0) ?? -1;
+  c = next(t.0) ?? -1;
+  assert(a == 300 && b == 301 && c == -1 && t.1 == 5, "c3 two values then done: {a} {b} {c}");
+}
+
+fn test_under_a_branch_taken_and_not() {
+  a = m4(true);
+  b = m4(false);
+  assert(a == "400" && b == "400", "c4 {a} {b}");
+}
+
+fn test_moved_and_refilled_on_every_pass() {
+  v: vector<iterator<integer>> = [];
+  for i in 0..3 {
+    g = patrol(10 + i, 2);
+    v += [g];
+  }
+  s = 0;
+  for h in v { s += next(h) ?? 0; }
+  // 1000 + 1100 + 1200
+  assert(s == 3300 && len(v) == 3, "c5 {s} {len(v)}");
+}
+
+fn test_refilled_after_the_move() {
+  g = patrol(6, 2);
+  v: vector<iterator<integer>> = [];
+  v += [g];
+  g = patrol(7, 2);
+  a = next(v[0]) ?? -1;
+  b = next(g) ?? -1;
+  assert(a == 600 && b == 700, "c6 two frames, two holders: {a} {b}");
+}
+
+fn test_written_over_a_live_generator() {
+  t = Task { g: patrol(8, 2), id: 0 };
+  g = patrol(9, 2);
+  t.g = g;
+  a = next(t.g) ?? -1;
+  assert(a == 900, "c7 the field holds the moved frame, the old one is released: {a}");
+}
+
+fn test_moved_into_a_returned_literal() {
+  t = m8();
+  s = drain_all(t.g);
+  assert(s == "500,501,502,", "c8 {s}");
+}
+
+fn test_a_parameter_stored_in_a_field_shares_the_frame() {
+  g = patrol(11, 4);
+  k = keep(g);
+  a = next(g) ?? -1;
+  b = next(k.g) ?? -1;
+  c = next(g) ?? -1;
+  assert(a == 1100 && b == 1101 && c == 1102, "c9 two holds, one frame: {a} {b} {c}");
+}
+
+fn test_records_holding_moved_generators_one_removed() {
+  v: vector<Task> = [];
+  for i in 0..3 {
+    g = patrol(20 + i, 3);
+    v += [Task { g: g, id: i }];
+  }
+  v.remove(1);
+  s = "";
+  for t in v { s += "{next(t.g) ?? -1},"; }
+  assert(s == "2000,2200," && len(v) == 2, "c10 {s} {len(v)}");
+}
+
+// DEVIATION (reported, not yet filed): (H-Move) says the moved local is SPENT and (H-Spent)
+// that reading it is a compile-time error; for a generator handle the read compiles.  While the
+// holder lives it advances the holder's frame (`a` 100, then `next(v[0])` 101); once the holder
+// releases the frame (`v.remove(0)`) it answers null, as an exhausted generator would — no
+// diagnostic, on both backends, the same under `LOFT_POISON=1` and `LOFT_STRICT_STORES=1`.
+// heap.md's `File` paragraph says "(H-Copy-Refuse) and (H-Spent) reach declared droppables
+// only", which may be the intended scope — the rules disagree with each other here, so this is
+// for the owner.  Not an entry point (no `test_` prefix): it compiles today and stops compiling
+// the day the refusal reaches generators, which is when it moves to a refused cell.
+fn spent_generator_read_after_its_move() -> integer {
+  g = patrol(1, 3);
+  v: vector<iterator<integer>> = [];
+  v += [g];
+  a = next(g) ?? -1;
+  v.remove(0);
+  b = next(g) ?? -1;
+  a * 1000 + b
+}

@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Seq` — `⟨v ; s, σ⟩ → ⟨s, σ⟩`: a finished statement's VALUE is dropped and only its
+// effect on σ survives.  `@FR-E-Val` — a value does not step, so a bare literal statement
+// (`5;`) is already done and changes nothing.  Crossed with `@FR-F-Block`: a `{ … }` block
+// that ends in an expression yields it wherever the block stands, so the value a block
+// answers is its LAST expression and every statement before it is a dropped `v ;`.
+//
+// Shallow shapes first: a bare literal / arithmetic / text statement, a call statement
+// whose return is dropped while its write through `&` is kept, a block as the right side
+// of an assignment, a nested block, a block as an operand, and an `if` arm with
+// statements before its value.  Every expected value is hand-computed in the message.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends); the
+//   cell keeps them held.  Its harness was shown able to fail by changing one expected
+//   value (`y == 8`) and watching that function fail on both backends.
+// CHANNEL: assertion values.
+// ARMED: no instrument; ordinary assertions on both backends.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn bump(n: &integer) -> integer {
+  n += 1;
+  n * 10
+}
+
+fn test_a_bare_value_statement_is_dropped() {
+  x = 3;
+  x + 1;
+  5;
+  "abc";
+  x * 100;
+  assert(x == 3, "the dropped `x + 1` and `x * 100` did not write x: x={x}, expected 3");
+}
+
+fn test_a_call_statements_value_is_dropped_its_effect_kept() {
+  c = 0;
+  bump(c);
+  bump(c);
+  // Each call answered c*10 (10, then 20) and that value went nowhere; the writes stayed.
+  assert(c == 2, "two dropped calls each incremented c: c={c}, expected 2");
+  r = bump(c);
+  assert(r == 30 && c == 3, "a kept call answers its value: r={r} c={c}, expected 30 3");
+}
+
+fn test_a_block_answers_its_last_expression() {
+  y = {
+    a = 2;
+    b = a * 3;
+    b + 1
+  };
+  assert(y == 7, "block: a=2, b=6, last b+1 = 7; got {y}");
+  t = {
+    s = "ab";
+    s + "c"
+  };
+  assert(t == "abc" && len(t) == 3, "text block answers its last: got '{t}' len {len(t)}, expected 'abc' 3");
+}
+
+fn test_a_nested_block_and_a_block_operand() {
+  w = {
+    q = { 4 };
+    q + 1
+  };
+  assert(w == 5, "inner block answers 4, outer q+1 = 5; got {w}");
+  z = 1 + { 2 * 3 };
+  assert(z == 7, "a block as the right operand yields 6; 1+6 = 7; got {z}");
+}
+
+fn test_an_if_arm_with_statements_answers_its_last() {
+  k = 0;
+  v = if k == 0 {
+    k = 10;
+    k + 5
+  } else {
+    k = 20;
+    k + 6
+  };
+  assert(v == 15 && k == 10, "THEN arm: k=10 then k+5 = 15; got v={v} k={k}, expected 15 10");
+}

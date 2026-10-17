@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Seq` crossed with `@FR-F-Block` — F-Block: a `{ … }` block ending in an expression
+// YIELDS it "wherever the block stands", and is discarded only where the block itself is a
+// statement (a `;`-terminated one, a loop body, a dropped function body).  So inside
+// `z = { { 4 } - 1 };` the inner block is not `;`-terminated and is read by `-`: the rule's
+// answer is 4 - 1 = 3.
+//
+// ⚠ DEFECT (reported, not yet filed): the parser closes the inner block as a STATEMENT,
+// drops its 4 (E-Seq), and reads `- 1` as a unary minus — `z` is -1, silently, on both
+// backends.  `{ { 4 } + 1 }` and `{ { 4 } * 2 }` are refused instead, with a message that
+// names an internal operator ("missing argument for parameter 'v1' of `OpAddInt`").  An
+// `if` in the same position DOES continue as an operand (`{ if true { 4 } else { 5 } + 1 }`
+// is 5) and a parenthesised block does too (`{ ({ 4 }) - 1 }` is 3), so the bare block is
+// the odd one out.  Either F-Block wants a statement-start carve-out (Rust's reading, which
+// also yields -1) or the parser wants to continue the expression; the cell records the rule
+// as written.
+//
+// @falsified-at: none — written against the defect.
+// CHANNEL: the value of `z`.
+
+fn test_the_spellings_that_already_continue() {
+  a = { ({ 4 }) - 1 };
+  b = { if true { 4 } else { 5 } + 1 };
+  assert(a == 3 && b == 5, "parenthesised block 4-1 = 3, an if-expression 4+1 = 5: got {a} {b}");
+}
+
+// @IGNORE — a bare block at statement start is dropped before a binary operator.
+fn test_a_block_before_minus_is_an_operand() {
+  z = { { 4 } - 1 };
+  assert(z == 3, "F-Block: the inner block yields 4, read by `-`: 4 - 1 = 3; got {z}");
+}

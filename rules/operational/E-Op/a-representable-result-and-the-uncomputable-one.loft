@@ -1,0 +1,111 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Op` — `v₁ op v₂` steps to its value when that value is REPRESENTABLE; `@FR-E-Uncomp`
+// — when it is not (overflow, integer `/`/`%` by zero, an IEEE NaN) it steps to `null` and
+// evaluation continues.  Crossed with `@FR-N-Arith` (the result's type follows the range
+// arithmetic, so a narrow operand computes in the full `integer` and does not wrap) and
+// `@FR-N-Domain` (a partial operation — `÷0`, `sqrt(<0)`, `ln(<0)`, an index out of range —
+// answers null from a reachable input).  `@FR-E-Null` fixes what "representable" means for
+// `integer`: the non-null range is `[i64::MIN+1, i64::MAX]`, so a result that lands on
+// `i64::MIN` IS the overflow case.
+//
+// Every operand comes through a function so no compile-time fold decides the answer.  Per
+// operand kind, a representable result at the EDGE beside an uncomputable one:
+//   integer  MAX-1 + 1 = MAX  vs  MAX + 1 → null;  -MAX + 0 vs -MAX - 1 → null (lands on MIN);
+//            3037000499² = 9223372030926249001  vs  3037000500² → null;  7/0, 7%0 → null.
+//   narrow   an `i32` at 2147483647 plus 1 is 2147483648 in `integer`, not a wrap.
+//   float    1/0 = inf and 1e308*10 = inf (IEEE representable);  0/0 and 5 % 0 → null;
+//            sqrt(4) = 2 vs sqrt(-1) → null;  ln(0) = -inf (IEEE) vs ln(-1) → null.
+//   character `'a' - 'b'` = -1;  a codepoint 98 casts to 'b', a surrogate 55296, 1114112 and
+//            -1 cast to null under the checked `as character?`.
+//   index    v[2] of a 3-vector vs v[3] → null (a plain-variable index, so N-Index applies).
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn big() -> integer { 9223372036854775807 }
+fn k(n: integer) -> integer { n }
+fn fk(f: float) -> float { f }
+
+fn test_integer_add_and_subtract_at_the_edge() {
+  a = (big() - k(1)) + k(1);
+  assert(a == 9223372036854775807, "MAX-1 + 1 is MAX, representable: got {a}");
+  b: integer? = big() + k(1);
+  assert(b == null, "MAX + 1 overflows: null, got {b}");
+  c = -big() + k(0);
+  assert(c == -9223372036854775807, "-MAX is the low end of the non-null range: got {c}");
+  d: integer? = -big() - k(1);
+  assert(d == null, "-MAX - 1 lands on i64::MIN, the reserved null: got {d}");
+  e: integer? = b + k(1);
+  assert(e == null, "the program continued, and the null stays null: got {e}");
+}
+
+fn test_integer_multiply_and_divide() {
+  m = k(3037000499) * k(3037000499);
+  assert(m == 9223372030926249001, "3037000499² fits: got {m}");
+  n: integer? = k(3037000500) * k(3037000500);
+  assert(n == null, "3037000500² = 9223372037000250000 > MAX: null, got {n}");
+  q: integer? = k(7) / k(0);
+  r: integer? = k(7) % k(0);
+  assert(q == null && r == null, "7/0 and 7%0 are uncomputable: got {q} {r}");
+  s = k(7) / k(2);
+  assert(s == 3, "7/2 truncates to 3: got {s}");
+}
+
+fn test_a_narrow_operand_computes_in_integer() {
+  x: i32 = 2147483647;
+  y = x + k(1);
+  assert(y == 2147483648, "i32 MAX + 1 is computed in integer: got {y}, expected 2147483648");
+  u: u8 = 255;
+  w = u * u;
+  assert(w == 65025, "u8 255*255 = 65025, no wrap: got {w}");
+}
+
+fn test_float_results_follow_ieee() {
+  g = fk(1.0) / fk(0.0);
+  assert(g > 1.0e308 && g != null, "1/0 is +inf, a value: got {g}");
+  j = fk(1.0e308) * fk(10.0);
+  assert(j > 1.0e308 && j != null, "1e308*10 overflows to +inf, a value: got {j}");
+  h: float? = fk(0.0) / fk(0.0);
+  i: float? = fk(5.0) % fk(0.0);
+  assert(h == null && i == null, "0/0 and 5%0 are NaN, the float null: got {h} {i}");
+  p = fk(1.5) * fk(2.0);
+  assert(p == 3.0, "1.5*2 = 3: got {p}");
+}
+
+fn test_float_domain_functions() {
+  s = sqrt(fk(4.0)) ?? -1.0;
+  assert(s == 2.0, "sqrt(4) = 2: got {s}");
+  t: float? = sqrt(fk(-1.0));
+  assert(t == null, "sqrt(-1) is out of domain: null, got {t}");
+  l = ln(fk(0.0)) ?? 1.0;
+  assert(l < -1.0e308, "ln(0) is IEEE -inf, a value (E-Uncomp's float carve-out): got {l}");
+  m: float? = ln(fk(-1.0));
+  assert(m == null, "ln(-1) is NaN: null, got {m}");
+}
+
+fn test_character_codepoints() {
+  a = 'a';
+  b = 'b';
+  d = a - b;
+  assert(d == -1, "'a' - 'b' = 97 - 98 = -1: got {d}");
+  c = k(98) as character?;
+  assert(c == 'b', "codepoint 98 is 'b': got {c}");
+  s: character? = k(55296) as character?;
+  o: character? = k(1114112) as character?;
+  n: character? = k(-1) as character?;
+  assert(s == null && o == null && n == null,
+    "a surrogate, a codepoint past 0x10FFFF and -1 are not characters: got {s == null} {o == null} {n == null}");
+}
+
+fn test_an_index_in_and_out_of_range() {
+  v = [10, 20, 30];
+  i = k(2);
+  j = k(3);
+  a = v[i] ?? -1;
+  b = v[j] ?? -1;
+  assert(a == 30 && b == -1 && len(v) == 3, "v[2] = 30, v[3] absent: got {a} {b}, len {len(v)}");
+}

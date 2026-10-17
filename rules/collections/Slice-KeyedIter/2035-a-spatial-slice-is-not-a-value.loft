@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2035 — A SPATIAL SLICE IS NOT A VALUE (`@FR-Slice-KeyedIter`, `@FR-Slice-Box`).  Every
+// keyed range slice is a `for`-only iterator and a value position is a STATIC ERROR; sorted,
+// index and trie refused it, and spatial — the rule's third kind — compiled `b = s[(0,0)..(2,2)]`
+// and answered one bogus record (len 1, sum 1 over a box holding 10 + 20), on both backends.
+// The sibling file iterates the same three forms, which is the half that must keep working.
+//
+// @falsified-at: 5dcb0afa3 — hand-measured, interpret and native: the control COMPILES this file
+//   and prints `len 1 sum 1`, so the expected refusal is missing on both backends.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument — the refusal is on by default.
+// HOLDS: the iterated forms (a-keyed-range-walks-its-key-interval-in-declared-order.loft).
+// @EXPECT_ERROR: a spatial slice is a `for`-loop iterator, not a value
+
+struct P { x: integer, y: integer, v: integer }
+
+fn main() {
+  s: spatial<P[x, y]> = [P { x: 1, y: 1, v: 10 }, P { x: 5, y: 5, v: 50 }, P { x: 2, y: 0, v: 20 }];
+  b = s[(0, 0)..(2, 2)];
+  t = 0;
+  for q in b { t += q.v; }
+  println("len {len(b)} sum {t}");
+}

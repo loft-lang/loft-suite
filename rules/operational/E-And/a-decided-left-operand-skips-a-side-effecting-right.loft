@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-And` — `e₁ && e₂` reduces e₁ first and evaluates e₂ only when e₁ is true
+// (`@FR-E-Or`, its `||` twin, has its own cell under `E-Or/`; the chains here mix both).
+// Crossed with `@FR-E-Truthy` (both operands are truthiness positions, so a NULL left
+// operand reads FALSE: `null && f()` skips `f`, and `null || f()` runs it) and with
+// `@FR-E-Left` (the operands that DO run, run left to right, so a log of the calls reads in
+// source order).
+//
+// Every right operand is a call that counts itself, so "not evaluated" is measured, not
+// inferred from the value.  Shapes: each operator with each left value; the `and` / `or`
+// spellings; a null left of `boolean?`, of a call; a chain `a && b || c`; the bounds guard
+// `i < len(v) && v[i] > 0` that a casual loop writes; and a log of the calls' order.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values, and the side-effect counters.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+fn nb() -> boolean? { null }
+
+fn test_and_skips_the_right_when_the_left_is_false() {
+  calls = 0;
+  t = fn(r: boolean) -> boolean { calls += 1; r };
+  a = false && t(true);
+  assert(a == false && calls == 0, "false && f(): false, f not run: got {a} calls={calls}");
+  b = true && t(false);
+  assert(b == false && calls == 1, "true && f(false): f runs once, answers false: got {b} calls={calls}");
+  c = true && t(true);
+  assert(c == true && calls == 2, "true && f(true): true: got {c} calls={calls}");
+}
+
+fn test_the_word_spellings_short_circuit_too() {
+  calls = 0;
+  t = fn(r: boolean) -> boolean { calls += 1; r };
+  a = false and t(true);
+  b = true or t(true);
+  assert(a == false && b == true && calls == 0, "`and` / `or` skip like `&&` / `||`: got {a} {b} calls={calls}");
+}
+
+fn test_a_null_left_operand_reads_false() {
+  calls = 0;
+  t = fn(r: boolean) -> boolean { calls += 1; r };
+  n: boolean? = null;
+  a = n && t(true);
+  assert(a == false && calls == 0, "null && f(): null reads false, f not run: got {a} calls={calls}");
+  b = n || t(true);
+  assert(b == true && calls == 1, "null || f(true): f runs and decides: got {b} calls={calls}");
+  c = nb() && t(true);
+  d = nb() || t(false);
+  assert(c == false && d == false && calls == 2, "a null call result on the left: got {c} {d} calls={calls}, expected false false 2");
+}
+
+fn test_a_chain_runs_only_what_it_needs() {
+  log = "";
+  f = fn(tag: text, r: boolean) -> boolean { log += tag; r };
+  a = f("a", false) && f("b", true) || f("c", true);
+  assert(a == true && log == "ac", "(a && b) || c with a false: b skipped, c runs: got {a} '{log}'");
+  log = "";
+  b = f("a", true) || f("b", true) && f("c", true);
+  assert(b == true && log == "a", "a || (b && c) with a true: only a: got {b} '{log}'");
+  log = "";
+  c = f("a", true) && f("b", true) && f("c", false);
+  assert(c == false && log == "abc", "all three run left to right: got {c} '{log}'");
+}
+
+fn test_the_bounds_guard_in_a_loop() {
+  v = [3, 1, 0, 5];
+  i = 0;
+  while i < len(v) && v[i] > 0 { i += 1; }
+  assert(i == 2, "stops at v[2] = 0: got i={i}, expected 2");
+  j = 0;
+  w = [1, 2];
+  while j < len(w) && w[j] > 0 { j += 1; }
+  assert(j == 2 && len(w) == 2, "runs off the end without reading w[2]: got j={j}, expected 2");
+}

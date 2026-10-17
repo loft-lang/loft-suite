@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2037 — A COLLECTION REBOUND FROM A CALL ENDS ITS VIEWS (`@FR-B-Disturb`,
+// `@FR-H-Materialise`, `@FR-H-SwapKeyed`).  Reassigning the container is one of the four events
+// that end the place a view names, so a view held across `h = f()` is copied out first: it keeps
+// the old element, the local reads the new one, and a write through the view stays in the view.
+// A keyed local's rebind is `OpReplaceKeyed` into its own store and a vector's is the callee
+// filling the local's store as its return buffer; neither counted as a reassignment, so a keyed
+// view read and wrote the NEW collection, on both backends.  Axes moved: the kind (vector, hash,
+// sorted, index), the rebind source (a call, another local), straight-line against a loop.
+//
+// @falsified-at: 9fb2a2898 — hand-measured, interpret and native, on this file's first cell as
+//   probes: the hash and sorted views read `501` where `101` is due (the new collection).
+// CHANNEL: the asserts; the suite's leak gate for the copied-out view.
+// ARMED: the suite's leak gate (`LOFT_LEAK_CHECK=1` on every run).
+// HOLDS: every cell on both backends, and under LOFT_POISON / LOFT_STRICT_STORES.
+
+struct E { k: integer, v: integer }
+fn bv(b: integer) -> vector<E> { [E { k: 0, v: b }, E { k: 1, v: b + 1 }] }
+fn bh(b: integer) -> hash<E[k]> { [E { k: 0, v: b }, E { k: 1, v: b + 1 }] }
+fn bs(b: integer) -> sorted<E[k]> { [E { k: 0, v: b }, E { k: 1, v: b + 1 }] }
+fn bi(b: integer) -> index<E[k]> { [E { k: 0, v: b }, E { k: 1, v: b + 1 }] }
+
+fn test_a_rebind_from_a_call_at_every_kind() {
+  v = bv(100); e = v[1]; v = bv(500); e.v = e.v + 1;
+  assert(e.v == 102 && v[1].v == 501, "vector: the view keeps 101+1, the local reads 501: {e.v} {v[1].v}");
+  h = bh(100); f = h[1]; h = bh(500); f.v = f.v + 1;
+  assert((f.v ?? -1) == 102 && (h[1].v ?? -1) == 501, "hash: {f.v ?? -1} {h[1].v ?? -1}");
+  s = bs(100); g = s[1]; s = bs(500); g.v = g.v + 1;
+  assert((g.v ?? -1) == 102 && (s[1].v ?? -1) == 501, "sorted: {g.v ?? -1} {s[1].v ?? -1}");
+  x = bi(100); q = x[1]; x = bi(500); q.v = q.v + 1;
+  assert((q.v ?? -1) == 102 && (x[1].v ?? -1) == 501, "index: {q.v ?? -1} {x[1].v ?? -1}");
+  assert(len(h) == 2 && len(s) == 2 && len(x) == 2 && len(v) == 2, "lengths stay 2");
+}
+
+fn test_a_rebind_from_another_local() {
+  o = bh(700); h = bh(100); f = h[1]; h = o; f.v = f.v + 1;
+  assert((f.v ?? -1) == 102 && (h[1].v ?? -1) == 701 && (o[1].v ?? -1) == 701, "hash <- local: {f.v ?? -1}");
+  ov = bv(700); v = bv(100); e = v[1]; v = ov; e.v = e.v + 1;
+  assert(e.v == 102 && v[1].v == 701 && ov[1].v == 701, "vector <- local: {e.v}");
+}
+
+fn test_a_rebind_in_a_loop() {
+  // the view taken before the loop keeps 101 through three rebinds; the last one is 3000's
+  w = bh(100); keep = w[1];
+  for i in 1..4 { w = bh(i * 1000); }
+  assert((keep.v ?? -1) == 101 && (w[1].v ?? -1) == 3001, "loop: {keep.v ?? -1} {w[1].v ?? -1}");
+}

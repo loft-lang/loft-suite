@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Var` — `⟨x, σ⟩ → ⟨σ(x), σ⟩`: a variable read answers what σ holds for it NOW, so it
+// sees the LAST write.  Crossed with `@FR-E-Asgn` (an assignment updates σ, and its right
+// side reads σ BEFORE the update: `x = x * 10` reads the old x) and `@FR-E-Seq` (each
+// statement's effect is in σ for the next one).
+//
+// Shapes: rewrites of a local, a self-referencing rewrite, a read in each loop round after
+// that round's write, a write inside an `if` arm to an OUTER local read after the arm, a
+// write through a `&` parameter read by the caller, a text local and a struct field.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends); the
+//   cell keeps them held.
+// CHANNEL: assertion values.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+struct Acc { n: integer, tag: text }
+
+fn set_to(r: &integer, v: integer) { r = v; }
+
+fn test_a_local_read_after_rewrites() {
+  x = 1;
+  first = x;
+  x = 2;
+  x = x * 10;
+  assert(first == 1 && x == 20, "x=1 read 1; x=2, x=x*10 reads the old 2: got {first} {x}, expected 1 20");
+  y = x;
+  x = 5;
+  assert(y == 20 && x == 5, "y took x's value at the time: y={y} x={x}, expected 20 5");
+}
+
+fn test_a_read_inside_a_loop_sees_each_rounds_write() {
+  s = 0;
+  seen = "";
+  for i in 1..4 {
+    s = s + i;
+    seen += "{s},";
+  }
+  assert(seen == "1,3,6," && s == 6, "running sum read after each write: got '{seen}' s={s}");
+}
+
+fn test_a_write_in_an_arm_is_seen_after_it() {
+  k = 1;
+  if k > 0 { k = 7; } else { k = 9; }
+  assert(k == 7, "the THEN arm's write is the last: got {k}, expected 7");
+  m = 3;
+  if m > 100 { m = 0; }
+  assert(m == 3, "an arm not taken writes nothing: got {m}, expected 3");
+}
+
+fn test_a_write_through_a_reference_is_seen_by_the_caller() {
+  v = 4;
+  set_to(v, 11);
+  assert(v == 11, "a `&` parameter's write is the last write of v: got {v}, expected 11");
+  set_to(v, v + 1);
+  assert(v == 12, "the argument v+1 read 11 before the write: got {v}, expected 12");
+}
+
+fn test_a_text_and_a_field() {
+  t = "a";
+  t = t + "b";
+  t += "c";
+  assert(t == "abc" && len(t) == 3, "text rewrites: got '{t}' len {len(t)}, expected 'abc' 3");
+  a = Acc { n: 1, tag: "x" };
+  a.n = a.n + 41;
+  a.tag = "{a.tag}{a.n}";
+  assert(a.n == 42 && a.tag == "x42", "field reads see the field's last write: n={a.n} tag={a.tag}");
+}

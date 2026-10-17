@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEYED RANGE WALKS ITS KEY INTERVAL IN DECLARED ORDER (`@FR-Slice-KeyedIter`,
+// `@FR-Col-Order-Sign`, `@FR-Slice-Box`).  `c[lo..hi]` / `c[lo..=hi]` on sorted and index walk
+// the key interval; on a `[-k]` key the bounds are named in the DECLARED order, so `6..2` is the
+// non-empty half and `2..6` the inverted, empty one, identically on sorted and index; an
+// interval holding no key walks nothing.  The spatial forms are the same rule's third kind.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together
+//   (the documented-pairs measure, 2026-10-17); every cell answered right on both backends.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+struct E { k: integer, v: integer, t: text }
+struct W { w: text, n: integer }
+
+fn test_keyed_range_is_an_iterator() {
+  // Slice-KeyedIter: a range slice over the KEY interval, in key order, for-only
+  s: sorted<E[k]> = [];
+  for k in [8, 1, 5, 3, 6] { s += [E { k: k, v: k, t: "" }]; }
+  o = "";
+  for e in s[3..6] { o += "{e.k},"; }
+  assert(o == "3,5,", "sorted [3..6): {o}");
+  o2 = "";
+  for e in s[3..=6] { o2 += "{e.k},"; }
+  assert(o2 == "3,5,6,", "sorted [3..=6]: {o2}");
+  ix: index<E[k]> = [];
+  for k in [8, 1, 5, 3, 6] { ix += [E { k: k, v: k, t: "" }]; }
+  o3 = "";
+  for e in ix[2..8] { o3 += "{e.k},"; }
+  assert(o3 == "3,5,6,", "index [2..8): {o3}");
+  // keys absent at both ends of the interval still bound it; an empty interval walks nothing
+  n = 0;
+  for e in ix[9..20] { n += 1 + e.k * 0; }
+  assert(n == 0, "empty interval: {n}");
+  // descending index: key order is the declared one
+  dx: index<E[-k]> = [];
+  for k in [8, 1, 5, 3, 6] { dx += [E { k: k, v: k, t: "" }]; }
+  o4 = "";
+  for e in dx { o4 += "{e.k},"; }
+  assert(o4 == "8,6,5,3,1,", "descending walk: {o4}");
+}
+
+fn test_descending_range_names_bounds_in_key_order() {
+  // Col-Order-Sign x Slice-KeyedIter: on [-k] a range starts at `from` and walks toward `till`
+  // in the DECLARED order, so 6..2 is the non-empty half; sorted and index answer alike
+  dx: index<E[-k]> = [];
+  ds: sorted<E[-k]> = [];
+  for k in [8, 1, 5, 3, 6, 2] {
+    dx += [E { k: k, v: k, t: "" }];
+    ds += [E { k: k, v: k, t: "" }];
+  }
+  a = ""; for e in dx[6..2] { a += "{e.k},"; }
+  b = ""; for e in ds[6..2] { b += "{e.k},"; }
+  assert(a == "6,5,3," && b == a, "6..2 walks 6,5,3: index {a} sorted {b}");
+  c = ""; for e in ds[6..=2] { c += "{e.k},"; }
+  assert(c == "6,5,3,2,", "inclusive end: {c}");
+  n = 0;
+  for e in dx[2..6] { n += 1 + e.k * 0; }
+  for e in ds[2..6] { n += 1 + e.k * 0; }
+  assert(n == 0, "2..6 is the inverted, empty half on a descending key: {n}");
+}
+
+struct Pt { x: integer, y: integer, v: integer }
+
+fn test_spatial_slices_iterate() {
+  // the spatial kind of the same rule: each form is iterated, or materialised by a comprehension
+  s: spatial<Pt[x, y]> = [Pt { x: 1, y: 1, v: 10 }, Pt { x: 5, y: 5, v: 50 }, Pt { x: 2, y: 0, v: 20 }];
+  t = 0; for q in s[(0, 0)..(2, 2)] { t += q.v; }
+  assert(t == 30, "the box holds (1,1) and (2,0): 10+20 = {t}");
+  v = [for q in s[(0, 0)..(2, 2)] { q.v }];
+  assert(len(v) == 2 && (v[0] ?? 0) + (v[1] ?? 0) == 30, "materialised box: {v}");
+  c = 0; for q in s[(1, 1)..:2] { c += 1 + q.v * 0; }
+  assert(c == 2, "a cap of 2 over 3 records: {c}");
+  o = 0; for q in s[(1, 1)..] { o += 1 + q.v * 0; }
+  assert(o == 3, "the open walk reaches every record: {o}");
+  w = [for q in s[(5, 5)..:1] { q.v }];
+  assert("{w}" == "[50]", "the nearest to (5,5): {w}");
+}

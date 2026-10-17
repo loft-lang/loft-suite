@@ -1,0 +1,124 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-SwapIn` crossed with `@FR-H-SwapRebind` — a rebind from a call result may EXCHANGE the
+// two stores instead of copying (H-SwapIn, both backends), and on `--native` may also skip the
+// reset of the destination first (H-SwapRebind).  Both are optimisations of the copy, so the
+// only program-visible promise is the copy's answer: the new value, all of it and nothing of
+// the old, and every other name reading what it read before.  Walked over the rebind's shape —
+// `x = f(x)` in a loop (the free-source form the rule names), a rebind with a copy of the old
+// value kept (`@FR-B-Copy`), a callee that hands back its PARAMETER (not given up: the copy
+// must run), a view of the old value's vector held across the rebind (`@FR-H-Materialise`: it
+// reads the old items), a type holding a keyed collection (the exchange keeps the copy), a
+// struct FIELD and a vector ELEMENT as the destination (not store roots), a long old value
+// replaced by an empty one, and a record holding a stored reference.  Every cell checks value
+// AND length, and the record's neighbours where a wrong exchange would have overwritten them.
+// Run under `LOFT_NO_STORE_SWAP=1` and `LOFT_NO_SWAP_REBIND=1` the answers are the same on both
+// backends (measured), so the cell does not depend on which path a build takes.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run); `LOFT_TRACE_STORE_SWAP=1` names
+//   each exchange.
+// HOLDS: panic is clean on both backends.
+
+struct Bag { name: text, items: vector<integer>, n: integer }
+struct E { k: integer, v: integer }
+struct KB { rows: hash<E[k]>, n: integer }
+struct O { b: Bag, t: integer, tail: text }
+struct Node { v: integer }
+struct RN { at: reference<Node>?, n: integer }
+
+fn bag(name: text, n: integer) -> Bag {
+  b = Bag { name: name, items: [], n: n };
+  for i in 0..n { b.items += [i * 10]; }
+  b
+}
+
+fn grow(p: Bag) -> Bag {
+  r = Bag { name: "{p.name}+", items: [], n: p.n + 1 };
+  for x in p.items { r.items += [x]; }
+  r.items += [p.n * 10];
+  r
+}
+
+fn id(p: Bag) -> Bag { p }
+
+fn kb(n: integer) -> KB {
+  r = KB { rows: [], n: n };
+  for i in 0..n { r.rows += [E { k: i, v: i * 2 }]; }
+  r
+}
+
+fn rn(n: integer) -> RN { RN { at: Node { v: n * 7 }, n: n } }
+
+fn test_rebound_from_a_call_on_itself_in_a_loop() {
+  x = bag("a", 1);
+  for _ in 0..4 { x = grow(x); }
+  assert(x.name == "a++++" && x.n == 5, "c1 {x.name} {x.n}");
+  assert(len(x.items) == 5 && x.items[0] == 0 && x.items[4] == 40, "c1 items {x.items}");
+}
+
+fn test_a_copy_kept_before_the_rebind_reads_the_old_value() {
+  x = bag("five", 5);
+  old = x;
+  x = bag("two", 2);
+  assert(len(old.items) == 5 && old.items[4] == 40 && old.name == "five", "c2 old {old.name} {old.items}");
+  assert(len(x.items) == 2 && x.items[1] == 10 && x.name == "two", "c2 new {x.name} {x.items}");
+}
+
+fn test_a_callee_that_hands_back_its_parameter() {
+  x = bag("p", 3);
+  y = bag("q", 1);
+  first = len(x.items);
+  x = id(y);
+  y.items += [7];
+  assert(first == 3 && len(x.items) == 1 && x.name == "q", "c3 x {x.name} {x.items}");
+  assert(len(y.items) == 2 && y.items[1] == 7, "c3 y keeps its own store {y.items}");
+}
+
+fn test_a_view_of_the_old_items_across_the_rebind() {
+  x = bag("v", 3);
+  e = x.items;
+  x = bag("w", 1);
+  assert(len(e) == 3 && e[2] == 20, "c4 the view reads the old items {e}");
+  assert(len(x.items) == 1 && x.name == "w", "c4 new {x.name} {x.items}");
+}
+
+fn test_a_type_holding_a_keyed_collection() {
+  x = kb(4);
+  before = len(x.rows);
+  x = kb(2);
+  assert(before == 4 && len(x.rows) == 2 && x.n == 2, "c5 {before} {len(x.rows)} {x.n}");
+  assert((x.rows[1].v ?? -1) == 2 && x.rows[3] == null, "c5 nothing of the four survives");
+}
+
+fn test_a_struct_field_as_the_destination() {
+  o = O { b: bag("o", 3), t: 77, tail: "end" };
+  for _ in 0..3 { o.b = grow(o.b); }
+  assert(o.b.name == "o+++" && o.b.n == 6 && len(o.b.items) == 6 && o.b.items[5] == 50, "c6 {o.b.name} {o.b.items}");
+  assert(o.t == 77 && o.tail == "end", "c6 the neighbours are intact {o.t} {o.tail}");
+}
+
+fn test_a_vector_element_as_the_destination() {
+  v = [bag("e", 2), bag("f", 1), bag("g", 0)];
+  v[1] = grow(v[1]);
+  assert(len(v) == 3 && v[1].name == "f+" && len(v[1].items) == 2 && v[1].items[1] == 10, "c7 {v[1].name} {v[1].items}");
+  assert(v[0].name == "e" && len(v[0].items) == 2 && v[2].name == "g" && len(v[2].items) == 0, "c7 the neighbours are intact");
+}
+
+fn test_a_long_old_value_replaced_by_an_empty_one() {
+  x = bag("long name here", 6);
+  was = x.name;
+  x = bag("s", 0);
+  assert(was == "long name here" && x.name == "s" && len(x.name) == 1, "c8 {was} {x.name}");
+  assert(len(x.items) == 0 && x.n == 0, "c8 {x.items}");
+}
+
+fn test_a_record_holding_a_stored_reference() {
+  x = rn(2);
+  a = x.at.v ?? -1;
+  for i in 3..6 { x = rn(i); }
+  assert(a == 14 && x.n == 5 && (x.at.v ?? -1) == 35, "c9 {a} {x.n} {x.at.v ?? -1}");
+}

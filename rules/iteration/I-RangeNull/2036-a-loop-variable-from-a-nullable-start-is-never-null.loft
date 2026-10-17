@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2036 — `@FR-I-RangeNull` crossed with `@FR-N-Store`.  A null bound makes the range
+// empty before the first round, so every value the loop variable of `for i in n..5` takes is a
+// PRESENT one, and storing it into a non-null slot is not `(N-Store)`'s store of a `τ?`.  The
+// variable used to take the START bound's type with its `?`, so each such store warned "a
+// nullable `integer?` is stored into …" — the gating tier, on both backends, saying what cannot
+// happen.  A null END bound never did it: only the start's type reached the variable.
+//
+// The narrow cell is the one that can FAIL: at `u8` the same store is (N-Store)'s hard ERROR,
+// so the defect refuses the file instead of printing a warning a cell does not fail on.  Every
+// range form is crossed with a present and an absent start, values hand-computed.
+//
+// @falsified-at: 9fb2a2898 with its one line reverted — hand-measured, interpret and native: the
+//   control refuses the file (`x: u8 = i` stores a `u8?`, lines 55 and 57).
+// CHANNEL: EXIT (the narrow store's refusal); the integer cells' warning is printed only.
+// ARMED: no instrument — the narrow store's refusal is on by default.
+// HOLDS: the values on both backends, before and after.
+
+fn opt(n: integer) -> integer? { if n >= 0 { n } else { null } }
+fn opt8(n: integer) -> u8? { if n > 0 { n as u8? } else { null } }
+
+fn test_a_present_start_yields_present_values() {
+  out: vector<integer> = [];
+  n = opt(2);
+  for i in n..5 { out += [i]; }
+  s = 0;
+  for i in n..4 { x: integer = i; s += x; }
+  assert("{out}" == "[2,3,4]" && len(out) == 3 && s == 5, "n = 2: [2,3,4] and 2+3 = 5: got {out} {s}");
+}
+
+fn test_every_form_with_a_nullable_start() {
+  p = opt(2);
+  a = opt(-1);
+  e = 0; for i in p..5 { x: integer = i; e += x; }
+  assert(e == 9, "2..5: 2+3+4 = 9, got {e}");
+  c = 0; for i in p..=5 { x: integer = i; c += x; }
+  assert(c == 14, "2..=5: 14, got {c}");
+  r = 0; for i in rev(p..5) { x: integer = i; r = r * 10 + x; }
+  assert(r == 432, "rev(2..5): 4,3,2, got {r}");
+  o = 0; for i in p.. { if i > 4 { break; } x: integer = i; o += x; }
+  assert(o == 9, "2.. until 4: 9, got {o}");
+  v = [for i in p..4 { i * 10 }];
+  assert("{v}" == "[20,30]", "comprehension: {v}");
+  z = 0;
+  for i in a..5 { x: integer = i; z += 1 + x; }
+  for i in a..=5 { x: integer = i; z += 1 + x; }
+  for i in rev(a..5) { x: integer = i; z += 1 + x; }
+  assert(z == 0 && len([for i in a..4 { i }]) == 0, "an absent start runs no round: {z}");
+}
+
+fn test_a_narrow_start_stores_without_a_discharge() {
+  n = opt8(2);
+  s = 0;
+  for i in n..5 { x: u8 = i; s += x as integer; }
+  m = opt8(0);
+  for i in m..5 { x: u8 = i; s += 100 * (x as integer); }
+  assert(s == 9, "u8 2..5: 2+3+4 = 9, the absent start adds nothing: {s}");
+}

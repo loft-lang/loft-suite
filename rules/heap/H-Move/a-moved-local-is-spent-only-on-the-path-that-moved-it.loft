@@ -1,0 +1,109 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Move` crossed with `@FR-H-Spent` — a local this function owns, placed into a new
+// structure, MOVES there: its lifetime ends, the structure releases it, and the name is SPENT
+// from the END of that statement, per path.  The refused half (reading a spent name) is
+// `rules/heap/H-Spent/a-name-read-after-it-moved-is-refused.loft`; this half pins what each
+// legal composition releases.  Moved along one axis at a time: the position it moves into (a
+// literal's field, an append, a tuple member, a field write, an element write, a returned
+// literal, a `return`, a record appended to a `hash` / `sorted` / `index`, a struct-enum
+// payload), a read inside the moving statement itself (not late), a refill after
+// the move (the name lives again), a move under a branch taken and not taken, a read on the
+// arm that did not move it, a move written in both arms, and a move with a refill on every
+// pass of a loop.  Each hook call and read is traced, and every trace is worked out by hand:
+// the moved record is released ONCE, by the structure, at the structure's death; a record a
+// field or element write displaced is never released (`@FR-H-Drop-Not`).
+//
+// @falsified-at: none — the walk found no defect in the values, so no earlier build answers
+//   wrong.  The control is a hand edit of one expected trace, which fails that cell on both
+//   backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument — each hook call and read is written to this cell's trace file.
+// HOLDS: leak and panic are clean on both backends.  Side finding: `advice[avoidable-copy]`
+//   says "`a` is still used after this point, so it could not be moved" on m1, m9 and m10,
+//   whose traces show one release — the move happened, as (H-Move) says it must.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_move_spent.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mk(i: integer) -> H { H { id: i } }
+struct S { h: H, tag: integer }
+struct KH { k: integer, h: H }
+enum W { WH { h: H }, WNone }
+
+fn m1() { a = mk(1); s = S { h: a, tag: a.id }; note("R{s.h.id}"); note("T{s.tag}"); }
+fn m2(c: boolean) { a = mk(2); if c { s = S { h: a, tag: 0 }; note("R{s.h.id}"); } note("X"); }
+fn m3() { a = mk(3); v: vector<H> = []; v += [a]; note("L{len(v)}"); note("R{v[0].id}"); }
+fn m4() { a = mk(4); t = (a, 7); note("R{t.0.id}"); }
+fn m5() { a = mk(5); s = S { h: a, tag: 0 }; a = mk(6); note("R{s.h.id}"); note("A{a.id}"); }
+fn m6() { v: vector<H> = []; for i in 0..3 { a = mk(10 + i); v += [a]; } note("L{len(v)}"); }
+fn m7() -> S { a = mk(7); S { h: a, tag: 1 } }
+fn m8() -> H { a = mk(8); return a; }
+fn m9(c: boolean) { a = mk(9); if c { s = S { h: a, tag: 0 }; note("R{s.h.id}"); } else { note("A{a.id}"); } note("X"); }
+fn m10(c: boolean) {
+  a = mk(20);
+  v: vector<H> = [];
+  if c { s = S { h: a, tag: 0 }; note("S{s.h.id}"); } else { v += [a]; note("V{len(v)}"); }
+  note("X");
+}
+fn m11() { s = S { h: mk(30), tag: 0 }; a = mk(31); s.h = a; note("R{s.h.id}"); }
+fn m12() { v = [mk(40), mk(41)]; a = mk(42); v[0] = a; note("R{v[0].id}"); }
+
+fn m13() { a = mk(13); h: hash<KH[k]> = []; h += [KH { k: 1, h: a }]; note("R{h[1].h.id ?? -1}"); note("L{len(h)}"); }
+fn m14() { a = mk(14); s: sorted<KH[k]> = []; s += [KH { k: 1, h: a }]; note("R{s[1].h.id ?? -1}"); note("L{len(s)}"); }
+fn m15() { a = mk(15); i: index<KH[k]> = []; i += [KH { k: 1, h: a }]; note("R{i[1].h.id ?? -1}"); }
+fn m16() { a = mk(16); w = WH { h: a }; if w is WH { h } { note("R{h.id}"); } }
+
+fn take7() { s = m7(); note("R{s.h.id}"); }
+fn take8() { h = m8(); note("R{h.id}"); }
+
+fn check(nm: text, want: text) {
+  got = drain();
+  assert(got == want, "{nm}: want {want}, got {got}");
+}
+
+fn test_into_a_literal_field_read_in_the_same_statement() { drain(); m1(); check("m1", "R1,T1,D1"); }
+fn test_under_a_branch_taken() { drain(); m2(true); check("m2 taken", "R2,D2,X"); }
+fn test_under_a_branch_not_taken() { drain(); m2(false); check("m2 not taken", "X,D2"); }
+fn test_appended() { drain(); m3(); check("m3", "L1,R3,D3"); }
+fn test_into_a_tuple_member() { drain(); m4(); check("m4", "R4,D4"); }
+fn test_refilled_after_the_move() { drain(); m5(); check("m5", "R5,A6,D5,D6"); }
+fn test_moved_and_refilled_on_every_pass() { drain(); m6(); check("m6", "L3,D10,D11,D12"); }
+fn test_into_a_returned_literal() { drain(); take7(); check("m7", "R7,D7"); }
+fn test_returned() { drain(); take8(); check("m8", "R8,D8"); }
+fn test_read_on_the_arm_that_did_not_move() {
+  drain(); m9(true); check("m9 moved", "R9,D9,X");
+  m9(false); check("m9 kept", "A9,X,D9");
+}
+fn test_moved_in_both_arms() {
+  drain(); m10(true); check("m10 field", "S20,D20,X");
+  m10(false); check("m10 append", "V1,X,D20");
+}
+fn test_written_into_a_field() { drain(); m11(); check("m11", "R31,D31"); }
+// A keyed collection's records are the author's to release (`@FR-H-Drop-Not`): the move
+// lands, the record reads, and no hook runs at the collection's death.
+fn test_into_a_hash_record() { drain(); m13(); check("m13", "R13,L1"); }
+fn test_into_a_sorted_record() { drain(); m14(); check("m14", "R14,L1"); }
+fn test_into_an_index_record() { drain(); m15(); check("m15", "R15"); }
+fn test_into_an_enum_payload() { drain(); m16(); check("m16", "R16,D16"); }
+fn test_written_into_an_element() { drain(); m12(); check("m12", "R42,D42,D41"); }

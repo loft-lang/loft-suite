@@ -1,0 +1,103 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-WriteLocked` crossed with `@FR-H-WriteNull` — a write to a LOCKED store halts a
+// development run, but a write that names no cell — through a null reference, an absent key,
+// or past the end (`@FR-H-WriteOOB`) — has no store to update, so it is a no-op that continues
+// even when the record it went through is locked: the lock is a property of a store, and the
+// write never reached one.  `@FR-H-Write-Else` then tells the two apart by the same test: its
+// arm runs when the write did not take, which is true of a locked write AND of a null one, and
+// a guarded locked write does not halt.  Walked over how the write names nothing — an absent
+// hash key, an index past the end, a null `reference` field, a past-the-end element of a
+// vector of records, the same in a loop — over a guarded locked write, a guarded null write,
+// an unlocked landed write and an unlocked absent one (the controls), and over `#lock = false`.
+// Every cell then reads the locked record, which must hold its bytes.  The halting half — an
+// unguarded write to an existing cell — is `tests/locked_writes.rs`.  Each collection has its
+// own element type: two collections over one type in a struct are one linked record set.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends — a write
+//   wrongly treated as a lock fault halts the cell with `write to a locked store`.
+// ARMED: no instrument.
+// HOLDS: leak and panic are clean on both backends.
+
+struct In { m: integer }
+struct E { k: integer, v: integer }
+struct R { k: integer, v: integer }
+struct D { n: integer, xs: vector<integer>, hs: hash<E[k]>, at: reference<In>?, recs: vector<R> }
+
+fn mk() -> D { D { n: 7, xs: [1, 2, 3], hs: [E { k: 5, v: 50 }], at: null, recs: [R { k: 1, v: 10 }] } }
+
+fn test_an_absent_key_in_a_locked_record() {
+  d = mk();
+  d#lock = true;
+  d.hs[99].v = 5;
+  assert(len(d.hs) == 1 && (d.hs[5].v ?? -1) == 50 && d.hs[99] == null, "c1 {len(d.hs)}");
+}
+
+fn test_past_the_end_in_a_locked_record() {
+  d = mk();
+  d#lock = true;
+  d.xs[7] = 9;
+  d.xs[-4] = 9;
+  assert(len(d.xs) == 3 && d.xs[0] == 1 && d.xs[2] == 3, "c2 {d.xs}");
+}
+
+fn test_a_null_reference_in_a_locked_record() {
+  d = mk();
+  d#lock = true;
+  d.at.m = 4;
+  assert(d.at == null && d.n == 7, "c3 {d.n}");
+}
+
+fn test_past_the_end_in_a_loop() {
+  d = mk();
+  d#lock = true;
+  for i in 0..3 {
+    d.xs[i + 7] = 9;
+    d.recs[i + 1].v = 9;
+  }
+  assert(len(d.xs) == 3 && len(d.recs) == 1 && d.recs[0].v == 10, "c4 {d.xs} {len(d.recs)}");
+}
+
+fn test_a_guarded_locked_write_runs_its_arm() {
+  d = mk();
+  d#lock = true;
+  took = true;
+  d.n = 99 else { took = false };
+  assert(!took && d.n == 7, "c5 {took} {d.n}");
+}
+
+fn test_a_guarded_null_write_runs_its_arm() {
+  d = mk();
+  d#lock = true;
+  a = true;
+  b = true;
+  c = true;
+  d.hs[99].v = 1 else { a = false };
+  d.recs[3].v = 1 else { b = false };
+  d.at.m = 1 else { c = false };
+  assert(!a && !b && !c, "c6 {a} {b} {c}");
+  assert(d.recs[0].v == 10 && len(d.recs) == 1, "c6 {d.recs[0].v}");
+}
+
+fn test_unlocked_controls() {
+  d = mk();
+  took = true;
+  d.n = 99 else { took = false };
+  missed = true;
+  d.xs[7] = 1 else { missed = false };
+  assert(took && d.n == 99, "c7 a landed write never runs its arm: {took} {d.n}");
+  assert(!missed && len(d.xs) == 3, "c7 an absent element runs it: {missed} {d.xs}");
+}
+
+fn test_unlocked_again_the_write_lands() {
+  d = mk();
+  d#lock = true;
+  d.xs[9] = 4;
+  d#lock = false;
+  d.n = 99;
+  d.xs[1] = 20;
+  assert(d.n == 99 && d.xs[1] == 20 && len(d.xs) == 3, "c8 {d.n} {d.xs}");
+}

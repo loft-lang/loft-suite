@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-FreeNull` — freeing null is a no-op.  A heap-typed name that holds null at its death
+// owns no store, so its scope-end free must release nothing — not a store another name holds,
+// and not the slot a later allocation is handed.  Walked over what is null: a record local, a
+// vector local, a call result, a record filled on some loop passes and not others, a null
+// `reference` field, and a local nulled after it held a record (the store it held is freed at
+// the rebind, the null at the scope end is not freed again).  Each cell then reads a record
+// allocated after the nulls died, which an erroneous free would have taken.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// HOLDS: panic is clean on both backends.
+
+struct P { x: integer, name: text }
+struct Link { to: reference<P>?, n: integer }
+
+fn find(v: vector<P>, x: integer) -> P? {
+  for p in v { if p.x == x { return p; } }
+  null
+}
+
+fn nulls() -> integer {
+  a: P? = null;
+  b: vector<P>? = null;
+  l = Link { to: null, n: 3 };
+  l.n + len(b?) + (a.x ?? 0)
+}
+
+fn test_null_locals_at_their_scope_end() {
+  n = nulls();
+  q = P { x: 8, name: "after" };
+  assert(n == 3 && q.x == 8 && q.name == "after", "c1 {n} {q.x} {q.name}");
+}
+
+fn test_a_null_call_result() {
+  v = [P { x: 1, name: "a" }];
+  m = find(v, 2);
+  assert(m == null, "c2 nothing found");
+  w = P { x: 9, name: "w" };
+  assert(w.name == "w" && len(v) == 1 && v[0].name == "a", "c2 {w.name} {v[0].name}");
+}
+
+fn test_filled_on_some_passes() {
+  s = 0;
+  for i in 0..100 {
+    p: P? = null;
+    if i % 3 == 0 { p = P { x: i, name: "p{i}" }; }
+    s += p.x ?? 0;
+  }
+  // 0 + 3 + … + 99 = 3 * (0 + 1 + … + 33) = 3 * 561
+  assert(s == 1683, "c3 {s}");
+}
+
+fn test_nulled_after_holding_a_record() {
+  p: P? = P { x: 4, name: "held" };
+  held = p.x ?? -1;
+  p = null;
+  r = P { x: 5, name: "r" };
+  assert(held == 4 && p == null && r.x == 5 && r.name == "r", "c4 {r.x} {r.name}");
+}

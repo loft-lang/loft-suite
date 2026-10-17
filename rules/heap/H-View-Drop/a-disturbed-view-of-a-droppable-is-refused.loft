@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-View-Drop` — a VIEW of a member that owns a droppable without `OpCopy` stays a view,
+// so disturbing its container while the view is still used (`@FR-B-Disturb`) is refused at the
+// disturbance, naming the view.  The four Rust cells (`tests/parse_errors.rs`
+// `h_view_drop_*`) hold a vector FIELD; these move the container kind — a vector LOCAL, a
+// `sorted`, a `hash` — the event — growth, a removal after the viewed position (no
+// renumbering of the view, still an event), a removal of the viewed key, a reassignment of
+// the base — and where the event is written: inline, in a loop body, one frame down.  The
+// legal half — the same views where nothing disturbs — is
+// `a-view-of-a-droppable-left-undisturbed-releases-once.loft`.
+//
+// @falsified-at: 9fb2a2898 — hand-measured, interpret and native: r10 and r11 (loft#2037) compile,
+//   so their two expectations are missing and the file fails.  A second control is a hand edit
+//   of one expected substring (`h` to `hh` in r6), which fails the
+//   file on both backends (`LOFT_NO_LEASE_REFUSE=1` does not reach this refusal).
+// CHANNEL: the expectations and the exit code, identically on both backends.
+// ARMED: no instrument — the refusal is on by default.
+// HOLDS: nothing runs on either backend.
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+struct Bag { v: vector<H>, tag: integer }
+struct KH { k: integer, h: H }
+
+fn grow(b: Bag) { b.v += [H { id: 9 }]; }
+
+// @EXPECT_ERROR: cannot grow `v` while `e` references a place inside it
+fn r1_vector_local_grows() { v = [H { id: 1 }]; e = v[0]; v += [H { id: 2 }]; print("{e.id}"); }
+
+// @EXPECT_ERROR: cannot remove from `v` while `e` references a place inside it
+fn r2_vector_local_removes_after_the_view() { v = [H { id: 1 }, H { id: 2 }]; e = v[0]; v.remove(1); print("{e.id}"); }
+
+// @EXPECT_ERROR: cannot give `v` a new value while `e` references a place inside it
+fn r3_vector_local_reassigned() { v = [H { id: 1 }]; e = v[0]; v = [H { id: 3 }]; print("{e.id}"); }
+
+// @EXPECT_ERROR: cannot grow `s` while `e` references a place inside it
+fn r4_sorted_grows() { s: sorted<KH[k]> = [KH { k: 5, h: H { id: 5 } }]; e = s[5]; s += [KH { k: 1, h: H { id: 1 } }]; print("{e.h.id}"); }
+
+// @EXPECT_ERROR: cannot remove from `s` while `e` references a place inside it
+fn r5_sorted_removes_another_key() { s: sorted<KH[k]> = [KH { k: 1, h: H { id: 1 } }, KH { k: 5, h: H { id: 5 } }]; e = s[5]; s[1] = null; print("{e.h.id}"); }
+
+// @EXPECT_ERROR: cannot grow `h` while `e` references a place inside it
+fn r6_hash_grows() { h: hash<KH[k]> = [KH { k: 1, h: H { id: 1 } }]; e = h[1]; h += [KH { k: 3, h: H { id: 3 } }]; print("{e.h.id}"); }
+
+// @EXPECT_ERROR: cannot remove from `h` while `e` references a place inside it
+fn r7_hash_removes_the_viewed_key() { h: hash<KH[k]> = [KH { k: 1, h: H { id: 1 } }]; e = h[1]; h[1] = null; print("{e.h.id ?? -1}"); }
+
+// @EXPECT_ERROR: cannot call `grow` while `e` references a place inside `b`
+fn r8_grown_one_frame_down() { b = Bag { v: [H { id: 1 }], tag: 0 }; e = b.v[0]; grow(b); print("{e.id}"); }
+
+// @EXPECT_ERROR: cannot grow `b` while `e` references a place inside it
+// @EXPECT_ERROR: cannot give `h` a new value while `e` references a place inside it
+// @EXPECT_ERROR: cannot give `v` a new value while `e` references a place inside it
+fn r9_grown_in_a_loop_body() { b = Bag { v: [H { id: 1 }], tag: 0 }; for i in 0..3 { e = b.v[0]; b.v += [H { id: 10 + i }]; print("{e.id}"); } }
+
+fn bh(base: integer) -> hash<KH[k]> { r: hash<KH[k]> = [KH { k: 1, h: H { id: base } }]; r }
+
+// loft#2037: a KEYED local rebound from a CALL while a view of a droppable element lives is
+// refused, as the literal rebind (r3's shape) is; it compiled before and `e.h.id` read `500`,
+// the NEW collection's element.  Plain-view half:
+// `rules/heap/H-SwapKeyed/a-keyed-rebind-answers-what-the-copy-answers-beside-every-other-name.loft` c1.
+fn r10_keyed_local_rebound_from_a_call() { h = bh(100); e = h[1]; h = bh(500); print("{e.h.id ?? -1}"); }
+
+fn bv(base: integer) -> vector<H> { [H { id: base }] }
+
+// loft#2037 at a `vector` local: rebound from a CALL while a view of its droppable element
+// lives, it is refused.  Before, it was a use after free — the rebind dropped and freed the old
+// vector (`D100`) and `e.id` read the freed store (`-2401053088876216593` under `LOFT_POISON=1`),
+// on both backends.
+fn r11_vector_local_rebound_from_a_call() { v = bv(100); e = v[0]; v = bv(500); print("{e.id}"); }

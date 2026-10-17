@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-NullSrc` — a null source iterates ZERO times and falls through, never a fault.  The
+// rule's own gloss draws the line this cell walks: a source whose TYPE is `τ?` is refused
+// until discharged (see `a-nullable-source-is-refused.loft`), and the discharge — `v?`
+// (`@FR-N-Default`, the empty collection) or `v ?? []` — gives exactly this rule's answer.
+// Crossed with `@FR-N-Chain` (an absent link of `w.rows[i].items` carries absence to the
+// tail, and one `?` there discharges it), `@FR-I-Comp` (a comprehension over it is empty) and
+// the `par(…)` clause.
+//
+// Every loop body appends to `out`, and each function ends with a control over a PRESENT
+// source of the same shape so the body is shown to leave a trace when it runs.
+//
+// @falsified-at: none — the rules held when this walk measured them (both backends).
+// CHANNEL: assertion values and lengths.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter and `--native`.
+
+struct S { items: vector<integer> }
+struct W { rows: vector<S> }
+
+fn k(n: integer) -> integer { n }
+fn dbl(x: integer) -> integer { x * 2 }
+fn maybe(n: integer) -> vector<integer>? { if n > 0 { [n, n] } else { null } }
+
+fn test_a_discharged_null_local_runs_no_round() {
+  out: vector<integer> = [];
+  w: vector<integer>? = null;
+  for x in w? { out += [x]; }
+  for x in w ?? [] { out += [x]; }
+  for x in maybe(0)? { out += [x]; }
+  assert(len(out) == 0, "null local and null call, both discharges: zero rounds, got {out}");
+  for x in maybe(4)? { out += [x]; }
+  assert(len(out) == 2 && out[0] == 4 && out[1] == 4, "control: maybe(4) is [4,4]: got {out}");
+}
+
+fn test_an_absent_chain_link_runs_no_round() {
+  w = W { rows: [S { items: [1, 2] }] };
+  n = 0;
+  for x in w.rows[k(3)].items? { n += x; }
+  assert(n == 0, "rows[3] is absent, so .items? is empty: n={n}");
+  for x in w.rows[k(0)].items? { n += x; }
+  assert(n == 3, "control: rows[0].items is [1,2], sum 3: got {n}");
+}
+
+fn test_a_comprehension_and_a_par_over_a_null_source() {
+  c = [for x in maybe(0)? { x * 10 }];
+  assert(len(c) == 0, "comprehension over a null source is empty: got {c}");
+  d = [for x in maybe(2)? { x * 10 }];
+  assert(len(d) == 2 && d[0] == 20 && d[1] == 20, "control: [20,20]: got {d}");
+  s = 0;
+  rounds = 0;
+  for x in maybe(0)? par(b = dbl(x), 2) { s += b; rounds += 1; }
+  assert(s == 0 && rounds == 0, "par over a null source: zero rounds, got s={s} rounds={rounds}");
+  for x in maybe(5)? par(b = dbl(x), 2) { s += b; rounds += 1; }
+  assert(s == 20 && rounds == 2, "control: par over [5,5] sums 10+10: got s={s} rounds={rounds}");
+}

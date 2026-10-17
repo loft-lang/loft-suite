@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Free` — a free releases the store a reference names, once, and a PINNED store (a
+// constant) lives for the whole program, its free a no-op.  With `@FR-H-FreeAny` a store may be
+// freed while newer ones are live.  A free is not program-visible by itself; what a program sees
+// is its two failures: a store freed too early reads someone else's bytes, and one never freed
+// is a residue at exit.  So each cell makes many stores die and then reads what must survive —
+// a record rebound a thousand times (each rebind frees the store it displaces), a call result
+// discarded a thousand times, a constant read through a thousand calls (its free, if any, must
+// not take it), and an older store freed while a newer one is still read.  The leak gate is
+// the residue channel; `LOFT_STRICT_STORES=1` and `LOFT_POISON=1` make an early free fail the
+// read after it.  The free-table mechanics themselves — a double free refused, store 0 refused,
+// a freed slot reused — are `tests/heap_free_discipline.rs`.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// HOLDS: panic is clean on both backends.
+
+struct P { x: integer, name: text, tags: vector<integer> }
+
+NAMES: vector<text> = ["alpha", "beta", "gamma"];
+
+fn mk(i: integer) -> P { P { x: i, name: "p{i}", tags: [i, i + 1] } }
+
+fn pick(i: integer) -> text { NAMES[i % 3]? }
+
+fn test_a_rebind_frees_what_it_displaces() {
+  p = mk(0);
+  for i in 1..1000 { p = mk(i); }
+  assert(p.x == 999 && p.name == "p999" && len(p.tags) == 2 && p.tags[1] == 1000, "c1 the last of a thousand rebinds: {p.x} {p.name} {p.tags}");
+}
+
+fn test_a_discarded_call_result_is_freed() {
+  s = 0;
+  for i in 0..1000 { s += len(mk(i).tags); }
+  assert(s == 2000, "c2 a thousand discarded results of two tags each: {s}");
+}
+
+fn test_a_constant_outlives_every_call() {
+  n = 0;
+  for i in 0..1000 { n += len(pick(i)); }
+  // 334 alpha (5) + 333 beta (4) + 333 gamma (5)
+  assert(n == 4667, "c3 the constant read through a thousand calls: {n}");
+  assert(len(NAMES) == 3 && NAMES[2] == "gamma", "c3 and is intact after: {NAMES}");
+}
+
+fn test_an_older_store_is_freed_while_a_newer_one_lives() {
+  a = mk(1);
+  b = mk(2);
+  first = a.x * 10 + b.x;
+  a = mk(3);
+  c = mk(4);
+  b = mk(5);
+  assert(first == 12 && a.x + b.x + c.x == 12 && a.name == "p3" && b.name == "p5" && c.name == "p4", "c4 {a.x} {b.x} {c.x}");
+}
+
+fn test_a_loop_body_record_dies_each_pass() {
+  total = 0;
+  for i in 0..500 {
+    q = mk(i);
+    q.tags += [q.x * 2];
+    total += q.tags[2];
+  }
+  // 2 * (0 + 1 + … + 499) = 2 * 124750
+  assert(total == 249500, "c5 {total}");
+}

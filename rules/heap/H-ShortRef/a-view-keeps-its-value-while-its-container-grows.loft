@@ -1,0 +1,129 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-ShortRef` — a variable may name vector or string content, or a record inline in a
+// collection, and while it lives the store it names into takes no addition and the collection
+// no reordering.  A user-written view whose container IS disturbed materialises instead
+// (`@FR-H-Materialise`, binding.md B-Disturb): it keeps the value it had at the bind, and a
+// write through it stops reaching the container.  So the program-visible promise is that a
+// short-term reference never reads moved content.  Walked over what is named — a vector
+// element (a local and a field), a text field, a text slice, a sorted element under a
+// reordering insert, a hash element under keyed adds — over where the growth is written
+// (inline, in a loop of two hundred, in a callee), over where the container came from (a
+// literal, a callee's result, a parameter grown inside the callee that views it), and with a
+// view whose last use PRECEDES the growth, which keeps aliasing.  Every
+// expected value is the value at the bind, and every container's length is checked after.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument.
+// HOLDS: leak and panic are clean on both backends.
+
+struct P { x: integer, name: text }
+struct Bag { v: vector<P>, s: text }
+struct K { k: integer, n: text }
+
+fn grow(b: Bag) {
+  for i in 0..50 { b.v += [P { x: 1000 + i, name: "g{i}" }]; }
+}
+
+fn test_vector_local_grown_in_a_loop() {
+  v = [P { x: 1, name: "a" }, P { x: 2, name: "b" }];
+  e = v[0];
+  for i in 0..200 { v += [P { x: 100 + i, name: "n{i}" }]; }
+  assert(e.x == 1 && e.name == "a", "c1 the view reads its value at the bind: {e.x} {e.name}");
+  assert(len(v) == 202 && v[0].x == 1 && v[201].x == 299, "c1 len {len(v)} first {v[0].x} last {v[201].x}");
+}
+
+fn test_vector_field_grown_inline() {
+  b = Bag { v: [P { x: 7, name: "q" }], s: "" };
+  e = b.v[0];
+  b.v += [P { x: 8, name: "r" }, P { x: 9, name: "s" }];
+  assert(e.x == 7 && e.name == "q", "c2 field view: {e.x} {e.name}");
+  assert(len(b.v) == 3, "c2 len {len(b.v)}");
+}
+
+fn test_vector_field_grown_in_a_callee() {
+  b = Bag { v: [P { x: 3, name: "c" }], s: "" };
+  e = b.v[0];
+  grow(b);
+  assert(e.x == 3 && e.name == "c", "c3 grown one frame down: {e.x} {e.name}");
+  assert(len(b.v) == 51 && b.v[50].x == 1049, "c3 len {len(b.v)}");
+}
+
+fn test_text_field() {
+  b = Bag { v: [], s: "hello" };
+  t = b.s;
+  b.s += " world";
+  assert(t == "hello" && len(t) == 5, "c4 text view: {t}");
+  assert(b.s == "hello world" && len(b.s) == 11, "c4 grown: {b.s}");
+}
+
+fn test_text_slice() {
+  s = "abcdefgh";
+  t = s[2..5];
+  s += "ijklmnopqrstuvwxyz";
+  assert(t == "cde", "c5 slice: {t}");
+  assert(len(s) == 26, "c5 len {len(s)}");
+}
+
+fn test_sorted_reordered() {
+  s: sorted<K[k]> = [K { k: 5, n: "five" }, K { k: 9, n: "nine" }];
+  e = s[9];
+  s += [K { k: 1, n: "one" }, K { k: 7, n: "seven" }];
+  assert(e.k == 9 && e.n == "nine", "c6 sorted view: {e.k} {e.n}");
+  assert(len(s) == 4 && (s[7].n ?? "") == "seven", "c6 len {len(s)}");
+}
+
+fn test_write_after_growth_reaches_the_copy() {
+  v = [P { x: 1, name: "a" }];
+  e = v[0];
+  v += [P { x: 2, name: "b" }];
+  e.x = 50;
+  assert(e.x == 50, "c7 the write lands in the view's copy: {e.x}");
+  assert(v[0].x == 1 && len(v) == 2, "c7 and not in the grown container: {v[0].x} len {len(v)}");
+}
+
+fn test_view_used_before_growth_aliases() {
+  v = [P { x: 1, name: "a" }];
+  e = v[0];
+  e.x = 5;
+  v += [P { x: 2, name: "b" }];
+  assert(v[0].x == 5 && len(v) == 2, "c8 a view last used before the growth wrote through: {v[0].x}");
+}
+
+fn mkv(n: integer) -> vector<P> {
+  r: vector<P> = [];
+  for i in 0..n { r += [P { x: i + 1, name: "m{i}" }]; }
+  r
+}
+
+fn view_then_grow(v: vector<P>) -> integer {
+  e = v[1];
+  for i in 0..100 { v += [P { x: 500 + i, name: "p{i}" }]; }
+  e.x
+}
+
+fn test_a_callee_returned_vector_grown() {
+  v = mkv(2);
+  e = v[1];
+  for i in 0..100 { v += [P { x: 300 + i, name: "c{i}" }]; }
+  assert(e.x == 2 && e.name == "m1", "c9 {e.x} {e.name}");
+  assert(len(v) == 102 && v[101].x == 399, "c9 len {len(v)}");
+}
+
+fn test_a_parameter_vector_grown_in_the_callee() {
+  v = mkv(3);
+  got = view_then_grow(v);
+  assert(got == 2, "c10 the callee's view of its parameter: {got}");
+  assert(len(v) == 103 && v[102].x == 599 && v[1].x == 2, "c10 the caller sees the growth: len {len(v)}");
+}
+
+fn test_a_hash_element_view_across_a_keyed_add() {
+  h: hash<K[k]> = [K { k: 1, n: "one" }];
+  e = h[1];
+  for i in 2..60 { h += [K { k: i, n: "k{i}" }]; }
+  assert((e.n ?? "") == "one" && (e.k ?? -1) == 1, "c11 {e.n ?? ""}");
+  assert(len(h) == 59, "c11 len {len(h)}");
+}

@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MISSED LOOKUP DISCHARGES AND PROPAGATES AT EVERY KIND (`@FR-Col-Lookup`, `@FR-N-Opt`,
+// `@FR-N-Prop`, `@FR-N-Match`, `@FR-P-Cap`).  A keyed miss is `τ?`: discharged by `??`, by `?`
+// (the record's default), through a field chain, by a `match` whose binding arm is spelled
+// `e: _` (a bare lowercase arm name is a refused misspelling, `@FR-M-Unit`), and carried by
+// `+`.  Kinds moved:
+// hash, sorted, index (descending), trie — whose prefix of a key is not a key.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together
+//   (the documented-pairs measure, 2026-10-17); every cell answered right on both backends.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+struct E { k: integer, v: integer, t: text }
+struct W { w: text, n: integer }
+
+fn mkh() -> hash<E[k]> {
+  h: hash<E[k]> = [];
+  for k in [7, 2, 9, 4] { h += [E { k: k, v: k * 10, t: "t{k}" }]; }
+  h
+}
+
+fn test_lookup_miss_discharges() {
+  // Col-Lookup x N-Opt: a miss is τ?, discharged by `??`, `?`, a field chain, match
+  h = mkh();
+  assert((h[3]?.v) == 0, "a missed record's default has v 0");
+  assert((h[3].v ?? -1) == -1, "a miss through the field chain");
+  assert((h[3].t ?? "none") == "none", "a text field of a miss");
+  assert((h[9].v ?? -1) == 90, "a hit");
+  r = h[3] ?? E { k: -1, v: -2, t: "d" };
+  assert(r.k == -1 && r.v == -2, "coalesced record: {r.k}");
+  m = match h[4] { null => -1, e: _ => e.v };
+  assert(m == 40, "match hit: {m}");
+  n = match h[5] { null => -1, e: _ => e.v };
+  assert(n == -1, "match miss: {n}");
+}
+
+fn test_lookup_miss_into_arith() {
+  // the lookup's null rides through arithmetic (N-Prop) and discharges once
+  h = mkh();
+  assert(((h[2].v + h[4].v) ?? -1) == 60, "20+40");
+  assert(((h[2].v + h[5].v) ?? -1) == -1, "one miss poisons the sum");
+}
+
+fn test_lookup_every_kind() {
+  s: sorted<E[k]> = [E { k: 3, v: 30, t: "" }, E { k: 1, v: 10, t: "" }];
+  ix: index<E[-k]> = [E { k: 3, v: 30, t: "" }, E { k: 1, v: 10, t: "" }];
+  tr: trie<W[w]> = [W { w: "ab", n: 1 }, W { w: "b", n: 2 }];
+  assert((s[1].v ?? -1) == 10 && (s[2].v ?? -1) == -1, "sorted hit and miss");
+  assert((ix[3].v ?? -1) == 30 && (ix[2].v ?? -1) == -1, "index hit and miss");
+  assert((tr["b"].n ?? -1) == 2 && (tr["a"].n ?? -1) == -1, "trie hit, and a prefix is not a key");
+}
+

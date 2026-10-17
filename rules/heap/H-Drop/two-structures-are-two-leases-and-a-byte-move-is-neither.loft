@@ -1,0 +1,115 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Drop` crossed with `@FR-H-Lease` — a structure whose type owns a droppable holds its
+// OWN lease, and the hook runs once per structure, at that structure's death.  A copy makes a
+// second structure and so a second lease (`@FR-H-Copy-Lease`: the type's `OpCopy` runs on the
+// new one, renumbering it here by +100); moving bytes without making a structure — a vector's
+// growth, a `sorted` reordering insert, a `hash` growing — is no copy and runs no hook.  Walked
+// over the copy's source (a member, a parameter, a parameter copied on every loop pass, a
+// member two records deep, a vector parameter) and over the byte moves.  A keyed collection's
+// records are the author's to release (`@FR-H-Drop-Not`), so its traces carry no `D` at all.
+// `@FR-H-Elide` lets the compiler skip a copy's `OpCopy` together with the drop of the
+// structure it would have made, so the vector-parameter cell asserts the PAIR — as many
+// copy-drops as hooks, each original once — rather than whether that copy was elided.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected trace, which fails that cell on both backends.
+// CHANNEL: the assertion count and the exit code, identically on both backends.
+// ARMED: no instrument — each hook call and read is written to this cell's trace file.
+// HOLDS: leak and panic are clean on both backends.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_drop_lease.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn OpCopy(self: H) { note("C{self.id}"); self.id += 100; }
+fn mk(i: integer) -> H { H { id: i } }
+struct S { h: H, n: integer }
+struct KH { k: integer, h: H }
+struct O { s: S, m: integer }
+
+fn d1() { s = S { h: mk(1), n: 0 }; v: vector<H> = []; v += [s.h]; note("L{len(v)}"); note("R{v[0].id}"); }
+fn d2() { v: vector<H> = []; for i in 0..40 { v += [mk(i)]; } note("L{len(v)}"); }
+fn d3() { s: sorted<KH[k]> = [KH { k: 50, h: mk(50) }]; for i in 0..5 { s += [KH { k: 10 - i, h: mk(10 - i) }]; } note("L{len(s)}"); }
+fn d4() { h: hash<KH[k]> = []; for i in 0..40 { h += [KH { k: i, h: mk(i) }]; } note("L{len(h)}"); }
+fn d5(p: H) { for _ in 0..2 { x = p; note("R{x.id}"); } }
+fn d6(p: O) { q = p; note("R{q.s.h.id}"); }
+fn d7(p: vector<H>) { q = p; note("R{q[0].id % 100}{q[1].id % 100}"); }
+fn d7w() { w = [mk(7), mk(8)]; d7(w); }
+
+fn count(t: text, prefix: text) -> integer {
+  n = 0;
+  for part in t.split(',') { if part.starts_with(prefix) { n += 1; } }
+  n
+}
+
+fn test_a_member_copied_into_a_vector_is_a_second_lease() {
+  drain(); d1();
+  t = drain();
+  assert(t == "C1,L1,R101,D101,D1", "c1 the copy's hook, its drop, the original's drop: {t}");
+}
+
+fn test_a_vector_growing_moves_bytes_and_makes_no_structure() {
+  drain(); d2();
+  t = drain();
+  want = "L40";
+  for i in 0..40 { want += ",D{i}"; }
+  assert(t == want, "c2 forty appends, no hook, then forty drops in element order: {t}");
+}
+
+fn test_a_sorted_reordering_insert_runs_no_hook() {
+  drain(); d3();
+  t = drain();
+  assert(t == "L6", "c3 no copy hook on a reorder, no drop of a keyed record: {t}");
+}
+
+fn test_a_hash_growing_runs_no_hook() {
+  drain(); d4();
+  t = drain();
+  assert(t == "L40", "c4 no copy hook on a rehash, no drop of a keyed record: {t}");
+}
+
+fn test_a_parameter_copied_on_every_pass() {
+  drain();
+  a = mk(5);
+  d5(a);
+  t = drain();
+  assert(t == "C5,R105,D105,C5,R105,D105", "c5 a lease per pass, dropped at the pass end: {t}");
+}
+
+fn test_a_member_two_records_deep_is_copied_by_the_cascade() {
+  drain();
+  o = O { s: S { h: mk(6), n: 0 }, m: 0 };
+  d6(o);
+  t = drain();
+  assert(t == "C6,R106,D106", "c6 the synthesized cascade reaches the member: {t}");
+}
+
+fn test_a_vector_parameter_copy_pairs_its_hooks_with_its_drops() {
+  drain(); d7w();
+  t = drain();
+  c = count(t, "C");
+  extra = count(t, "D1");
+  assert(count(t, "R78") == 1, "c7 the copy reads the elements: {t}");
+  assert(count(t, "D7") == 1 && count(t, "D8") == 1, "c7 each original dropped once: {t}");
+  assert(c == extra && (c == 0 || c == 2), "c7 as many copy drops as copy hooks (elided or not): {t}");
+}

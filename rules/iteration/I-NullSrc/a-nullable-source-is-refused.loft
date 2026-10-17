@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-NullSrc` — the line the rule draws: a source whose TYPE is `τ?` is REFUSED, because
+// `@FR-N-Coal` / `@FR-N-Default` admit no implicit unwrap and a `for` is not an exception.
+// Crossed with `@FR-I-Comp` — the comprehension's source is the same position.  The
+// diagnostic names the two discharges.
+//
+// @falsified-at: none — the rule held when this walk measured it (both backends).
+
+fn main() {
+  w: vector<integer>? = null;
+  n = 0;
+  // @EXPECT_ERROR: cannot iterate over vector<integer>? because it is NULLABLE
+  for x in w { n += x; }
+  // @EXPECT_ERROR: cannot iterate over vector<integer>? because it is NULLABLE
+  c = [for x in w { x }];
+  println("{n} {c}");
+}

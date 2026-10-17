@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Copy-Refuse` crossed with `@FR-H-Move` — the two rules partition every position that
+// places an existing droppable into a new structure: a value the function OWNS, placed once,
+// MOVES; a value it does NOT own — a parameter, a member of a container, a loop variable
+// over one — is a COPY, refused on the line that writes it.  Each refused cell below is the
+// non-owned twin of a move the legal half
+// (`a-move-of-an-owned-local-releases-once.loft`) shows compiling: the same position — a
+// literal's field, a tuple member, an append (a local vector and a vector field), a
+// whole-value bind, a `return`, a `??` operand — with the source moved from an owned local to
+// a parameter, a struct member, an element, a tuple member or a loop variable.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected substring, which fails the file on both backends.
+// CHANNEL: the expectations and the exit code, identically on both backends.
+// ARMED: no instrument — the refusal is on by default.
+// HOLDS: nothing runs on either backend.
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+fn mk(i: integer) -> H { H { id: i } }
+struct S { h: H, tag: integer }
+struct B { hs: vector<H> }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r1_a_parameter_into_a_literal_field(p: H) { s = S { h: p, tag: 0 }; print("{s.tag}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `s` here
+fn r2_a_member_into_a_literal_field() { s = S { h: mk(2), tag: 0 }; t = S { h: s.h, tag: 1 }; print("{t.tag}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `v` here
+fn r3_an_element_appended() { v = [mk(3)]; w: vector<H> = []; w += [v[0]]; print("{len(w)}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `t` here
+fn r4_a_tuple_member_into_a_literal_field() { t = (mk(4), 1); u = S { h: t.0, tag: 0 }; print("{u.tag}"); }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r5_a_parameter_returned(p: H) -> H { return p; }
+
+// @EXPECT_ERROR: cannot copy a member of `s` here
+fn r6_a_member_returned() -> H { s = S { h: mk(6), tag: 0 }; return s.h; }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r7_a_parameter_as_a_coalesce_operand(p: H) { x = p ?? mk(7); print("{x.id}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `v` here
+fn r8_a_loop_variable_appended() { v = [mk(8)]; w: vector<H> = []; for e in v { w += [e]; } print("{len(w)}"); }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r9_a_parameter_bound_whole(p: H) { x = p; print("{x.id}"); }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r10_a_parameter_appended_to_a_vector_field(p: H) { b = B { hs: [] }; b.hs += [p]; print("{len(b.hs)}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `s` here
+fn r11_a_member_into_a_tuple_member() { s = S { h: mk(11), tag: 0 }; t = (s.h, 1); print("{t.1}"); }

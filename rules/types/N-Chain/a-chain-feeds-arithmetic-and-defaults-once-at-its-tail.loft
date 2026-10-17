@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHAIN FEEDS ARITHMETIC AND DEFAULTS ONCE AT ITS TAIL (`@FR-N-Chain`, `@FR-N-Prop`,
+// `@FR-N-Default`).  The chain rule's own guard (1450d) discharges the chain directly; the text
+// says it is (N-Prop) read over projection, so these cells hand the chain's absence to an
+// OPERATOR first and discharge the result once: `(a.mid.leaf.v + 2) ?? -1`.  Axes moved: which
+// link is absent (the first, the second, none), the leaf type (integer, float, text, a struct
+// tail), the discharge (`??`, `?`, per-link `?.`), and straight-line against a loop that
+// alternates the absent link.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together
+//   (the documented-pairs measure, 2026-10-17); every cell answered right on both backends.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+struct Leaf { v: integer, f: float, t: text }
+struct Mid  { leaf: Leaf?, n: integer }
+struct Top  { mid: Mid?, k: integer }
+
+fn absent() -> Top { Top { mid: null, k: 1 } }
+fn hole() -> Top { Top { mid: Mid { leaf: null, n: 4 }, k: 2 } }
+fn full() -> Top { Top { mid: Mid { leaf: Leaf { v: 40, f: 2.5, t: "ab" }, n: 4 }, k: 3 } }
+
+fn test_chain_into_arith() {
+  // N-Chain x N-Prop: an absent chain fed to `+` carries the null; one discharge after
+  a = absent(); h = hole(); p = full();
+  assert(((a.mid.leaf.v + 2) ?? -1) == -1, "absent link 1: {a.mid.leaf.v + 2}");
+  assert(((h.mid.leaf.v + 2) ?? -1) == -1, "absent link 2");
+  assert(((p.mid.leaf.v + 2) ?? -1) == 42, "present: 40+2");
+  assert(((2 * p.mid.leaf.v - 1) ?? -1) == 79, "present, both sides: 2*40-1");
+  assert(((a.mid.n * 3) ?? -7) == -7, "one link absent, then multiply");
+  assert(((h.mid.n * 3) ?? -7) == 12, "one link present: 4*3");
+}
+
+fn test_chain_into_float_and_text() {
+  a = absent(); p = full();
+  // float: absent chain + 1.0 is null (NaN), discharged
+  assert(((a.mid.leaf.f + 1.0) ?? -1.0) == -1.0, "float absent");
+  assert(((p.mid.leaf.f + 1.0) ?? -1.0) == 3.5, "float present: 2.5+1.0");
+  // text: the type default of an absent text chain is ""
+  assert((a.mid.leaf.t?) == "", "text default");
+  assert((a.mid.leaf.t ?? "none") == "none", "text coalesce");
+  assert((p.mid.leaf.t ?? "none") == "ab", "text present");
+  assert(len(a.mid.leaf.t ?? "xyz") == 3, "len of the coalesced text");
+}
+
+fn test_chain_default_per_link() {
+  // `a?.b?.c?` is N-Default per link: the chain answers the leaf default, not absence
+  a = absent(); p = full();
+  assert((a.mid?.leaf?.v?) == 0, "per-link default on an absent chain");
+  assert((p.mid?.leaf?.v?) == 40, "per-link on a present chain");
+  assert((a.mid?.n) == 0, "a default Mid's n is 0");
+}
+
+fn test_chain_struct_tail() {
+  // the tail is itself a struct: `a.mid.leaf` absent, its default is a zero Leaf
+  a = absent(); p = full();
+  l = a.mid.leaf?;
+  assert(l.v == 0 && l.t == "" , "default leaf: {l.v} '{l.t}'");
+  m = p.mid.leaf ?? Leaf { v: -1, f: 0.0, t: "d" };
+  assert(m.v == 40 && m.t == "ab", "present leaf: {m.v}");
+  q = a.mid.leaf ?? Leaf { v: -1, f: 0.0, t: "d" };
+  assert(q.v == -1 && q.t == "d", "coalesced leaf: {q.v}");
+}
+
+fn test_chain_in_a_loop() {
+  // each pass alternates the absent link; the sum is hand computed
+  // i=0 absent -> -1; i=1 hole -> -1; i=2 full -> 40; i=3 absent -> -1  => 37
+  s = 0;
+  for i in 0..4 {
+    t = if i % 3 == 0 { absent() } else if i == 1 { hole() } else { full() };
+    s += t.mid.leaf.v ?? -1;
+  }
+  assert(s == 37, "loop sum {s}");
+}

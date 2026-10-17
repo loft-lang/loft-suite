@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HASH WALKS IN KEY ORDER WHATEVER THE INSERT ORDER (`@FR-Col-Order`, `@FR-Col-Hash`).  Inserted
+// 7, 2, 9, 4 walks 2, 4, 7, 9; after a remove and an insert below the minimum it is still key
+// order; a text key walks lexicographically.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together
+//   (the documented-pairs measure, 2026-10-17); every cell answered right on both backends.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+struct E { k: integer, v: integer, t: text }
+struct W { w: text, n: integer }
+
+fn mkh() -> hash<E[k]> {
+  h: hash<E[k]> = [];
+  for k in [7, 2, 9, 4] { h += [E { k: k, v: k * 10, t: "t{k}" }]; }
+  h
+}
+
+fn test_hash_iterates_in_key_order() {
+  // Col-Hash x Col-Order: inserted 7,2,9,4 -> walked 2,4,7,9
+  h = mkh();
+  o = "";
+  for e in h { o += "{e.k},"; }
+  assert(o == "2,4,7,9,", "key order: {o}");
+  // remove one and re-insert below the minimum: still key order
+  h[7] = null;
+  h += [E { k: 1, v: 1, t: "" }];
+  o2 = "";
+  for e in h { o2 += "{e.k},"; }
+  assert(o2 == "1,2,4,9,", "after remove + insert: {o2}");
+  assert(len(h) == 4, "len {len(h)}");
+}
+
+fn test_hash_text_key_order() {
+  hw: hash<W[w]> = [];
+  for w in ["pear", "apple", "fig", "banana"] { hw += [W { w: w, n: len(w) }]; }
+  o = "";
+  for e in hw { o += "{e.w},"; }
+  assert(o == "apple,banana,fig,pear,", "text key order: {o}");
+}
+
