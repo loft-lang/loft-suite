@@ -16,6 +16,7 @@
 // @falsified-at: 7ea99d900 — hand-measured, interpret and native: `z` is -1 and the `+` / `*`
 //   cells are refused.
 // ARMED: no instrument.
+// HOLDS: the parenthesised and `if` spellings, and the void-block statements, on both trees.
 // CHANNEL: the value of `z`.
 
 fn test_the_spellings_that_already_continue() {
