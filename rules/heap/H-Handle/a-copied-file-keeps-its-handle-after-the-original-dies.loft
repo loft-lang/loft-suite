@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // `@FR-H-Handle` crossed with `@FR-H-Lease` — every `File` record that names an open handle
+// `@FR-H-Handle-Copy` — a copy is legal: one handle, a position and a lease per copy.
 // holds a lease on it, a record returns its lease once at its death, and the handle closes
 // only when the LAST lease returns.  So a copy must keep reading after the record it was
 // copied from has died, at its own position.  Walked over how the original dies while a copy

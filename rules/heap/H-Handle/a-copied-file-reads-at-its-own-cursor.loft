@@ -1,4 +1,5 @@
 // `@FR-H-Handle` — every `File` record that names an open handle keeps its OWN position: a
+// `@FR-H-Handle-Copy` — a copy is legal: one handle, a position and a lease per copy.
 // copy `g = f` made after `f` was read from reads at `g#next`, wherever a read through the
 // other record left the shared handle, and `#next` / `#index` say where each record's next
 // read lands (loft#2005).  A copy made BEFORE the first read opens a handle of its own, and
