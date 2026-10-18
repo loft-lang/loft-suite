@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2048 — AN OPTIONAL GROUP STANDS ANYWHERE IN A SLICE (`@FR-P-Opt`, `@FR-P-Opt-Ty`,
+// `@FR-P-Seq`, `@FR-P-Rest`, `@FR-P-Cap`).  `(a)?` is a sequence element: try `a`; on a match take
+// it, else bind its captures null and move nothing — GREEDY, as a PEG is, so the elements after it
+// must fit what it left.  It parsed only at a slice's START (`[(a)?, ..rest]`); after a fixed head,
+// before a fixed tail, or last, it was "Expect token ,", on both backends.  Axes moved: the
+// group's place (last, before a fixed element, after a bare-name head, before a rest), its width
+// (one element, a two-element sequence), present against absent, a length that fits neither,
+// the greedy edge (a tail element the optional also matches), and the whole-slice forms beside.
+//
+// @falsified-at: 0f5ba1ec9 — hand-measured, interpret and native: every mid-slice and trailing
+//   group is a parse error ("Expect token ,", "Expect token ]").
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the function whose answer moved.
+// HOLDS: the whole-slice forms (`lead`, `leadseq`) answer as before on both trees.
+
+enum Tok { Num { n: integer }, Tag { t: text }, Kw { k: integer }, Op { o: integer }, End }
+fn last(v: vector<Tok>) -> text { match v { [Num { n }, (Tag { t })?] => "{n}:{t ?? "--"}", _ => "x" } }
+fn mid(v: vector<Tok>) -> text { match v { [Num { n }, (Tag { t })?, End] => "{n}:{t ?? "--"}", _ => "x" } }
+fn named(v: vector<Tok>) -> text { match v { [a, (Tag { t })?, End] => "{t ?? "--"}", _ => "x" } }
+fn withrest(v: vector<Tok>) -> text { match v { [Num { n }, (Tag { t })?, ..rest] => "{n}:{t ?? "--"}:{len(rest)}", _ => "x" } }
+fn seq(v: vector<Tok>) -> text { match v { [Num { n }, (Kw { k } Op { o })?, End] => "{n}:{k ?? -1}:{o ?? -1}", _ => "x" } }
+fn greedy(v: vector<Tok>) -> text { match v { [Num { n }, (Tag { t })?, Tag { t: u }] => "{t ?? "--"}/{u}", _ => "x" } }
+fn lead(v: vector<Tok>) -> text { match v { [(Kw { k })?, ..rest] => "{k ?? -1}:{len(rest)}", _ => "x" } }
+fn leadseq(v: vector<Tok>) -> text { match v { [(Kw { k } Op { o })?, ..rest] => "{k ?? -1}:{o ?? -1}:{len(rest)}", _ => "x" } }
+fn test_the_cells() {
+  n = Num { n: 3 }; a = Tag { t: "ab" }; b = Tag { t: "cd" }; e: Tok = Tok.End; kw = Kw { k: 7 }; op = Op { o: 8 };
+  assert(last([n]) == "3:--" && last([n, a]) == "3:ab" && last([n, a, b]) == "x" && last([n, e]) == "x", "last");
+  assert(mid([n, e]) == "3:--" && mid([n, a, e]) == "3:ab" && mid([n, a]) == "x" && mid([n, a, a, e]) == "x", "mid");
+  assert(named([n, e]) == "--" && named([n, a, e]) == "ab", "a head name");
+  assert(withrest([n]) == "3:--:0" && withrest([n, a, e, e]) == "3:ab:2" && withrest([n, e]) == "3:--:1", "rest");
+  assert(seq([n, kw, op, e]) == "3:7:8" && seq([n, e]) == "3:-1:-1" && seq([n, kw, e]) == "x", "a sequence group");
+  // greedy (P-Opt): the optional takes the first Tag, and the tail Tag then has nothing left
+  assert(greedy([n, a, b]) == "ab/cd" && greedy([n, a]) == "x", "greedy: {greedy([n, a])}");
+  assert(lead([kw, e]) == "7:1" && lead([e]) == "-1:1" && leadseq([kw, op]) == "7:8:0" && leadseq([e]) == "-1:-1:1", "whole-slice forms unchanged");
+}

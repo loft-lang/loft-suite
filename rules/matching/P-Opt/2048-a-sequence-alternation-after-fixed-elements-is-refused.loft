@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SEQUENCE ALTERNATION AFTER FIXED ELEMENTS IS REFUSED (`@FR-P-Alt`, `@FR-P-Opt`).  An OPTIONAL
+// group may follow fixed elements (loft#2048); a multi-element alternation `( A B | C )` is the
+// whole slice pattern, and after a fixed element it is refused by name rather than read as
+// something else.
+//
+// @falsified-at: none — a conformance guard; the refusal is new with loft#2048's lowering.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the construct.
+// HOLDS: the optional group after a fixed element, in the sibling file, on both trees.
+// @EXPECT_ERROR: a multi-element alternation `( … | … )` is the whole slice pattern
+
+enum Tok { Num { n: integer }, Kw { k: integer }, Op { o: integer } }
+
+fn main() {
+  v: vector<Tok> = [Num { n: 1 }, Kw { k: 2 }, Op { o: 3 }];
+  r = match v { [Num { n }, (Kw { k } Op { o } | Op { o })] => n, _ => -1 };
+  println("{r}");
+}
