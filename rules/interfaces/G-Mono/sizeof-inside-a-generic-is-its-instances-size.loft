@@ -8,18 +8,14 @@
 // record.  And inside its header a type variable's spelling means the variable
 // (`G-Gen-Scope`), so `sizeof(T)` is the same number.
 //
-// ⚠ DEFECT, silent-wrong (reported by the rule walk, 2026-10-18): `sizeof(x)` in `fn g<T>(x: T)`
-// answers 0 at EVERY instance on both backends (integer, u8, record, float, text), while the
-// same `sizeof(x)` outside reads 8 / 1 / 16.  And `sizeof(T)` is refused "Unknown variable 'T'"
-// / "Expect a variable or type after sizeof".  The file is ignored as a whole because the
-// refusal stops it compiling.
+// loft#2054: `sizeof(x)` in `fn g<T>(x: T)` answered 0 at EVERY instance on both backends
+// (integer, u8, record, float, text), and `sizeof(T)` was refused "Unknown variable 'T'".
 //
-// @IGNORE — the defect above: sizeof is not re-derived per instance, and sizeof(T) is refused.
-// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
-//   the receipt the fix must turn green.
+// @falsified-at: 2cf8ce6ff — hand-measured, interpret and native: `g(i)` is 0 where
+//   `sizeof(i)` is 8, and `gt` does not compile.
 // CHANNEL: the asserts.
 // ARMED: no instrument.
-// WITNESS: today `g(i)` is 0 where `sizeof(i)` is 8.
+// WITNESS: each message names the instance's size beside the concrete one.
 // HOLDS: `sizeof` outside a generic keeps its answers (the control line in each function).
 
 struct P { a: integer, b: integer }
