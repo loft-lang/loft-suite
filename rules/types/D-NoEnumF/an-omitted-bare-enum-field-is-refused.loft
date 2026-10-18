@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OMITTED BARE ENUM FIELD IS REFUSED, AND EVERY OTHER SPELLING CHOOSES (`@FR-D-NoEnumF`, `@FR-D-Opt`,
+// `@FR-D-Enum`, `@FR-D-Rec`).  An enum's 0 is its null, so a literal may not zero-fill a bare enum
+// field; the author supplies it, declares `= <variant>`, or types it `E?` (which defaults to null).
+// The values half is the sibling file; this one is the refusal.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the field and the three cures.
+// HOLDS: every cell on both backends.
+// @EXPECT_ERROR: field `c: C` is an enum with no default
+
+enum C { Red, Green }
+struct S { c: C, n: integer }
+
+fn main() {
+  s = S { n: 1 };
+  println("{s.n}");
+}

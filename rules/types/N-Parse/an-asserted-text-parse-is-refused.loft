@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ASSERTED TEXT PARSE IS REFUSED (`@FR-N-Parse`, `@FR-N-Cast`): `s as integer` asserts a fit no text can
+// prove, so `as integer?` is the spelling.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the cast.
+// HOLDS: every cell on both backends.
+// @EXPECT_ERROR: a text parse `as integer` may fail
+
+fn main() {
+  s = "12";
+  n: integer = s as integer;
+  println("{n}");
+}

@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INDEX TRUSTED BY CONTRACT READS NON-NULL (`@FR-N-Index`, `@FR-N-Store`, `@FR-H-Index`).  A
+// constant, an active `for` variable and a read guarded by `i < len(v)` store into a declared
+// `integer` with no discharge; a plain variable index — or arithmetic over one — reads `integer?`,
+// which the sibling file pins as `(N-Store)`'s warning.  A negative index in `[-len, -1]` counts
+// from the end.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the element read.
+// HOLDS: every cell on both backends.
+
+fn test_the_trusted_indexes() {
+  v = [10, 20, 30];
+  a: integer = v[1];
+  s = 0;
+  for i in 0..len(v) { x: integer = v[i]; s += x; }
+  j = 2;
+  g = 0;
+  if j < len(v) { y: integer = v[j]; g = y; }
+  assert(a == 20 && s == 60 && g == 30, "constant 20, for 60, guarded 30: {a} {s} {g}");
+}
+
+fn test_a_plain_variable_index_is_discharged() {
+  v = [10, 20, 30];
+  i = 1;
+  k = -1;
+  m = 7;
+  assert((v[i] ?? -1) == 20 && (v[k] ?? -1) == 30 && (v[m] ?? -1) == -1,
+         "v[1] 20, v[-1] the last 30, v[7] absent");
+}

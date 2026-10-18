@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ENUM FIELD'S DEFAULT IS A CHOICE THE DECLARATION MAKES (`@FR-D-NoEnumF`, `@FR-D-Opt`, `@FR-D-Enum`,
+// `@FR-D-Rec`, `@FR-N-Default`).  `= Green` is taken when the literal omits the field; an `E?` field
+// defaults to null; an optional LOCAL's `?` answers the enum's first-declared variant; a record's `?`
+// default needs every field to have one, and a nullable scalar field's is null.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the value read.
+// HOLDS: every cell on both backends.
+
+enum C { Red, Green }
+struct Chosen { c: C = Green, n: integer }
+struct Maybe { c: C?, n: integer }
+struct Plain { a: integer?, t: text?, n: integer, w: text }
+
+fn none() -> Plain? { null }
+
+fn test_a_declared_variant_is_taken() {
+  s = Chosen { n: 1 };
+  assert(s.c == Green && s.n == 1, "c = Green, n = 1: {s.c} {s.n}");
+  t = Chosen { c: Red, n: 2 };
+  assert(t.c == Red, "a supplied field wins: {t.c}");
+}
+
+fn test_an_optional_enum_field_defaults_to_null() {
+  s = Maybe { n: 1 };
+  assert(s.c == null && s.n == 1, "c is null: {s.c == null}");
+}
+
+fn test_an_optional_enum_local_discharges_to_its_first_variant() {
+  x: C? = null;
+  assert(x? == Red, "D-Enum: the first-declared variant: {x?}");
+}
+
+fn test_a_record_default_fills_each_field() {
+  p = none()?;
+  assert(p.a == null && p.t == null && p.n == 0 && p.w == "" && len(p.w) == 0,
+         "nullable fields null, n 0, w empty: {p.n} [{p.w}]");
+}

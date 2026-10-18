@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFERENCE IS REFUSED WHERE A VIEW IS COPIED OUT (`@FR-B-Ref-Reshape`, `@FR-B-View`,
+// `@FR-H-Materialise`, `@FR-B-Disturb`).  One disturbance, two spellings: a plain view of `v[0]`
+// held across `v += [...]` is given its own copy (the advice says so) and its write stays in that
+// copy; a `&` reference held LIVE across the same grow is refused (the sibling file), and one
+// that is dead at the grow is fine — liveness is the condition, not existence.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every
+//   cell answered as the rules say on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the element read.
+// HOLDS: every cell on both backends.
+
+struct P { n: integer }
+
+fn test_a_view_held_across_a_grow_is_copied_out() {
+  v = [P { n: 1 }, P { n: 2 }];
+  c = v[0];
+  v += [P { n: 3 }];
+  c.n = 9;
+  assert(c.n == 9 && v[0].n == 1 && len(v) == 3, "the copy takes the write: {c.n} {v[0].n}");
+}
+
+fn test_a_reference_dead_at_the_grow_writes_through() {
+  v = [P { n: 1 }, P { n: 2 }];
+  c = &v[0];
+  c.n = 9;
+  v += [P { n: 3 }];
+  assert(v[0].n == 9 && len(v) == 3, "written before the grow: {v[0].n}");
+}

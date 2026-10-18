@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LIVE REFERENCE ACROSS A GROW IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`): loft will not
+// quietly downgrade a `&` to a copy, so where it cannot honour the write it declines the program.
+//
+// @falsified-at: none — a conformance guard; the refusal held on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the container and the reference.
+// HOLDS: the view spelling in the sibling file compiles on both trees.
+// @EXPECT_ERROR: cannot grow `v` while `c` references a place inside it
+
+struct P { n: integer }
+
+fn main() {
+  v = [P { n: 1 }, P { n: 2 }];
+  c = &v[0];
+  v += [P { n: 3 }];
+  c.n = 9;
+  println("{v[0].n}");
+}

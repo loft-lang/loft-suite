@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE ONLY IMPLICIT CONVERSIONS ARE THE LISTED ONES (`@FR-C-Only`, `@FR-C-Num`, `@FR-C-Int`, `@FR-N-Intro`).  An
+// integer widens into a float, a narrow integer into a wide one, a `τ` into a `τ?`; a wide integer
+// into a narrow one is refused (the sibling file), as are text, boolean and character targets.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the converted value.
+// HOLDS: every cell on both backends.
+
+fn test_the_listed_widenings() {
+  n = 3;
+  f: float = n;
+  b: u8 = 7;
+  w: integer = b;
+  x: integer? = n;
+  assert(f == 3.0 && w == 7 && (x ?? -1) == 3, "3.0, 7, 3: {f} {w} {x ?? -1}");
+  assert(n as float == 3.0 && (65 as character) == 'A', "the explicit casts");
+}

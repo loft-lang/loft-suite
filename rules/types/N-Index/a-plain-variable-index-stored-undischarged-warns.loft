@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLAIN VARIABLE INDEX STORED UNDISCHARGED IS (N-Store)'S WARNING (`@FR-N-Index`, `@FR-N-Store`).
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected warning.
+// ARMED: no instrument.
+// WITNESS: the warning names the slot.
+// HOLDS: every cell on both backends.
+// @EXPECT_WARNING: a nullable `integer?` is stored into the local `x` of the non-null type `integer`
+
+fn main() {
+  v = [10, 20];
+  i = 1;
+  x: integer = v[i];
+  assert(x == 20, "the value is right: {x}");
+}

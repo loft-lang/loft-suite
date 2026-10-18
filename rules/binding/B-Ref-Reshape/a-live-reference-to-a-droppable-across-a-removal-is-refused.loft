@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LIVE REFERENCE TO A DROPPABLE ACROSS A REMOVAL IS REFUSED (`@FR-B-Ref-Reshape`,
+// `@FR-H-View-Drop`): the removal renumbers the elements, and the element `c` names would be
+// released under it.
+//
+// @falsified-at: none — a conformance guard; the refusal held on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the container and the reference.
+// HOLDS: a reference dead before the removal compiles on both trees.
+// @EXPECT_ERROR: cannot remove from `v` while `c` references a place inside it
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+
+fn main() {
+  v = [H { id: 1 }];
+  c = &v[0];
+  v.remove(0);
+  println("{c.id}");
+}

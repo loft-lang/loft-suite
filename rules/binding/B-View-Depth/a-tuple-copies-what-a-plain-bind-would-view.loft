@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TUPLE COPIES WHAT A PLAIN BIND WOULD VIEW (`@FR-B-View-Depth`, `@FR-B-View-Base`, `@FR-T-Cons`).
+// An index read `a = vv[0]` and a projection off a borrowed base (`c = b.vecf` in a `for` over a
+// collection) are VIEWS, so an append through them reaches the source; the same value placed in a
+// tuple literal is COPIED in (T-Cons), so the tuple's member and the source are independent.
+//
+// @falsified-at: none — a conformance guard at rule pairings no guard named together; every cell
+//   answered as the rules say on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the vectors read.
+// HOLDS: every cell on both backends.
+
+struct B { vecf: vector<integer>, n: integer }
+fn test_a_tuple_off_a_borrowed_base_copies() {
+  bv = [B { vecf: [1], n: 1 }, B { vecf: [2], n: 2 }];
+  s = 0;
+  for b in bv {
+    t = (b.vecf, b.n);
+    t.0 += [9];
+    s += len(t.0) * 10 + len(b.vecf);
+  }
+  // each pass: t.0 has 2, b.vecf keeps 1 -> 21 + 21 = 42; the source untouched
+  assert(s == 42 && "{bv[0].vecf}" == "[1]" && "{bv[1].vecf}" == "[2]", "T-Cons copies: {s} {bv[0].vecf}");
+  for b in bv { c = b.vecf; c += [7]; }
+  // B-View-Base: off a borrowed base the projection VIEWS, so the append reaches bv
+  assert("{bv[0].vecf}" == "[1,7]" && "{bv[1].vecf}" == "[2,7]", "the view writes through: {bv[0].vecf} {bv[1].vecf}");
+}
+fn test_an_index_read_views_and_a_tuple_copies() {
+  vv = [[1, 2], [3]];
+  a = vv[0];
+  a += [9];
+  assert("{vv[0]}" == "[1,2,9]", "B-View-Depth: the index read views: {vv[0]}");
+  t = (vv[1], 0);
+  t.0 += [8];
+  assert("{vv[1]}" == "[3]" && "{t.0}" == "[3,8]" && len(vv) == 2, "T-Cons copies: {vv[1]} {t.0}");
+}

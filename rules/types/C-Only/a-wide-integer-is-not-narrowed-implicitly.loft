@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WIDE INTEGER IS NOT NARROWED IMPLICITLY (`@FR-C-Only`, `@FR-C-Int`).
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both types.
+// HOLDS: every cell on both backends.
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+
+fn main() {
+  n = 7;
+  b: u8 = n;
+  println("{b}");
+}

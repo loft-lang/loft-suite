@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHECKED CAST CARRIES A DOMAIN MISS, AND A JOIN CARRIES THE CAST (`@FR-N-Cast`, `@FR-N-Domain`,
+// `@FR-N-Join`, `@FR-N-Div`, `@FR-N-Chain`, `@FR-N-Opt`, `@FR-E-Uncomp`).  Pairs the formal text
+// names and no guard named together: a partial operation's null through `as u8?`, a local joined
+// over a checked cast, integer and float division against their domains (float ÷0 keeps IEEE's
+// `inf`, 0/0 and `%0` are null), and a fn-ref read through an absent receiver — a function type has
+// no null, so the chain does not wrap it and the absent function answers its return type's null.
+//
+// @falsified-at: none — a conformance guard at rule pairings no guard named; every cell answered
+//   right on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the value.
+// HOLDS: every cell on both backends.
+
+struct H { f: fn(integer) -> integer, n: integer }
+struct Hold { h: H? }
+fn dbl(x: integer) -> integer { x * 2 }
+
+fn test_fnref_through_absent_receiver() {
+  // N-Chain x N-Opt: a fn-ref has no null, so the chain does not wrap it; an absent receiver
+  // yields the ABSENT function, which answers its return type's null when called
+  a = Hold { h: null };
+  p = Hold { h: H { f: dbl, n: 1 } };
+  assert((p.h.f(21) ?? -1) == 42, "present: dbl(21)");
+  assert((a.h.f(21) ?? -1) == -1, "absent receiver: the absent fn answers null");
+  assert((a.h.n ?? -1) == -1, "the scalar field of the same absent link is null");
+}
+
+fn test_cast_of_a_domain_miss() {
+  // N-Cast x N-Domain: a partial op's null cast checked stays null; a fitting value casts
+  v = [300, 7];
+  i = 1;
+  a = v[i] as u8?;
+  assert((a ?? 99) == 7, "7 fits u8");
+  i = 0;
+  b = v[i] as u8?;
+  assert((b ?? 99) == 99, "300 does not fit u8: null");
+  i = 5;
+  c = v[i] as u8?;
+  assert((c ?? 99) == 99, "a miss stays null through the checked cast");
+  d = 10;
+  z = 0;
+  q = (d / z) as u8?;
+  assert((q ?? 99) == 99, "a division by zero stays null through the cast");
+  r = (d / 5) as u8?;
+  assert((r ?? 99) == 2, "10/5 = 2 fits");
+}
+
+fn test_cast_joins() {
+  // N-Cast x N-Join: a local joined over a checked cast and a plain value is optional
+  v = [5, 400];
+  s = 0;
+  for i in 0..3 {
+    w = 1 as u8?;
+    if i < 3 { w = v[i] as u8?; }
+    k = (w ?? 50) as integer;
+    s += k;
+  }
+  // i=0: 5; i=1: 400 does not fit -> 50; i=2: miss -> 50  => 105
+  assert(s == 105, "joined cast sum {s}");
+}
+
+fn test_div_domain() {
+  // N-Div x N-Domain: provably in-domain divisors type non-null; a variable divisor is τ?
+  a = 17;
+  assert(a / 5 == 3 && a % 5 == 2, "17/5 = 3, 17%5 = 2");
+  assert(-17 / 5 == -3 && -17 % 5 == -2, "truncates toward zero");
+  for d in 1..4 { assert(((a / d) ?? -1) > 0, "a for variable from 1 is in domain"); }
+  z = 0;
+  assert((a / z ?? -1) == -1 && (a % z ?? -1) == -1, "÷0 and %0 are null");
+  f = 1.0;
+  zf = 0.0;
+  // (E-Uncomp): float ÷0 is IEEE `inf`; 0/0 is the NaN that reads null, and float %0 is null
+  assert((f / zf) > 1.0e308, "float ÷0 is inf: {f / zf}");
+  assert(((zf / zf) ?? -1.0) == -1.0 && ((f % zf) ?? -1.0) == -1.0, "0/0 and %0 are null");
+  assert(ln(zf) < -1.0e308 && (ln(zf - 1.0) ?? -2.0) == -2.0, "ln(0) is -inf, ln(-1) null");
+  assert((sqrt(-1.0) ?? -2.0) == -2.0, "sqrt of a negative is null");
+  assert((sqrt(16.0) ?? -2.0) == 4.0, "sqrt(16) = 4");
+}

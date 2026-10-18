@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARSE IS A CAST: `as τ?` CHECKS AND `as τ` ASSERTS (`@FR-N-Parse`, `@FR-N-Cast`).  The checked parse
+// answers the value or null; the asserted one is refused, because a text's fit is never provable.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the parsed value.
+// HOLDS: every cell on both backends.
+
+fn test_a_checked_parse_answers_the_value_or_null() {
+  good = "12";
+  bad = "x";
+  neg = "-7";
+  assert(((good as integer?) ?? -1) == 12 && ((bad as integer?) ?? -1) == -1, "12 and null");
+  assert(((neg as integer?) ?? 0) == -7, "a sign parses: -7");
+  assert(((good as float?) ?? -1.0) == 12.0, "a float parse: 12.0");
+}
