@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// `@FR-N-Store` at `len`'s parameter, for every collection kind: a `<kind>?` handed to `len`
+// `@FR-N-Store` at `len`'s parameter (`@FR-Col-Len`: an absent collection counts 0), for every
+// collection kind: a `<kind>?` handed to `len`
 // WARNS, once, and the call counts — the present collection its elements, the absent one 0.
 //
 // A `vector<…>?` did that.  The keyed kinds did not, three ways.  `hash`, `sorted`,

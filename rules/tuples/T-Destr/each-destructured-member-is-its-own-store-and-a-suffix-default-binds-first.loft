@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EACH DESTRUCTURED MEMBER IS ITS OWN STORE, AND A SUFFIX `?` BINDS FIRST (`@FR-T-Destr`,
+// `@FR-N-Decl`, `@FR-G-Post-Default`, `@FR-N-Default`, `@FR-F-Recv`, `@FR-N-Intro`).  Three rule
+// pairs no guard named together: `(a, b) = (5, opt(0))` stores each member with ITS slot's
+// nullability (a declared `integer?` takes the null); postfix `?` discharges the primary before
+// `+` / `*` and before a `.` read (`(v[i])? + 1`, `(s)?.v`); and a method declared for `S` and
+// for `S?` is reached by the receiver's own nullability, an absent receiver reaching `m(S?)`.
+//
+// @falsified-at: none — a conformance guard at rule pairings no guard named together; every
+//   cell answered as the rules say on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the values read.
+// HOLDS: every cell on both backends.
+
+struct S { v: integer }
+fn opt(k: integer) -> integer? { if k > 0 { k } else { null } }
+fn rcv(self: S) -> integer { self.v * 10 }
+fn rcv(self: S?) -> integer { (self.v ?? -1) * 100 }
+fn mk(z: boolean) -> S? { if z { null } else { S { v: 3 } } }
+fn test_destructuring_into_declared_slots() {
+  // T-Destr x N-Decl: each member is the store x_i = e_i, with that store's nullability
+  a: integer = 0;
+  b: integer? = 0;
+  (a, b) = (5, opt(0));
+  assert(a == 5 && b == null, "a 5, b the null: {a} {b == null}");
+  c = 0; d = 0;
+  (c, d) = (opt(7) ?? -1, 8);
+  assert(c == 7 && d == 8, "a discharged member: {c} {d}");
+}
+fn test_postfix_default_binds_tightest() {
+  // G-Post-Default x N-Default: `?` is a suffix on the primary, before `+` and after `.`/`[]`
+  v: vector<integer?> = [null, 4];
+  i = 0;
+  x = v[i]? + 1;
+  j = 1;
+  y = v[j]? * 2;
+  assert(x == 1 && y == 8, "(v[0])? + 1 = 0 + 1, (v[1])? * 2 = 8: {x} {y}");
+  s = mk(true);
+  assert(s?.v == 0 && mk(false)?.v == 3, "(s)?.v reads the default record: {s?.v}");
+}
+fn test_a_receiver_picks_its_spelling() {
+  // F-Recv x N-Intro: a dense receiver reaches m(S); a nullable one m(S?)
+  p = S { v: 2 };
+  assert(p.rcv() == 20, "the dense spelling: {p.rcv()}");
+  q = mk(false);
+  r = mk(true);
+  assert(q.rcv() == 300 && r.rcv() == -100, "the nullable spelling, present and absent: {q.rcv()} {r.rcv()}");
+}

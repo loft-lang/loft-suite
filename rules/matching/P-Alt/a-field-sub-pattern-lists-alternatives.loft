@@ -4,7 +4,8 @@
 // `@FR-P-Alt` at a FIELD position — `Box { s: Circle { r } | Square { r }, n } => r * 10.0 + n`:
 // the field matches when any alternative's tag does, and each name is read from whichever variant
 // matched.  The same home serves a struct field (f1), a variant's field (f2), bare variants with
-// no fields (f3), a name only some alternatives bind, `τ?` (f4, `@FR-P-Alt-Diff`), a text and a
+// no fields (f3), a name only some alternatives bind, `τ?` (f4, `@FR-P-Alt-Diff`, read by `??`
+// through `@FR-N-Join`), a text and a
 // vector payload (f5, f5b — the names borrow what the field borrows), an alternation beside a
 // literal field (f6), and the arm's end restoring what a name meant before it (f7: an outer `r`
 // keeps 55).  A tuple element takes the same path (a-tuple-element-lists-alternatives.loft).
