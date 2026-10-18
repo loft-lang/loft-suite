@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2062 — VECTORS WHOSE ELEMENTS NEED A CAST ARE NOT COMPARED (`@FR-E-Eq`, `@FR-C-Only`).  Owner
+// ruling 2026-10-18: "if normally `as <type>` is needed it should not work" — a `character` and
+// an `integer` element meet only through an explicit `as` (a plain `==` between the two scalars
+// is admitted, the vector form is not), as do a `boolean`, a `text` and an enum.
+//
+// @falsified-at: 05d019607 — hand-measured, interpret and native: the file compiles and answers
+//   by bytes.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both element types.
+// HOLDS: numeric element types compare by value (the sibling file) on both trees.
+// @EXPECT_ERROR: `==` compares the elements of a vector<character> with those of a vector<integer>
+
+fn main() {
+  a = ['a', 'b'];
+  b = [97, 98];
+  println("{a == b}");
+}

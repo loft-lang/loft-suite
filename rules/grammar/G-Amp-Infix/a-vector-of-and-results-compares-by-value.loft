@@ -7,19 +7,15 @@
 // element by its own `==` — and integer `==` is by VALUE, whatever the width.  So the vector
 // equals the `vector<integer>` literal `[4, 2, 0]`.
 //
-// ⚠ DEFECT, silent-wrong (reported by the rule walk, 2026-10-18): `==` between two vectors
-// whose element WIDTHS differ answers by bytes, not by value, on both backends:
-// `[a & 4, a & 2, a & 1] == [4, 2, 0]` is false while every element compares equal;
-// `u: vector<u8> = [4, 2, 0]` against `i: vector<integer> = [4, 2, 0]` is false both ways, an
-// `i32` vector against either is false, and `vector<u8> [4, 2, 0] == vector<integer> [4, 0, 0]`
-// is TRUE.  A one-element vector happens to answer right.  Same-width vectors are correct.
-// The first function (same widths) holds today; the second is ignored until the fix.
+// loft#2062: `==` between two vectors whose element WIDTHS differ answered by bytes, not by
+// value, on both backends — `[a & 4, a & 2, a & 1] == [4, 2, 0]` was false while every element
+// compared equal, and `vector<u8> [4, 2, 0] == vector<integer> [4, 0, 0]` was TRUE.
 //
-// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
-//   the receipt the fix must turn green.
+// @falsified-at: 05d019607 — hand-measured, interpret and native: the different-widths cells
+//   answer false where every element compares equal.
 // CHANNEL: the asserts.
 // ARMED: no instrument.
-// WITNESS: today `u8==int false`, and `[4,2,0] == [4,0,0]` across widths `true`.
+// WITNESS: each message names the vectors compared.
 // HOLDS: same-width comparisons (the first function) keep their answers.
 
 fn test_same_widths_compare_by_value() {
@@ -32,7 +28,6 @@ fn test_same_widths_compare_by_value() {
   assert(u == v && !(u != v), "u8 against u8");
 }
 
-// @IGNORE — the defect above: vectors of different element widths compare by bytes.
 fn test_different_widths_compare_by_value() {
   a = 6;
   w = [a & 4, a & 2, a & 1];

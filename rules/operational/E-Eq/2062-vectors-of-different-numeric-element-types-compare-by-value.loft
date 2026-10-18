@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2062 — VECTORS OF DIFFERENT NUMERIC ELEMENT TYPES COMPARE BY VALUE (`@FR-E-Eq`, `@FR-C-Int`,
+// `@FR-C-Num`).  A vector compares by length and then element by element with each element's own
+// `==`; owner ruling 2026-10-18: across element types only where they convert soundly — numbers
+// do (every integer width, `float`, `single`), and nested vectors when their elements do.  The
+// comparison read bytes before, so equal values answered false and some unequal ones true.  Axes
+// moved: three widths, integers against floats, a differing value, a differing length, an empty
+// pair, a call operand bound once, the comparison in a loop, a nested vector.  The refusal for a
+// pair that needs an `as` is the sibling file.
+//
+// @falsified-at: 05d019607 — hand-measured, interpret and native: `u8 [4, 2, 0] == integer
+//   [4, 2, 0]` answers false.
+// CHANNEL: the asserts, under the suite's leak gate (a nested pair is read in place).
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// WITNESS: each message names the vectors compared.
+// HOLDS: same-type vectors keep their content comparison on both trees.
+
+fn wide(n: integer) -> vector<integer> { [n, 2, 0] }
+fn test_numeric_elements_compare_by_value() {
+  a: vector<u8> = [4, 2, 0];
+  b: vector<integer> = [4, 2, 0];
+  c: vector<integer> = [4, 0, 0];
+  d: vector<i32> = [4, 2, 0];
+  e: vector<integer> = [4, 2];
+  f: vector<float> = [4.0, 2.0, 0.0];
+  assert(a == b && b == a && a == d && d == b, "same values, three widths");
+  assert(!(a == c) && a != c && a != e && !(a == e), "a value differs; a length differs");
+  assert(a == f && f == a && a != [4.0, 2.5, 0.0], "integers against floats by value");
+  assert(a == wide(4) && wide(5) != a, "a call operand, bound once");
+  n = 0;
+  for k in 3..6 { if a == wide(k) { n += 1; } }
+  assert(n == 1, "one of 3..6 is equal: {n}");
+  em1: vector<u8> = [];
+  em2: vector<integer> = [];
+  assert(em1 == em2, "two empty vectors are equal");
+}
+fn test_nested_vectors_recurse() {
+  x: vector<vector<u8>> = [[1, 2], [3]];
+  y: vector<vector<integer>> = [[1, 2], [3]];
+  z: vector<vector<integer>> = [[1, 2], [4]];
+  assert(x == y && x != z, "nested by value");
+}
