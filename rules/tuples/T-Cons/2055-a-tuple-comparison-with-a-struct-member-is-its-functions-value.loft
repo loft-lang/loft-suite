@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2055 — A TUPLE COMPARISON WITH A STRUCT MEMBER IS ITS FUNCTION'S VALUE (`@FR-T-Cons`,
+// `@FR-E-Eq`, `@FR-F-Block`).  `==` on two tuples compares element by element, a struct member by
+// content.  As a function's tail, the comparison's block ends in the frees of its member
+// temporaries, and the scope pass took the last of them — a sentinel reset — as the block's value:
+// the interpreter answered `false` for equal tuples (and `false` for `!=` beside it), and native did
+// not compile.  Axes moved: which side holds the literal, a call result, a text and a struct
+// second member, both members structs, `!=`, unequal values, and the comparison bound first.
+//
+// @falsified-at: 7ba3ed473 — hand-measured: the interpreter answers `right false left false` and
+//   native fails rustc E0605 (`()` as `u8`).
+// CHANNEL: the asserts, and the suite's leak gate for the member temporaries.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// WITNESS: each message names the function and its answer.
+// HOLDS: two tuples of locals, and a vector member, answer right on both trees.
+
+struct P { hidden: integer }
+
+fn mk() -> P { P { hidden: 41 } }
+fn lit_right(p: P) -> boolean { (p, 1) == (P { hidden: 41 }, 1) }
+fn lit_left(p: P) -> boolean { (P { hidden: 41 }, 1) == (p, 1) }
+fn call_right(p: P) -> boolean { (p, 1) == (mk(), 1) }
+fn struct_both(p: P) -> boolean { (p, p) == (P { hidden: 41 }, P { hidden: 41 }) }
+fn text_member(p: P) -> boolean { (p, "x") == (P { hidden: 41 }, "x") }
+fn differ(p: P) -> boolean { (p, 1) == (P { hidden: 40 }, 1) }
+fn not_equal(p: P) -> boolean { (p, 1) != (P { hidden: 41 }, 1) }
+fn not_equal_differ(p: P) -> boolean { (p, 1) != (P { hidden: 40 }, 1) }
+
+fn test_equal_tuples_compare_equal() {
+  a = P { hidden: 41 };
+  assert(lit_right(a) && lit_left(a) && call_right(a), "literal right, left, a call");
+  assert(struct_both(a) && text_member(a), "two struct members, a text member");
+}
+
+fn test_the_complement_and_a_difference() {
+  a = P { hidden: 41 };
+  assert(!differ(a) && !not_equal(a) && not_equal_differ(a), "40 differs; != is the complement");
+  n = 0;
+  for k in 39..43 { if (P { hidden: k }, 1) == (a, 1) { n += 1; } }
+  assert(n == 1, "one of 39..43 equals 41 in a loop: {n}");
+}
