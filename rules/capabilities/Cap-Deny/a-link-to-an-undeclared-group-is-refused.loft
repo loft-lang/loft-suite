@@ -1,22 +1,21 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — a `loft --tests` defect: in a file that carries an `@EXPECT_ERROR`, the undeclared-group
-//   refusal is never emitted (the same file without the annotation, `loft --interpret` and
-//   `loft sandbox-check` all emit it), so only the ungranted-write refusal answers and the claim
-//   goes unmatched.  Remove this line when the runner emits it.
-//
 // A LINK TO AN UNDECLARED GROUP IS REFUSED (`@FR-Cap-Deny`, `@FR-Cap-Write`).  Groups are declared
 // (`capability g`), and a `group#right` link naming one that is not — here the misspelt `helth`
 // beside the declared `health` — is a load error, whatever the profile grants.  The diagnostic
-// carries no source position, so it can only be claimed file-wide.
+// carries no source position, so it is claimed file-wide; the write the misspelt link guards is
+// refused beside it (`helth#update` is granted by no profile), and that refusal is claimed too.
 //
-// @falsified-at: none — the runner defect above is open on every build so far.
+// @falsified-at: none — a conformance guard: the refusal held on the tree it landed on.  (Its first
+//   draft read the runner as dropping the refusal; it was consumed by the claim while the WRITE
+//   refusal beside it went unclaimed.)
 // CHANNEL: the expected diagnostic (an admission refusal at load).
 // ARMED: the `[sandbox]` policy in this directory's loft.toml.
 // WITNESS: the refusal names the undeclared group.
-// HOLDS: nothing yet under `loft --tests`; `loft --interpret` and `sandbox-check` refuse the file.
+// HOLDS: `loft --interpret` and `sandbox-check` refuse the file the same way.
 // @EXPECT_ERROR: undeclared capability `helth` — a `group#right` link references it but no matching `capability` is declared
+// @EXPECT_ERROR: sandboxed `deny_undeclared` writes host field `hp`, which needs capability `helth#update`
 
 capability health
 
