@@ -13,11 +13,11 @@
 // before a yield, E0425 (`var_r` not found) when it is read after one.  The interpreter answers
 // every cell as hand-computed.
 //
-// @falsified-at: none — the interpreter answers every cell; the ignored cells are the open
-//   native defect.
-// CHANNEL: the asserts (interpret), the rustc build (native).
+// @falsified-at: 58ea03896 — hand-measured, native: the record-link cells fail rustc (loft#2061);
+//   the interpreter answered every cell.
+// CHANNEL: the asserts on both backends, and the rustc build on native.
 // ARMED: no instrument.
-// WITNESS: native E0596 / E0425 in the generated generator struct.
+// WITNESS: each message names the hand-computed sequence.
 // HOLDS: the scalar control on both backends.
 
 struct Box { n: integer }
@@ -31,7 +31,7 @@ fn test_the_scalar_control() {
 
 fn record_link(b: Box) -> iterator<integer> { r = &b; yield r.n; b.n = 7; yield r.n; r.n = 9; yield b.n; }
 
-// @IGNORE — native: E0425 `var_r` not found (a record link read after a yield).
+// loft#2061 — native once refused this (rustc), the interpreter answered it.
 fn test_a_record_link_across_yields() {
   bx = Box { n: 3 };
   // 3; b.n = 7 read through r; r.n = 9 read through b; the caller sees 9.
@@ -45,7 +45,7 @@ fn makers(b: Box) -> iterator<fn() -> integer> {
   yield fn() -> integer { r.n * 2 };
 }
 
-// @IGNORE — native: E0425 `var_r` not found (a lambda capturing a record link, yielded).
+// loft#2061 — native once refused this (rustc), the interpreter answered it.
 fn test_a_yielded_lambda_keeps_the_link() {
   bx = Box { n: 3 };
   g = makers(bx);

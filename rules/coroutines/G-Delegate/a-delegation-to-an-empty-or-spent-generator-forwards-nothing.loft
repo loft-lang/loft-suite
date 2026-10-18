@@ -11,9 +11,9 @@
 // handle fails in rustc (E0308, `self.sub_1 = Some(self.var_h)`), and on a parameter handle with
 // E0425 (`OpCoroutineRetain` not found).  The interpreter answers both as hand-computed.
 //
-// @falsified-at: none — the call-delegation cells hold on both backends; the ignored handle
-//   cells are the open native defect.
-// CHANNEL: the asserts (interpret), the rustc build (native, ignored cells).
+// @falsified-at: 58ea03896 — hand-measured, native: the held-handle cells fail rustc (loft#2060);
+//   the interpreter answered every cell.
+// CHANNEL: the asserts on both backends, and the rustc build on native.
 // ARMED: no instrument.
 // WITNESS: each message names the hand-computed sequence.
 // HOLDS: the call-delegation cells on both backends, leak-clean.
@@ -42,14 +42,14 @@ fn handle_spent() -> iterator<integer> { h = two(5); a = next(h); b = next(h); y
 fn handle_half() -> iterator<integer> { h = two(5); a = next(h); yield a; yield from h; yield 99; }
 fn from_param(h: iterator<integer>) -> iterator<integer> { yield from h; yield 99; }
 
-// @IGNORE — native: `yield from` a local handle fails in rustc (E0308).
+// loft#2060 — native once refused this (rustc), the interpreter answered it.
 fn test_a_spent_or_half_spent_local_handle() {
   // 5 + 6 = 11, the spent handle forwards nothing, 99; then 5, the rest 6, 99.
   assert(s(handle_spent()) == "11 99 ", "11 99: {s(handle_spent())}");
   assert(s(handle_half()) == "5 6 99 ", "5 6 99: {s(handle_half())}");
 }
 
-// @IGNORE — native: `yield from` a parameter handle fails in rustc (E0425 OpCoroutineRetain).
+// loft#2060 — native once refused this (rustc), the interpreter answered it.
 fn test_a_handle_parameter() {
   h = two(5);
   a = next(h);
