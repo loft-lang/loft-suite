@@ -17,7 +17,8 @@
 //   backends.
 // CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
 // ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run); `LOFT_STRICT_STORES=1` agrees.
-// HOLDS: panic is clean on both backends.  The deviation at the bottom of this file is not run.
+// HOLDS: panic is clean on both backends.  Reading the moved name is refused (loft#2043):
+//   `2043-a-moved-generator-is-not-read.loft`.
 
 fn patrol(id: integer, n: integer) -> iterator<integer> {
   steps = [0, 1, 2, 3, 4, 5, 6, 7];
@@ -132,23 +133,4 @@ fn test_records_holding_moved_generators_one_removed() {
   s = "";
   for t in v { s += "{next(t.g) ?? -1},"; }
   assert(s == "2000,2200," && len(v) == 2, "c10 {s} {len(v)}");
-}
-
-// DEVIATION (reported, not yet filed): (H-Move) says the moved local is SPENT and (H-Spent)
-// that reading it is a compile-time error; for a generator handle the read compiles.  While the
-// holder lives it advances the holder's frame (`a` 100, then `next(v[0])` 101); once the holder
-// releases the frame (`v.remove(0)`) it answers null, as an exhausted generator would — no
-// diagnostic, on both backends, the same under `LOFT_POISON=1` and `LOFT_STRICT_STORES=1`.
-// heap.md's `File` paragraph says "(H-Copy-Refuse) and (H-Spent) reach declared droppables
-// only", which may be the intended scope — the rules disagree with each other here, so this is
-// for the owner.  Not an entry point (no `test_` prefix): it compiles today and stops compiling
-// the day the refusal reaches generators, which is when it moves to a refused cell.
-fn spent_generator_read_after_its_move() -> integer {
-  g = patrol(1, 3);
-  v: vector<iterator<integer>> = [];
-  v += [g];
-  a = next(g) ?? -1;
-  v.remove(0);
-  b = next(g) ?? -1;
-  a * 1000 + b
 }

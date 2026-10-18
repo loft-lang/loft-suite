@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2043 — a moved generator is not read, the field position (`@FR-G-Hold`, `@FR-H-Move`,
+// `@FR-H-Spent`): see `2043-a-moved-generator-is-not-read.loft` for the rule and the append.
+//
+// @falsified-at: d1bff0fb0 — hand-measured, interpret and native: the control compiles this file.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument — the refusal is on by default.
+// WITNESS: the diagnostic names the moved name and the line it moved at.
+// HOLDS: the same read of a moved droppable is refused on both trees.
+// @EXPECT_ERROR: `g` is read after its value moved
+
+fn counter() -> iterator<integer> { for i in 1..100 { yield i; } }
+struct S { g: iterator<integer>, n: integer }
+
+fn main() {
+  s = S { g: counter(), n: 1 };
+  g = counter();
+  s.g = g;
+  println("{next(g)} {s.n}");
+}

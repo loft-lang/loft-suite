@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2043 — A MOVED GENERATOR IS NOT READ (`@FR-G-Hold`, `@FR-H-Move`, `@FR-H-Spent`).  A
+// generator local given to a field, an element or a tuple member MOVES there (G-Hold), so the
+// name is spent and reading it is a compile-time error that names where the value went.  It
+// compiled: `next(g)` drove the frame its holder now owned (1, 2), and once the holder released
+// it (`v.remove(0)`) answered null, silently, on both backends.  One file per position, since a
+// refusal stops the file: this one is the append; the field, literal, tuple and returned
+// literal are the sibling files.  The legal half — a refill, a move on one path only, a view, a
+// parameter's own hold, a call argument — is in
+// `a-generator-moved-into-a-holder-is-released-once-by-it.loft` and the cells beside it.
+//
+// @falsified-at: d1bff0fb0 — hand-measured, interpret and native: the control compiles this file
+//   and prints `1 2` then `null`.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument — the refusal is on by default.
+// WITNESS: the diagnostic names the moved name and the line it moved at.
+// HOLDS: the same read of a moved droppable is refused on both trees.
+// @EXPECT_ERROR: `g` is read after its value moved
+
+fn counter() -> iterator<integer> { for i in 1..100 { yield i; } }
+
+fn main() {
+  g = counter();
+  v: vector<iterator<integer>> = [];
+  v += [g];
+  println("{next(g)} {next(g)}");
+  v.remove(0);
+  println("{next(g)}");
+}
