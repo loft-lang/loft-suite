@@ -1,0 +1,149 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2059 — A LAMBDA GENERATOR IN EVERY POSITION A FUNCTION VALUE TAKES (`@FR-G-Call`, `@FR-G-Hold`,
+// `@FR-L-CapHeap`, `@FR-L-FnAbsent`, `@FR-G-Delegate`).  A call through a `fn(…) -> iterator<T>`
+// value allocates a suspended frame as a named generator call does, binding the arguments and the
+// lambda's closure record.  Axes moved: top level / inside a generator, scalar / heap / text
+// captures, a named generator through a fn-ref, two live handles from one lambda, text and struct
+// yields, a `fn(…)` parameter, a struct field, `yield from` inside the lambda, an early `break`, an
+// ABSENT fn-ref (answers an exhausted handle), a capturing lambda that outlives the function that
+// made it, and a handle that outlives its lambda's rebinding.
+//
+// @falsified-at: bc34c159b — interpret: every lambda cell panics ("OpYield outside active
+//   coroutine"); native: every cell fails in rustc (E0425 `var___closure`, E0308 `()`).
+// CHANNEL: the asserts, under the suite's leak gate.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// WITNESS: each message names the stream it read.
+// HOLDS: named generators and ordinary fn-ref calls keep their answers on both trees.
+
+struct P { a: integer, b: text }
+struct H { g: fn(integer) -> iterator<integer> }
+fn three(n: integer) -> iterator<integer> { yield n; yield n + 1; yield n + 2; }
+fn twice(x: integer) -> iterator<integer> { yield x; yield x * 2; }
+fn outer() -> iterator<integer> {
+  g = fn(x: integer) -> iterator<integer> { yield x; yield x + 1; };
+  for v in g(10) { yield v; }
+  yield 2;
+}
+fn test_a_lambda_generator_at_top_level() {
+  f = fn(x: integer) -> iterator<integer> { yield x; yield x + 1; };
+  r = "";
+  for v in f(10) { r += "{v} "; }
+  assert(r == "10 11 ", "top: {r}");
+}
+fn test_a_lambda_generator_inside_a_generator() {
+  r = "";
+  for v in outer() { r += "{v} "; }
+  assert(r == "10 11 2 ", "nested: {r}");
+}
+fn test_a_capturing_lambda_generator() {
+  base = 100;
+  f = fn(x: integer) -> iterator<integer> { yield base + x; yield base - x; };
+  r = "";
+  for v in f(3) { r += "{v} "; }
+  assert(r == "103 97 ", "capture: {r}");
+}
+fn test_a_named_generator_through_a_fn_ref() {
+  f = twice;
+  r = "";
+  for v in f(7) { r += "{v} "; }
+  assert(r == "7 14 ", "fn-ref: {r}");
+}
+fn test_two_live_handles_from_one_lambda() {
+  f = fn(x: integer) -> iterator<integer> { yield x; yield x + 1; yield x + 2; };
+  a = f(1);
+  b = f(50);
+  s = "{next(a)} {next(b)} {next(a)} {next(b)}";
+  assert(s == "1 50 2 51", "interleaved: {s}");
+}
+fn test_a_text_lambda_generator() {
+  f = fn(t: text) -> iterator<text> { yield "{t}!"; yield "{t}?"; };
+  r = "";
+  for v in f("hi") { r += "{v} "; }
+  assert(r == "hi! hi? ", "text: {r}");
+}
+fn test_an_absent_lambda_generator_yields_nothing() {
+  fs = [fn(x: integer) -> iterator<integer> { yield x; }];
+  g = fs[5];
+  n = 0;
+  for v in g(1) { n += v + 1; }
+  assert(n == 0, "absent: {n}");
+  r = 0;
+  for v in fs[0](41) { r += v + 1; }
+  assert(r == 42, "present: {r}");
+}
+fn run(g: fn(integer) -> iterator<integer>, at: integer) -> text {
+  r = "";
+  for v in g(at) { r += "{v} "; }
+  r
+}
+fn mk_in(k: integer) -> iterator<integer> {
+  base = [k, k * 10, k * 100];
+  f = fn(m: integer) -> iterator<integer> { for b in base { yield b + m; } };
+  for v in f(1) { yield v; }
+}
+fn test_a_lambda_generator_as_a_parameter() {
+  r = run(fn(x: integer) -> iterator<integer> { yield x; yield -x; }, 6);
+  assert(r == "6 -6 ", "param: {r}");
+}
+fn test_a_lambda_generator_yields_structs() {
+  f = fn(n: integer) -> iterator<P> { yield P { a: n, b: "one" }; yield P { a: n + 1, b: "two" }; };
+  r = "";
+  for p in f(4) { r += "{p.a}{p.b} "; }
+  assert(r == "4one 5two ", "structs: {r}");
+}
+fn test_a_heap_capture_lives_with_the_handle() {
+  r = "";
+  for v in mk_in(2) { r += "{v} "; }
+  assert(r == "3 21 201 ", "heap capture: {r}");
+}
+fn test_yield_from_inside_a_lambda() {
+  f = fn(n: integer) -> iterator<integer> { yield 0; yield from three(n); yield 99; };
+  r = "";
+  for v in f(5) { r += "{v} "; }
+  assert(r == "0 5 6 7 99 ", "yield from: {r}");
+}
+fn test_a_lambda_generator_in_a_struct_field() {
+  h = H { g: fn(x: integer) -> iterator<integer> { yield x * 3; yield x * 4; } };
+  r = "";
+  for v in h.g(2) { r += "{v} "; }
+  assert(r == "6 8 ", "field: {r}");
+}
+fn test_breaking_out_of_a_lambda_generator() {
+  f = fn(x: integer) -> iterator<text> { yield "a{x}"; yield "b{x}"; yield "c{x}"; };
+  r = "";
+  for v in f(1) { if v == "b1" { break; } r += v; }
+  assert(r == "a1", "break: {r}");
+  n = 0;
+  for v in f(2) { n += len(v); }
+  assert(n == 6, "after break: {n}");
+}
+fn mk(k: integer) -> fn(integer) -> iterator<integer> {
+  base = [k, k * 10, k * 100];
+  fn(m: integer) -> iterator<integer> { for b in base { yield b + m; } }
+}
+fn mkt(t: text) -> fn(integer) -> iterator<text> {
+  tag = "<{t}>";
+  fn(n: integer) -> iterator<text> { yield "{tag}{n}"; yield "{tag}{n + 1}"; }
+}
+fn test_a_returned_lambda_handle_keeps_its_capture() {
+  r = "";
+  g = mk(2);
+  for v in g(1) { r += "{v} "; }
+  assert(r == "3 21 201 ", "escaped heap capture: {r}");
+}
+fn test_a_returned_lambda_handle_keeps_its_text_capture() {
+  r = "";
+  g = mkt("q");
+  for v in g(7) { r += "{v} "; }
+  assert(r == "<q>7 <q>8 ", "escaped text capture: {r}");
+}
+fn test_a_stored_handle_after_its_lambda_is_rebound() {
+  big = [1, 2, 3];
+  f = fn(m: integer) -> iterator<integer> { for b in big { yield b * m; } };
+  h = f(5);
+  f = fn(m: integer) -> iterator<integer> { yield m; };
+  s = "{next(h)} {next(h)} {next(h)}";
+  assert(s == "5 10 15", "rebound: {s}");
+}
