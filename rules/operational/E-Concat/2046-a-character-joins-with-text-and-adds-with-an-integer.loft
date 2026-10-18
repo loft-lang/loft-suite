@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2046 — A CHARACTER JOINS WITH TEXT AND ADDS WITH AN INTEGER (`@FR-E-Concat`, `@FR-E-Op`,
+// `@FR-N-Prop`).  `+` joins when the other side is text or a character, and with an integer it is
+// arithmetic on the code point on EITHER side.  It used to answer by side: `'a' + 1` joined into
+// "a1" while `1 + 'a'` added to 98.  Axes moved: the operand order, the right operand's kind (a
+// character, a text, an integer, a narrow integer), a chain that has joined against one that has
+// added, a nullable character, `+=` into a text, a loop over a text's characters.
+//
+// @falsified-at: 2cf8ce6ff — hand-measured, interpret and native: `'a' + 1` is "a1", so the first
+//   cell's `x3 == 98` fails.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the value that moved.
+// HOLDS: the joins (`ab`, `acd`, `ab1`, `xa1`, `xa`) and `1 + 'a'` are the same on both trees.
+
+fn nc(z: boolean) -> character? { if z { null } else { 'a' } }
+fn test_the_cells() {
+  a = 'a';
+  x1 = a + 'b'; x2 = a + "cd"; x3 = a + 1; x4 = 1 + a; x5 = a - 'b';
+  assert(x1 == "ab" && x2 == "acd" && x3 == 98 && x4 == 98 && x5 == -1, "{x1} {x2} {x3} {x4} {x5}");
+  n: u8 = 2;
+  assert(a + n == 99, "a narrow integer: {a + n}");
+  assert((a + 1) as character == 'b', "the next letter");
+  assert(a + 1 + 2 == 100 && a + 'b' + 1 == "ab1" && "x" + a + 1 == "xa1", "chains");
+  assert(((nc(true) + 1) ?? -1) == -1 && ((nc(false) + 1) ?? -1) == 98, "a nullable character");
+  t = "x"; t += a; assert(t == "xa", "text += character: {t}");
+  s = 0; for c in "abc" { s += c + 0; }
+  assert(s == 97 + 98 + 99, "a loop over text: {s}");
+}

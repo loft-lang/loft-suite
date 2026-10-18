@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2046 — a character `+` an operand that is neither text, a character nor an integer is
+// refused (`@FR-E-Concat`), naming interpolation as the spelling that puts the two side by side.
+// It used to join into "a1.5".
+//
+// @falsified-at: 2cf8ce6ff — hand-measured, interpret and native: the control compiles this file
+//   and prints "a1.5".
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the operand's type.
+// HOLDS: `"{c}{x}"` prints "a1.5" on both trees.
+// @EXPECT_ERROR: `+` joins a character only with text or another character
+
+fn main() {
+  c = 'a';
+  x = c + 1.5;
+  println("{x}");
+}
