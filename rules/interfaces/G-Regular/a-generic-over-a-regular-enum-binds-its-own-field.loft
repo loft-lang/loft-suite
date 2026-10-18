@@ -8,18 +8,13 @@
 // it to — its fields, its variants" (`G-Type`), so `match l { Cons { t } => … }` and `if l is
 // Cons { t }` bind the variant's `t`.  Hand-computed: the list below has two cells.
 //
-// ⚠ DEFECT (reported by the rule walk, 2026-10-18): both spellings are refused on both
-// backends with "variant Cons has no field 't'" (then "Unknown variable 't'").  Holding any
-// one axis fixed passes: a CONCRETE `fn f(l: Lst<text>)` binds `t`; a generic enum whose
-// variant holds `vector<T>` (not itself) binds it; a regular generic STRUCT `Tree<T>` reads
-// `kids`.  Only the self-naming field of an open enum instance is missing.
+// loft#2058: the template's own `t: vector<Lst<T>>` minted the open instance `Lst<T>` before
+// its `Cons` variant had `t`, so inside a generic both spellings were refused on both backends.
 //
-// @IGNORE — the defect above: an open regular enum instance has no self-naming field.
-// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
-//   the receipt the fix must turn green.
+// @falsified-at: 38a114cb9 — hand-measured, interpret and native: "variant Cons has no field 't'".
 // CHANNEL: the asserts (today: a compile refusal).
 // ARMED: no instrument.
-// WITNESS: today "variant Cons has no field 't'".
+// WITNESS: each message names the count read.
 // HOLDS: the concrete spelling (`a-template-names-itself-at-its-own-variables.loft`).
 
 enum Lst<T> { Nil, Cons { h: T, t: vector<Lst<T>> } }

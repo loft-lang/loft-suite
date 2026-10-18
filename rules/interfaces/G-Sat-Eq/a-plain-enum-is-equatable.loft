@@ -6,18 +6,14 @@
 // variant, as `a == Col.Red` does at a concrete site.  So `same(Col.Red, Col.Red)` is true and
 // `same(Col.Red, Col.Green)` false, and a `Col?` bound at the same generic too.
 //
-// ⚠ DEFECT (reported by the rule walk, 2026-10-18): a plain enum at `<T: Equatable>` is refused
-// on both backends: "'Col' does not satisfy interface 'Equatable': it needs `OpEq`, which only
-// the built-in types define" — and the same for a `Col?`.  Holding one axis fixed passes: a
-// struct-enum, a `vector<Col>`, and a struct with a `Col` field are all accepted and compare
-// right.  The file is ignored as a whole because the refusal stops it compiling.
+// loft#2057: a plain enum at `<T: Equatable>` was refused — `content_comparable` admitted an
+// enum only when it is a struct-enum.
 //
-// @IGNORE — the defect above: a plain enum does not satisfy Equatable.
-// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
-//   the receipt the fix must turn green.
+// @falsified-at: 38a114cb9 — hand-measured, interpret and native: "'Col' does not satisfy
+//   interface 'Equatable'".
 // CHANNEL: the asserts (today: a compile refusal).
 // ARMED: no instrument.
-// WITNESS: today "'Col' does not satisfy interface 'Equatable'".
+// WITNESS: each message names the comparison's answer.
 // HOLDS: the struct-enum and vector cells of `an-equatable-bound-compares-content-in-the-monomorph`.
 
 enum Col { Red, Green }
