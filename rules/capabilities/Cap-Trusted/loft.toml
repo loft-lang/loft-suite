@@ -1,0 +1,8 @@
+# The sandbox policy for the cells beside it (formal/capabilities.md).  `loft --tests` reads the
+# nearest loft.toml above a cell, so every cell in this directory runs under these designations.
+[sandbox]
+leaf = ["fn:leaf_entry", "fn:leaf_direct"]
+
+[profile.leaf]
+allow_libs = ["code"]
+allow = ["vault#read"]

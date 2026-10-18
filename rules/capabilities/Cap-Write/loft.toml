@@ -1,0 +1,21 @@
+# The sandbox policy for the cells beside it (formal/capabilities.md § Cap-Write).
+[sandbox]
+upd = ["fn:write_update", "fn:write_update_prefix"]
+app = ["fn:write_append", "fn:write_assign_append_only", "fn:write_element_append_only", "fn:write_scalar_plus_append"]
+none = ["fn:write_update_bare", "fn:write_append_bare"]
+updonly = ["fn:write_append_with_update"]
+
+[profile.upd]
+allow_libs = ["code"]
+allow = ["stats#update"]
+
+[profile.app]
+allow_libs = ["code"]
+allow = ["bag#append"]
+
+[profile.none]
+allow_libs = ["code"]
+
+[profile.updonly]
+allow_libs = ["code"]
+allow = ["bag#update"]

@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL OUTSIDE THE GRANTS IS REFUSED (`@FR-Cap-Call`, `@FR-Cap-Deny`).  The refused twins of
+// `a-granted-gate-or-an-allowed-library-admits-the-call.loft`: the same calls under a profile
+// that grants nothing (direct, inside a lambda, through a function value, and the stdlib's
+// `mtime` with `files` not allowed); and the three ways a grant can fail to cover a gate — a
+// NARROWER group (`game.entity#read` does not grant `game#read`), a STRING prefix that is not a
+// segment prefix (`gam#read` does not grant `game#read`), and another RIGHT (`game#read` does
+// not grant `game.entity#update`).
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names the gate the call needs.
+// HOLDS: every refusal on both backends.
+
+capability vault
+capability game
+capability game.entity
+capability gam
+
+fn peek(x: integer) -> integer vault#read { x + 100 }
+fn top(x: integer) -> integer game#read { x + 300 }
+fn poke(x: integer) -> integer game.entity#update { x + 400 }
+
+// @EXPECT_ERROR: sandboxed `call_bare` reaches `peek`, which needs capability `vault#read` — not granted
+fn call_bare() -> integer { peek(5) }
+
+// @EXPECT_ERROR: reaches `peek`, which needs capability `vault#read` — not granted
+fn call_lambda_bare() -> integer { v = [1, 2].map(|y| { peek(y) }); v[0] + v[1] }
+
+// @EXPECT_ERROR: sandboxed `call_fnref_bare` reaches `peek`, which needs capability `vault#read` — not granted
+fn call_fnref_bare() -> integer { g = peek; g(7) }
+
+// @EXPECT_ERROR: sandboxed `call_mtime_bare` reaches `mtime`, which needs capability `fs#read` — not granted
+fn call_mtime_bare() -> boolean { mtime("no_such_file_cap_call") > 0 }
+
+// @EXPECT_ERROR: sandboxed `prefix_child` reaches `top`, which needs capability `game#read` — not granted
+fn prefix_child() -> integer { top(1) }
+
+// @EXPECT_ERROR: sandboxed `prefix_string` reaches `top`, which needs capability `game#read` — not granted
+fn prefix_string() -> integer { top(2) }
+
+// @EXPECT_ERROR: sandboxed `prefix_wrong_right` reaches `poke`, which needs capability `game.entity#update` — not granted
+fn prefix_wrong_right() -> integer { poke(3) }

@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// OVERRIDING A LOCKED PARAMETER NEEDS ITS LOCK (`@FR-Cap-Set`, `@FR-Cap-Call`, `@FR-Cap-Deny`).
+// The refused twins of `the-default-or-a-granted-lock-admits-the-argument.loft`: a `count` other
+// than the default with the call granted and the lock not; and the lock granted without the call's
+// gate — `(Cap-Set)` judges the arguments of a call `(Cap-Call)` admits, it does not admit the call.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names the lock or the gate.
+// HOLDS: every refusal on both backends.
+
+capability world
+capability spawn.count
+
+fn spawn(kind: text, count: integer = 1 spawn.count#default) -> integer world#append { len(kind) * 10 + count }
+
+// @EXPECT_ERROR: sandboxed `set_override` overrides a parameter the host pinned with `spawn.count#default` — not granted
+fn set_override() -> integer { spawn("gob", 4) }
+
+// @EXPECT_ERROR: sandboxed `set_lock_only` reaches `spawn`, which needs capability `world#append` — not granted
+fn set_lock_only() -> integer { spawn("gob", 4) }

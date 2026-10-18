@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CURSOR RECORD CARRIES THE POSITION A GENERATOR LEAVES (`@FR-G-NoRefParam`, `@FR-G-Call`,
+// `@FR-G-Next`, `@FR-F-ParamHeap`).  The rule's cure for a refused `&`: the generator takes the
+// record, and a write to its field is visible to the caller after every advance (the record is
+// shared, F-ParamHeap) — including after the caller drains the rest with a `for`.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the word and the position the caller read.
+// HOLDS: every cell on both backends, leak-clean.
+
+struct Cursor { src: text, pos: integer }
+
+fn words(c: Cursor) -> iterator<text> {
+  while c.pos < len(c.src) {
+    start = c.pos;
+    while c.pos < len(c.src) and c.src[c.pos] != ' ' { c.pos += 1; }
+    w = c.src[start..c.pos];
+    c.pos += 1;
+    yield w;
+  }
+}
+
+fn test_the_caller_reads_the_position_after_each_advance() {
+  c = Cursor { src: "ab cde f", pos: 0 };
+  g = words(c);
+  w1 = next(g);
+  p1 = c.pos;
+  w2 = next(g);
+  p2 = c.pos;
+  // "ab" ends at 2, the space moves it to 3; "cde" ends at 6, then 7.
+  assert(w1 == "ab" && p1 == 3 && w2 == "cde" && p2 == 7, "ab 3 cde 7: {w1} {p1} {w2} {p2}");
+  rest = "";
+  for w in g { rest += w; }
+  // "f" ends at 8 = len, the space step makes it 9, and the loop ends.
+  assert(rest == "f" && c.pos == 9, "f 9: {rest} {c.pos}");
+}

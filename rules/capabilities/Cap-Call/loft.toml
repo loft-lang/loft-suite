@@ -1,0 +1,32 @@
+# The sandbox policy for the cells beside it (formal/capabilities.md § Cap-Call): one profile per
+# grant shape, each designating the functions that probe it.  Every profile allows the stdlib's
+# `code` library, which any arithmetic reaches (SANDBOX.md § allow_libs).
+[sandbox]
+vault = ["fn:call_granted", "fn:call_lambda_granted", "fn:call_fnref_granted"]
+bare = ["fn:call_bare", "fn:call_lambda_bare", "fn:call_fnref_bare", "fn:call_mtime_bare"]
+parent = ["fn:prefix_parent", "fn:prefix_wrong_right"]
+child = ["fn:prefix_child"]
+near = ["fn:prefix_string"]
+files = ["fn:lib_allowed"]
+
+[profile.vault]
+allow_libs = ["code"]
+allow = ["vault#read"]
+
+[profile.bare]
+allow_libs = ["code"]
+
+[profile.parent]
+allow_libs = ["code"]
+allow = ["game#read"]
+
+[profile.child]
+allow_libs = ["code"]
+allow = ["game.entity#read"]
+
+[profile.near]
+allow_libs = ["code"]
+allow = ["gam#read"]
+
+[profile.files]
+allow_libs = ["code", "files"]

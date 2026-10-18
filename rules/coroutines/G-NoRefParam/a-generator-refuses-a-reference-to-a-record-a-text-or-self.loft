@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERATOR REFUSES A REFERENCE TO A RECORD, A TEXT OR ITS RECEIVER (`@FR-G-NoRefParam`,
+// `@FR-G-Call`, `@FR-F-ParamRef`).  The attic program 1680 refuses a `&vector` and a `&integer`;
+// these are the other kinds a `&` names — a record, a text, and a `self: &T` method receiver,
+// which is the spelling a cursor method reaches for first.  Each is refused at its definition.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics.
+// ARMED: no instrument — the refusal is on by default.
+// WITNESS: each diagnostic names the `&` parameter.
+// HOLDS: every refusal on both backends.
+
+struct Cur { pos: integer }
+
+// @EXPECT_ERROR: a generator cannot take the `&` parameter `c`
+fn by_ref_record(c: &Cur) -> iterator<integer> { c.pos += 1; yield c.pos; }
+
+// @EXPECT_ERROR: a generator cannot take the `&` parameter `t`
+fn by_ref_text(t: &text) -> iterator<integer> { t += "!"; yield len(t); }
+
+// @EXPECT_ERROR: a generator cannot take the `&` parameter `self`
+fn steps(self: &Cur) -> iterator<integer> { self.pos += 1; yield self.pos; }

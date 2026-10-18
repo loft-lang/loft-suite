@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WRITE OUTSIDE ITS RIGHT IS REFUSED (`@FR-Cap-Write`, `@FR-Cap-Deny`).  The refused twins of
+// `a-granted-right-admits-its-write.loft`: an update and an append with no grant; an append-only
+// field assigned with `=` or written at an element even though `bag#append` is granted; an
+// append under `bag#update` alone (the right must be EQUAL); a scalar `+=` under an append
+// grant, since a scalar `+=` is an update; and an `#append` link on a scalar field, refused
+// where it is declared (`r = append ⟹ m : collection`).
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals and the declaration error at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names the field's grant, or the raw write.
+// HOLDS: every refusal on both backends.
+
+capability stats
+capability bag
+
+struct M { hp: integer stats#update, sc: integer bag#update }
+struct I { items: vector<integer> bag#append }
+
+// @EXPECT_ERROR: sandboxed `write_update_bare` writes host field `hp`, which needs capability `stats#update` — not granted
+fn write_update_bare(m: M) { m.hp = 7; }
+
+// @EXPECT_ERROR: sandboxed `write_append_bare` appends to host field `items`, which needs capability `bag#append` — not granted
+fn write_append_bare(i: I) { i.items += [3]; }
+
+// @EXPECT_ERROR: performs a raw write to heap data
+fn write_assign_append_only(i: I) { i.items = [5]; }
+
+// @EXPECT_ERROR: performs a raw write to heap data
+fn write_element_append_only(i: I) { i.items[0] = 5; }
+
+// @EXPECT_ERROR: sandboxed `write_append_with_update` appends to host field `items`, which needs capability `bag#append` — not granted
+fn write_append_with_update(i: I) { i.items += [4]; }
+
+// @EXPECT_ERROR: sandboxed `write_scalar_plus_append` writes host field `sc`, which needs capability `bag#update` — not granted
+fn write_scalar_plus_append(m: M) { m.sc += 1; }
+
+struct Bad { n: integer bag#append }
+// @EXPECT_ERROR: `bag#append` on `n`: an append grows a collection
+fn holds_bad() -> integer { b = Bad { n: 1 }; b.n }

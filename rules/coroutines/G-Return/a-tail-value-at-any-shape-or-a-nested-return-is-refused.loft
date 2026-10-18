@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TAIL VALUE AT ANY SHAPE, OR A NESTED RETURN, IS REFUSED (`@FR-G-Return`).  The rule is asked
+// at both spellings — the `return` keyword and a body whose tail is a value.  `L-FnAbsent/102`
+// pins a plain call tail, a valued `return` and a bare `return` in a loop; these are the other
+// tail shapes (a literal, a `match`, a block, a valued `if`) and a bare `return` two loops deep.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics.
+// ARMED: no instrument — the refusal is on by default.
+// WITNESS: each diagnostic is the tail-value or the no-return message.
+// HOLDS: every refusal on both backends.
+
+struct Mark { m: integer }
+
+// @EXPECT_ERROR: a generator's body produces values only through `yield`
+fn tail_literal() -> iterator<integer> { yield 1; 5 }
+
+// @EXPECT_ERROR: a generator's body produces values only through `yield`
+fn tail_match(k: integer) -> iterator<integer> { yield 0; match k { 1 => 10, _ => 20 } }
+
+// @EXPECT_ERROR: a generator's body produces values only through `yield`
+fn tail_block() -> iterator<integer> { yield 0; { 7 } }
+
+// @EXPECT_ERROR: a generator's body produces values only through `yield`
+fn tail_if_value(c: boolean) -> iterator<integer> { yield 0; if c { 1 } else { 2 } }
+
+// @EXPECT_ERROR: a generator has no `return` — use `break` to end it early
+fn nested_return() -> iterator<integer> {
+  for i in 0..3 { for j in 0..3 { if j == 1 { return; } yield i * 10 + j; } }
+}

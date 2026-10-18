@@ -1,0 +1,12 @@
+# The sandbox policy for the cells beside it (formal/capabilities.md § Cap-Read).  `P.hidden` is
+# linked `secret#read`; only the `secret` profile grants it.
+[sandbox]
+none = ["fn:read_free", "fn:read_built", "fn:read_hidden_bare", "fn:read_render", "fn:read_json", "fn:read_match", "fn:read_copy", "fn:read_for", "fn:read_outer_render", "fn:read_eq_oracle", "fn:read_ne", "fn:read_vec_eq", "fn:read_nested_eq"]
+secret = ["fn:read_hidden_granted", "fn:read_render_granted"]
+
+[profile.none]
+allow_libs = ["code"]
+
+[profile.secret]
+allow_libs = ["code"]
+allow = ["secret#read"]

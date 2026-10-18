@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DELEGATED FRAME KEEPS ITS HELPERS AND LOCALS (`@FR-G-YieldDepth`, `@FR-G-Delegate`,
+// `@FR-G-Yield`).  The deeper yield the stackful frame buys is `yield from`: three generators deep,
+// each level's locals and the non-generator helper it calls between yields survive every
+// suspension, and a yield whose value is a call with several helper-computed arguments resumes
+// with each argument as it was.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the hand-computed sequence.
+// HOLDS: every cell on both backends, leak-clean.
+
+fn scale(x: integer) -> integer { x * 10 }
+fn inner(k: integer) -> iterator<integer> { acc = k; for i in 0..2 { acc = acc + scale(i + 1); yield acc; } }
+fn middle(k: integer) -> iterator<integer> { base = scale(k); yield base; yield from inner(base); yield base + 1; }
+fn outer() -> iterator<integer> { tag = 1000; yield tag; yield from middle(2); yield from middle(3); yield tag + 1; }
+fn add3(a: integer, b: integer, c: integer) -> integer { a * 100 + b * 10 + c }
+fn arg_yield() -> iterator<integer> { a = 1; yield add3(a, scale(a), 3); a = 2; yield add3(a, 0, scale(a)); }
+fn s(g: iterator<integer>) -> text { r = ""; for v in g { r += "{v} "; } r }
+
+fn test_three_levels_of_delegation() {
+  // 1000; middle(2): base 20, inner(20): 20+10=30, 30+20=50, then 21;
+  // middle(3): 30, inner(30): 40, 60, then 31; 1001.
+  assert(s(outer()) == "1000 20 30 50 21 30 40 60 31 1001 ", "the sequence: {s(outer())}");
+}
+
+fn test_a_yielded_call_with_helper_arguments() {
+  // add3(1, 10, 3) = 100 + 100 + 3; add3(2, 0, 20) = 200 + 0 + 20.
+  assert(s(arg_yield()) == "203 220 ", "203 220: {s(arg_yield())}");
+}

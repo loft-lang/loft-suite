@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A YIELDED LAMBDA KEEPS ITS COPY OF A CAPTURED VECTOR (`@FR-G-Own`, `@FR-L-CapOwn`).  Every heap
+// value a yielded lambda captures is copied into a store the closure record owns, at the yield:
+// the generator's later growth and element write of the local do not reach the first lambda,
+// while the second lambda, yielded after them, copies the changed vector.  Read whether the
+// consumer calls them during the drain or holds both and calls them after.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every cell
+//   answered as the rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts, and the leak gate for the closure records' stores.
+// ARMED: no instrument.
+// WITNESS: each message names the two hand-computed answers.
+// HOLDS: every cell on both backends, leak-clean.
+
+fn makers() -> iterator<fn() -> integer> {
+  v = [1, 2];
+  yield fn() -> integer { len(v) * 10 + v[0] };
+  v += [3];
+  v[0] = 7;
+  yield fn() -> integer { len(v) * 10 + v[0] };
+  v += [4];
+}
+
+fn test_called_during_the_drain() {
+  r = "";
+  for f in makers() { r += "{f()} "; }
+  // [1, 2] -> 2 * 10 + 1 = 21; [7, 2, 3] -> 3 * 10 + 7 = 37.
+  assert(r == "21 37 ", "21 37: {r}");
+}
+
+fn test_held_and_called_after_the_generator_moved_on() {
+  g = makers();
+  a = next(g);
+  b = next(g);
+  // `a` was copied before `v += [3]; v[0] = 7` ran, so it still answers 21.
+  assert(a() == 21 && b() == 37, "21 37: {a()} {b()}");
+}

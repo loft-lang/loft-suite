@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GRANTED GATE OR AN ALLOWED LIBRARY ADMITS THE CALL (`@FR-Cap-Call`, `@FR-Cap-Trusted`).
+// `g#r ∈ P` holds when a grant has the same right and a group that is a dotted-segment prefix of
+// the gate's: `vault#read` admits a `vault#read` call, made directly, from inside a lambda the
+// designated function builds (the lambda is judged as sandboxed code), and through a function
+// value; `game#read` admits a `game.entity#read` call.  `lib(f) ∈ P.libs` is the other
+// disjunct: with `files` allowed wholesale, `mtime` needs no `fs#read` token.  The refused
+// twins are in `a-call-outside-the-grants-is-refused.loft`.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: a refusal would name the gate the call needs.
+// HOLDS: every cell on both backends.
+
+capability vault
+capability game
+capability game.entity
+
+fn peek(x: integer) -> integer vault#read { x + 100 }
+fn look(x: integer) -> integer game.entity#read { x + 200 }
+
+fn call_granted() -> integer { peek(5) }
+fn call_lambda_granted() -> integer { v = [1, 2].map(|y| { peek(y) }); v[0] + v[1] }
+fn call_fnref_granted() -> integer { g = peek; g(7) }
+fn prefix_parent() -> integer { look(5) }
+fn lib_allowed() -> boolean { mtime("no_such_file_cap_call") > 0 }
+
+fn test_a_granted_gate() {
+  // 105; 101 + 102; 107.
+  assert(call_granted() == 105 && call_lambda_granted() == 203 && call_fnref_granted() == 107,
+    "105 203 107: {call_granted()} {call_lambda_granted()} {call_fnref_granted()}");
+}
+
+fn test_a_grant_for_the_enclosing_group() {
+  assert(prefix_parent() == 205, "205: {prefix_parent()}");
+}
+
+fn test_a_library_allowed_wholesale() {
+  assert(!lib_allowed(), "a missing file has no positive mtime");
+}

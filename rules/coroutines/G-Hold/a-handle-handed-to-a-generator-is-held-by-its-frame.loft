@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HANDLE HANDED TO A GENERATOR IS HELD BY ITS FRAME (`@FR-G-Hold`, `@FR-G-Call`, `@FR-G-Next`).
+// `(G-Call)` binds a generator's arguments into a frame that outlives the call, and `(G-Hold)`
+// says that frame holds every handle it is given until its end or its abandonment.  An inline
+// handle is handed over; a local one is shared — the caller and the outer frame advance the SAME
+// generator, interleaved — and each holder releases its own hold once, whether the outer frame
+// runs to its end, is abandoned after one value, or is rebuilt on each pass of a loop.  The leak
+// gate checks every frame was released.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every cell
+//   answered as the rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts, and the leak gate.
+// ARMED: LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
+// WITNESS: each message names the hand-computed values; a frame left behind fails as a leak.
+// HOLDS: every cell on both backends, leak-clean.
+
+fn from(k: integer) -> iterator<integer> { for i in k..k + 100 { yield i; } }
+fn wrap(g: iterator<integer>) -> iterator<integer> { yield next(g) * 10; yield next(g) * 10; }
+
+fn test_an_inline_handle_is_handed_over() {
+  w = wrap(from(5));
+  a = next(w);
+  b = next(w);
+  c = next(w);
+  assert(a == 50 && b == 60 && c == null && exhausted(w), "50 60 done: {a} {b}");
+}
+
+fn test_a_local_handle_is_shared_with_the_frame() {
+  h = from(1);
+  w = wrap(h);
+  a = next(h);
+  b = next(w);
+  c = next(h);
+  d = next(w);
+  // One generator, advanced in turn: 1 by the caller, 2 * 10 by the frame, 3, then 4 * 10.
+  assert(a == 1 && b == 20 && c == 3 && d == 40, "1 20 3 40: {a} {b} {c} {d}");
+}
+
+fn test_an_abandoned_frame_releases_its_handle() {
+  h = from(1);
+  w = wrap(h);
+  b = next(w);
+  assert(b == 10, "10: {b}");
+}
+
+fn test_a_frame_rebuilt_on_each_pass() {
+  t = 0;
+  for i in 0..3 {
+    w = wrap(from(i));
+    t += next(w) ?? 0;
+  }
+  // 0 + 10 + 20.
+  assert(t == 30, "30: {t}");
+}

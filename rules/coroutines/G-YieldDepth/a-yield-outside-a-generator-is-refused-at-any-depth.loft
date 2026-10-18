@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A YIELD OUTSIDE A GENERATOR IS REFUSED AT ANY DEPTH (`@FR-G-YieldDepth`, `@FR-G-Yield`).  The
+// frame is stackful, but that is not a licence to write `yield` in a function that is not a
+// generator: a plain helper the generator calls, a void lambda the generator builds, and a lambda
+// handed to `map` inside a generator each have no `iterator<T>` to produce into.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics.
+// ARMED: no instrument — the refusal is on by default.
+// WITNESS: each diagnostic is the "only allowed inside generator functions" message.
+// HOLDS: every refusal on both backends.
+
+struct Mark { m: integer }
+
+// @EXPECT_ERROR: yield is only allowed inside generator functions (return type must be iterator<T>)
+fn helper(x: integer) { yield x; }
+fn calls_helper() -> iterator<integer> { helper(1); yield 2; }
+
+// @EXPECT_ERROR: yield is only allowed inside generator functions (return type must be iterator<T>)
+fn void_lambda() -> iterator<integer> { f = fn(x: integer) { yield x; }; f(1); yield 2; }
+
+// @EXPECT_ERROR: yield is only allowed inside generator functions (return type must be iterator<T>)
+fn map_lambda() -> iterator<integer> { v = [1, 2].map(|x| { yield x; x }); yield len(v); }

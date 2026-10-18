@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARAMETER IS HOST DATA (`@FR-Cap-Own`, `@FR-Cap-Write`, `@FR-Cap-Deny`).  The twin of
+// `a-value-the-script-built-is-written-freely.loft`, under the same grant-less profile: the
+// same field write on a PARAMETER, an append to a parameter's vector field, and a write through a
+// `&` alias of a parameter are host writes, and each is refused at load.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml (no capability granted).
+// WITNESS: each refusal names the field's grant or the raw write.
+// HOLDS: every refusal on both backends.
+
+capability stats
+
+struct M { hp: integer stats#update, items: vector<integer> }
+
+// @EXPECT_ERROR: sandboxed `own_param_write` writes host field `hp`, which needs capability `stats#update`
+fn own_param_write(m: M) { m.hp = 5; }
+
+// @EXPECT_ERROR: performs a raw write to heap data
+fn own_param_append(m: M) { m.items += [3]; }
+
+// @EXPECT_ERROR: performs a raw write to heap data
+fn own_alias_write(v: vector<integer>) { r = &v; r[0] = 9; }

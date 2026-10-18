@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DESIGNATED HELPER IS JUDGED AS SANDBOXED CODE (`@FR-Cap-Deny`, `@FR-Cap-Own`).  The admitted
+// twin of `a-construct-no-rule-admits-is-refused-at-load.loft`'s helper cell: when the helper is
+// designated too, the call is no longer a reach into the host — the admission walk descends into
+// the helper and judges its body, which here touches only values it owns.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: a refusal would name `deny_designated_helper` as an undesignated helper.
+// HOLDS: every cell on both backends.
+
+fn deny_designated_helper(x: integer) -> integer { x * 3 }
+fn deny_designated_pair() -> integer { deny_designated_helper(4) + 1 }
+
+fn test_a_designated_helper_is_descended() {
+  assert(deny_designated_pair() == 13, "4 * 3 + 1: {deny_designated_pair()}");
+}

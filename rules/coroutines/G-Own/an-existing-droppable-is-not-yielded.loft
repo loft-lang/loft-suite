@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN EXISTING DROPPABLE IS NOT YIELDED (`@FR-G-Own`, `@FR-H-Copy-Refuse`).  `yield e` of an
+// existing value places a copy, and a type with a drop hook cannot be copied, so yielding a local
+// of one is refused at compile time.  The twin, `a-fresh-droppable-is-handed-over.loft`, yields
+// one built at the yield, which is handed over and compiles.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every cell
+//   answered as the rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument — the refusal is on by default.
+// WITNESS: the diagnostic names the type and the cure (a value built at the yield).
+// HOLDS: the refusal on both backends.
+
+struct Dh { id: integer }
+fn OpDrop(self: Dh) { }
+
+// @EXPECT_ERROR: cannot yield an existing `Dh` here
+fn keeps() -> iterator<Dh> { d = Dh { id: 1 }; yield d; d.id = 2; }

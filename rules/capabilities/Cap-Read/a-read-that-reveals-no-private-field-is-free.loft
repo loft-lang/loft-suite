@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A READ THAT REVEALS NO PRIVATE FIELD IS FREE (`@FR-Cap-Read`, `@FR-Cap-Own`).  Reading a host
+// field is allow-by-default: an unlinked field of a parameter reads with no grant.  A field linked
+// `secret#read` reads when the grant is held — field by field and in a whole-value render — and
+// on a value the function BUILT it reads with no grant, since that value is the script's own.
+// The refused twins are in `a-private-field-is-refused-at-every-read.loft`.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: a refusal would name `secret#read`.
+// HOLDS: every cell on both backends.
+
+capability secret
+
+struct P { name: text, hidden: integer secret#read }
+
+fn read_free(p: P) -> text { "{p.name}!" }
+fn read_built() -> integer { q = P { name: "ab", hidden: 41 }; q.hidden + 1 }
+fn read_hidden_granted(p: P) -> integer { p.hidden + 1 }
+fn read_render_granted(p: P) -> integer { len("{p}") }
+
+fn test_free_reads() {
+  p = P { name: "ab", hidden: 41 };
+  assert(read_free(p) == "ab!" && read_built() == 42, "ab! 42: {read_free(p)} {read_built()}");
+}
+
+fn test_granted_reads() {
+  p = P { name: "ab", hidden: 41 };
+  assert(read_hidden_granted(p) == 42 && read_render_granted(p) == len("{p}"), "42 and the render");
+}

@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PRIVATE FIELD IS REFUSED AT EVERY READ (`@FR-Cap-Read`, `@FR-Cap-Own`, `@FR-Cap-Deny`).
+// Without `secret#read`, every construct that reveals `P.hidden` of host data is refused: the
+// field itself, a whole-value render (plain, JSON, and of a record holding a `P`), a `match`
+// binding it, a plain copy of the parameter (its content is still the host's), and a `for` over
+// a parameter's vector.  Content equality reveals it too and is NOT refused today — that is
+// `an-equality-reveals-a-private-field.loft`, ignored until fixed.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names `secret#read`.
+// HOLDS: every refusal on both backends.
+
+capability secret
+
+struct P { name: text, hidden: integer secret#read }
+struct O { inner: P }
+
+// @EXPECT_ERROR: sandboxed `read_hidden_bare` reads a host field that needs capability `secret#read`
+fn read_hidden_bare(p: P) -> integer { p.hidden + 1 }
+
+// @EXPECT_ERROR: sandboxed `read_render` reads a host field that needs capability `secret#read`
+fn read_render(p: P) -> text { "{p}" }
+
+// @EXPECT_ERROR: sandboxed `read_json` reads a host field that needs capability `secret#read`
+fn read_json(p: P) -> text { "{p:j}" }
+
+// @EXPECT_ERROR: sandboxed `read_outer_render` reads a host field that needs capability `secret#read`
+fn read_outer_render(o: O) -> text { "{o}" }
+
+// @EXPECT_ERROR: sandboxed `read_match` reads a host field that needs capability `secret#read`
+fn read_match(p: P) -> integer { match p { P { hidden } => hidden } }
+
+// @EXPECT_ERROR: sandboxed `read_copy` reads a host field that needs capability `secret#read`
+fn read_copy(p: P) -> integer { q = p; q.hidden }
+
+// @EXPECT_ERROR: sandboxed `read_for` reads a host field that needs capability `secret#read`
+fn read_for(ps: vector<P>) -> integer { t = 0; for p in ps { t += p.hidden; } t }

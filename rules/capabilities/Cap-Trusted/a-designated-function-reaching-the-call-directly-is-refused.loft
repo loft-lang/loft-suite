@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DESIGNATED FUNCTION REACHING THE CALL DIRECTLY IS REFUSED (`@FR-Cap-Trusted`,
+// `@FR-Cap-Call`, `@FR-Cap-Deny`).  The twin of
+// `trusted-code-and-a-granted-leaf-are-not-descended.loft`: the same profile, and the `mtime`
+// the granted leaf hid is now in the designated function's own body, where it is judged.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostic (an admission refusal at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: the refusal names `mtime` and `fs#read`.
+// HOLDS: the refusal on both backends.
+
+capability vault
+
+// @EXPECT_ERROR: sandboxed `leaf_direct` reaches `mtime`, which needs capability `fs#read` — not granted
+fn leaf_direct() -> integer { if mtime("no_such_file_cap_trusted") > 0 { 1 } else { 0 } }

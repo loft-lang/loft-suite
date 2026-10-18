@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LAMBDA RETURNING AN ITERATOR IS A GENERATOR (`@FR-G-Call`, `@FR-G-Yield`, `@FR-G-Next`).
+// `(G-Call)` makes a call to any function whose return type is `iterator<T>` a suspended frame,
+// and `(G-Yield)`'s static clause admits a `yield` exactly where the return type is
+// `iterator<T>` — which a `fn(x: integer) -> iterator<integer> { yield x; … }` lambda has.  So
+// the lambda must behave as the named generator beside it does, or be refused at compile time.
+// Today it does neither: the interpreter runs the lambda as an ordinary call, so outside a
+// generator its `yield` panics ("OpYield outside active coroutine") and inside one its values
+// join the ENCLOSING generator's stream with nothing reported; `--native` fails in rustc (E0308).
+// The two cells below are that defect, ignored until it is fixed; the control is the named form.
+//
+// @falsified-at: none — the control holds on both backends; the ignored cells are the open
+//   defect and fail on every build so far.
+// CHANNEL: the asserts (interpret), the rustc build (native).
+// ARMED: no instrument.
+// WITNESS: interpret answers "10 11 " for `inside_a_generator` (expected "10 2 "); native E0308.
+// HOLDS: the named-generator control on both backends.
+
+fn s(g: iterator<integer>) -> text { r = ""; for v in g { r += "{v} "; } r }
+fn named(x: integer) -> iterator<integer> { yield x; yield x + 1; }
+
+fn test_the_named_generator_control() {
+  assert(s(named(10)) == "10 11 ", "10 11: {s(named(10))}");
+}
+
+// @IGNORE — the lambda's yields run as an ordinary call: OpYield panic (interpret), E0308 (native).
+fn test_a_lambda_generator_drives_a_for() {
+  f = fn(x: integer) -> iterator<integer> { yield x; yield x + 1; };
+  r = "";
+  for v in f(10) { r += "{v} "; }
+  assert(r == "10 11 ", "10 11: {r}");
+}
+
+fn inside_a_generator() -> iterator<integer> {
+  f = fn(x: integer) -> iterator<integer> { yield x; yield x + 1; };
+  it = f(10);
+  yield next(it);
+  yield 2;
+}
+
+// @IGNORE — interpret answers "10 11 ": the lambda's yields reach the enclosing generator's stream.
+fn test_a_lambda_generator_inside_a_generator() {
+  // The lambda's first value 10, then the outer 2.
+  assert(s(inside_a_generator()) == "10 2 ", "10 2: {s(inside_a_generator())}");
+}

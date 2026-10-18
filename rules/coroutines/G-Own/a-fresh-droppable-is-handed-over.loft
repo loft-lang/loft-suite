@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FRESH DROPPABLE IS HANDED OVER (`@FR-G-Own`, `@FR-H-Copy-Refuse`, `@FR-H-Move`).  The twin of
+// `an-existing-droppable-is-not-yielded.loft`: a value built at the yield is
+// fresh, so the yield hands it over (H-Move) and no copy is made — the drop-hook type compiles,
+// and each record is the consumer's.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every cell
+//   answered as the rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts, and the leak gate.
+// ARMED: no instrument.
+// WITNESS: the message names the hand-computed sum.
+// HOLDS: every cell on both backends, leak-clean.
+
+struct Dh { id: integer }
+fn OpDrop(self: Dh) { }
+
+fn fresh() -> iterator<Dh> { for i in 1..3 { yield Dh { id: i * 10 }; } }
+
+fn test_fresh_records_are_handed_over() {
+  t = 0;
+  n = 0;
+  for x in fresh() { t += x.id; n += 1; }
+  // 10 + 20, two records.
+  assert(t == 30 && n == 2, "30 over 2: {t} {n}");
+}

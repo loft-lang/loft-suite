@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// CALLING A GENERATOR BINDS ITS ARGUMENTS AND RUNS NOTHING (`@FR-G-Call`, `@FR-G-Next`,
+// `@FR-G-Done`, `@FR-F-ParamScalar`, `@FR-F-ParamHeap`, `@FR-F-ParamGrow`).  The call allocates a
+// frame with the arguments bound and returns it; the body's first statement runs on the first
+// advance.  A scalar or text argument is bound at the CALL, so a later rebind of the caller's
+// local is not seen; a record or vector argument is shared, so a write through it is visible to
+// the caller and a growth by the caller is visible to the body.  A generator never advanced runs
+// nothing and is released at its scope end (the leak gate), and one with no yield is done at its
+// first advance and stays done.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts, and the leak gate for the never-advanced frame.
+// ARMED: no instrument.
+// WITNESS: each message names the hand-computed values in order.
+// HOLDS: every cell on both backends, leak-clean.
+
+struct Log { n: integer }
+
+// n: +1 before the first yield, +10 before the second.
+fn bump(lg: Log) -> iterator<integer> { lg.n += 1; yield lg.n; lg.n += 10; yield lg.n; }
+fn held(x: integer, s: text) -> iterator<integer> { yield x; yield len(s); }
+fn grow(v: vector<integer>) -> iterator<integer> { yield len(v); yield len(v); }
+fn none() -> iterator<integer> { for i in 0..0 { yield i; } }
+fn count_from(k: integer) -> iterator<integer> { yield k; yield k + 1; yield k + 2; }
+
+fn test_the_body_waits_for_the_first_advance() {
+  lg = Log { n: 0 };
+  it = bump(lg);
+  a0 = lg.n;
+  a1 = next(it);
+  a2 = lg.n;
+  a3 = next(it);
+  a4 = lg.n;
+  // 0 after the call; 1 yielded and seen; 1 + 10 = 11 yielded and seen.
+  assert(a0 == 0 && a1 == 1 && a2 == 1 && a3 == 11 && a4 == 11, "0 1 1 11 11: {a0} {a1} {a2} {a3} {a4}");
+}
+
+fn test_a_scalar_and_a_text_are_bound_at_the_call() {
+  x = 5;
+  s = "ab";
+  h = held(x, s);
+  x = 99;
+  s = "zzzz";
+  b1 = next(h);
+  b2 = next(h);
+  // The frame holds 5 and "ab" (length 2); the caller's 99 and "zzzz" are its own.
+  assert(b1 == 5 && b2 == 2 && x == 99 && len(s) == 4, "5 2, caller 99 4: {b1} {b2} {x} {len(s)}");
+}
+
+fn test_a_vector_grown_by_the_caller_is_seen_by_the_body() {
+  v = [1];
+  g = grow(v);
+  v += [2];
+  c1 = next(g);
+  v += [3];
+  c2 = next(g);
+  // The parameter shares the caller's store: length 2 at the first advance, 3 at the second.
+  assert(c1 == 2 && c2 == 3 && len(v) == 3, "2 3: {c1} {c2}");
+}
+
+fn test_a_generator_never_advanced_runs_nothing() {
+  lg = Log { n: 0 };
+  never = bump(lg);
+  assert(lg.n == 0, "the body never ran: {lg.n}");
+  assert(!exhausted(never), "a suspended frame is not exhausted");
+}
+
+fn test_two_calls_are_two_frames() {
+  p = count_from(10);
+  q = count_from(20);
+  r = "{next(p)} {next(q)} {next(p)} {next(q)} {next(p)} {next(q)}";
+  assert(r == "10 20 11 21 12 22", "interleaved: {r}");
+}
+
+fn test_a_generator_with_no_yield_is_done_at_once() {
+  e = none();
+  e1 = next(e);
+  e2 = next(e);
+  assert(e1 == null && e2 == null && exhausted(e), "done, and done again");
+  cnt = 0;
+  for _ in none() { cnt += 1; }
+  assert(cnt == 0, "a for over it runs no pass: {cnt}");
+}

@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// BREAK ENDS A GENERATOR, AND A LAMBDA KEEPS ITS OWN RETURN (`@FR-G-Return`, `@FR-G-Done`).
+// What the rule leaves legal: `break` ends the body early and the iterator is done; a `return`
+// inside a lambda the generator builds belongs to the lambda, not to the generator; and a body
+// whose LAST statement is a `yield` (no `;`), or an `if` whose arms yield, is not a tail value.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the hand-computed sequence.
+// HOLDS: every cell on both backends.
+
+fn s(g: iterator<integer>) -> text { r = ""; for v in g { r += "{v} "; } r }
+fn early(n: integer) -> iterator<integer> { for i in 0..10 { if i == n { break; } yield i; } }
+fn lam_return() -> iterator<integer> {
+  f = fn(x: integer) -> integer { if x > 2 { return 100; } x };
+  yield f(1);
+  yield f(5);
+}
+fn tail_yield() -> iterator<integer> { yield 1; yield 2 }
+fn tail_if(c: boolean) -> iterator<integer> { if c { yield 1 } else { yield 2 } }
+
+fn test_break_ends_the_body() {
+  g = early(3);
+  assert(s(g) == "0 1 2 ", "0 1 2: {s(early(3))}");
+  assert(next(g) == null && exhausted(g), "a broken body is done, and stays done");
+}
+
+fn test_a_lambdas_return_is_its_own() {
+  // f(1) = 1; f(5) returns 100 from the lambda, and the generator goes on to its end.
+  assert(s(lam_return()) == "1 100 ", "1 100: {s(lam_return())}");
+}
+
+fn test_a_yield_or_a_yielding_if_ends_the_body() {
+  assert(s(tail_yield()) == "1 2 ", "1 2: {s(tail_yield())}");
+  assert(s(tail_if(true)) == "1 " && s(tail_if(false)) == "2 ", "1 / 2");
+}

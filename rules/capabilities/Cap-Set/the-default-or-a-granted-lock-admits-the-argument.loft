@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE DEFAULT OR A GRANTED LOCK ADMITS THE ARGUMENT (`@FR-Cap-Set`, `@FR-Cap-Call`).  Once the
+// call is admitted (`world#append`), an argument is free unless its parameter is locked: the
+// untagged `kind` takes any text, and the locked `count` takes its default — omitted or written
+// as the literal `1` — without the lock.  With `spawn.count#default` granted, or the enclosing
+// `spawn#default` (a segment prefix, as for a call gate), any `count` is admitted.  The refused
+// twins are in `overriding-a-locked-parameter-needs-its-lock.loft`.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: a refusal would name `spawn.count#default`.
+// HOLDS: every cell on both backends.
+
+capability world
+capability spawn.count
+
+fn spawn(kind: text, count: integer = 1 spawn.count#default) -> integer world#append { len(kind) * 10 + count }
+
+fn set_default() -> integer { spawn("gob") + spawn("orc", 1) + spawn("troll!") }
+fn set_locked() -> integer { spawn("gob", 4) }
+fn set_parent_lock() -> integer { spawn("gob", 5) }
+
+fn test_the_default_needs_no_lock() {
+  // 3 * 10 + 1, 3 * 10 + 1, 6 * 10 + 1.
+  assert(set_default() == 123, "31 + 31 + 61: {set_default()}");
+}
+
+fn test_a_granted_lock_admits_an_override() {
+  assert(set_locked() == 34 && set_parent_lock() == 35, "34 35: {set_locked()} {set_parent_lock()}");
+}

@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSTRUCT NO RULE ADMITS IS REFUSED AT LOAD (`@FR-Cap-Deny`, `@FR-Cap-Call`, `@FR-Cap-Write`).
+// Deny-by-default: a call to an untagged helper of the script's own library (no gate, and the
+// script's own library may not be allowed wholesale), a write to an UNLINKED host field even with
+// unrelated grants held (read-only by default) are each refused.  A link naming an undeclared group
+// is `a-link-to-an-undeclared-group-is-refused.loft`.  The admitted twin is
+// `a-designated-helper-is-judged-as-sandboxed-code.loft`.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names the helper or the raw write.
+// HOLDS: every refusal on both backends.
+
+capability stats
+capability health
+
+struct M { hp: integer }
+
+fn helper(x: integer) -> integer { x * 3 }
+
+// @EXPECT_ERROR: sandboxed `deny_helper` reaches `helper`, a helper in its OWN library
+fn deny_helper() -> integer { helper(4) }
+
+// @EXPECT_ERROR: performs a raw write to heap data
+fn deny_unlinked_write(m: M) { m.hp = 0; }

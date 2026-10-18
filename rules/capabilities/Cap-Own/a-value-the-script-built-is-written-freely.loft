@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VALUE THE SCRIPT BUILT IS WRITTEN FREELY (`@FR-Cap-Own`, `@FR-Cap-Write`, `@FR-B-Copy`).
+// Under a profile with no grant at all, a designated function builds a record whose field the
+// host linked `stats#update`, writes that field, appends to and writes an element of its vector
+// field, and grows a local vector: all script-owned, all admitted.  A plain copy of a parameter
+// is independent (B-Copy), so writing it reaches no host data and is admitted too — the caller's
+// record keeps its value.  The twin `a-parameter-is-host-data.loft` writes the parameter itself.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml (no capability granted).
+// WITNESS: a refusal would name `stats#update` or a raw write.
+// HOLDS: every cell on both backends, leak-clean.
+
+capability stats
+
+struct M { hp: integer stats#update, items: vector<integer> }
+
+fn own_build() -> integer {
+  m = M { hp: 1, items: [] };
+  m.hp = 5;
+  m.items += [3, 4];
+  m.items[0] = 30;
+  v = [1, 2];
+  v[1] = 20;
+  v += [7];
+  m.hp + m.items[0] + m.items[1] + v[1] + v[2] + len(v)
+}
+
+fn own_copy_write(m: M) -> integer { c = m; c.hp = 5; c.hp }
+
+fn test_built_values_are_the_scripts() {
+  // 5 + 30 + 4 + 20 + 7 + 3.
+  assert(own_build() == 69, "69: {own_build()}");
+}
+
+fn test_a_copy_of_a_parameter_is_the_scripts() {
+  m = M { hp: 1, items: [] };
+  r = own_copy_write(m);
+  assert(r == 5 && m.hp == 1, "the copy answers 5, the caller keeps 1: {r} {m.hp}");
+}

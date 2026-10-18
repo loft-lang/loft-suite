@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TRUSTED CODE AND A GRANTED LEAF ARE NOT DESCENDED (`@FR-Cap-Trusted`, `@FR-Cap-Call`).  Under
+// an active policy (`loft.toml` beside this cell: `leaf_entry` designated, `vault#read` granted),
+// a function the policy does not designate is trusted: it calls an ungranted `fs#read` stdlib
+// function and a gated host function freely.  A designated function may call a host function
+// whose gate is granted, and the host function's BODY is the host's contract — it is a leaf, not
+// descended into — so the `mtime` (`fs#read`, ungranted) inside it does not refuse the caller.
+// The twin `a-designated-function-reaching-the-call-directly-is-refused.loft` makes that call
+// itself and is refused.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: a refusal would name `mtime` and `fs#read`.
+// HOLDS: every cell on both backends.
+
+capability vault
+
+fn missing_mtime() -> integer { if mtime("no_such_file_cap_trusted") > 0 { 1 } else { 0 } }
+
+// Gated host function; its body reaches `fs#read`, which the profile does not grant.
+fn peek_file() -> integer vault#read { 7 + missing_mtime() }
+
+fn leaf_entry() -> integer { peek_file() + 1 }
+
+fn host_side() -> integer { peek_file() * 10 + missing_mtime() }
+
+fn test_a_granted_leaf_is_not_descended() {
+  // 7 + 0 (no such file), + 1.
+  assert(leaf_entry() == 8, "8: {leaf_entry()}");
+}
+
+fn test_undesignated_code_is_trusted() {
+  // 7 * 10 + 0.
+  assert(host_side() == 70, "70: {host_side()}");
+}

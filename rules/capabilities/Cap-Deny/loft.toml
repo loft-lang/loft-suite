@@ -1,0 +1,9 @@
+# The sandbox policy for the cells beside it (formal/capabilities.md § Cap-Deny): the profile
+# grants `stats#update` and `health#update`, so every refusal below is the absence of a rule,
+# not of a grant the construct could have used.
+[sandbox]
+deny = ["fn:deny_helper", "fn:deny_unlinked_write", "fn:deny_undeclared", "fn:deny_designated_pair", "fn:deny_designated_helper", "fn:deny_recursive"]
+
+[profile.deny]
+allow_libs = ["code"]
+allow = ["stats#update", "health#update"]

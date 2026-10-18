@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — the whole file is an open defect: none of these is refused today, so every
+//   expectation goes unmatched.  Remove this line when content equality records its reads.
+//
+// AN EQUALITY REVEALS A PRIVATE FIELD (`@FR-Cap-Read`, `@FR-Cap-Deny`, `@FR-Cap-Own`).  `==`
+// compares CONTENT (@C91), field by field, so a comparison of host data against a value the
+// script built reads every field — the `secret#read` one included.  `read_eq_oracle` recovers
+// `hidden` exactly (41) by comparing against each candidate, under a profile with no grant;
+// `!=`, a vector `==` and a nested record's `==` are the same read.  D-cap-4 closed the render
+// and `match` faces of this read; equality is the face it did not list.  Each must be refused
+// as `a-private-field-is-refused-at-every-read.loft`'s are.
+//
+// @falsified-at: none — the defect is open on every build so far; un-ignored, every expectation
+//   goes unmatched (measured on interpret and native).
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: today the file loads and `read_eq_oracle` answers 41 under a grant-less profile.
+// HOLDS: nothing yet — the cells are the open defect.
+
+capability secret
+
+struct P { name: text, hidden: integer secret#read }
+struct O { inner: P }
+
+// @EXPECT_ERROR: sandboxed `read_eq_oracle` reads a host field that needs capability `secret#read`
+fn read_eq_oracle(p: P) -> integer {
+  found = -1;
+  for c in 0..100 { if found < 0 and p == P { name: p.name, hidden: c } { found = c; } }
+  found
+}
+
+// @EXPECT_ERROR: sandboxed `read_ne` reads a host field that needs capability `secret#read`
+fn read_ne(p: P) -> boolean { p != P { name: "ab", hidden: 41 } }
+
+// @EXPECT_ERROR: sandboxed `read_vec_eq` reads a host field that needs capability `secret#read`
+fn read_vec_eq(ps: vector<P>) -> boolean { ps == [P { name: "ab", hidden: 41 }] }
+
+// @EXPECT_ERROR: sandboxed `read_nested_eq` reads a host field that needs capability `secret#read`
+fn read_nested_eq(o: O) -> boolean { o.inner == P { name: "ab", hidden: 41 } }

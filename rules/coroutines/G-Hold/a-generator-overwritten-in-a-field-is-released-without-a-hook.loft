@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERATOR OVERWRITTEN IN A FIELD IS RELEASED WITHOUT A HOOK (`@FR-G-Hold`, `@FR-H-Drop-Not`).
+// `(H-Drop-Not)` leaves the old value of an overwritten field, an element taken out and a keyed
+// record to the author — for a value with a drop hook.  A frame has no hook, so it is not bound by
+// that rule: the field given a new generator, the element removed and the record replaced each
+// release the frame they held, which the leak gate checks.  The values show each holder drives
+// the frame it now names.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every cell
+//   answered as the rule says on both backends on the tree it landed on.
+// CHANNEL: the leak gate, and the asserts.
+// ARMED: LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
+// WITNESS: a frame left behind fails the cell as a leak.
+// HOLDS: every cell on both backends, leak-clean.
+
+struct S { g: iterator<integer> }
+
+fn from(k: integer) -> iterator<integer> { for i in k..k + 100 { yield i; } }
+
+fn test_a_field_given_a_new_generator() {
+  s = S { g: from(10) };
+  a = next(s.g);
+  s.g = from(50);
+  b = next(s.g);
+  s.g = from(70);
+  c = next(s.g);
+  assert(a == 10 && b == 50 && c == 70, "10 50 70: {a} {b} {c}");
+}
+
+fn test_an_element_removed_and_a_record_replaced() {
+  v = [S { g: from(1) }, S { g: from(2) }];
+  x = next(v[0].g);
+  v.remove(0);
+  y = next(v[0].g);
+  v[0] = S { g: from(3) };
+  z = next(v[0].g);
+  // 1 from the first; the second slides to 0 and answers 2; the replacement answers 3.
+  assert(x == 1 && y == 2 && z == 3 && len(v) == 1, "1 2 3, one left: {x} {y} {z} {len(v)}");
+}

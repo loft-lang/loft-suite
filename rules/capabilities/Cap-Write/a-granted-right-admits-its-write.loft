@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GRANTED RIGHT ADMITS ITS WRITE (`@FR-Cap-Write`, `@FR-F-ParamHeap`).  A host field linked
+// `stats#update` is assigned under that grant, and one linked `stats.hp#update` under the
+// enclosing `stats#update` (a segment prefix); a collection field linked `bag#append` is
+// appended to under that grant.  Each write reaches the caller's record (F-ParamHeap).  The
+// refused twins are in `a-write-outside-its-right-is-refused.loft`.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: admission (the file loads) and the asserts.
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: a refusal would name the field's grant.
+// HOLDS: every cell on both backends, leak-clean.
+
+capability stats
+capability stats.hp
+capability bag
+
+struct M { hp: integer stats#update, mp: integer stats.hp#update }
+struct I { items: vector<integer> bag#append }
+
+fn write_update(m: M) { m.hp = 7; }
+fn write_update_prefix(m: M) { m.mp = 8; }
+fn write_append(i: I, x: integer) { i.items += [x]; }
+
+fn test_update_and_append_reach_the_caller() {
+  m = M { hp: 1, mp: 2 };
+  write_update(m);
+  write_update_prefix(m);
+  i = I { items: [1] };
+  write_append(i, 9);
+  assert(m.hp == 7 && m.mp == 8 && len(i.items) == 2 && i.items[1] == 9, "7 8 [1, 9]: {m.hp} {m.mp} {i.items}");
+}

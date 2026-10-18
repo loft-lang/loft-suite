@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DELEGATION TO AN EMPTY OR SPENT GENERATOR FORWARDS NOTHING (`@FR-G-Delegate`, `@FR-G-Done`).
+// When the delegated generator is done the outer body continues after the `yield from`: one
+// done at its first advance forwards nothing, and so does a handle the outer body already
+// drained; a half-drained one forwards what is left.  A generator whose only statement is such a
+// delegation is done at once, and every exhausted iterator stays done.
+//
+// The two HANDLE cells are a native defect, ignored until it is fixed: `yield from h` on a local
+// handle fails in rustc (E0308, `self.sub_1 = Some(self.var_h)`), and on a parameter handle with
+// E0425 (`OpCoroutineRetain` not found).  The interpreter answers both as hand-computed.
+//
+// @falsified-at: none — the call-delegation cells hold on both backends; the ignored handle
+//   cells are the open native defect.
+// CHANNEL: the asserts (interpret), the rustc build (native, ignored cells).
+// ARMED: no instrument.
+// WITNESS: each message names the hand-computed sequence.
+// HOLDS: the call-delegation cells on both backends, leak-clean.
+
+fn empty() -> iterator<integer> { for i in 0..0 { yield i; } }
+fn two(k: integer) -> iterator<integer> { yield k; yield k + 1; }
+fn around_empty() -> iterator<integer> { yield 1; yield from empty(); yield 2; }
+fn only_empty() -> iterator<integer> { yield from empty(); }
+fn s(g: iterator<integer>) -> text { r = ""; for v in g { r += "{v} "; } r }
+
+fn test_an_empty_delegation_continues_the_body() {
+  assert(s(around_empty()) == "1 2 ", "1 2: {s(around_empty())}");
+  assert(s(only_empty()) == "", "nothing: [{s(only_empty())}]");
+}
+
+fn test_done_stays_done_after_a_delegation() {
+  d = around_empty();
+  y1 = next(d);
+  y2 = next(d);
+  y3 = next(d);
+  y4 = next(d);
+  assert(y1 == 1 && y2 == 2 && y3 == null && y4 == null && exhausted(d), "1 2 done done");
+}
+
+fn handle_spent() -> iterator<integer> { h = two(5); a = next(h); b = next(h); yield a + b; yield from h; yield 99; }
+fn handle_half() -> iterator<integer> { h = two(5); a = next(h); yield a; yield from h; yield 99; }
+fn from_param(h: iterator<integer>) -> iterator<integer> { yield from h; yield 99; }
+
+// @IGNORE — native: `yield from` a local handle fails in rustc (E0308).
+fn test_a_spent_or_half_spent_local_handle() {
+  // 5 + 6 = 11, the spent handle forwards nothing, 99; then 5, the rest 6, 99.
+  assert(s(handle_spent()) == "11 99 ", "11 99: {s(handle_spent())}");
+  assert(s(handle_half()) == "5 6 99 ", "5 6 99: {s(handle_half())}");
+}
+
+// @IGNORE — native: `yield from` a parameter handle fails in rustc (E0425 OpCoroutineRetain).
+fn test_a_handle_parameter() {
+  h = two(5);
+  a = next(h);
+  assert(a == 5 && s(from_param(h)) == "6 99 ", "6 99 after one taken");
+}
