@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY KIND RENDERS THROUGH ONE SINK (`@FR-F-Desugar`, crossed with `@FR-F-Render`).  The
+// template's value is a `text`, and each hole appends its value's canonical rendering.  The
+// cells walk the hole's kind: narrow integers (`u8`, `i16`, `i32`), `float` and `single`,
+// `text`, `character` (a multi-byte one), a plain enum, a struct, a vector, and a null of
+// each kind — a null renders `null`, except a null character, which renders nothing.  The
+// length is asserted beside the value because a sink that appended a stray byte would read
+// the same in a println.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the rendering that moved.
+// HOLDS: the same text on both backends.
+
+struct P { x: integer, y: text }
+enum Col { Red, Green }
+
+fn test_narrow_integers_render_their_value() {
+  a: u8 = 255;
+  b: i32 = -7;
+  h: i16 = 300;
+  r = "{a}|{b}|{h}";
+  assert(r == "255|-7|300" && len(r) == 10, "widths: [{r}] {len(r)}");
+}
+
+fn test_floats_render_the_shortest_round_trip() {
+  f = 0.1 + 0.2;
+  g = 1.5f;
+  r = "{f}|{g}";
+  assert(r == "0.30000000000000004|1.5" && len(r) == 23, "floats: [{r}] {len(r)}");
+}
+
+fn test_a_character_an_enum_a_struct_and_a_vector() {
+  ch = 'é';
+  e = Col.Green;
+  p = P { x: 1, y: "q" };
+  v = [1, 2, 3];
+  r = "{ch}|{e}|{p}|{v}";
+  assert(r == "é|Green|{{x:1,y:\"q\"}}|[1,2,3]", "kinds: [{r}]");
+  assert(len(r) == 27 && r.size() == 28, "len counts characters, size bytes: {len(r)} {r.size()}");
+}
+
+fn test_a_null_of_each_kind() {
+  ni: integer? = null;
+  nf: float? = null;
+  nt: text? = null;
+  nc: character? = null;
+  ne: Col? = null;
+  np: P? = null;
+  r = "{ni}|{nf}|{nt}|{nc}|{ne}|{np}";
+  assert(r == "null|null|null||null|null" && len(r) == 25, "nulls: [{r}] {len(r)}");
+}

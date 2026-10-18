@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INFIX `&` IS BITWISE-AND AT LEVEL SIX (`@FR-G-Amp-Infix`, crossed with `@FR-G-Prec`,
+// `@FR-G-Assoc` and `@FR-G-Amp-Disambig`).  A `&` with a left operand is the operator: looser
+// than `+` and the shifts, tighter than `|`, `^` and the comparisons, left-associative.  The
+// left operand may be any expression form — a name, a literal, a parenthesised group, an
+// element, a field, a call — and the operator may open a continuation line.  Spacing does not
+// matter (`a&b`).  Hand-computed: `1 + 2 & 3` is `3 & 3` = 3; `6 & 3 == 2` is `(6 & 3) == 2`;
+// `1 << 3 & 12` is `8 & 12` = 8; `6 | 1 & 2` is `6 | (1 & 2)` = 6; `255 & ~32` = 223.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value that moved.
+// HOLDS: the same values on both backends.
+
+struct S { x: integer }
+
+fn three() -> integer { 3 }
+fn id(v: integer) -> integer { v }
+
+fn test_precedence_against_its_neighbours() {
+  r1 = 1 + 2 & 3;
+  r2 = 6 & 3 == 2;
+  r3 = 1 << 3 & 12;
+  r4 = 6 | 1 & 2;
+  r5 = 6 ^ 3 & 5;
+  assert(r1 == 3 && r2 && r3 == 8 && r4 == 6 && r5 == 7, "{r1} {r2} {r3} {r4} {r5}");
+}
+
+fn test_left_associative() {
+  a = 6;
+  b = 3;
+  r = a & b & 2;
+  assert(r == 2, "{r}");
+}
+
+fn test_every_left_operand_form() {
+  a = 6;
+  b = 3;
+  v = [12, 10];
+  s = S { x: 7 };
+  assert((a & b) == 2 && (a&b) == 2 && ((a) & b) == 2, "names");
+  assert((v[0] & v[1]) == 8, "elements: {v[0] & v[1]}");
+  assert((s.x & 3) == 3, "a field: {s.x & 3}");
+  assert((three() & 6) == 2, "a call: {three() & 6}");
+  assert((255 & ~32) == 223, "a complement: {255 & ~32}");
+}
+
+fn test_expression_and_statement_positions() {
+  a = 6;
+  r11 = a
+    & 5;
+  assert(r11 == 4, "a continuation line: {r11}");
+  r12 = 0;
+  if a & 2 == 2 { r12 = 1; }
+  assert(r12 == 1, "a condition: {r12}");
+  assert(id(a & 3) == 2, "a call argument: {id(a & 3)}");
+  w = [a & 4, a & 2, a & 1];
+  assert(w[0] == 4 && w[1] == 2 && w[2] == 0 && len(w) == 3, "vector elements, widest first: {w}");
+}

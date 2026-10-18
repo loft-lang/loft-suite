@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEYED COLLECTION OVER A VARIABLE IS REFUSED (`@FR-G-Gen`).  `fn f<T>(h: hash<T[k]>)` names
+// a key FIELD that `T` does not have until it is instantiated, so it is refused at the
+// declaration, for a parameter as for the return.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting the shape compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+
+struct Box { w: integer }
+
+fn size(self: Box) -> integer { self.w }
+
+struct E { k: text }
+
+// @EXPECT_ERROR: parameter `h` is a keyed collection over the type variable T
+fn count<T>(h: hash<T[k]>) -> integer { len(h) }
+
+fn main() {
+  b = Box { w: 2 };
+  assert(b.size() == 2, "the program around it");
+}

@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INTERFACE IS A SET OF SIGNATURES A GENERIC CALLS (`@FR-G-Iface`, crossed with
+// `@FR-G-Sat`, `@FR-G-Gen`, `@FR-G-Mono` and `@FR-Op-Bound`).  An interface lists method
+// shapes whose first parameter is `self: Self`; a type meets it by having the methods, with no
+// `impl`; a bounded generic calls exactly those members, and each instance reaches the
+// concrete method of its type.  The members carry extra parameters and returns; an operator
+// requirement is the `operator compare` member, which gives a generic body its `<`.
+// Hand-computed: `total([Box{2,3}, Box{4,5}], 2)` is (6 + 12) + (20 + 40) = 78;
+// `total([Sq{3}], 10)` is 9 + 30 = 39.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value that moved.
+// HOLDS: the same values on both backends.
+
+interface Shaped {
+  fn area(self: Self) -> integer
+  fn scaled(self: Self, k: integer) -> integer
+}
+interface Named { fn label(self: Self) -> text }
+interface Ord2 { operator compare(self: Self, other: Self) -> Ordering }
+
+struct Box { w: integer, h: integer }
+struct Sq { s: integer }
+struct Ver { n: integer }
+
+fn area(self: Box) -> integer { self.w * self.h }
+fn scaled(self: Box, k: integer) -> integer { self.w * self.h * k }
+fn label(self: Box) -> text { "box{self.w}x{self.h}" }
+fn area(self: Sq) -> integer { self.s * self.s }
+fn scaled(self: Sq, k: integer) -> integer { self.s * k }
+operator compare(self: Ver, other: Ver) -> Ordering {
+  if self.n < other.n { Less } else if self.n > other.n { Greater } else { Equal }
+}
+
+fn total<T: Shaped>(xs: vector<T>, k: integer) -> integer {
+  s = 0;
+  for x in xs { s += x.area() + x.scaled(k); }
+  s
+}
+fn tag<T: Shaped + Named>(x: T) -> text { "{x.label()}={x.area()}" }
+fn smaller<T: Ord2>(a: T, b: T) -> T { if a < b { a } else { b } }
+
+fn test_each_instance_reaches_its_types_members() {
+  b = total([Box { w: 2, h: 3 }, Box { w: 4, h: 5 }], 2);
+  s = total([Sq { s: 3 }], 10);
+  assert(b == 78 && s == 39, "{b} {s}");
+}
+
+fn test_two_interfaces_bound_one_variable() {
+  t = tag(Box { w: 1, h: 7 });
+  assert(t == "box1x7=7" && len(t) == 8, "{t}");
+}
+
+fn test_an_operator_member_gives_the_body_its_operator() {
+  v = smaller(Ver { n: 9 }, Ver { n: 4 });
+  w = smaller(Ver { n: 2 }, Ver { n: 4 });
+  assert(v.n == 4 && w.n == 2, "{v.n} {w.n}");
+}

@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A METHOD ON THE VARIABLE ITSELF IS REFUSED (`@FR-G-Gen`).  A method is found on its
+// receiver's type, and `T` is not a type until it is instantiated, so `fn m<T>(self: T)` is
+// refused at the declaration, naming the free-function spelling as the cure.  A receiver
+// BUILT over `T` (`self: vector<T>`) is accepted — the sibling
+// `an-unbounded-variable-moves-values-and-a-bound-adds-methods.loft`.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting the shape compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+
+struct Box { w: integer }
+
+fn size(self: Box) -> integer { self.w }
+
+// @EXPECT_ERROR: a method's receiver cannot be the type variable T itself
+fn twice<T>(self: T) -> T { self }
+
+fn main() {
+  b = Box { w: 2 };
+  assert(b.size() == 2, "the program around it");
+}

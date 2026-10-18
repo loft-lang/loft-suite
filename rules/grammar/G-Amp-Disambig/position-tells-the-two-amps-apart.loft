@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// POSITION TELLS THE TWO `&`S APART (`@FR-G-Amp-Disambig`, crossed with `@FR-G-Amp-Infix`,
+// `@FR-G-Amp-Prefix` and `@FR-B-Ref-AnnotationOnly`).  A `&` with a left operand is bitwise-and;
+// a `&` that leads the WHOLE right-hand side of a binding is the reference annotation; a `&`
+// that merely leads an OPERAND is refused, whichever side of an infix `&` it sits on.  `a &&
+// b` is the logical-and token, not two `&`s.  The refusals — `a & &b`, `&a & b`, `&a + 1` — are
+// the sibling cell `a-prefix-amp-leading-an-operand-is-refused-on-either-side.loft`.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value that moved.
+// HOLDS: the same values and diagnostics on both backends.
+
+fn test_the_same_token_in_both_roles() {
+  a = 6;
+  b = 3;
+  link = &a;
+  masked = link & b;
+  assert(masked == 2, "an infix & on a link reads through it: {masked}");
+  link = 7;
+  assert(a == 7 && (link & b) == 3, "the link still writes its source: {a}");
+}
+
+fn test_double_amp_is_logical_and() {
+  t = true;
+  f = false;
+  assert((t && t) && !(t && f), "&& is one token");
+  a = 6;
+  assert((a & 2 == 2) && (a & 1 == 0), "& inside &&");
+}
+

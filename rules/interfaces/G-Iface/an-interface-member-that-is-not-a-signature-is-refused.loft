@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INTERFACE MEMBER THAT IS NOT A SIGNATURE IS REFUSED (`@FR-G-Iface`, crossed with
+// `@FR-G-Scope` and `@FR-Op-Bound`).  An interface is a set of method SIGNATURES whose first
+// parameter is `self: Self`: an `op <tok>` member is refused naming the `operator` spelling
+// that meets it, and a FACTORY member (a `Self` return with no `self`) is refused as out of
+// scope.  A member with a BODY is the third shape; its refusal is the sibling cell
+// `an-interface-member-with-a-body-is-refused.loft`, because it is a syntax error that does
+// not leave the rest of a file parseable.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the two diagnostics.
+// ARMED: no instrument.
+// WITNESS: a build accepting either member compiles the file with a claim unanswered.
+// HOLDS: the diagnostics are the same on both backends.
+
+// @EXPECT_ERROR: an interface names the definition that meets it: `op <` is spelled `operator compare(self: Self, other: Self) -> Ordering`
+// @EXPECT_ERROR: 'make' returns Self without a 'self: Self' first parameter
+struct Unused { n: integer }
+interface Lt { op < (self: Self, other: Self) -> boolean }
+interface Mk { fn make() -> Self }
+
+fn main() {
+  u = Unused { n: 1 };
+  assert(u.n == 1, "unreachable");
+}

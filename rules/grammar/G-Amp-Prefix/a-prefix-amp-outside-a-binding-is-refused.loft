@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PREFIX `&` OUTSIDE A BINDING IS REFUSED (`@FR-G-Amp-Prefix`, crossed with
+// `@FR-B-Ref-AnnotationOnly`, `@FR-B-Ref-NotTarget`, `@FR-B-Ref-Lvalue` and `@FR-E-Eq`).
+// Every position `(B-Ref-AnnotationOnly)` lists, in expression and in statement position:
+// an operand, a collection element, a call argument, a condition, a bare statement, a
+// `return`, a compound-assignment right-hand side, an assignment target, a struct field that
+// is not a `reference<τ>`, a format hole, a block's value and an `if` arm's value; plus a
+// non-addressable operand and a one-sided identity comparison.  One function per position,
+// so each claim is answered by its own diagnostic.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build admitting `&` as a value prefix compiles a function and leaves its claim
+//   unanswered.
+// HOLDS: the diagnostics are the same on both backends.
+
+struct S { x: integer }
+struct Item { n: integer }
+
+fn val(v: integer) -> integer { v }
+fn ret(a: integer) -> integer {
+  // @EXPECT_ERROR: a bare `&a` discards the reference
+  return &a;
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_an_operand() {
+  a = 3;
+  b = 1 + &a;
+  assert(b == 4, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_collection_element() {
+  a = 3;
+  v = [&a];
+  assert(len(v) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_call_argument() {
+  a = 3;
+  b = val(&a);
+  assert(b == 3 && ret(a) == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_condition() {
+  a = 3;
+  b = 0;
+  if &a > 0 { b = 2; }
+  assert(b == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: a bare `&a` discards the reference
+fn test_a_bare_statement() {
+  a = 3;
+  &a;
+  assert(a == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_compound_right_hand_side() {
+  a = 3;
+  b = 1;
+  b += &a;
+  assert(b == 4, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` cannot appear on the left of an assignment
+fn test_an_assignment_target() {
+  a = 3;
+  b = a;
+  &a = 4;
+  assert(a == 4 && b == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_field_that_is_not_a_reference() {
+  a = 3;
+  s = S { x: &a };
+  assert(s.x == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: a bare `&a` discards the reference
+fn test_a_format_hole() {
+  a = 3;
+  c = "{&a}";
+  assert(c == "3", "unreachable");
+}
+
+// @EXPECT_ERROR: a bare `&a` discards the reference
+fn test_a_block_value() {
+  a = 3;
+  b = { &a };
+  assert(b == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: a bare `&a` discards the reference
+fn test_an_if_arm_value() {
+  a = 3;
+  t = true;
+  b = if t { &a } else { &a };
+  assert(b == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` requires an addressable operand
+fn test_a_call_result() {
+  a = 3;
+  b = &val(a);
+  assert(b == 3, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` on one side of `==` asks nothing
+fn test_identity_on_one_side() {
+  it = Item { n: 1 };
+  c = &it == it;
+  assert(c, "unreachable");
+}

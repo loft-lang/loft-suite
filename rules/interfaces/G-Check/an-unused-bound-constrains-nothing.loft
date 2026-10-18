@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNUSED BOUND CONSTRAINS NOTHING (`@FR-G-Check`, crossed with `@FR-G-Iface` and
+// `@FR-G-Sat`).  The check runs at the USE, not at the interface or the generic's
+// declaration: an interface no type in the program satisfies, and a generic bounded by it that
+// is never called, compile and run; and a generic called only at satisfying types compiles,
+// however many other types in the program would miss its bound.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts (and the file compiling at all).
+// ARMED: no instrument.
+// WITNESS: a build checking at the declaration refuses the file.
+// HOLDS: the same values on both backends.
+
+interface Never { fn nothing_has_this(self: Self, a: integer, b: text) -> text }
+interface Sizable { fn size(self: Self) -> integer }
+
+struct Box { w: integer }
+struct Bare { w: integer }
+
+fn size(self: Box) -> integer { self.w * 2 }
+
+fn unused<T: Never>(x: T) -> text { x.nothing_has_this(1, "b") }
+fn total<T: Sizable>(xs: vector<T>) -> integer {
+  s = 0;
+  for x in xs { s += x.size(); }
+  s
+}
+
+fn test_an_unsatisfiable_interface_never_used() {
+  b = Bare { w: 4 };
+  assert(b.w == 4, "the program around it runs");
+}
+
+fn test_a_generic_used_only_where_it_holds() {
+  t = total([Box { w: 3 }, Box { w: 5 }]);
+  assert(t == 16, "{t}");
+}

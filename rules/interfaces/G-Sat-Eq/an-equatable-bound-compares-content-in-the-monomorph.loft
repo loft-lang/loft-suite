@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN `Equatable` BOUND COMPARES CONTENT IN THE MONOMORPH (`@FR-G-Sat-Eq`, crossed with
+// `@FR-E-Eq` and `@FR-G-Mono`).  Every type satisfies `Equatable`, and a type with no `OpEq` of
+// its own is compared in the monomorph by `(E-Eq)`'s content `==`: a struct field by field, a
+// vector by length then element by element, a struct-enum by variant then fields, a tuple
+// element by element, `0.0 == -0.0`, two absent nullables equal; and `!=` is the exact
+// complement.  The `(E-Eq)` × `(G-Sat-Eq)` pair no guard named before.  A PLAIN enum is the
+// sibling ignored cell `a-plain-enum-is-equatable.loft`.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the kind that moved.
+// HOLDS: the same answers on both backends; the leak check passes.
+
+struct P { x: integer, t: text }
+enum Sh { Circ { r: integer }, Sq { s: integer } }
+
+fn same<T: Equatable>(a: T, b: T) -> boolean { a == b }
+fn differ<T: Equatable>(a: T, b: T) -> boolean { a != b }
+
+fn test_a_struct_and_a_vector() {
+  p1 = P { x: 1, t: "a" };
+  p2 = P { x: 1, t: "a" };
+  p3 = P { x: 1, t: "b" };
+  assert(same(p1, p2) && !same(p1, p3) && !differ(p1, p2) && differ(p1, p3), "struct");
+  assert(same([1, 2], [1, 2]) && !same([1, 2], [1, 2, 3]) && differ([p1], [p3]), "vector");
+}
+
+fn test_a_struct_enum_and_a_tuple() {
+  c1: Sh = Circ { r: 2 };
+  c2: Sh = Circ { r: 2 };
+  c3: Sh = Sq { s: 2 };
+  assert(same(c1, c2) && !same(c1, c3) && differ(c1, c3), "struct-enum");
+  assert(same((1, "a"), (1, "a")) && !same((1, "a"), (2, "a")), "tuple");
+}
+
+fn test_scalars_and_nulls() {
+  assert(same(0.0, -0.0) && same("x", "x") && !same("x", "y"), "scalars");
+  n1: integer? = null;
+  n2: integer? = null;
+  assert(same(n1, n2) && !same(n1, 3) && differ(n1, 3), "nulls");
+}

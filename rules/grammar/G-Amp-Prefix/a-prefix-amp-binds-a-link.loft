@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PREFIX `&` BINDS A LINK (`@FR-G-Amp-Prefix`, crossed with `@FR-B-Ref-Intro`,
+// `@FR-B-Ref-Lvalue`, `@FR-B-Ref-Write`, `@FR-B-Ref-StoredRef` and `@FR-E-Eq`).  A leading `&`
+// on the whole right-hand side of a binding is the reference annotation: the bound name is a
+// live link to a variable, an element, a field, or a parenthesised variable, and a `&τ`
+// parameter or a `x: &τ` annotation links without a `&` at the use.  The one field form is a
+// `reference<τ>` struct field (`B-Ref-StoredRef`).  `&a == &b` is the identity question on
+// records (`E-Eq`), the other position that admits a leading `&` — see the report on
+// `(G-Amp-Prefix)`'s single named exception.  Hand-computed values in each message.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the source after the write through the link.
+// HOLDS: the same values on both backends; the leak check passes.
+
+struct Item { n: integer }
+struct Link { link: reference<Item> }
+struct Pool { items: vector<Item> }
+
+fn bump(n: &integer) { n += 10; }
+
+fn test_a_link_to_a_variable() {
+  a = 3;
+  b = &a;
+  b = 4;
+  assert(a == 4, "write through: {a}");
+  a = 5;
+  assert(b == 5, "read through: {b}");
+  bump(a);
+  assert(a == 15, "a & parameter, called without &: {a}");
+}
+
+fn test_a_link_to_an_element_a_field_and_a_group() {
+  v = [1, 2, 3];
+  e = &v[1];
+  e = 20;
+  assert(v == [1, 20, 3] && len(v) == 3, "element: {v}");
+  s = Item { n: 1 };
+  f = &s.n;
+  f += 5;
+  assert(s.n == 6, "field: {s.n}");
+  a = 3;
+  p = &(a);
+  p = 9;
+  assert(a == 9, "a parenthesised variable: {a}");
+  q: &integer = a;
+  q = 11;
+  assert(a == 11, "the annotation spelling: {a}");
+}
+
+fn test_a_stored_reference_field() {
+  p = Pool { items: [Item { n: 7 }, Item { n: 8 }] };
+  l = Link { link: &p.items[1] };
+  assert(l.link.n == 8, "{l.link.n}");
+}
+
+fn test_identity_on_both_sides() {
+  x = Item { n: 1 };
+  y = Item { n: 1 };
+  z = &x;
+  i1 = &x == &x;
+  i2 = &x == &y;
+  i3 = &x != &y;
+  i4 = &z == &x;
+  assert(i1 && !i2 && i3 && i4 && x == y, "{i1} {i2} {i3} {i4}");
+  r = 0;
+  if &x == &z { r = 1; }
+  assert(r == 1, "in a condition: {r}");
+}

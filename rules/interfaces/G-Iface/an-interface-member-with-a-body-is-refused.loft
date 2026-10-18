@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INTERFACE MEMBER WITH A BODY IS REFUSED (`@FR-G-Iface`, crossed with `@FR-G-Scope`).  "the
+// interface has NO bodies", and DEFAULT method bodies are out of scope by design.  The refusal
+// today is the parser's generic "Syntax error: unexpected '}'" — it names neither the rule nor
+// the cure, so the claim pins only the word every wording of it will keep.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting a default body compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+
+// @EXPECT_ERROR: Syntax error
+interface Sz { fn size(self: Self) -> integer { 1 } }
+
+fn main() { }

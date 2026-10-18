@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EACH HOLE KIND CALLS ITS OWN METHOD (`@FR-F-Target`, crossed with `@FR-F-Desugar` and
+// `@FR-F-Target-Pos`).  A template checked against a type that defines `lit` does not build
+// text: it calls `lit(s)` for every NON-EMPTY literal run and `hole_<kind>(v)` for every hole,
+// in source order, and the kind is derived from the hole's type.  The log below records each
+// call, so the ORDER, the KIND and the VALUE are all asserted.  Axes moved: every scalar kind,
+// narrow integers (`u8`, `i32`, `i16` are `hole_int`), a struct, a plain enum, an acronym-named
+// struct (`SQLIdent` → `hole_sql_ident`), a null `text?` (nullability is not a kind), a
+// template with no holes (one `lit`), the empty template (no call at all, still a `Q`), a
+// leading and adjacent holes (no empty `lit`), and a string literal written inside a hole
+// (a value, not a second target).
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the call log that moved.
+// HOLDS: the same log on both backends.
+
+struct Name { v: text }
+enum Level { Low, High }
+struct SQLIdent { n: text }
+struct Q {
+  const parts: vector<text>,
+  const log: vector<text>,
+}
+
+fn lit(self: Q, s: text) {
+  self.parts += [s];
+  self.log += ["L({s})"];
+}
+fn hole_text(self: Q, v: text?) { self.log += ["T({v ?? "NUL"})"]; }
+fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
+fn hole_float(self: Q, v: float) { self.log += ["F({v})"]; }
+fn hole_single(self: Q, v: single) { self.log += ["S({v})"]; }
+fn hole_boolean(self: Q, v: boolean) { self.log += ["B({v})"]; }
+fn hole_character(self: Q, v: character) { self.log += ["C({v})"]; }
+fn hole_name(self: Q, v: Name) { self.log += ["N({v.v})"]; }
+fn hole_level(self: Q, v: Level) { self.log += ["E({v})"]; }
+fn hole_sql_ident(self: Q, v: SQLIdent) { self.log += ["Id({v.n})"]; }
+
+fn cat(v: vector<text>) -> text {
+  r = "";
+  for x in v { r += x; }
+  r
+}
+
+fn test_narrow_integers_are_one_kind() {
+  a: u8 = 200;
+  b: i32 = -5;
+  c: i16 = 7;
+  q: Q = "x{a}y{b}{c}z";
+  assert(cat(q.log) == "L(x)I(200)L(y)I(-5)I(7)L(z)", "{cat(q.log)}");
+  assert(len(q.parts) == 3 && len(q.log) == 6, "{len(q.parts)} {len(q.log)}");
+}
+
+fn test_every_other_scalar_kind() {
+  f = 2.5;
+  s = 1.5f;
+  t = true;
+  ch = 'w';
+  q: Q = "{f}{s}{t}{ch}";
+  assert(cat(q.log) == "F(2.5)S(1.5)B(true)C(w)" && len(q.parts) == 0, "{cat(q.log)}");
+}
+
+fn test_a_struct_an_enum_and_an_acronym() {
+  nm = Name { v: "nn" };
+  lv = Level.High;
+  id = SQLIdent { n: "tb" };
+  q: Q = "{nm}-{lv}-{id}";
+  assert(cat(q.log) == "N(nn)L(-)E(High)L(-)Id(tb)", "{cat(q.log)}");
+}
+
+fn test_a_null_text_is_a_text_hole() {
+  tn: text? = null;
+  tt = "hi";
+  q: Q = "{tn}{tt}";
+  assert(cat(q.log) == "T(NUL)T(hi)" && len(q.log) == 2, "{cat(q.log)}");
+}
+
+fn test_no_holes_and_no_text() {
+  q5: Q = "plain";
+  assert(len(q5.parts) == 1 && cat(q5.log) == "L(plain)", "{len(q5.parts)} {cat(q5.log)}");
+  q6: Q = "";
+  assert(len(q6.parts) == 0 && len(q6.log) == 0, "{len(q6.parts)} {len(q6.log)}");
+}
+
+fn test_a_literal_inside_a_hole_is_a_value() {
+  q7: Q = "{"seed"}";
+  assert(cat(q7.log) == "T(seed)" && len(q7.parts) == 0, "{cat(q7.log)}");
+}
+
+fn test_the_same_template_into_text_renders() {
+  n = 7;
+  s: text = "id={n}";
+  assert(s == "id=7" && len(s) == 4, "[{s}]");
+}

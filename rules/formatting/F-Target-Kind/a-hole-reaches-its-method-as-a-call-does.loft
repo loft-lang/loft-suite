@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOLE REACHES ITS METHOD AS A CALL DOES (`@FR-F-Target-Kind`, crossed with `@FR-F-Target`
+// and `@FR-T-Chk`).  `(F-Target)` lowers each piece to a CALL — `τ.lit(s)`, `τ.hole_<kind>(v)`
+// — so the argument meets the parameter the way the same call written by hand meets it: a
+// `hole_int` whose parameter is a `text`, a `lit` whose parameter is an `integer`, and a
+// `float` into a `single` parameter are refused with the call's own diagnostic, and an
+// `integer` into a `u8` parameter is refused as a narrowing.
+//
+// ⚠ DEFECT (reported by the rule walk, 2026-10-18): the lowering emits the call with no
+// argument check or conversion.  `hole_int(self: Q, v: text)` crashes the interpreter
+// (SIGSEGV in OpFormatText) and fails rustc on --native (E0308); `lit(self: Q, s: integer)`
+// panics the interpreter (DbRef store_nr out of range) and fails rustc; `hole_int(self: Q, v:
+// u8)` given 300 logs `I(300)` from a u8 parameter on the interpreter; `hole_float(self: Q, v:
+// single)` logs `F(0)` on the interpreter and fails rustc.  The file is ignored as a whole
+// because a crash or a rustc failure takes every function in it down.
+//
+// @IGNORE — the defect above: the hole/lit call bypasses argument checking.
+// @falsified-at: none — the expected refusals do not exist on any build yet; this cell is the
+//   receipt the fix must turn green.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: today a crash (interpreter) or E0308 (native) instead of the claimed diagnostic.
+// HOLDS: the explicit-call spelling of each shape keeps the diagnostic it has today.
+
+struct A { const log: vector<text> }
+struct B { const log: vector<text> }
+struct C { const log: vector<text> }
+struct D { const log: vector<text> }
+
+fn lit(self: A, s: text) { self.log += [s]; }
+fn hole_int(self: A, v: text) { self.log += [v]; }
+fn lit(self: B, s: integer) { self.log += ["{s}"]; }
+fn hole_int(self: B, v: integer) { self.log += ["{v}"]; }
+fn lit(self: C, s: text) { self.log += [s]; }
+fn hole_int(self: C, v: u8) { self.log += ["{v}"]; }
+fn lit(self: D, s: text) { self.log += [s]; }
+fn hole_float(self: D, v: single) { self.log += ["{v}"]; }
+
+// @EXPECT_ERROR: expected text, got integer on argument 2 of call to hole_int
+fn test_a_hole_parameter_of_another_type() {
+  n = 3;
+  a: A = "x{n}";
+  assert(len(a.log) == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: expected integer, got text on argument 2 of call to lit
+fn test_a_lit_parameter_of_another_type() {
+  n = 3;
+  b: B = "x{n}";
+  assert(len(b.log) == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+fn test_a_narrower_hole_parameter() {
+  n = 300;
+  c: C = "x{n}";
+  assert(len(c.log) == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: expected single, got float on argument 2 of call to hole_float
+fn test_a_float_into_a_single_parameter() {
+  f = 2.5;
+  d: D = "x{f}";
+  assert(len(d.log) == 2, "unreachable");
+}

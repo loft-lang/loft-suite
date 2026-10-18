@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNBOUNDED VARIABLE CALLS NO METHOD (`@FR-G-Gen`, crossed with `@FR-G-Check`).  With no
+// bound there is no method a body may call on a `T`, even one every type the program passes
+// would have; the refusal is at the DECLARATION.  The wording names a field access where the
+// body calls a method; the claim pins the part every wording keeps.  (In a file that ALSO
+// declares a refused `self: T` method, the same body is reported as "Unknown field T#4.size",
+// an internal placeholder spelling — reported by the rule walk, 2026-10-18.)
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting the shape compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+
+struct Box { w: integer }
+
+fn size(self: Box) -> integer { self.w }
+
+// @EXPECT_ERROR: generic type T
+fn unbounded<T>(x: T) -> integer { x.size() }
+
+fn main() {
+  b = Box { w: 2 };
+  assert(b.size() == 2, "the program around it");
+}

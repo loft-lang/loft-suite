@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR OF `&` RESULTS TAKES THE JOIN OF THEIR RANGES (`@FR-G-Amp-Infix`, crossed with
+// `@FR-I-Join` and `@FR-T-Chk-Vec`).  `a & k` synthesises a RANGE type (`a & 1` is `integer
+// limit(0, 1)`, `a & 2` is `limit(0, 2)`).  An unannotated vector literal of such elements
+// has no expected element type, so its element type must hold EVERY element: the join, as
+// `(I-Join)` gives a variable written several times ("never just the first/narrowest").
+//
+// ⚠ DEFECT (reported by the rule walk, 2026-10-18): the element type is the FIRST element's
+// range, and every wider element is refused: `w = [a & 1, a & 2]` is "cannot implicitly
+// narrow integer limit(0, 2) to integer limit(0, 1)" on both backends; `[a % 2, a % 3]` is
+// the same with `limit(-1, 1)`.  Widest first (`[a & 4, a & 1]`) compiles, and an annotated
+// `w: vector<integer> = [a & 1, a & 2]` does too.  Not specific to `&`: any range-typed
+// first element.  No rule states the synthesised element type of a vector literal; `(I-Join)`
+// is the nearest.
+//
+// @IGNORE — the defect above: a vector literal's element type is its first element's range.
+// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
+//   the receipt the fix must turn green.
+// CHANNEL: the asserts (today: a compile refusal).
+// ARMED: no instrument.
+// WITNESS: today "cannot implicitly narrow integer limit(0, 2) to integer limit(0, 1)".
+// HOLDS: the widest-first and annotated spellings keep compiling to the same values.
+
+fn test_narrowest_first() {
+  a = 6;
+  w = [a & 1, a & 2, a & 4];
+  assert(w == [0, 2, 4] && len(w) == 3, "{w}");
+  m = [a % 2, a % 4];
+  assert(m == [0, 2] && len(m) == 2, "{m}");
+}

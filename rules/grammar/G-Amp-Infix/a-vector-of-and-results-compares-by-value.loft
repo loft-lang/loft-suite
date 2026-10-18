@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR OF `&` RESULTS COMPARES BY VALUE (`@FR-G-Amp-Infix`, crossed with `@FR-E-Eq` and
+// `@FR-C-Int`).  `[a & 4, a & 2, a & 1]` is a vector of a narrow range (`integer limit(0, 4)`),
+// and `==` compares "a vector or array by length and then element by element in order", each
+// element by its own `==` — and integer `==` is by VALUE, whatever the width.  So the vector
+// equals the `vector<integer>` literal `[4, 2, 0]`.
+//
+// ⚠ DEFECT, silent-wrong (reported by the rule walk, 2026-10-18): `==` between two vectors
+// whose element WIDTHS differ answers by bytes, not by value, on both backends:
+// `[a & 4, a & 2, a & 1] == [4, 2, 0]` is false while every element compares equal;
+// `u: vector<u8> = [4, 2, 0]` against `i: vector<integer> = [4, 2, 0]` is false both ways, an
+// `i32` vector against either is false, and `vector<u8> [4, 2, 0] == vector<integer> [4, 0, 0]`
+// is TRUE.  A one-element vector happens to answer right.  Same-width vectors are correct.
+// The first function (same widths) holds today; the second is ignored until the fix.
+//
+// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
+//   the receipt the fix must turn green.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: today `u8==int false`, and `[4,2,0] == [4,0,0]` across widths `true`.
+// HOLDS: same-width comparisons (the first function) keep their answers.
+
+fn test_same_widths_compare_by_value() {
+  a = 6;
+  w = [a & 4, a & 4];
+  x = [a & 4, a & 4];
+  assert(w == x && len(w) == 2, "{w} {x}");
+  u: vector<u8> = [4, 2, 0];
+  v: vector<u8> = [4, 2, 0];
+  assert(u == v && !(u != v), "u8 against u8");
+}
+
+// @IGNORE — the defect above: vectors of different element widths compare by bytes.
+fn test_different_widths_compare_by_value() {
+  a = 6;
+  w = [a & 4, a & 2, a & 1];
+  assert(w == [4, 2, 0], "an & vector against a literal: {w}");
+  u: vector<u8> = [4, 2, 0];
+  i: vector<integer> = [4, 2, 0];
+  k: vector<integer> = [4, 0, 0];
+  n: vector<i32> = [4, 2, 0];
+  assert(u == i && i == u && n == i && n == u, "equal contents across widths");
+  assert(u != k && !(u == k), "different contents across widths");
+}

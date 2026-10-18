@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ARGUMENT INSIDE A HOLE TARGETS ITS PARAMETER (`@FR-F-Target-Pos`, crossed with
+// `@FR-F-Interp`).  A hole holds an arbitrary expression parsed at full language level
+// `(F-Interp)`, so a call written inside a hole meets its parameters exactly as the same call
+// does outside one.  Where a call argument targets (the compiler and LOFT_LITERALS.md say it
+// does; the rule text says it does not — see the sibling cell
+// `an-annotated-binding-and-a-field-build-the-target.loft`), it targets inside a hole too.
+//
+// ⚠ DEFECT, conditional on the ruling (reported by the rule walk, 2026-10-18): `a =
+// take("x{n}")` builds a `Q`, but `"{take("x{n}")}"` is refused "expected Q, got text on
+// argument 1 of call to take" on both backends.  The gate that stops a string inside a hole
+// from inheriting the TEMPLATE's destination (`!self.in_format_expr`, src/parser/vectors.rs)
+// also stops it from taking the destination of a call written in that hole.
+//
+// @IGNORE — the defect above, and the pending F-Target-Pos ruling it depends on.
+// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
+//   the receipt the fix must turn green.
+// CHANNEL: the asserts (today: a compile refusal).
+// ARMED: no instrument.
+// WITNESS: today `expected Q, got text on argument 1 of call to take`.
+// HOLDS: `q: Q = "{"seed"}"` still hands "seed" to `hole_text` as a value.
+
+struct Q { const log: vector<text> }
+
+fn lit(self: Q, s: text) { self.log += ["L({s})"]; }
+fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
+fn take(q: Q) -> integer { len(q.log) }
+
+fn test_a_call_inside_a_hole() {
+  n = 4;
+  a = take("x{n}");
+  s = "{take("x{n}")}";
+  assert(a == 2 && s == "2", "{a} [{s}]");
+}

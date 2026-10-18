@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEMPLATE NAMING ITSELF IRREGULARLY IS REFUSED (`@FR-G-Regular`, crossed with `@FR-G-Type`).
+// A template may name itself only at its own variables, UNCHANGED, and anything else is refused
+// at the declaration: a variable wrapped in a former (`Bad<vector<T>>`, a struct, and the same
+// for an enum `Lst<vector<T>>`), a tuple of the variable (`Wide<(T, T)>`), the variables
+// SWAPPED (`Two<U, T>`), and a CONCRETE argument (`Fix<integer>`).  The last two do have a
+// finite set of instances, so the diagnostic's "has no finite set of instances" over-states
+// them — the rule's own test ("only at its own variables, unchanged") is what refuses them,
+// and the claims pin the part every wording keeps.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the five diagnostics.
+// ARMED: no instrument.
+// WITNESS: a build accepting a shape compiles the file and leaves its claim unanswered.
+// HOLDS: the diagnostics are the same on both backends.
+
+// @EXPECT_ERROR: `Bad<vector<T>>` inside `Bad<T>`
+// @EXPECT_ERROR: `Lst<vector<T>>` inside `Lst<T>`
+// @EXPECT_ERROR: `Wide<(T, T)>` inside `Wide<T>`
+// @EXPECT_ERROR: `Two<U, T>` inside `Two<T, U>`
+// @EXPECT_ERROR: `Fix<integer>` inside `Fix<T>`
+struct Bad<T> { v: T, n: vector<Bad<vector<T>>> }
+enum Lst<T> { Nil, Cons { h: T, t: vector<Lst<vector<T>>> } }
+struct Wide<T> { v: T, kids: vector<Wide<(T, T)>> }
+struct Two<T, U> { a: T, b: U, kids: vector<Two<U, T>> }
+struct Fix<T> { a: T, o: vector<Fix<integer>> }
+
+fn main() { }

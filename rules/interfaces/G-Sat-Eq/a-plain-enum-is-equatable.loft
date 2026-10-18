@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLAIN ENUM IS `Equatable` (`@FR-G-Sat-Eq`, crossed with `@FR-E-Eq` and `@FR-G-Check`).
+// "every type satisfies `Equatable`" (DESIGN_DECISIONS @C91); a plain enum compares by its
+// variant, as `a == Col.Red` does at a concrete site.  So `same(Col.Red, Col.Red)` is true and
+// `same(Col.Red, Col.Green)` false, and a `Col?` bound at the same generic too.
+//
+// ⚠ DEFECT (reported by the rule walk, 2026-10-18): a plain enum at `<T: Equatable>` is refused
+// on both backends: "'Col' does not satisfy interface 'Equatable': it needs `OpEq`, which only
+// the built-in types define" — and the same for a `Col?`.  Holding one axis fixed passes: a
+// struct-enum, a `vector<Col>`, and a struct with a `Col` field are all accepted and compare
+// right.  The file is ignored as a whole because the refusal stops it compiling.
+//
+// @IGNORE — the defect above: a plain enum does not satisfy Equatable.
+// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
+//   the receipt the fix must turn green.
+// CHANNEL: the asserts (today: a compile refusal).
+// ARMED: no instrument.
+// WITNESS: today "'Col' does not satisfy interface 'Equatable'".
+// HOLDS: the struct-enum and vector cells of `an-equatable-bound-compares-content-in-the-monomorph`.
+
+enum Col { Red, Green }
+
+fn same<T: Equatable>(a: T, b: T) -> boolean { a == b }
+
+fn test_a_plain_enum() {
+  assert(same(Col.Red, Col.Red) && !same(Col.Red, Col.Green), "by variant");
+  n: Col? = null;
+  m: Col? = null;
+  assert(same(n, m) && !same(n, Col.Red), "a nullable enum");
+}

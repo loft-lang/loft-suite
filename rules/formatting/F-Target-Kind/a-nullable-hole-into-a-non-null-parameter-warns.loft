@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE HOLE INTO A NON-NULL PARAMETER WARNS (`@FR-F-Target-Kind`, crossed with
+// `@FR-N-Store`).  Nullability is not a hole KIND — a `text?` hole is a `text` hole and an
+// `integer?` hole an `integer` one — so whether a null may arrive is the hole method's own
+// parameter type to say (the compiler's comment: "`v: text?` takes both, `v: text` takes only
+// the non-null one").  Storing a `τ?` into a non-null parameter is `(N-Store)`'s warning when
+// the call is written by hand; the call the template writes owes the same warning.
+//
+// ⚠ DEFECT (reported by the rule walk, 2026-10-18): the template path emits no warning.
+// `q: Q = "{ni}{tn}"` with `ni: integer? = null`, `tn: text? = null` and non-null
+// `hole_int(v: integer)` / `hole_text(v: text)` hands both nulls in and logs `I(null)T(null)`
+// with no diagnostic, while `q.hole_int(ni)` / `q.hole_text(tn)` written by hand each warn
+// "a nullable `integer?` is stored into parameter 2 of `hole_int` of the non-null type".
+//
+// @IGNORE — the defect above: the template's hole call skips the (N-Store) warning.
+// @falsified-at: none — the expected warnings do not exist on any build yet; this cell is the
+//   receipt the fix must turn green.
+// CHANNEL: expect — the two warnings.
+// ARMED: no instrument.
+// WITNESS: today the file runs warning-free and logs `I(null)T(null)`.
+// HOLDS: the logged values (the null still arrives; the warning is what is owed).
+
+struct Q { const log: vector<text> }
+
+fn lit(self: Q, s: text) { self.log += ["L({s})"]; }
+fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
+fn hole_text(self: Q, v: text) { self.log += ["T({v})"]; }
+
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 2 of `hole_int`
+// @EXPECT_WARNING: a nullable `text?` is stored into parameter 2 of `hole_text`
+fn test_a_null_into_a_non_null_hole() {
+  ni: integer? = null;
+  tn: text? = null;
+  q: Q = "{ni}{tn}";
+  assert(len(q.log) == 2, "{len(q.log)}");
+}

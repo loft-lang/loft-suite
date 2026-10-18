@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO GENERICS NOTHING RANKS ARE REFUSED (`@FR-G-Select`, crossed with `@FR-G-Check`).  At a
+// type meeting BOTH `A1` and `B1`, `<T: A1>` and `<T: B1>` are two minimal members whose bound
+// sets neither contains the other, so the call is refused naming both — a refusal can be
+// broadened later, a choice cannot.  A type meeting only one bound is not ambiguous (the
+// accepting function in the sibling cell's spirit is kept out of this file, which a refusal
+// stops from running).
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build picking one by declaration order compiles the file and leaves the claim
+//   unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+
+interface A1 { fn a1(self: Self) -> integer }
+interface B1 { fn b1(self: Self) -> integer }
+
+struct Both { n: integer }
+
+fn a1(self: Both) -> integer { self.n + 1 }
+fn b1(self: Both) -> integer { self.n + 2 }
+fn pick<T: A1>(x: T) -> integer { x.a1() }
+fn pick<T: B1>(x: T) -> integer { x.b1() }
+
+// @EXPECT_ERROR: `pick(Both)` is ambiguous — it is taken by pick<T: A1>(T) and pick<T: B1>(T) and nothing ranks them
+fn test_two_bound_sets_neither_containing_the_other() {
+  assert(pick(Both { n: 0 }) > 0, "unreachable");
+}

@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNBOUNDED VARIABLE MOVES VALUES; A BOUND ADDS METHODS (`@FR-G-Gen`, crossed with
+// `@FR-G-Mono`, `@FR-G-Iface` and `@FR-G-Sat`).  An unbounded `<T>` may store, pass and return a
+// `T` — at a scalar, a text, a record and a vector alike — and a method whose receiver is BUILT
+// over `T` (`self: vector<T>`) is found on that former.  `T: A + B` lets the body call the
+// members of both.  Every value below is hand-computed in its message.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value that moved.
+// HOLDS: the same values on both backends; the leak check passes.
+
+interface Sized { fn size(self: Self) -> integer }
+interface Named { fn label(self: Self) -> text }
+
+struct Sq { s: integer }
+
+fn size(self: Sq) -> integer { self.s * self.s }
+fn label(self: Sq) -> text { "sq{self.s}" }
+
+fn pick<T>(a: T, b: T, first: boolean) -> T { if first { a } else { b } }
+fn keep<T>(xs: vector<T>) -> integer { len(xs) }
+fn second<T>(self: vector<T>) -> T { self[1] }
+fn both<T: Sized + Named>(x: T) -> text { "{x.label()}:{x.size()}" }
+
+fn test_an_unbounded_variable_at_every_kind() {
+  i = pick(1, 2, false);
+  t = pick("a", "b", true);
+  r = pick(Sq { s: 4 }, Sq { s: 5 }, false);
+  v = pick([1], [2, 3], false);
+  assert(i == 2 && t == "a" && r.s == 5 && v == [2, 3] && len(v) == 2, "{i} {t} {r.s} {v}");
+}
+
+fn test_a_method_over_a_vector_of_the_variable() {
+  assert(keep(["x", "y", "z"]) == 3, "keep");
+  assert([10, 20, 30].second() == 20 && ["p", "q"].second() == "q", "second");
+  assert(second([Sq { s: 6 }, Sq { s: 7 }]).s == 7, "free-function spelling");
+}
+
+fn test_two_bounds_combine() {
+  b = both(Sq { s: 3 });
+  assert(b == "sq3:9" && len(b) == 5, "{b}");
+}

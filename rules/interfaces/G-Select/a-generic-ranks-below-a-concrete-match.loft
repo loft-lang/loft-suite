@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC RANKS BELOW A CONCRETE MATCH, AND THE NARROWER GENERIC WINS (`@FR-G-Select`,
+// crossed with `@FR-G-Mono`, `@FR-G-Check` and `@FR-C-Int`).  One name, several definitions;
+// the definition a call reaches is a function of the argument types alone:
+// · an exact match beats the generic (`first(ints)` is the concrete -1), and so does a WIDENED
+//   one (`widen(b)` with `b: u8` reaches `widen(x: integer)`);
+// · every other type reaches the generic's instance (`first(texts)`, `first(floats)`);
+// · `vector<T>` beats `T` (fewer types), and `<T: Named + Sized>` beats `<T: Named>` where both
+//   bounds hold, while a type meeting only `Named` reaches the weaker one;
+// · a call inside a generic is decided again per instance (`relay`).
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the definition reached.
+// HOLDS: the same answers on both backends.
+
+interface Named { fn tag(self: Self) -> text }
+interface Sized { fn size(self: Self) -> integer }
+
+struct Cat { n: integer }
+struct Rock { n: integer }
+
+fn tag(self: Cat) -> text { "cat{self.n}" }
+fn size(self: Cat) -> integer { self.n * 4 }
+fn tag(self: Rock) -> text { "rock{self.n}" }
+
+fn first<T>(v: vector<T>) -> T { v[0] }
+fn first(v: vector<integer>) -> integer { -1 - len(v) }
+fn kind<T>(_x: T) -> text { "T" }
+fn kind<T>(x: vector<T>) -> text { "vec{len(x)}" }
+fn show<T: Named>(x: T) -> text { "N:{x.tag()}" }
+fn show<T: Named + Sized>(x: T) -> text { "NS:{x.tag()}{x.size()}" }
+fn relay<U: Named>(x: U) -> text { show(x) }
+fn widen(x: integer) -> text { "int{x}" }
+fn widen<T: Printable>(x: T) -> text { "gen{x}" }
+
+fn test_an_exact_or_widened_match_beats_the_generic() {
+  a = first([5, 6]);
+  b: u8 = 3;
+  assert(a == -3 && widen(7) == "int7" && widen(b) == "int3", "{a} {widen(b)}");
+}
+
+fn test_every_other_type_reaches_the_instance() {
+  assert(first(["p", "q"]) == "p" && first([2.5]) == 2.5, "texts and floats");
+  assert(widen("t") == "gent", "{widen("t")}");
+}
+
+fn test_the_narrower_generic_wins() {
+  assert(kind([1, 2]) == "vec2" && kind(1) == "T", "{kind([1, 2])} {kind(1)}");
+  assert(show(Cat { n: 1 }) == "NS:cat14", "{show(Cat { n: 1 })}");
+  assert(show(Rock { n: 2 }) == "N:rock2", "{show(Rock { n: 2 })}");
+}
+
+fn test_a_call_inside_a_generic_is_decided_per_instance() {
+  assert(relay(Cat { n: 2 }) == "NS:cat28" && relay(Rock { n: 1 }) == "N:rock1", "relay");
+}

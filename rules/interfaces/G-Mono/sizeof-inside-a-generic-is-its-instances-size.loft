@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `sizeof` INSIDE A GENERIC IS ITS INSTANCE'S SIZE (`@FR-G-Mono`, crossed with `@FR-G-Gen` and
+// `@FR-G-Gen-Scope`).  A monomorph applies `[T ↦ C]` to "every CONSTANT derived from a type —
+// a schema row, an element width", so `sizeof(x)` on a `T` parameter answers what it answers on
+// a `C` value outside the generic: 8 for an `integer`, 1 for a `u8`, 16 for a two-integer
+// record.  And inside its header a type variable's spelling means the variable
+// (`G-Gen-Scope`), so `sizeof(T)` is the same number.
+//
+// ⚠ DEFECT, silent-wrong (reported by the rule walk, 2026-10-18): `sizeof(x)` in `fn g<T>(x: T)`
+// answers 0 at EVERY instance on both backends (integer, u8, record, float, text), while the
+// same `sizeof(x)` outside reads 8 / 1 / 16.  And `sizeof(T)` is refused "Unknown variable 'T'"
+// / "Expect a variable or type after sizeof".  The file is ignored as a whole because the
+// refusal stops it compiling.
+//
+// @IGNORE — the defect above: sizeof is not re-derived per instance, and sizeof(T) is refused.
+// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
+//   the receipt the fix must turn green.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: today `g(i)` is 0 where `sizeof(i)` is 8.
+// HOLDS: `sizeof` outside a generic keeps its answers (the control line in each function).
+
+struct P { a: integer, b: integer }
+
+fn g<T>(x: T) -> integer { sizeof(x) }
+fn gt<T>(_x: T) -> integer { sizeof(T) }
+
+fn test_sizeof_of_a_parameter() {
+  i = 5;
+  b: u8 = 1;
+  p = P { a: 1, b: 2 };
+  assert(sizeof(i) == 8 && sizeof(b) == 1 && sizeof(p) == 16, "the control outside");
+  assert(g(i) == 8 && g(b) == 1 && g(p) == 16, "{g(i)} {g(b)} {g(p)}");
+}
+
+fn test_sizeof_of_the_type_variable() {
+  b: u8 = 1;
+  assert(gt(5) == 8 && gt(b) == 1, "{gt(5)} {gt(b)}");
+}

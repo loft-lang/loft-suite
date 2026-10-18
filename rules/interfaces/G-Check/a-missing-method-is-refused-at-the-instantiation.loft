@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MISSING METHOD IS REFUSED AT THE INSTANTIATION (`@FR-G-Check`, crossed with `@FR-G-Sat`,
+// `@FR-G-Gen` and `@FR-G-Mono`).  Each instantiation `f[T ↦ C]` verifies `C ⊨ I` for EVERY
+// bound, and a miss is a static error naming the type, the interface and the method.  The
+// cells: a record with no `size`; a type meeting the first of two bounds but not the second; a
+// built-in type (`integer`), checked like any other; and one generic called at a satisfying
+// AND an unsatisfying type in one function — the check is per instance, so only the miss is
+// named.  (A second use of an instance already refused is not reported again: one
+// instantiation, one check.)
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build that checked bounds at the declaration, or not at all, leaves a claim
+//   unanswered (or crashes at run time).
+// HOLDS: the diagnostics are the same on both backends.
+
+interface Sizable { fn size(self: Self) -> integer }
+interface Named { fn label(self: Self) -> text }
+
+struct Box { w: integer }
+struct Bare { w: integer }
+
+fn size(self: Box) -> integer { self.w }
+
+fn total<T: Sizable>(x: T) -> integer { x.size() }
+fn total2<T: Sizable>(x: T) -> integer { x.size() * 2 }
+fn tag<T: Sizable + Named>(x: T) -> text { "{x.label()}{x.size()}" }
+
+// @EXPECT_ERROR: 'Bare' does not satisfy interface 'Sizable': missing size
+fn test_a_record_without_the_method() {
+  assert(total(Bare { w: 1 }) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: 'Box' does not satisfy interface 'Named': missing label
+fn test_the_second_bound_is_checked_too() {
+  assert(tag(Box { w: 1 }) == "", "unreachable");
+}
+
+// @EXPECT_ERROR: 'integer' does not satisfy interface 'Sizable': missing size
+fn test_a_built_in_type() {
+  assert(total(5) == 5, "unreachable");
+}
+
+// @EXPECT_ERROR: 'Bare' does not satisfy interface 'Sizable': missing size
+fn test_one_generic_at_two_types() {
+  a = total2(Box { w: 3 });
+  b = total2(Bare { w: 3 });
+  assert(a == 6 && b == 6, "unreachable");
+}

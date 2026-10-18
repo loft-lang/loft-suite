@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOLE THE TARGET DOES NOT TAKE IS REFUSED (`@FR-F-Target-Kind`, crossed with
+// `@FR-F-Target-Spec` and `@FR-F-Target`).  A hole whose derived kind has no `hole_<kind>` of
+// the one-value shape is a static error naming the method to declare — never a quiet fallback
+// to text.  The cells: a missing `hole_int`; a `hole_int` that takes two values (the wrong
+// shape, the same refusal); a vector and a tuple hole, which have no kind at all (the
+// compiler's wording: "a hole is a scalar or a value of a named type"); and a format spec on a
+// hole of a target.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: on a build that fell back to text the file compiles and every claim is unanswered.
+// HOLDS: the diagnostics are the same on both backends.
+
+struct Q { const log: vector<text> }
+struct W { const log: vector<text> }
+
+fn lit(self: Q, s: text) { self.log += [s]; }
+fn hole_text(self: Q, v: text?) { self.log += [v ?? ""]; }
+fn lit(self: W, s: text) { self.log += [s]; }
+fn hole_int(self: W, v: integer, w: integer) { self.log += ["{v}{w}"]; }
+
+// @EXPECT_ERROR: Q has no `fn hole_int(self: Q, v: integer)` — declare one to accept this hole
+fn test_a_missing_kind() {
+  n = 3;
+  q: Q = "a{n}";
+  assert(len(q.log) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: W has no `fn hole_int(self: W, v: integer)` — declare one to accept this hole
+fn test_a_kind_method_of_the_wrong_shape() {
+  n = 3;
+  w: W = "a{n}";
+  assert(len(w.log) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: a vector<integer> cannot be interpolated into a Q
+fn test_a_vector_hole() {
+  v = [1, 2];
+  q: Q = "a{v}";
+  assert(len(q.log) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: a (integer, integer) cannot be interpolated into a Q
+fn test_a_tuple_hole() {
+  t = (1, 2);
+  q: Q = "a{t}";
+  assert(len(q.log) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: a format spec has no meaning on a Q hole
+fn test_a_spec_on_a_target_hole() {
+  s = "x";
+  q: Q = "a{s:>4}";
+  assert(len(q.log) == 2, "unreachable");
+}

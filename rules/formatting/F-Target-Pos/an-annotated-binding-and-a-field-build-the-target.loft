@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ANNOTATED BINDING AND A FIELD BUILD THE TARGET (`@FR-F-Target-Pos`, crossed with
+// `@FR-F-Target`).  The positions the rule names — an annotated binding and a struct-literal
+// field of the target type — build a `Q`; so does a reassignment of a local already typed `Q`
+// (its declared type is the expected type).  An UNannotated binding expects nothing, so the
+// same template is a `text`.
+//
+// ⚠ The rule text says a call ARGUMENT and a RETURN position do NOT target ("measured:
+// `expected Query, got text`").  The compiler threads both (loft#837, `seed_leaving_value_hint`
+// and `argument_hint`), and LOFT_LITERALS.md § "Building a value instead of text" PROMISES
+// both ("a function parameter, or a return type").  That is a disagreement between the formal
+// rule and the user documentation, reported for a ruling; the last function measures today's
+// behaviour and is ignored until the ruling says which text is the contract.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the call log that moved.
+// HOLDS: the same log on both backends.
+
+struct Q { const log: vector<text> }
+struct Holder { q: Q, n: integer }
+
+fn lit(self: Q, s: text) { self.log += ["L({s})"]; }
+fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
+
+fn cat(v: vector<text>) -> text {
+  r = "";
+  for x in v { r += x; }
+  r
+}
+
+fn build(n: integer) -> Q { "r{n}" }
+fn take(q: Q) -> text { cat(q.log) }
+
+fn test_an_annotated_binding() {
+  n = 4;
+  q: Q = "a{n}";
+  assert(cat(q.log) == "L(a)I(4)" && len(q.log) == 2, "{cat(q.log)}");
+}
+
+fn test_a_struct_literal_field() {
+  n = 4;
+  h = Holder { q: "f{n}", n: 1 };
+  assert(cat(h.q.log) == "L(f)I(4)" && h.n == 1, "{cat(h.q.log)}");
+}
+
+fn test_a_reassignment_of_a_typed_local() {
+  n = 4;
+  q: Q = "a{n}";
+  assert(len(q.log) == 2, "first build");
+  q = "b{n}";
+  assert(cat(q.log) == "L(b)I(4)", "a reassignment builds a fresh Q: {cat(q.log)}");
+}
+
+fn test_an_unannotated_binding_is_text() {
+  n = 4;
+  s = "a{n}";
+  assert(s == "a4" && len(s) == 2, "[{s}]");
+}
+
+// @IGNORE — the rule text says these two positions do not target; the documentation and the
+// compiler say they do.  Pending the ruling (see the header).
+fn test_a_return_and_an_argument() {
+  n = 4;
+  assert(cat(build(9).log) == "L(r)I(9)", "{cat(build(9).log)}");
+  t = take("arg{n}");
+  assert(t == "L(arg)I(4)", "{t}");
+}

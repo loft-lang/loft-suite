@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC OVER A REGULAR ENUM BINDS ITS OWN FIELD (`@FR-G-Regular`, crossed with `@FR-G-Type`
+// and `@FR-G-Mono`).  `enum Lst<T> { Nil, Cons { h: T, t: vector<Lst<T>> } }` names itself
+// regularly, so it is a template with one instance per `T`.  A generic `fn f<T>(l: Lst<T>)`
+// sees the OPEN instance `Lst<T>` and "each monomorph reads the instance its bindings close
+// it to — its fields, its variants" (`G-Type`), so `match l { Cons { t } => … }` and `if l is
+// Cons { t }` bind the variant's `t`.  Hand-computed: the list below has two cells.
+//
+// ⚠ DEFECT (reported by the rule walk, 2026-10-18): both spellings are refused on both
+// backends with "variant Cons has no field 't'" (then "Unknown variable 't'").  Holding any
+// one axis fixed passes: a CONCRETE `fn f(l: Lst<text>)` binds `t`; a generic enum whose
+// variant holds `vector<T>` (not itself) binds it; a regular generic STRUCT `Tree<T>` reads
+// `kids`.  Only the self-naming field of an open enum instance is missing.
+//
+// @IGNORE — the defect above: an open regular enum instance has no self-naming field.
+// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
+//   the receipt the fix must turn green.
+// CHANNEL: the asserts (today: a compile refusal).
+// ARMED: no instrument.
+// WITNESS: today "variant Cons has no field 't'".
+// HOLDS: the concrete spelling (`a-template-names-itself-at-its-own-variables.loft`).
+
+enum Lst<T> { Nil, Cons { h: T, t: vector<Lst<T>> } }
+
+fn by_match<T>(l: Lst<T>) -> integer {
+  match l {
+    Nil => 0,
+    Cons { h: _, t } => if len(t) == 0 { 1 } else { 1 + by_match(t[0]) },
+  }
+}
+
+fn by_is<T>(l: Lst<T>) -> integer {
+  if l is Cons { t } { len(t) } else { -1 }
+}
+
+fn test_a_generic_binds_the_self_naming_field() {
+  l: Lst<text> = Cons { h: "a", t: [Cons { h: "b", t: [] }] };
+  n: Lst<integer> = Cons { h: 1, t: [] };
+  assert(by_match(l) == 2 && by_match(n) == 1, "{by_match(l)} {by_match(n)}");
+  assert(by_is(l) == 1 && by_is(n) == 0, "{by_is(l)} {by_is(n)}");
+}

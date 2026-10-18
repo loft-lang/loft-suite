@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PREFIX `&` LEADING AN OPERAND IS REFUSED ON EITHER SIDE (`@FR-G-Amp-Disambig`, crossed with
+// `@FR-G-Amp-Infix`, `@FR-G-Amp-Prefix` and `@FR-B-Ref-AnnotationOnly`).  "Leading" means
+// leading the whole BINDING: `a & &b` (an infix `&` whose right operand is a prefix `&`),
+// `&a & b` (a leading `&` over an `&` expression, not an lvalue) and `&a + 1` are each refused.
+// The accepting half is `position-tells-the-two-amps-apart.loft`.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build reading `&a & b` as `(&a) & b` compiles that function and leaves its claim
+//   unanswered.
+// HOLDS: the diagnostics are the same on both backends.
+
+struct Item { n: integer }
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_an_infix_amp_before_a_prefix_amp() {
+  a = 6;
+  b = 3;
+  c = a & &b;
+  assert(c == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_leading_amp_over_an_infix_amp() {
+  a = 6;
+  b = 3;
+  c = &a & b;
+  assert(c == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn test_a_leading_amp_over_a_sum() {
+  a = 6;
+  c = &a + 1;
+  assert(c == 7, "unreachable");
+}

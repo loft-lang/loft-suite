@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEMPLATE NAMES ITSELF AT ITS OWN VARIABLES (`@FR-G-Regular`, crossed with `@FR-G-Type`,
+// `@FR-G-Gen` and `@FR-G-Check`).  `Tree<T>` inside `Tree<T>` through a vector, and an enum
+// template `Lst<T>` whose variant holds `vector<Lst<T>>`, have one instance per binding of
+// `T`; a BOUNDED generic walks the open instance `Tree<T>` and each monomorph reads its own
+// instance.  Hand-computed: the rock tree weighs 5 + 2 + 7 + 1 = 15; the text list has three
+// cells.  The generic function over the open ENUM instance is a separate, ignored cell
+// (`a-generic-over-a-regular-enum-binds-its-own-field.loft`).
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value that moved.
+// HOLDS: the same values on both backends; the leak check passes.
+
+struct Tree<T> { v: T, kids: vector<Tree<T>> }
+enum Lst<T> { Nil, Cons { h: T, t: vector<Lst<T>> } }
+interface Weighed { fn weight(self: Self) -> integer }
+struct Rock { kg: integer }
+
+fn weight(self: Rock) -> integer { self.kg }
+
+fn heavy<T: Weighed>(t: Tree<T>) -> integer {
+  n = t.v.weight();
+  for k in t.kids { n += heavy(k); }
+  n
+}
+
+fn count<T>(t: Tree<T>) -> integer {
+  n = 1;
+  for k in t.kids { n += count(k); }
+  n
+}
+
+fn cells(l: Lst<text>) -> integer {
+  match l {
+    Nil => 0,
+    Cons { h: _, t } => if len(t) == 0 { 1 } else { 1 + cells(t[0]) },
+  }
+}
+
+fn test_a_bounded_generic_walks_a_regular_struct() {
+  t = Tree { v: Rock { kg: 5 }, kids: [Tree { v: Rock { kg: 2 }, kids: [] }, Tree { v: Rock { kg: 7 }, kids: [Tree { v: Rock { kg: 1 }, kids: [] }] }] };
+  assert(heavy(t) == 15 && count(t) == 4, "{heavy(t)} {count(t)}");
+  s: Tree<text> = Tree { v: "root", kids: [Tree { v: "a", kids: [] }] };
+  assert(count(s) == 2 && s.kids[0].v == "a", "a second instance: {count(s)}");
+}
+
+fn test_a_regular_enum_instance() {
+  l: Lst<text> = Cons { h: "a", t: [Cons { h: "b", t: [Cons { h: "c", t: [] }] }] };
+  e: Lst<text> = Nil;
+  assert(cells(l) == 3 && cells(e) == 0, "{cells(l)} {cells(e)}");
+}

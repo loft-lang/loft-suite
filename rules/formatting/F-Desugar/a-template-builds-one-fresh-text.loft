@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEMPLATE BUILDS ONE FRESH TEXT (`@FR-F-Desugar`, crossed with `@FR-F-Interp`).  A
+// template compiles to a FRESH accumulator that is cleared and then appended to piece by
+// piece, so a template that reads the variable it is assigned to sees the variable's OLD
+// value — the accumulator is not that variable.  The holes evaluate left to right, a
+// template inside a hole is its own accumulator, and a template in a loop body starts empty
+// on every turn.  Axes moved: the destination read inside its own template (`=` and `+=`),
+// a loop, a nested template, holes with side effects, adjacency of holes, an empty hole value.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the text and the length that moved.
+// HOLDS: every value is the same on both backends; nothing allocates past the cell.
+
+fn tick(c: &integer) -> integer {
+  c += 1;
+  c
+}
+
+fn test_the_destination_read_in_its_own_template_is_its_old_value() {
+  s = "x";
+  s = "{s}{s}";
+  assert(s == "xx" && len(s) == 2, "s = \"{{s}}{{s}}\" over \"x\": [{s}] {len(s)}");
+  t = "ab";
+  t += "{t}!";
+  assert(t == "abab!" && len(t) == 5, "t += \"{{t}}!\" over \"ab\": [{t}] {len(t)}");
+}
+
+fn test_a_template_in_a_loop_starts_empty_each_turn() {
+  out = "";
+  for i in 0..3 {
+    w = "{i}-";
+    out += w;
+  }
+  assert(out == "0-1-2-" && len(out) == 6, "loop: [{out}] {len(out)}");
+}
+
+fn test_a_template_inside_a_hole_is_its_own_text() {
+  x = 5;
+  n = "[{"<{x}>"}]";
+  assert(n == "[<5>]" && len(n) == 5, "nested: [{n}] {len(n)}");
+}
+
+fn test_holes_evaluate_left_to_right_once_each() {
+  c = 0;
+  o = "{tick(c)}{tick(c)}{tick(c)}";
+  assert(o == "123" && c == 3, "left to right: [{o}] c={c}");
+}
+
+fn test_an_empty_value_and_a_template_of_only_holes() {
+  em = "";
+  e2 = "{em}";
+  assert(e2 == "" && len(e2) == 0, "an empty hole: [{e2}] {len(e2)}");
+  a = 1;
+  b = "z";
+  e3 = "{a}{b}{a}";
+  assert(e3 == "1z1" && len(e3) == 3, "adjacent holes: [{e3}]");
+}
