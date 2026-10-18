@@ -8,20 +8,14 @@
 // `float` into a `single` parameter are refused with the call's own diagnostic, and an
 // `integer` into a `u8` parameter is refused as a narrowing.
 //
-// ⚠ DEFECT (reported by the rule walk, 2026-10-18): the lowering emits the call with no
-// argument check or conversion.  `hole_int(self: Q, v: text)` crashes the interpreter
-// (SIGSEGV in OpFormatText) and fails rustc on --native (E0308); `lit(self: Q, s: integer)`
-// panics the interpreter (DbRef store_nr out of range) and fails rustc; `hole_int(self: Q, v:
-// u8)` given 300 logs `I(300)` from a u8 parameter on the interpreter; `hole_float(self: Q, v:
-// single)` logs `F(0)` on the interpreter and fails rustc.  The file is ignored as a whole
-// because a crash or a rustc failure takes every function in it down.
+// loft#2056: the template lowering emitted the hole and `lit` calls bare, with no argument check
+// and no conversion — a crash on the interpreter, rustc E0308 natively, `I(300)` into a `u8`.
 //
-// @IGNORE — the defect above: the hole/lit call bypasses argument checking.
-// @falsified-at: none — the expected refusals do not exist on any build yet; this cell is the
-//   receipt the fix must turn green.
+// @falsified-at: 88fb61b1f — hand-measured, interpret and native: the claimed diagnostics never fire
+//   (a SIGSEGV in OpFormatText, rustc E0308).
 // CHANNEL: expect — each function's diagnostic.
 // ARMED: no instrument.
-// WITNESS: today a crash (interpreter) or E0308 (native) instead of the claimed diagnostic.
+// WITNESS: each diagnostic names the method and the argument.
 // HOLDS: the explicit-call spelling of each shape keeps the diagnostic it has today.
 
 struct A { const log: vector<text> }

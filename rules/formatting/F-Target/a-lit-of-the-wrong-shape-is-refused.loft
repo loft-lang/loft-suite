@@ -6,18 +6,14 @@
 // text cannot be lowered — the author's bytes would have nowhere to go.  The refusal it owes
 // has the shape `(F-Target-Kind)` gives a missing hole method.
 //
-// ⚠ DEFECT (reported by the rule walk, 2026-10-18): `Parser::interpolation_target` admits any
-// struct with a method NAMED `lit`, and `format_lit` then skips every literal run whose `lit`
-// does not take exactly two attributes — silently.  With `fn lit(self: Q, s: text, extra:
-// integer)` the template `"a{n}b"` logs only `I(3)` on both backends: the author's `a` and
-// `b` are dropped and nothing says so.
+// loft#2056: a `lit` of another arity still made the type a target, and every literal run was
+// dropped silently — `"a{n}b"` logged only `I(3)`.
 //
-// @IGNORE — the defect above: a `lit` of the wrong shape drops every literal run silently.
-// @falsified-at: none — the expected refusal does not exist on any build yet; this cell is the
-//   receipt the fix must turn green.
+// @falsified-at: 88fb61b1f — hand-measured, interpret and native: the file compiles and `q.log` is
+//   `["I(3)"]`.
 // CHANNEL: expect — the diagnostic.
 // ARMED: no instrument.
-// WITNESS: today the file compiles and `q.log` is `["I(3)"]` on both backends.
+// WITNESS: the diagnostic names the type, its `lit`'s arity and the shape it needs.
 // HOLDS: a `lit(self: Q, s: text)` target is unaffected (each-hole-kind-calls-its-own-method).
 
 struct Q { const log: vector<text> }
@@ -25,7 +21,7 @@ struct Q { const log: vector<text> }
 fn lit(self: Q, s: text, extra: integer) { self.log += ["L({s}{extra})"]; }
 fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
 
-// @EXPECT_ERROR: Q has no `fn lit(self: Q, s: text)`
+// @EXPECT_ERROR: Q's `fn lit` takes 3 parameters
 fn test_a_lit_of_three_parameters() {
   n = 3;
   q: Q = "a{n}b";

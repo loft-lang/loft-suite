@@ -8,18 +8,13 @@
 // the non-null one").  Storing a `τ?` into a non-null parameter is `(N-Store)`'s warning when
 // the call is written by hand; the call the template writes owes the same warning.
 //
-// ⚠ DEFECT (reported by the rule walk, 2026-10-18): the template path emits no warning.
-// `q: Q = "{ni}{tn}"` with `ni: integer? = null`, `tn: text? = null` and non-null
-// `hole_int(v: integer)` / `hole_text(v: text)` hands both nulls in and logs `I(null)T(null)`
-// with no diagnostic, while `q.hole_int(ni)` / `q.hole_text(tn)` written by hand each warn
-// "a nullable `integer?` is stored into parameter 2 of `hole_int` of the non-null type".
+// loft#2056: the template's hole call skipped the `(N-Store)` warning a hand-written call gives.
 //
-// @IGNORE — the defect above: the template's hole call skips the (N-Store) warning.
-// @falsified-at: none — the expected warnings do not exist on any build yet; this cell is the
-//   receipt the fix must turn green.
+// @falsified-at: 88fb61b1f — hand-measured, interpret and native: the file runs warning-free and
+//   logs `I(null)T(null)`.
 // CHANNEL: expect — the two warnings.
 // ARMED: no instrument.
-// WITNESS: today the file runs warning-free and logs `I(null)T(null)`.
+// WITNESS: each warning names the parameter and the method.
 // HOLDS: the logged values (the null still arrives; the warning is what is owed).
 
 struct Q { const log: vector<text> }
