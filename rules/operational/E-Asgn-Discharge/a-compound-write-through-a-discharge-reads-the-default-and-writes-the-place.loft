@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPOUND WRITE THROUGH A DISCHARGE READS THE DEFAULT AND WRITES THE PLACE (`@FR-E-Asgn-Discharge`,
+// `@FR-E-Asgn-Compound`, `@FR-E-Op`, `@FR-E-Op-IntDivMod`, `@FR-E-Null`, `@FR-H-RefNull`,
+// `@FR-H-WriteNull`).  Three rule pairs no guard named together: `place? op= e` reads the type's
+// default when the place is null and writes the place, a field and an element alike; integer `/`
+// truncates toward zero and `%` takes the dividend's sign, so `a == (a/b)*b + a%b` for every
+// non-zero `b`; and a field write through the reference null updates nothing.
+//
+// @falsified-at: none — a conformance guard at rule pairings no guard named together; every
+//   cell answered as the rules say on both backends on the tree it landed on.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the values read.
+// HOLDS: every cell on both backends.
+
+struct C { n: integer? }
+struct R { v: integer }
+fn none() -> R? { null }
+fn test_compound_through_a_discharge() {
+  // E-Asgn-Compound x E-Asgn-Discharge: `place? += e` reads the default when null, writes `place`
+  c = C { n: null };
+  c.n? += 5;
+  assert((c.n ?? -1) == 5, "null read as 0, 0 + 5 = 5: {c.n ?? -1}");
+  c.n? += 5;
+  assert((c.n ?? -1) == 10, "present 5 + 5 = 10");
+  v: vector<integer?> = [null, 3];
+  k = 0;
+  for i in 0..2 { k += 1; v[i]? *= 2; }
+  assert((v[0] ?? -1) == 0 && (v[1] ?? -1) == 6 && k == 2, "0*2 = 0, 3*2 = 6: {v[0] ?? -1} {v[1] ?? -1}");
+}
+fn test_int_div_mod_signs() {
+  // E-Op x E-Op-IntDivMod: truncation toward zero, remainder takes the dividend's sign
+  a = -7; b = 2; c = -2;
+  assert(a / b == -3 && a % b == -1 && 7 / c == -3 && 7 % c == 1 && a / c == 3 && a % c == -1, "signs");
+  for x in [-7, -1, 0, 5] { assert(x == (x / b) * b + x % b, "a == (a/b)*b + a%b for {x}"); }
+}
+fn test_a_write_through_nullref_is_a_noop() {
+  // E-Null x H-RefNull x H-WriteNull: a write through the reference null stores nothing
+  r = none();
+  r.v = 9;
+  assert(r == null && (r.v ?? -1) == -1, "nothing to update");
+}
