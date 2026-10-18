@@ -7,17 +7,15 @@
 // `z = { { 4 } - 1 };` the inner block is not `;`-terminated and is read by `-`: the rule's
 // answer is 4 - 1 = 3.
 //
-// ⚠ DEFECT (reported, not yet filed): the parser closes the inner block as a STATEMENT,
-// drops its 4 (E-Seq), and reads `- 1` as a unary minus — `z` is -1, silently, on both
-// backends.  `{ { 4 } + 1 }` and `{ { 4 } * 2 }` are refused instead, with a message that
-// names an internal operator ("missing argument for parameter 'v1' of `OpAddInt`").  An
-// `if` in the same position DOES continue as an operand (`{ if true { 4 } else { 5 } + 1 }`
-// is 5) and a parenthesised block does too (`{ ({ 4 }) - 1 }` is 3), so the bare block is
-// the odd one out.  Either F-Block wants a statement-start carve-out (Rust's reading, which
-// also yields -1) or the parser wants to continue the expression; the cell records the rule
-// as written.
+// loft#2040 — it was dropped: the parser closed the inner block as a STATEMENT, dropped its 4
+// (E-Seq) and read `- 1` as a unary minus, so `z` was -1, silently, on both backends, and
+// `{ { 4 } + 1 }` was refused with a message naming an internal operator.  Owner ruling
+// 2026-10-18: each block returns its last expression.  A VOID block still ends its statement,
+// as an `if` does — the last cell holds that half.
 //
-// @falsified-at: none — written against the defect.
+// @falsified-at: 7ea99d900 — hand-measured, interpret and native: `z` is -1 and the `+` / `*`
+//   cells are refused.
+// ARMED: no instrument.
 // CHANNEL: the value of `z`.
 
 fn test_the_spellings_that_already_continue() {
@@ -26,8 +24,30 @@ fn test_the_spellings_that_already_continue() {
   assert(a == 3 && b == 5, "parenthesised block 4-1 = 3, an if-expression 4+1 = 5: got {a} {b}");
 }
 
-// @IGNORE — a bare block at statement start is dropped before a binary operator.
 fn test_a_block_before_minus_is_an_operand() {
   z = { { 4 } - 1 };
   assert(z == 3, "F-Block: the inner block yields 4, read by `-`: 4 - 1 = 3; got {z}");
+}
+
+fn test_every_operator_and_the_function_tail() {
+  a = { { 4 } + 1 };
+  b = { { 4 } * 2 };
+  c = { { 4 } == 4 };
+  n = { { { 2 } * 3 } + 1 };
+  t = { { "a" } + "b" };
+  assert(a == 5 && b == 8 && c && n == 7 && t == "ab", "4+1, 4*2, true, 2*3+1, ab: {a} {b} {c} {n} {t}");
+  assert(tail_minus() == 3 && tail_alone() == 4, "a function tail: {tail_minus()} {tail_alone()}");
+}
+
+fn tail_minus() -> integer { { 4 } - 1 }
+fn tail_alone() -> integer { { 4 } }
+
+fn test_a_void_block_still_ends_its_statement() {
+  x = 1;
+  { x = 7; }
+  -1;
+  y = 2;
+  { y = 5; }
+  (y, x) = (x, y);
+  assert(x == 5 && y == 7, "the `-1;` and `(y, x)` lines are statements of their own: {x} {y}");
 }
