@@ -1,9 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — the whole file is an open defect: none of these is refused today, so every
-//   expectation goes unmatched.  Remove this line when content equality records its reads.
-//
 // AN EQUALITY REVEALS A PRIVATE FIELD (`@FR-Cap-Read`, `@FR-Cap-Deny`, `@FR-Cap-Own`).  `==`
 // compares CONTENT (@C91), field by field, so a comparison of host data against a value the
 // script built reads every field — the `secret#read` one included.  `read_eq_oracle` recovers
@@ -12,12 +9,12 @@
 // and `match` faces of this read; equality is the face it did not list.  Each must be refused
 // as `a-private-field-is-refused-at-every-read.loft`'s are.
 //
-// @falsified-at: none — the defect is open on every build so far; un-ignored, every expectation
-//   goes unmatched (measured on interpret and native).
+// @falsified-at: 2cf8ce6ff — hand-measured, interpret and native: the file loads, every
+//   expectation goes unmatched, and `read_eq_oracle` answers 41 under a grant-less profile (loft#2053).
 // CHANNEL: the expected diagnostics (admission refusals at load).
 // ARMED: the `[sandbox]` policy in this directory's loft.toml.
-// WITNESS: today the file loads and `read_eq_oracle` answers 41 under a grant-less profile.
-// HOLDS: nothing yet — the cells are the open defect.
+// WITNESS: each refusal names the function and the `secret#read` it needs.
+// HOLDS: the admitted reads of `a-read-that-reveals-no-private-field-is-free.loft` on both trees.
 
 capability secret
 
