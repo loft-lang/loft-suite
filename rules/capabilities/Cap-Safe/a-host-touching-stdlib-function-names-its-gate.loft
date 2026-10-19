@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOST-TOUCHING STDLIB FUNCTION NAMES ITS GATE (`@FR-Cap-Safe`, `@FR-Cap-Call`, `@FR-Cap-Deny`).
+// The stdlib functions that reach outside the script each carry a gate, so `(Cap-Safe)` does not
+// admit them: the output stream (`io#append`), the clock (`time#read`), the program's arguments
+// (`env#read`), the embedding host's channel (`host#append`), and starting threads — a `for … par`
+// loop and a `parallel { … }` block (`thread#update`).  Under a profile that grants none of
+// them, each is refused at load, naming the construct the author wrote and the gate.
+//
+// @falsified-at: 243841b86 — with the `(Cap-Safe)` admission disabled (sandbox.rs), interpret:
+//   the file fails, `dbl`'s ungated `*` refused beside the claimed refusals.
+// CHANNEL: the expected diagnostics.
+// ARMED: the `[sandbox]` policy in this directory's `loft.toml`.
+// WITNESS: each diagnostic names the function and its gate.
+// HOLDS: the ungated stdlib stays admitted (the sibling file).
+
+fn dbl(x: integer) -> integer { x * 2 }
+
+// @EXPECT_ERROR: sandboxed `bare_print` reaches `println`, which needs capability `io#append`
+fn bare_print() { println("x"); }
+
+// @EXPECT_ERROR: sandboxed `bare_clock` reaches `now`, which needs capability `time#read`
+fn bare_clock() -> integer { now() }
+
+// @EXPECT_ERROR: sandboxed `bare_args` reaches `arguments`, which needs capability `env#read`
+fn bare_args() -> integer { len(arguments()) }
+
+// @EXPECT_ERROR: sandboxed `bare_host` reaches `host_output`, which needs capability `host#append`
+fn bare_host() { host_output("m"); }
+
+// @EXPECT_ERROR: sandboxed `bare_par` reaches `for … par(…)`, which needs capability `thread#update`
+fn bare_par() -> integer { v = [1, 2, 3]; n = 0; for e in v par(r = dbl(e), 2) { n += r; } n }
+
+// @EXPECT_ERROR: sandboxed `bare_parallel` reaches `parallel { … }`, which needs capability `thread#update`
+fn bare_parallel() { parallel { dbl(1); dbl(2); } }

@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNGATED STDLIB FUNCTION NEEDS NO GRANT (`@FR-Cap-Safe`, crossed with `@FR-Cap-Call` and
+// `@FR-Cap-Own`).  Owner ruling 2026-10-19: safe stdlib functions are available to every sandbox.
+// Under a profile that grants nothing and allows no library, a designated function sorts a
+// vector, measures and searches text, parses JSON, formats and branches — every call an ungated
+// stdlib function — and is admitted; so is `println` under a profile granting `io#append`.  The
+// refused twins are the sibling file.
+//
+// @falsified-at: 243841b86 — with the `(Cap-Safe)` admission disabled (sandbox.rs), interpret:
+//   `safe_compute` is refused at load for each ungated stdlib call it makes.
+// CHANNEL: the asserts (admission refuses the whole file at load, so a refusal reads as a parse
+//   failure).
+// ARMED: the `[sandbox]` policy in this directory's `loft.toml`.
+// WITNESS: each message prints the value computed inside the sandbox.
+// HOLDS: the gated calls stay refused (the sibling file).
+
+fn safe_compute() -> integer {
+  v = [3, 1, 2];
+  v.sort();
+  j = json_parse("[4, 5]");
+  n = if len(j) == 2 { 10 } else { 0 };
+  v[0] * 100 + len(v) * 10 + n
+}
+
+fn safe_text() -> text {
+  t = "sandbox";
+  "{t.starts_with("sand")}:{len(t)}:{t[0..4]}"
+}
+
+fn granted_print() { println("granted output"); }
+
+fn test_ungated_stdlib_calls_are_admitted_with_no_grant() {
+  assert(safe_compute() == 140, "{safe_compute()}");
+  assert(safe_text() == "true:7:sand", "{safe_text()}");
+  granted_print();
+}

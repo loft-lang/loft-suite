@@ -1,0 +1,11 @@
+# The sandbox policy for the cells beside it (formal/capabilities.md § Cap-Safe): `bare` grants
+# NOTHING and allows no library — the stdlib's ungated functions need neither — and `out`
+# grants only the output stream.
+[sandbox]
+bare = ["fn:safe_compute", "fn:safe_text", "fn:bare_print", "fn:bare_clock", "fn:bare_args", "fn:bare_host", "fn:bare_par", "fn:bare_parallel", "fn:dbl"]
+out = ["fn:granted_print"]
+
+[profile.bare]
+
+[profile.out]
+allow = ["io#append"]
