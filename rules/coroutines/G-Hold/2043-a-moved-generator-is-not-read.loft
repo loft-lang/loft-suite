@@ -15,8 +15,10 @@
 //   and prints `1 2` then `null`.
 // CHANNEL: the expected diagnostic.
 // ARMED: no instrument — the refusal is on by default.
-// WITNESS: the diagnostic names the moved name and the line it moved at.
+// WITNESS: the diagnostic names the moved name and the line it moved at — once per reading
+//   line, so the read before the `remove` and the one after it are two expected errors.
 // HOLDS: the same read of a moved droppable is refused on both trees.
+// @EXPECT_ERROR: `g` is read after its value moved
 // @EXPECT_ERROR: `g` is read after its value moved
 
 fn counter() -> iterator<integer> { for i in 1..100 { yield i; } }

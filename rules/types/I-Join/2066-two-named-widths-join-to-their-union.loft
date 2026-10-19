@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2066, `@FR-I-Join` — the arms of an `if` or a `match` join to the UNION of their ranges,
+// never just the first.  An arm whose type is a NAMED width (`a: u8`) is that arm's declaration,
+// not the construct's: `if t { a } else { b }` over `a: u8`, `b: i8` was refused "cannot
+// implicitly narrow i8 to u8" because the else arm was parsed expecting the then arm's `u8`.  A
+// destination that names a width still checks the join at its own store (the sibling cell).
+//
+// Axes it MOVES: which arm runs, the arm order (u8 then i8, i8 then u8), two unsigned widths
+// (u8 / u16), a literal outside the named width, an `else if` chain, a `match` with three arms,
+// a `null` arm, and the join stored into a `vector<integer>`.  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: cab835774 — interpret and native: the file is refused at compile time, "cannot
+//   implicitly narrow i8 to u8" on the first i8 arm.
+// CHANNEL: the compile (exit) and then the asserts.
+// ARMED: no instrument.
+// WITNESS: each assert message prints the joined values.
+// HOLDS: `c: u8 = if … { a } else { a + 300 }` is still refused, at the destination.
+
+enum K { P, Q, R }
+fn pick(k: K, a: u8, b: i8) -> integer { match k { P => a, Q => b, R => 1000 } }
+
+fn test_if_arms_of_two_named_widths_join() {
+  t = true;
+  f = false;
+  a: u8 = 3;
+  b: i8 = -1;
+  c = if t { a } else { b };
+  d = if f { a } else { b };
+  e = if t { b } else { a };
+  assert(c == 3 && d == -1 && e == -1, "{c} {d} {e}");
+  x: u16 = 300;
+  y: u8 = 7;
+  g = if f { y } else { x };
+  h = if f { a } else { 1000 };
+  assert(g == 300 && h == 1000, "{g} {h}");
+  n = if f { a } else if f { b } else { 70000 };
+  o: integer? = if f { a } else { null };
+  assert(n == 70000 && !o, "{n} {o}");
+  v: vector<integer> = [a];
+  v += [if f { a } else { b }];
+  assert("{v}" == "[3,-1]" && len(v) == 2, "{v}");
+}
+
+fn test_match_arms_of_two_named_widths_join() {
+  a: u8 = 3;
+  b: i8 = -1;
+  m = match K::Q { P => a, Q => b, R => 1000 };
+  assert(pick(K::P, a, b) == 3 && pick(K::Q, a, b) == -1 && pick(K::R, a, b) == 1000, "pick");
+  assert(m == -1, "{m}");
+}
+
+fn main() {
+  test_if_arms_of_two_named_widths_join();
+  test_match_arms_of_two_named_widths_join();
+}
