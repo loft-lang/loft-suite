@@ -1,13 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): with THREE consumer definitions of a library
-//   set's name the file is refused — "Variable 'c' cannot change type from DkClay to DkRock" at
-//   the first consumer definition, and the same at the second and third: every consumer body is
-//   read on pass 2 against ONE parameter `c` (the third definition's), because the third
-//   definition does not join the library's set and registers as a fresh `n_dk_hit`.  Two
-//   consumer definitions compile and dispatch correctly.
-//
 // EVERY CONSUMER MEMBER OF ANOTHER SPELLING JOINS A LIBRARY'S SET (`@FR-Disp-Key`, last
 // sentence).  Three definitions of `dk_hit` beside the fixture library's two
 // (`disp_key_fixture_lib.loft`: `dk_hit(DkFire)`, `dk_hit(integer)`) make one set of five, and
@@ -20,7 +13,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: 18594597b — interpret and native: the file is refused at compile time.
+// @falsified-at: 18594597b (loft#2071) — interpret and native: the file is refused at compile time.
 // CHANNEL: the compile, then the asserts.
 // ARMED: no instrument.
 // WITNESS: the message prints the joined answers.

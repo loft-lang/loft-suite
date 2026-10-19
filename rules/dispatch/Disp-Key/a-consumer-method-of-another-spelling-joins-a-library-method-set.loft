@@ -1,13 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): the consumer's `fn dk_melt(self: DkFire, b: u8)`
-//   is refused "Cannot redefine 'dk_melt' (already defined at disp_key_fixture_lib.loft…)" and
-//   "cannot redefine method `dk_melt` on `DkFire`", though its full spelling (DkFire, u8) is not
-//   one the library's set carries ((DkFire, integer), (DkFire, text)).  A consumer method on
-//   the library's type under a NEW name (`fn glow(self: DkFire)`) compiles, and the same three
-//   members declared in ONE source form one set.
-//
 // A CONSUMER METHOD OF ANOTHER SPELLING JOINS A LIBRARY'S METHOD SET (`@FR-Disp-Key`, last
 // sentence: "a consumer's definition of ANOTHER spelling joins it"; `@FR-Disp-Specific` ranks
 // it).  The fixture library `disp_key_fixture_lib.loft` exports `dk_melt(self: DkFire, k:
@@ -20,7 +13,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: 18594597b — interpret and native: the file is refused at compile time.
+// @falsified-at: 18594597b (loft#2071) — interpret and native: the file is refused at compile time.
 // CHANNEL: the compile, then the asserts.
 // ARMED: no instrument.
 // WITNESS: the message prints the joined answers.

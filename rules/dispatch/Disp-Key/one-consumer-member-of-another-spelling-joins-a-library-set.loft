@@ -1,11 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): a consumer's LONE definition of a library set's
-//   name never joins the set; `dk_hit(b)` with `b: u8` answers the library's `dk_hit(integer)`
-//   ("lib integer 9") instead of the consumer's exact `dk_hit(u8)` ("own u8 9"), with no
-//   diagnostic.  The text and struct spellings pass only because no library member takes them.
-//
 // ONE CONSUMER MEMBER OF ANOTHER SPELLING JOINS A LIBRARY'S SET (`@FR-Disp-Key`, last sentence,
 // with `@FR-Disp-Specific` / `@FR-Disp-Select` ranking the joined set).  The fixture library
 // `disp_key_fixture_lib.loft` exports `dk_hit(DkFire)` and `dk_hit(integer)`.  This file defines
@@ -22,7 +17,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: 18594597b — interpret and native: `dk_hit(b)` answered "lib integer 9".
+// @falsified-at: 18594597b (loft#2071) — interpret and native: `dk_hit(b)` answered "lib integer 9".
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: the message prints the joined answers.
