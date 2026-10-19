@@ -8,7 +8,8 @@
 // destination that names a width still checks the join at its own store (the sibling cell).
 //
 // Axes it MOVES: which arm runs, the arm order (u8 then i8, i8 then u8), two unsigned widths
-// (u8 / u16), a literal outside the named width, an `else if` chain, a `match` with three arms,
+// (u8 / u16), a literal outside the named width, an `else if` chain (its own arms join too: an
+// inferred local takes `a + b` beside `a: i8`), a `match` with three arms,
 // a `null` arm, and the join stored into a `vector<integer>`.  Values hand-computed.
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
@@ -45,6 +46,14 @@ fn test_if_arms_of_two_named_widths_join() {
   assert("{v}" == "[3,-1]" && len(v) == 2, "{v}");
 }
 
+fn test_an_inferred_local_takes_a_chains_join() {
+  a: i8 = 100;
+  b: i8 = 50;
+  k = 2;
+  c = if k == 1 { a } else if k == 2 { a + b } else { b };
+  assert(c == 150, "{c}");
+}
+
 fn test_match_arms_of_two_named_widths_join() {
   a: u8 = 3;
   b: i8 = -1;
@@ -55,5 +64,6 @@ fn test_match_arms_of_two_named_widths_join() {
 
 fn main() {
   test_if_arms_of_two_named_widths_join();
+  test_an_inferred_local_takes_a_chains_join();
   test_match_arms_of_two_named_widths_join();
 }

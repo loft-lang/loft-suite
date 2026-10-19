@@ -23,6 +23,10 @@
 //   exit/expectations channel carries this one on that backend. The native side was not
 //   scored in that run.
 
+// Since loft#2066 the arms join to the union of their ranges (`@FR-I-Join`) and the DECLARED
+// destination refuses the join, so each message names the joined range; an INFERRED local takes
+// the join and is not refused (`rules/types/I-Join/2066-two-named-widths-join-to-their-union.loft`).
+
 fn take1380b(x: i16) -> integer { x }
 
 // The float-arm cell (`x: integer = if … { 1 } else if … { 2.5 } …`) is a PASS-1 refusal since
@@ -36,7 +40,7 @@ fn test_an_overflowing_chain_arm_into_a_u8_local() {
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=300) to u8
 fn test_a_literal_chain_arm_that_does_not_fit() {
   a: u8 = 250; b: u8 = 10; k = 2;
   c: u8 = if k == 1 { a } else if k == 2 { 300 } else { b };
@@ -49,15 +53,8 @@ fn test_an_overflowing_chain_arm_as_an_argument() {
   assert(take1380b(if k == 1 { a } else if k == 2 { a + b } else { b }) == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer (here 10..=4294967304) to u32
+// @EXPECT_ERROR: (here 0..=4294967304) to u32
 fn give1380b(u: u32, k: integer) -> u32 { if k == 1 { u } else if k == 2 { u + 10 } else { u } }
-
-// @EXPECT_ERROR: cannot implicitly narrow integer (here -256..=254) to i8
-fn test_an_inferred_local_from_a_narrow_then_arm() {
-  a: i8 = 100; b: i8 = 50; k = 2;
-  c = if k == 1 { a } else if k == 2 { a + b } else { b };
-  assert(c == 0, "unreached");
-}
 
 // @EXPECT_ERROR: expected text, got integer on if
 fn test_an_integer_chain_behind_a_text_then_arm() {

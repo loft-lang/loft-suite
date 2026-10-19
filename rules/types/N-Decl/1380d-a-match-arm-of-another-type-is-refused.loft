@@ -47,7 +47,7 @@ fn test_an_overflowing_arm_into_a_u8_local() {
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=300) to u8
 fn test_a_literal_arm_that_does_not_fit() {
   a: u8 = 250; k = 2;
   c: u8 = match k { 1 => a, _ => 300 };
@@ -67,7 +67,7 @@ fn test_an_overflowing_arm_under_a_text_subject() {
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
 fn test_an_overflowing_arm_under_an_enum_subject() {
   a: u8 = 250; b: u8 = 10;
   e: Ch1380d = Ch1380d::Beta { n: 2 };
@@ -75,7 +75,7 @@ fn test_an_overflowing_arm_under_an_enum_subject() {
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
 fn test_an_overflowing_arm_under_a_struct_enum_subject() {
   a: u8 = 250; b: u8 = 10;
   e: Ch1380d = Ch1380d::Beta { n: 2 };

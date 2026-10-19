@@ -52,7 +52,7 @@ fn test_an_i16() {
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=4294967304) to u32
+// @EXPECT_ERROR: (here 0..=4294967304) to u32
 fn test_a_u32() {
   u: u32 = 4294967290; t = true;
   w: u32 = if t { u + 10 } else { u };

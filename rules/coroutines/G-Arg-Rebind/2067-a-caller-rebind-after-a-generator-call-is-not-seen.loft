@@ -7,21 +7,39 @@
 // frame keeps the value it was handed — a later whole rebind of the caller's variable is a new
 // binding it does not see — while a mutation of the shared value is seen.
 //
-// loft#2067: a STRUCT rebind (`lg = Log { … }`) builds in place into the store the frame reads,
-// so the frame answers the new value; a vector rebind mints a fresh backing and is right.  The
-// struct function is ignored until the fix; the controls run now.
+// loft#2067: a STRUCT rebind (`lg = Log { … }`) built in place into the store the frame read, so
+// the frame answered the new value; so did `lg = other` (a copy into the same slot), a keyed
+// collection's rebind, and — in a loop — a vector literal's re-mint.  The cure is the rule's
+// release clause: the frame holds the store of each heap argument for its life, a free while it
+// does only orphans the store (the last holder frees it), and a re-mint of a held store takes a
+// fresh one.  Axes moved: the right-hand side (literal, another local, a keyed literal), the
+// collection kind (struct, vector, hash), straight line against a loop, the rebind inside the
+// loop that drives the generator, two frames over one value, a frame that outlives its caller
+// (held by a returned record), and a generator driven from another generator's body.
 //
-// @falsified-at: none — the expected struct behaviour does not exist on any build yet; this cell
-//   is the receipt the fix must turn green.
+// @falsified-at: cab835774 — interpret and native: the struct rebind answers `5 50`, the copy
+//   `5 60`, the loop `10 20`, the hash `1 3`, the driving loop `5,105,205,` and the escaped
+//   frame reads a released store (`77 77`).
 // CHANNEL: the asserts, under the suite's leak gate.
 // ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
-// WITNESS: each message prints the two values the generator yielded.
+// WITNESS: each message prints the values the generator yielded.
 // HOLDS: the vector rebind and both mutations keep their answers.
 
 struct Log { n: integer }
+struct E { k: text, n: integer }
+struct Holder { g: iterator<integer> }
 
 fn bump(l: Log) -> iterator<integer> { yield l.n; yield l.n; }
 fn grow(v: vector<integer>) -> iterator<integer> { yield len(v); yield len(v); }
+fn first(v: vector<integer>) -> iterator<integer> { yield v[0]; yield v[0]; }
+fn three(l: Log) -> iterator<integer> { yield l.n; yield l.n; yield l.n; }
+fn keys(h: hash<E[k]>) -> iterator<integer> { yield len(h); yield len(h); }
+fn held_past_its_caller() -> Holder { lg = Log { n: 5 }; Holder { g: bump(lg) } }
+fn driven_from_a_body() -> iterator<integer> {
+  lg = Log { n: 5 };
+  for x in three(lg) { lg = Log { n: x + 100 }; yield x; }
+  yield lg.n;
+}
 
 fn test_a_vector_rebind_is_not_seen_and_a_mutation_is() {
   v = [1];
@@ -46,7 +64,6 @@ fn test_a_field_mutation_is_seen() {
   assert(c == 5 && d == 50, "{c} {d}");
 }
 
-// @IGNORE — loft#2067: the struct rebind builds into the store the frame reads (answers 5 50).
 fn test_a_struct_rebind_is_not_seen() {
   lg = Log { n: 5 };
   h = bump(lg);
@@ -54,4 +71,77 @@ fn test_a_struct_rebind_is_not_seen() {
   lg = Log { n: 50 };
   d = next(h);
   assert(c == 5 && d == 5 && lg.n == 50, "{c} {d} {lg.n}");
+}
+
+fn test_a_copy_rebind_is_not_seen() {
+  lg = Log { n: 5 };
+  o = Log { n: 60 };
+  h = bump(lg);
+  c = next(h);
+  lg = o;
+  d = next(h);
+  assert(c == 5 && d == 5 && lg.n == 60, "{c} {d} {lg.n}");
+}
+
+fn test_a_rebind_in_a_loop_is_not_seen() {
+  s = Log { n: 100 };
+  g = bump(s);
+  a = next(g);
+  for i in 1..3 {
+    s = Log { n: i * 10 };
+    if i == 1 { g = bump(s); a = next(g); }
+  }
+  b = next(g);
+  v = [100];
+  k = first(v);
+  e = next(k);
+  for i in 1..3 {
+    v = [i * 10];
+    if i == 1 { k = first(v); e = next(k); }
+  }
+  f = next(k);
+  assert(a == 10 && b == 10 && s.n == 20, "struct {a} {b} {s.n}");
+  assert(e == 10 && f == 10 && v[0] == 20, "vector {e} {f} {v[0]}");
+}
+
+fn test_a_keyed_rebind_is_not_seen() {
+  hh: hash<E[k]> = [E { k: "a", n: 1 }];
+  g = keys(hh);
+  a = next(g);
+  hh = [E { k: "x", n: 1 }, E { k: "y", n: 2 }, E { k: "z", n: 3 }];
+  b = next(g);
+  assert(a == 1 && b == 1 && len(hh) == 3, "{a} {b} {len(hh)}");
+}
+
+fn test_a_rebind_inside_the_driving_loop_is_not_seen() {
+  lg = Log { n: 5 };
+  s = "";
+  for x in three(lg) { s += "{x},"; lg = Log { n: x + 100 }; }
+  assert(s == "5,5,5," && lg.n == 105, "{s} {lg.n}");
+}
+
+fn test_two_frames_keep_the_value_they_were_handed() {
+  lg = Log { n: 5 };
+  g1 = bump(lg);
+  g2 = bump(lg);
+  a = next(g1);
+  b = next(g2);
+  lg = Log { n: 50 };
+  c = next(g1);
+  d = next(g2);
+  assert(a == 5 && b == 5 && c == 5 && d == 5 && lg.n == 50, "{a} {b} {c} {d} {lg.n}");
+}
+
+fn test_a_frame_outlives_its_callers_scope() {
+  h = held_past_its_caller();
+  z = Log { n: 77 };
+  a = next(h.g);
+  b = next(h.g);
+  assert(a == 5 && b == 5 && z.n == 77, "{a} {b} {z.n}");
+}
+
+fn test_a_generator_driven_from_another_body() {
+  s = "";
+  for v in driven_from_a_body() { s += "{v},"; }
+  assert(s == "5,5,5,105,", s);
 }
