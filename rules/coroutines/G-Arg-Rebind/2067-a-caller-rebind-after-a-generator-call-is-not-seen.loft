@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A CALLER'S REBIND AFTER A GENERATOR CALL IS NOT SEEN (`@FR-G-Call`, crossed with `@FR-B-Copy`
-// and `@FR-H-Free`).  A generator's frame binds its arguments at the call and keeps them past it,
+// A CALLER'S REBIND AFTER A GENERATOR CALL IS NOT SEEN (`@FR-G-Arg-Rebind`, crossed with
+// `@FR-G-Arg-Share`, `@FR-G-Call` and `@FR-H-Free`).  A generator's frame binds its arguments at the call and keeps them past it,
 // so it can watch what the caller does before the next advance.  Owner ruling 2026-10-19: the
 // frame keeps the value it was handed — a later whole rebind of the caller's variable is a new
 // binding it does not see — while a mutation of the shared value is seen.

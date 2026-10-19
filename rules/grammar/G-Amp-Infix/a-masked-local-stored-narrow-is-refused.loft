@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A MASKED LOCAL STORED NARROW IS REFUSED (`@FR-N-Arith`, `@FR-N-Store`).  The range `x & 255`
+// A MASKED LOCAL STORED NARROW IS REFUSED (`@FR-G-Amp-Infix`, crossed with `@FR-N-Arith` and
+// `@FR-N-Store`).  The range `x & 255`
 // proves is asked at the store that meets the mask; a local bound to it is an `integer`, its range
 // is its declaration, so `m = x & 255; lo: u8 = m` narrows a value nothing proves fits (owner
 // ruling 2026-10-19: an implicitly narrowed local type would surprise its reader).  The cures the

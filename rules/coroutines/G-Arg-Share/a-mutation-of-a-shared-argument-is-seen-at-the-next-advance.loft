@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MUTATION OF A SHARED ARGUMENT IS SEEN AT THE NEXT ADVANCE (`@FR-G-Arg-Share`, crossed with
+// `@FR-G-Call` and `@FR-G-Next`).  A heap argument is shared with the generator's frame, not
+// copied, so whatever either side does TO the value between two advances, the other sees: the
+// caller appends to a vector, writes a struct field, writes and removes a vector element, appends
+// to a text field; the generator writes a field the caller then reads.  Axes moved: the
+// collection kind (vector, struct, struct-with-text), the mutating side, the mutation kind.
+//
+// @falsified-at: none — a conformance guard for a rule written 2026-10-19; every cell answered as
+//   the rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts, under the suite's leak gate.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// WITNESS: each message prints the values the generator yielded.
+// HOLDS: every cell on both backends.
+
+struct Log { n: integer, t: text }
+
+fn lens(v: vector<integer>) -> iterator<integer> { yield len(v); yield len(v); yield len(v); }
+fn firsts(v: vector<integer>) -> iterator<integer> { yield v[0]; yield v[0]; }
+fn fields(l: Log) -> iterator<text> { yield "{l.n}{l.t}"; yield "{l.n}{l.t}"; }
+fn bumps(l: Log) -> iterator<integer> { l.n += 100; yield l.n; l.n += 100; yield l.n; }
+
+fn test_the_caller_mutates_a_vector() {
+  w = [1];
+  k = lens(w);
+  a = next(k);
+  w += [2, 3];
+  b = next(k);
+  w.remove(0);
+  c = next(k);
+  assert(a == 1 && b == 3 && c == 2, "{a} {b} {c}");
+}
+
+fn test_the_caller_writes_an_element() {
+  v = [4, 5];
+  f = firsts(v);
+  a = next(f);
+  v[0] = 40;
+  b = next(f);
+  assert(a == 4 && b == 40, "{a} {b}");
+}
+
+fn test_the_caller_writes_fields() {
+  lg = Log { n: 1, t: "x" };
+  g = fields(lg);
+  a = next(g);
+  lg.n = 2;
+  lg.t += "y";
+  b = next(g);
+  assert(a == "1x" && b == "2xy", "{a} {b}");
+}
+
+fn test_the_generator_writes_a_field_the_caller_reads() {
+  lg = Log { n: 1, t: "" };
+  g = bumps(lg);
+  a = next(g);
+  seen = lg.n;
+  b = next(g);
+  assert(a == 101 && seen == 101 && b == 201 && lg.n == 201, "{a} {seen} {b} {lg.n}");
+}
