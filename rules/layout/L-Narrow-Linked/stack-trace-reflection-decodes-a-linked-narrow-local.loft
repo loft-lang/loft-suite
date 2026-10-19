@@ -15,8 +15,8 @@
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
 // @falsified-at: none — a conformance guard; the dense cells answered as hand-computed on
-//   18594597b (interpret: decoded; native: empty, ST-6).  The `u8?` cell below is @IGNOREd: it
-//   is a live defect.
+//   18594597b (interpret: decoded; native: empty, ST-6).  The linked `u8?` cell and the type-name
+//   cell failed there (loft#2073: `OtherVal`; loft#2072: `integer(-128, 127)` for an `i8`).
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the reported variables.
@@ -66,10 +66,7 @@ fn test_an_unlinked_nullable_local_reads_null() {
   }
 }
 
-// @IGNORE — DEFECT (interpreter, 18594597b): a LINKED `u8?` reads as `OtherVal` ("other") for
-//   both null and 254.  `State::read_variable_value` (state/debug.rs) decodes a linked slot only
-//   in its `Type::Integer(_) if narrow.is_some()` arm; a `Type::Optional(Integer)` with a narrow
-//   slot is excluded from the nullable arm (`narrow.is_none()`) and falls to `Unsupported`.
+// loft#2073 — a LINKED `u8?` read as `OtherVal` for both null and 254 on 18594597b.
 fn test_a_linked_nullable_local_reads_decoded() {
   c: u8? = 7;
   e: u8? = 7;
@@ -85,7 +82,31 @@ fn test_a_linked_nullable_local_reads_decoded() {
   }
 }
 
+// A frame argument's `type_name` is the reader's spelling, as `type_name()` gives it: `i8`,
+// not the range `integer(-128, 127)` (loft#2072).
+fn typed_frame(a: i8, b: Lim, c: u8?) -> text {
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  o = "";
+  for v in f.arguments {
+    if "a,b,c,".contains("{v.name},") {
+      o += "{v.name}:{v.type_name};";
+    }
+  }
+  if len(o) == 0 {
+    o = "{a} {b} {c}";
+  }
+  o
+}
+
+fn test_a_reported_argument_names_its_declared_type() {
+  o = typed_frame(-2, 1050, 3);
+  assert(o == "a:i8;b:Lim;c:u8?;" || o == "-2 1050 3", "declared types: {o}");
+}
+
 fn main() {
   test_a_linked_signed_and_biased_local_reads_decoded();
   test_an_unlinked_nullable_local_reads_null();
+  test_a_linked_nullable_local_reads_decoded();
+  test_a_reported_argument_names_its_declared_type();
 }

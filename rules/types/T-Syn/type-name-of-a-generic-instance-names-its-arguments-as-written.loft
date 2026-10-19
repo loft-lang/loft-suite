@@ -1,14 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): `type_name` of a generic struct instance renders
-//   the instance's internal KEY — `TBox<integer(0, 255)s1>`, `TBox<integer(-32768, 32767)s2>`,
-//   `TBox<vector<integer(0, 255)s1>>` — where loft#1824 made every other position name the width
-//   as the program wrote it (`u8`, `i16`).  `Data::type_name_with` (data.rs) answers a
-//   `Type::Reference` by the definition's `name`, which for an instance is the monomorph key; it
-//   does not render the template and its arguments through `integer_name`.  The instance itself
-//   is right: `sizeof` reads its one-byte field.
-//
 // THE TYPE AN INSTANCE LITERAL SYNTHESISES IS NAMED AS THE PROGRAM WRITES IT (`@FR-T-Syn`, with
 // `@FR-G-Type` giving the literal its instance): `TBox { v: 3 as u8, b: true }` synthesises
 // `TBox<u8>`, the type a program spells, so `type_name` — the observer of a synthesised type —
@@ -18,7 +10,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: 18594597b — interpret and native: "TBox<integer(0, 255)s1>".
+// @falsified-at: 18594597b (loft#2072) — interpret and native: "TBox<integer(0, 255)s1>".
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: the message prints the names and sizes.
