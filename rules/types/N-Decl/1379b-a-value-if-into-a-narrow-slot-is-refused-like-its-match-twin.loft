@@ -31,51 +31,51 @@
 struct Rf1379 { f: u8 }
 fn take1379b(x: u8) -> integer { x }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn test_a_local() {
   a: u8 = 250; b: u8 = 10; t = true;
   c: u8 = if t { a + b } else { a };
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer limit(5, 300) to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 5..=300) to u8
 fn test_a_literal_arm() {
   t = true;
   c: u8 = if t { 300 } else { 5 };
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to i16
+// @EXPECT_ERROR: cannot implicitly narrow integer (here -65536..=65534) to i16
 fn test_an_i16() {
   a: i16 = 32000; b: i16 = 1000; t = true;
   c: i16 = if t { a + b } else { a };
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u32
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=4294967304) to u32
 fn test_a_u32() {
   u: u32 = 4294967290; t = true;
   w: u32 = if t { u + 10 } else { u };
   assert(w == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn test_an_argument() {
   a: u8 = 250; b: u8 = 10; t = true;
   assert(take1379b(if t { a + b } else { a }) == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn give1379b(a: u8, b: u8, t: boolean) -> u8 { if t { a + b } else { a } }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn test_a_struct_literal_field() {
   a: u8 = 250; b: u8 = 10; t = true;
   s = Rf1379 { f: if t { a + b } else { a } };
   assert(s.f == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn test_a_field_write() {
   a: u8 = 250; b: u8 = 10; t = true;
   s = Rf1379 { f: 1 };
@@ -83,7 +83,7 @@ fn test_a_field_write() {
   assert(s.f == 0, "unreached");
 }
 
-// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+// @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn test_an_element_write() {
   a: u8 = 250; b: u8 = 10; t = true;
   v: vector<u8> = [1];

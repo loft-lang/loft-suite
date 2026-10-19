@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MASKED LOCAL STORED NARROW IS REFUSED (`@FR-N-Arith`, `@FR-N-Store`).  The range `x & 255`
+// proves is asked at the store that meets the mask; a local bound to it is an `integer`, its range
+// is its declaration, so `m = x & 255; lo: u8 = m` narrows a value nothing proves fits (owner
+// ruling 2026-10-19: an implicitly narrowed local type would surprise its reader).  The cures the
+// diagnostic names — the mask at the store, `?? <value>`, a `u8?` destination — all compile.
+//
+// @falsified-at: 3cae84177 — interpret and native: the store compiles (the local carried
+//   `limit(0, 255)`).
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the source as `integer` and the destination `u8`.
+// HOLDS: the mask at the store compiles (the sibling cell).
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+
+fn main() {
+  x = 1000;
+  m = x & 255;
+  lo: u8 = m;
+  println("{lo}");
+}

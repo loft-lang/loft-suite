@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // A VECTOR OF `&` RESULTS COMPARES BY VALUE (`@FR-G-Amp-Infix`, crossed with `@FR-E-Eq` and
-// `@FR-C-Int`).  `[a & 4, a & 2, a & 1]` is a vector of a narrow range (`integer limit(0, 4)`),
-// and `==` compares "a vector or array by length and then element by element in order", each
+// `@FR-C-Int`).  `[a & 4, a & 2, a & 1]` is a vector of `integer` (`@FR-N-Arith` writes no range
+// into the type), a `vector<u8>` holds the same values narrow, and `==` compares "a vector or array by length and then element by element in order", each
 // element by its own `==` — and integer `==` is by VALUE, whatever the width.  So the vector
 // equals the `vector<integer>` literal `[4, 2, 0]`.
 //

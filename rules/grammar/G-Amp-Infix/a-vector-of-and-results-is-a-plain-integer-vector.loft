@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR OF `&` RESULTS IS A PLAIN INTEGER VECTOR (`@FR-G-Amp-Infix`, crossed with `@FR-N-Arith`,
+// `@FR-N-Cast` and `@FR-T-Chk-Vec`).  `a & k` is an `integer`: the range its shape proves is asked
+// only where a narrow slot needs it, never written into the type (owner ruling 2026-10-19).  So an
+// unannotated vector literal of such elements is a `vector<integer>` whatever their order, while a
+// literal checked against `vector<u8>` proves each element's fit at that element.  A local bound to
+// a masked value is an `integer`, so storing it into a `u8` is refused — the mask must meet the
+// store.
+//
+// @falsified-at: 3cae84177 — interpret and native: `[a & 1, a & 2]` is refused "cannot implicitly
+//   narrow integer limit(0, 2) to integer limit(0, 1)" (the first element's range was the type).
+// CHANNEL: the asserts, and the refusal in the sibling file's last function.
+// ARMED: no instrument.
+// WITNESS: each message prints the vector built.
+// HOLDS: a mask, a remainder and a `u8 + u8` sum still store into a narrow slot without a cast.
+
+fn test_any_order_builds_an_integer_vector() {
+  a = 6;
+  w = [a & 1, a & 2, a & 4];
+  assert(w == [0, 2, 4] && len(w) == 3, "{w}");
+  m = [a % 2, a % 4];
+  assert(m == [0, 2] && len(m) == 2, "{m}");
+  w += [a & 7, 1000];
+  assert(w == [0, 2, 4, 6, 1000], "an integer vector takes any integer: {w}");
+}
+
+fn test_the_store_proves_the_fit() {
+  x = 1000;
+  lo: u8 = x & 255;
+  b: vector<u8> = [x & 255, x & 15];
+  p: u8 = 200;
+  q: u8 = 100;
+  s: u16 = p + q;
+  c = (x & 255) as u8;
+  n: u8 = (x & 15) + (x & 7);
+  assert(lo == 232 && b == [232, 8] && s == 300 && c == 232 && n == 8, "{lo} {b} {s} {c} {n}");
+}
