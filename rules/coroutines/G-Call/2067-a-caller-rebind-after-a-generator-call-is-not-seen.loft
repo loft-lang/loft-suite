@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALLER'S REBIND AFTER A GENERATOR CALL IS NOT SEEN (`@FR-G-Call`, crossed with `@FR-B-Copy`
+// and `@FR-H-Free`).  A generator's frame binds its arguments at the call and keeps them past it,
+// so it can watch what the caller does before the next advance.  Owner ruling 2026-10-19: the
+// frame keeps the value it was handed — a later whole rebind of the caller's variable is a new
+// binding it does not see — while a mutation of the shared value is seen.
+//
+// loft#2067: a STRUCT rebind (`lg = Log { … }`) builds in place into the store the frame reads,
+// so the frame answers the new value; a vector rebind mints a fresh backing and is right.  The
+// struct function is ignored until the fix; the controls run now.
+//
+// @falsified-at: none — the expected struct behaviour does not exist on any build yet; this cell
+//   is the receipt the fix must turn green.
+// CHANNEL: the asserts, under the suite's leak gate.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// WITNESS: each message prints the two values the generator yielded.
+// HOLDS: the vector rebind and both mutations keep their answers.
+
+struct Log { n: integer }
+
+fn bump(l: Log) -> iterator<integer> { yield l.n; yield l.n; }
+fn grow(v: vector<integer>) -> iterator<integer> { yield len(v); yield len(v); }
+
+fn test_a_vector_rebind_is_not_seen_and_a_mutation_is() {
+  v = [1];
+  g = grow(v);
+  a = next(g);
+  v = [7, 7, 7, 7];
+  b = next(g);
+  w = [1];
+  k = grow(w);
+  e = next(k);
+  w += [2, 3];
+  f = next(k);
+  assert(a == 1 && b == 1 && e == 1 && f == 3, "{a} {b} {e} {f}");
+}
+
+fn test_a_field_mutation_is_seen() {
+  lg = Log { n: 5 };
+  h = bump(lg);
+  c = next(h);
+  lg.n = 50;
+  d = next(h);
+  assert(c == 5 && d == 50, "{c} {d}");
+}
+
+// @IGNORE — loft#2067: the struct rebind builds into the store the frame reads (answers 5 50).
+fn test_a_struct_rebind_is_not_seen() {
+  lg = Log { n: 5 };
+  h = bump(lg);
+  c = next(h);
+  lg = Log { n: 50 };
+  d = next(h);
+  assert(c == 5 && d == 5 && lg.n == 50, "{c} {d} {lg.n}");
+}
