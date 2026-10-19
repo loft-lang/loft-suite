@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC MEMBER RANKS BELOW EVERY NON-CONVERTING MATCH, AND THE NARROWER GENERIC BEATS THE
+// WIDER (`@FR-D-Rank`, with `@FR-Disp-Specific` for the concrete side and `@FR-G-Select` for the
+// generic pairs).  A parameter naming a type variable ranks GENERIC where it binds: worse than
+// EXACT, WIDENED and LOSSY.  So a concrete member that takes the argument without a conversion
+// wins over a template of the same name, and the template takes every call no concrete member
+// fits.  Between two templates, the one admitting strictly fewer types — a pattern that is an
+// instance of the other's (`vector<T>` against `T`), or a strict superset of bounds
+// (`T: RTagged` against `T`) — is the more specific.
+//
+// Ranks hand-computed:
+//   rg(integer) | rg<T>(T):  integer EXACT, u8 / i8 WIDENED, integer? LOSSY  → the concrete member;
+//                            text, a struct: only the template applies       → "generic".
+//   rq(integer?) | rq<T>(T): u8 → integer? WIDENED + WIDENED, integer → integer? WIDENED,
+//                            integer? EXACT → the concrete member; text → "generic".
+//   rv(vector<text>) | rv<T>(vector<T>) | rv<T>(T): vector<text> EXACT → concrete; another
+//                            vector → vector<T> (an instance of T); a float → T.
+//   rh(RB) | rh<T: RTagged>(T) | rh<T>(T): RB → concrete; RA meets RTagged → the bounded one;
+//                            an integer meets no bound → the bare T.
+//
+// Axes it MOVES: the concrete member's rank (EXACT, WIDENED at two widths, LOSSY, WIDENED twice
+//   through a nullable parameter), generic against generic by pattern and by bound, the
+//   argument kind (scalar, text, struct, vector of three element types, float).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: a template still answers what no concrete member takes.
+
+interface RTagged { fn tag(self: Self) -> text }
+struct RA { n: integer }
+struct RB { n: integer }
+struct RPt { x: integer }
+fn tag(self: RA) -> text { "a{self.n}" }
+
+fn rg(x: integer) -> text { "integer {x}" }
+fn rg<T>(_x: T) -> text { "generic" }
+
+fn rq(x: integer?) -> text { "integer? {x}" }
+fn rq<T>(_x: T) -> text { "generic" }
+
+fn rv(x: vector<text>) -> text { "vector<text> {len(x)}" }
+fn rv<T>(x: vector<T>) -> text { "vector<T> {len(x)}" }
+fn rv<T>(_x: T) -> text { "T" }
+
+fn rh(x: RB) -> text { "rb {x.n}" }
+fn rh<T: RTagged>(x: T) -> text { "tagged {x.tag()}" }
+fn rh<T>(_x: T) -> text { "any" }
+
+fn test_a_concrete_member_beats_the_template() {
+  a: integer = 3;
+  b: u8 = 4;
+  c: integer? = 5;
+  e: i8 = -2;
+  s = "{rg(a)}|{rg(b)}|{rg(c)}|{rg(e)}|{rg("t")}|{rg(RPt { x: 1 })}";
+  assert(s == "integer 3|integer 4|integer 5|integer -2|generic|generic", "concrete over generic: {s}");
+}
+
+fn test_a_nullable_concrete_member_beats_the_template() {
+  b: u8 = 4;
+  i: integer = 5;
+  n: integer? = null;
+  s = "{rq(b)}|{rq(i)}|{rq(n)}|{rq("s")}";
+  assert(s == "integer? 4|integer? 5|integer? null|generic", "nullable concrete: {s}");
+}
+
+fn test_the_narrower_pattern_wins() {
+  a: vector<integer> = [1, 2];
+  b: vector<text> = ["x"];
+  c: vector<u8> = [1, 2, 3];
+  s = "{rv(a)}|{rv(b)}|{rv(c)}|{rv(1.5)}";
+  assert(s == "vector<T> 2|vector<text> 1|vector<T> 3|T", "patterns: {s}");
+}
+
+fn test_the_stronger_bound_wins() {
+  s = "{rh(RA { n: 1 })}|{rh(RB { n: 2 })}|{rh(3)}";
+  assert(s == "tagged a1|rb 2|any", "bounds: {s}");
+}
+
+fn main() {
+  test_a_concrete_member_beats_the_template();
+  test_a_nullable_concrete_member_beats_the_template();
+  test_the_narrower_pattern_wins();
+  test_the_stronger_bound_wins();
+}

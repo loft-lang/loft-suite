@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN `operator equals` IS REFUSED AT THE DEFINITION, NAMING THE CURE (`@FR-Op-Eq`): `==` is
+// structural on every type and no type defines it, so the definition — which would back a
+// comparison of the type's own — is refused where it is written, pointing at a named method.
+// One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the cure.
+// HOLDS: `fn equals` (no `operator`) is an ordinary method (the sibling cell).
+// @EXPECT_ERROR: `==` is always structural, for every type: there is no `operator equals` — write a named method
+
+struct ET { h: integer, m: integer }
+
+operator equals(self: ET, o: ET) -> boolean { self.h == o.h }
+
+fn main() {
+  println("{ET { h: 1, m: 2 } == ET { h: 1, m: 3 }}");
+}

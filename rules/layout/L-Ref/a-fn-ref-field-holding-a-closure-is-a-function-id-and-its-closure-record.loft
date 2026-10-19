@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FN-REF FIELD HOLDING A CAPTURING CLOSURE IS A FUNCTION ID AND ITS CLOSURE RECORD
+// (`@FR-L-Ref`: "a fn-ref field is a 4-byte function id followed by the ChildRec of its closure
+// record"): 4 + 4 = 8 bytes, aligned 4.  Two closures with different captures (an integer; a
+// text, an integer and a float) stored into the same field each answer from their own captures.
+//
+// ⚠ Measured beside this cell, not asserted: a fn-ref field that never receives a CAPTURING
+//   lambda in the program lays out as the 4-byte id alone (`typedef.rs`, P213's legacy layout),
+//   so `struct { f: fn(integer) -> integer }` is 4, not the 8 the rule states.  That is an
+//   owner question about the rule's text (and `L-Total`'s "decided by the type alone"), not
+//   asserted here either way.
+//
+// Sizes hand-computed: { g: fn(integer) -> text, n: integer } = 8 + 8 → 16;
+//   { f: fn(integer) -> integer } holding a closure = 8.
+// Values hand-computed: k=10 → "k11"; t="abc", m=7, z=2.5 at x=3 → "abc-21-2.5".
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes or the closures' answers.
+// HOLDS: the second closure's captures do not overwrite the first's.
+
+struct LFH { g: fn(integer) -> text, n: integer }
+struct LF1 { f: fn(integer) -> integer }
+
+fn one(k: integer) -> text {
+  h = LFH { g: |x| { "k{x + k}" }, n: 1 };
+  "{h.g(1)}/{h.n}"
+}
+
+fn two(t: text, m: integer, z: float) -> text {
+  h = LFH { g: |x| { "{t}-{x * m}-{z}" }, n: 2 };
+  "{h.g(3)}/{h.n}"
+}
+
+fn test_a_closure_field_is_id_and_record() {
+  k = 5;
+  a = LF1 { f: |x| { x * k } };
+  s = "{sizeof(LFH)} {sizeof(LF1)} {a.f(6)}";
+  assert(s == "16 8 30", "sizes: {s}");
+  t = "{one(10)}|{two("abc", 7, 2.5)}";
+  assert(t == "k11/1|abc-21-2.5/2", "closures: {t}");
+}
+
+fn main() {
+  test_a_closure_field_is_id_and_record();
+}

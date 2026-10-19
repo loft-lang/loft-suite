@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for this directory's library cells (`@FR-Disp-Key`): one free overload
+// set (`dk_hit`, two members, one of them `integer` so a narrower consumer member has a wider
+// library member to lose against), and one method set (`dk_melt` on `DkFire`).  The cells beside
+// it `use disp_key_fixture_lib` — the flat file in the script's own directory is where `use`
+// resolves it.  Run on its own it is a cell too: the set answers its own calls with the
+// library's members.
+//
+// @falsified-at: none — a conformance guard; the library's own calls answered as hand-computed
+//   on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the answers.
+// HOLDS: nothing outside the library is in its set when it runs alone.
+
+pub struct DkFire { pub n: integer }
+
+pub fn dk_hit(f: DkFire) -> text { "lib fire {f.n}" }
+pub fn dk_hit(x: integer) -> text { "lib integer {x}" }
+
+pub fn dk_melt(self: DkFire, k: integer) -> text { "lib melt integer {self.n}/{k}" }
+pub fn dk_melt(self: DkFire, t: text) -> text { "lib melt text {self.n}/{t}" }
+
+fn test_the_library_answers_its_own_calls() {
+  f = DkFire { n: 4 };
+  s = "{dk_hit(f)}|{dk_hit(5)}|{f.dk_melt(6)}|{f.dk_melt("w")}";
+  assert(s == "lib fire 4|lib integer 5|lib melt integer 4/6|lib melt text 4/w", "library alone: {s}");
+}

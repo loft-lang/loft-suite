@@ -1,0 +1,90 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FAILED ALTERNATIVE OVER AN ITERATOR LEAVES ITS ITEMS FOR THE NEXT (`@FR-P-Anchor`, with
+// `@FR-P-Revert` rewinding to the anchor): an iterator cannot be re-indexed, so an alternative
+// that pulls items and then fails must leave every pulled item to the alternative after it —
+// the next ARM sees the subject from its first item, and a repetition that ran too far gives
+// items back to the tail after it.  (The shipped design materialises the subject and runs the
+// vector machinery, matching.md § How it is built; for a source without side effects the two
+// agree on every observable, which is what these cells read.)
+//
+// Values hand-computed: the subject yields A1 A2 B5 C1.  Arm 1 matches A1 A2 and fails at the
+//   third item (B5, not A3); arm 2 reads from A1 again: p 1, m 2, q 5, one item left.  A run
+//   `(xs: A)*` takes A1 A2 and leaves B5 to the tail: 2 5 1.  A 600-item generator whose first
+//   arm fails at its LAST item gives all 600 to the second arm.
+//
+// Axes it MOVES: how many items the failed alternative pulled (two, 600), the next consumer
+//   (another arm, the tail after a repetition), and the subject (a generator over a vector, a
+//   generator over a range).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints what the matching arm read.
+// HOLDS: the same matches over the vector itself answer alike.
+
+enum PE { A { p: integer }, B { q: integer }, C { r: integer } }
+
+fn it(v: vector<PE>) -> iterator<PE> {
+  for e in v { yield e; }
+}
+
+fn many(k: integer) -> iterator<PE> {
+  for i in 0..k { yield A { p: i }; }
+  yield C { r: 9 };
+}
+
+fn arms(v: vector<PE>) -> text {
+  match it(v) {
+    [A { p: 1 }, A { p: 2 }, A { p: 3 }, ..] => "three",
+    [A { p }, A { p: m }, B { q }, ..rest] => "two {p} {m} {q} {len(rest)}",
+    _ => "none",
+  }
+}
+
+fn arms_vec(v: vector<PE>) -> text {
+  match v {
+    [A { p: 1 }, A { p: 2 }, A { p: 3 }, ..] => "three",
+    [A { p }, A { p: m }, B { q }, ..rest] => "two {p} {m} {q} {len(rest)}",
+    _ => "none",
+  }
+}
+
+fn run(v: vector<PE>) -> text {
+  match it(v) { [(xs: A)*, B { q }, ..rest] => "{len(xs)} {q} {len(rest)}", _ => "none" }
+}
+
+fn long_arm(k: integer) -> text {
+  match many(k) {
+    [(xs: A)*, B { q }] => "b {len(xs)} {q}",
+    [(ys: A)*, C { r }] => "c {len(ys)} {r}",
+    _ => "none",
+  }
+}
+
+fn test_the_next_arm_reads_from_the_first_item() {
+  x: vector<PE> = [A { p: 1 }, A { p: 2 }, B { q: 5 }, C { r: 1 }];
+  s = "{arms(x)}|{arms_vec(x)}";
+  assert(s == "two 1 2 5 1|two 1 2 5 1", "arms: {s}");
+}
+
+fn test_a_run_gives_items_back_to_its_tail() {
+  x: vector<PE> = [A { p: 1 }, A { p: 2 }, B { q: 5 }, C { r: 1 }];
+  s = run(x);
+  assert(s == "2 5 1", "run: {s}");
+}
+
+fn test_a_long_failed_arm_leaves_every_item() {
+  s = long_arm(600);
+  assert(s == "c 600 9", "600 items: {s}");
+}
+
+fn main() {
+  test_the_next_arm_reads_from_the_first_item();
+  test_a_run_gives_items_back_to_its_tail();
+  test_a_long_failed_arm_leaves_every_item();
+}

@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LITERAL NEEDING A WIDTH AT A SET IS REFUSED (`@FR-Disp-Hint`): the arguments of a name with
+// several definitions are typed from their own spelling, so `hn(5)` is an `integer` call, which
+// neither `hn(u8)` (no implicit narrowing) nor `hn(text)` takes — refused naming the declared
+// definitions, never narrowed into the `u8` member because it is the only numeric one.  The lone
+// definition `one(5)` beside it compiles (the sibling cell).  One refusal per file.
+//
+// ⚠ The rule also asks the refusal to name "the typed spelling that cures it"; this diagnostic
+//   names the definitions only (the lambda refusal names its cure).  The cell matches what is
+//   said; the missing cure is reported to the walk as a diagnostic deviation.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the synthesised argument type and the declared members.
+// HOLDS: a `u8`-typed local (`b: u8 = 5; hn(b)`) reaches `hn(u8)` EXACT.
+// @EXPECT_ERROR: no definition of `hn` takes (integer) — declared: hn(u8), hn(text)
+
+fn hn(x: u8) -> text { "u8 {x}" }
+fn hn(t: text) -> text { "text {t}" }
+
+fn main() {
+  println(hn(5));
+}

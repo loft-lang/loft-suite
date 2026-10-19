@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO WIDENINGS AT ONE POSITION ARE REFUSED (`@FR-Disp-Ambiguous`, ranked by
+// `@FR-Disp-Specific`): a `u8` widens into `integer` and into `i16` alike (C-Int — both ranges
+// hold 0..=255), so the two members rank WIDENED at the only position and neither is more
+// specific.  The rank table does not order two ranges that both hold the argument by their
+// size, so the call is refused naming both, never resolved to the tighter range.  One refusal
+// per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: an `integer` argument is EXACT for `aw(integer)` and is not refused (Disp-Specific's
+//   cell).
+// @EXPECT_ERROR: `aw(u8)` is ambiguous — it is taken by aw(integer) and aw(i16)
+
+fn aw(x: integer) -> text { "integer {x}" }
+fn aw(x: i16) -> text { "i16 {x}" }
+
+fn main() {
+  b: u8 = 7;
+  println(aw(b));
+}

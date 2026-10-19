@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): `sizeof(TPt { x: 1, b: 2 })`,
+//   `type_name(TPt { x: 1, b: 2 })` and `type_name(TSh::TCi { r: 1 })` are refused "Expect token
+//   )" (plus three cascading syntax errors): `Parser::parse_size` / `parse_type_name`
+//   (parser/control.rs) read a leading identifier that names a struct or enum as the TYPE
+//   operand and never look at what follows it, so the literal's `{ … }` (or `::TCi`) is left
+//   unparsed.  A bare variant literal (`TCi { r: 1 }`) is excluded from that branch and works.
+//
+// A STRUCT LITERAL INSIDE `sizeof` OR `type_name` SYNTHESISES ITS TYPE (`@FR-T-Syn`): the
+// argument of `sizeof(expr)` / `type_name(expr)` is an expression that synthesises its own type
+// (LOFT_DATA.md § sizeof: "`sizeof(expr)` answers `sizeof` of the expression's type"); a record
+// literal is such an expression, and so is a field read off one and a qualified variant
+// literal.  That a TYPE of the same name exists does not make `TPt { … }` a type.
+//
+// Values hand-computed: TPt { x: integer, b: u8 } is 8 + 1 → 16; its `b` is 1 byte; the
+//   variant TCi { r: integer } is 16 (tag word, then the integer); the type names are the
+//   declared ones.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: the file is refused at compile time.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the sizes and names.
+// HOLDS: `sizeof(TPt)` (the type) is still the type's size.
+
+struct TPt { x: integer, b: u8 }
+enum TSh { TCi { r: integer }, TSq { s: integer } }
+
+fn test_a_literal_argument_is_an_expression() {
+  a = sizeof(TPt { x: 1, b: 2 });
+  b = sizeof(TPt { x: 1, b: 2 }.b);
+  c = type_name(TPt { x: 1, b: 2 });
+  d = type_name(TSh::TCi { r: 1 });
+  e = sizeof(TPt);
+  s = "{a} {b} {c} {d} {e}";
+  assert(s == "16 1 TPt TCi 16", "literal arguments: {s}");
+}
+
+fn main() {
+  test_a_literal_argument_is_an_expression();
+}

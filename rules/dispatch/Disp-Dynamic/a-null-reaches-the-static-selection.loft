@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULL REACHES THE STATIC SELECTION (`@FR-Disp-Dynamic`: "a call where an argument is held
+// at an enum (dense, or nullable when the call has a static selection) selects at run time on
+// the runtime variants … A null reaches the static selection").  With `dn(DFire)` and
+// `dn(DEnt)` declared, a `DEnt?` argument has a static selection (`dn(DEnt)`, LOSSY), so a
+// present value is dispatched on its variant and a null goes to `dn(DEnt)` with the null.
+//
+// Axes it MOVES: where the nullable enum comes from (a return, a struct field, a vector
+//   element), present (each variant) against null, and the order the nulls fall in a loop.
+// Values hand-computed: DFire → "fire n"; DIce and a null → the enum-level body, which tests
+//   for the null itself.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the joined answers.
+// HOLDS: a present DFire held nullable still reaches its own member, not the static selection.
+
+enum DEnt { DFire { n: integer }, DIce { n: integer } }
+struct DSlot { e: DEnt? }
+
+fn dn(a: DFire) -> text { "fire {a.n}" }
+fn dn(a: DEnt) -> text { if a == null { "any null" } else { "any {a.n}" } }
+
+fn pick(k: integer) -> DEnt? {
+  if k == 1 { DFire { n: 1 } } else if k == 2 { DIce { n: 2 } } else { null }
+}
+
+fn test_a_returned_nullable_enum() {
+  x = pick(1);
+  y = pick(2);
+  z = pick(0);
+  s = "{dn(x)}|{dn(y)}|{dn(z)}";
+  assert(s == "fire 1|any 2|any null", "returns: {s}");
+}
+
+fn test_a_nullable_enum_field() {
+  s = DSlot { e: pick(1) };
+  t = DSlot { e: null };
+  r = "{dn(s.e)}|{dn(t.e)}";
+  assert(r == "fire 1|any null", "fields: {r}");
+}
+
+fn test_nullable_enum_elements() {
+  v: vector<DEnt?> = [pick(1), pick(0), pick(2), pick(0)];
+  o = "";
+  for e in v {
+    o += dn(e) + ";";
+  }
+  assert(o == "fire 1;any null;any 2;any null;", "elements: {o}");
+}
+
+fn main() {
+  test_a_returned_nullable_enum();
+  test_a_nullable_enum_field();
+  test_nullable_enum_elements();
+}

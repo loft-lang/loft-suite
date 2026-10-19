@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE UNIQUE MOST-SPECIFIC APPLICABLE MEMBER IS CHOSEN, IN ANY DECLARATION ORDER
+// (`@FR-Disp-Select`, crossed with `@FR-Disp-Ambiguous`'s "no third more specific than both").
+// Selection is a function of the argument types alone, so a set written in one order and the
+// same set written in the reverse order answer every call alike.  Two of the members here are
+// incomparable for the call (`sel(KFire, KEnt)` and `sel(KEnt, KIce)` at `(KFire, KIce)`), and
+// a THIRD (`sel(KFire, KIce)`) is more specific than both, so that call is not ambiguous: it
+// reaches the third.
+//
+// Axes it MOVES: declaration order (forward and reversed), the static argument tuple (each of
+//   the four variant pairs at the variants), and the presence of a member that beats an
+//   incomparable pair.
+// Values hand-computed: at each tuple the member with the most EXACT positions that is no worse
+//   anywhere.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the four answers.
+// HOLDS: the enum-level member still takes the tuple nothing narrower takes.
+
+enum KEnt { KFire { n: integer }, KIce { n: integer } }
+
+fn sel(a: KFire, b: KEnt) -> text { "F,E {a.n}{b.n}" }
+fn sel(a: KEnt, b: KIce) -> text { "E,I {a.n}{b.n}" }
+fn sel(a: KFire, b: KIce) -> text { "F,I {a.n}{b.n}" }
+fn sel(a: KEnt, b: KEnt) -> text { "E,E {a.n}{b.n}" }
+
+fn les(a: KEnt, b: KEnt) -> text { "E,E {a.n}{b.n}" }
+fn les(a: KFire, b: KIce) -> text { "F,I {a.n}{b.n}" }
+fn les(a: KEnt, b: KIce) -> text { "E,I {a.n}{b.n}" }
+fn les(a: KFire, b: KEnt) -> text { "F,E {a.n}{b.n}" }
+
+fn test_every_static_tuple_in_both_orders() {
+  f = KFire { n: 1 };
+  i = KIce { n: 2 };
+  s = "{sel(f, i)}|{sel(f, f)}|{sel(i, i)}|{sel(i, f)}";
+  t = "{les(f, i)}|{les(f, f)}|{les(i, i)}|{les(i, f)}";
+  assert(s == "F,I 12|F,E 11|E,I 22|E,E 21", "forward: {s}");
+  assert(t == s, "reversed declaration order: {t}");
+}
+
+fn main() {
+  test_every_static_tuple_in_both_orders();
+}

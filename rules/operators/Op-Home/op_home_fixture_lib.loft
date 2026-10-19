@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for `an-operator-on-another-sources-type-is-refused.loft` (`@FR-Op-Home`):
+// it declares `OhPt` and its own `operator plus`, so the type's home is this source.  Run on its
+// own it is a cell too: the operator it declares for its own type works.
+//
+// @falsified-at: none — a conformance guard; the library's own operator answered as
+//   hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the sum.
+// HOLDS: nothing outside the library defines an operator on `OhPt`.
+
+pub struct OhPt { pub x: integer }
+
+pub operator plus(self: OhPt, o: OhPt) -> OhPt { OhPt { x: self.x + o.x } }
+
+fn test_the_home_source_may_define_an_operator() {
+  a = OhPt { x: 2 };
+  b = a + OhPt { x: 5 };
+  assert(b.x == 7, "home operator: {b.x}");
+}

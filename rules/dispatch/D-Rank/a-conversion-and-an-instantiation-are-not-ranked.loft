@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONVERSION AND AN INSTANTIATION ARE NOT RANKED (`@FR-D-Rank`, refused by
+// `@FR-Disp-Ambiguous`): GENERIC is INCOMPARABLE with CONVERTED, so a call that one member takes
+// by an implicit conversion (`character` into `integer`) and another by instantiating its type
+// variable is refused, naming both — the language refuses rather than choosing.  The rule's own
+// example is `float` against `T` with an integer (in the attic, `1925b`); this is the other
+// conversion family, character into integer, so the incomparability is the rank's and not the
+// one pair's.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: an `integer` argument (EXACT) is not refused — the sibling cell's `rg(integer)` takes it.
+// @EXPECT_ERROR: `rc(character)` is ambiguous — it is taken by rc(integer) and rc<T>(T)
+
+fn rc(x: integer) -> text { "integer {x}" }
+fn rc<T>(_x: T) -> text { "generic" }
+
+fn main() {
+  c = 'A';
+  println(rc(c));
+}

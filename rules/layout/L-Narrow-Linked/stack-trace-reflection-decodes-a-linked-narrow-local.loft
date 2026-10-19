@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// STACK-TRACE REFLECTION DECODES A LINKED NARROW LOCAL (`@FR-L-Narrow-Linked`: "The obligation
+// runs to EVERY reader of the slot … reflection through `stack_trace()` … each must decode"):
+// `stack_trace()` reads frame slots from ordinary loft code, so a linked `i8` holding -1, a
+// linked `limit(1000, 1100)` holding 1050 and a linked `u8?` holding null or 254 must be
+// reported as those values — never the raw stored code, never an opaque "other".
+//
+// The interpreter fills `variables`; under `--native` a frame has no slot reader and every list
+// is empty (STACKTRACE.md ST-6), which the native lane asserts instead.
+//
+// Values hand-computed: the values written through the links.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; the dense cells answered as hand-computed on
+//   18594597b (interpret: decoded; native: empty, ST-6).  The `u8?` cell below is @IGNOREd: it
+//   is a live defect.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the reported variables.
+// HOLDS: an UNLINKED `u8?` holding null is reported `null` (the control function).
+
+type Lim = integer limit(1000, 1100);
+
+fn show(v: ArgValue) -> text {
+  match v { NullVal => "null", IntVal { n } => "{n}", LongVal { n } => "{n}", OtherVal => "other", _ => "?" }
+}
+
+fn report(f: StackFrame, names: text) -> text {
+  o = "";
+  for v in f.variables {
+    if names.contains("{v.name},") {
+      o += "{v.name}={show(v.value)};";
+    }
+  }
+  o
+}
+
+fn test_a_linked_signed_and_biased_local_reads_decoded() {
+  a: i8 = -1;
+  b: Lim = 1050;
+  ra = &a;
+  rb = &b;
+  ra = -1;
+  rb = 1050;
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  if len(f.variables) > 0 {
+    s = report(f, "a,b,");
+    assert(s == "a=-1;b=1050;", "interpreter reflection: {s}");
+  } else {
+    assert(len(f.arguments) == 0, "native frames carry nothing (ST-6)");
+  }
+}
+
+fn test_an_unlinked_nullable_local_reads_null() {
+  c: u8? = null;
+  d: u8? = 254;
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  if len(f.variables) > 0 {
+    s = report(f, "c,d,");
+    assert(s == "c=null;d=254;", "the unlinked control: {s} ({c} {d})");
+  }
+}
+
+// @IGNORE — DEFECT (interpreter, 18594597b): a LINKED `u8?` reads as `OtherVal` ("other") for
+//   both null and 254.  `State::read_variable_value` (state/debug.rs) decodes a linked slot only
+//   in its `Type::Integer(_) if narrow.is_some()` arm; a `Type::Optional(Integer)` with a narrow
+//   slot is excluded from the nullable arm (`narrow.is_none()`) and falls to `Unsupported`.
+fn test_a_linked_nullable_local_reads_decoded() {
+  c: u8? = 7;
+  e: u8? = 7;
+  rc = &c;
+  re = &e;
+  rc = 254;
+  re = null;
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  if len(f.variables) > 0 {
+    s = report(f, "c,e,");
+    assert(s == "c=254;e=null;", "linked nullable: {s}");
+  }
+}
+
+fn main() {
+  test_a_linked_signed_and_biased_local_reads_decoded();
+  test_an_unlinked_nullable_local_reads_null();
+}

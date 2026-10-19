@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SET MEMBER TAKES EVERY ARGUMENT ITS LONE TWIN TAKES (`@FR-Disp-Applicable`): applicability
+// is the call's own argument check — the stdlib's implicit conversions included — after
+// (F-Recv)'s nullability routing, and a trailing parameter with a default may be omitted.  So a
+// member of a set answers a call exactly as the same definition does when it is the name's ONLY
+// definition.  Each set below pairs the converting member with a member of a type the argument
+// cannot reach (a struct), so the converting member is the one applicable definition, and its
+// answer is compared with its lone twin's and with the hand-computed text.
+//
+// Axes it MOVES: the conversion (integer into single, character and boolean; a u8 into float),
+//   a defaulted trailing parameter omitted and supplied, a nullable struct argument present and
+//   null into a `τ?` member, and a call written with a literal and with a typed local.
+// Values hand-computed: 66 is 'B'; an integer converts to `true` whatever its value, since only
+//   null and `false` are falsy (LOFT.md § conversions); a whole single prints without decimals.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the set's and the lone twin's answers side by side.
+// HOLDS: the struct member never takes a scalar argument.
+
+struct APt { x: integer }
+
+fn as_(x: single) -> text { "single {x}" }
+fn as_(p: APt) -> text { "pt {p.x}" }
+fn lone_s(x: single) -> text { "single {x}" }
+
+fn ac(x: character) -> text { "char {x}" }
+fn ac(p: APt) -> text { "pt {p.x}" }
+fn lone_c(x: character) -> text { "char {x}" }
+
+fn ab(x: boolean) -> text { "bool {x}" }
+fn ab(p: APt) -> text { "pt {p.x}" }
+fn lone_b(x: boolean) -> text { "bool {x}" }
+
+fn af(x: float) -> text { "float {x}" }
+fn af(p: APt) -> text { "pt {p.x}" }
+fn lone_f(x: float) -> text { "float {x}" }
+
+fn ad(x: integer, k: integer = 40) -> text { "int {x} {k}" }
+fn ad(t: text) -> text { "text {t}" }
+
+fn ao(p: APt?) -> text { if p == null { "pt? null" } else { "pt? {p.x}" } }
+fn ao(t: text) -> text { "text {t}" }
+
+fn test_a_member_converts_as_its_lone_twin_does() {
+  i: integer = 66;
+  u: u8 = 7;
+  s = "{as_(i)}/{lone_s(i)}|{ac(i)}/{lone_c(i)}|{ab(i)}/{lone_b(i)}|{ab(0)}/{lone_b(0)}|{af(u)}/{lone_f(u)}";
+  assert(s == "single 66/single 66|char B/char B|bool true/bool true|bool true/bool true|float 7/float 7", "conversions: {s}");
+}
+
+fn test_a_defaulted_trailing_parameter_may_be_omitted() {
+  s = "{ad(1)}|{ad(1, 2)}|{ad("z")}";
+  assert(s == "int 1 40|int 1 2|text z", "defaults: {s}");
+}
+
+fn test_a_nullable_argument_reaches_the_nullable_member() {
+  p = APt { x: 5 };
+  q: APt? = null;
+  r: APt? = APt { x: 6 };
+  s = "{ao(p)}|{ao(q)}|{ao(r)}";
+  assert(s == "pt? 5|pt? null|pt? 6", "routing: {s}");
+}
+
+fn main() {
+  test_a_member_converts_as_its_lone_twin_does();
+  test_a_defaulted_trailing_parameter_may_be_omitted();
+  test_a_nullable_argument_reaches_the_nullable_member();
+}

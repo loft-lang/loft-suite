@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EQUALITY IS STRUCTURAL AT EVERY DEPTH, AND NO TYPE DEFINES IT (`@FR-Op-Eq`): `==` and `!=`
+// compare by value on every type at every depth; a plain `fn equals` is an ordinary method that
+// `==` never calls; `!a` is the presence test on every type; and `Equatable` declares nothing, so
+// every type meets it.  Two records built apart with equal fields are equal, and one differing
+// in a field three levels down — a nested struct's text, a vector field's length, an enum
+// field's variant — is not.
+//
+// Axes it MOVES: the depth of the differing field (a nested struct's text, a vector field, an
+//   enum field), the field types beside it (float, character, boolean, u8), a vector of structs
+//   compared whole, a type carrying a plain `fn equals` that disagrees with `==`, a generic
+//   bounded by `Equatable` at a struct, an integer and a text, and `!` on a null, a struct
+//   and a struct with `fn equals`.
+// Values hand-computed field by field.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the booleans.
+// HOLDS: `x.equals(y)` answers the method's own comparison, which `==` ignores.
+
+struct EIn { a: integer, t: text }
+enum ESh { ECi { r: integer }, ESq { s: integer } }
+struct EOut { i: EIn, v: vector<integer>, e: ESh, f: float, c: character, b: boolean, u: u8 }
+struct ET { h: integer, m: integer }
+
+fn equals(self: ET, o: ET) -> boolean { self.h == o.h }
+
+fn same<T: Equatable>(a: T, b: T) -> boolean { a == b }
+
+fn mk(t: text, v: vector<integer>, e: ESh) -> EOut {
+  EOut { i: EIn { a: 1, t: t }, v: v, e: e, f: 1.5, c: 'q', b: true, u: 7 }
+}
+
+fn test_equality_reads_every_level() {
+  a = mk("x", [1, 2], ECi { r: 3 });
+  b = mk("x", [1, 2], ECi { r: 3 });
+  c = mk("y", [1, 2], ECi { r: 3 });
+  d = mk("x", [1, 2, 3], ECi { r: 3 });
+  e = mk("x", [1, 2], ESq { s: 3 });
+  s = "{a == b} {a != b} {a == c} {a == d} {a == e} {a != e}";
+  assert(s == "true false false false false true", "depth: {s}");
+  vs: vector<EIn> = [EIn { a: 1, t: "p" }, EIn { a: 2, t: "q" }];
+  ws: vector<EIn> = [EIn { a: 1, t: "p" }, EIn { a: 2, t: "q" }];
+  xs: vector<EIn> = [EIn { a: 1, t: "p" }, EIn { a: 2, t: "r" }];
+  t = "{vs == ws} {vs == xs}";
+  assert(t == "true false", "vectors of structs: {t}");
+}
+
+fn test_a_plain_equals_is_an_ordinary_method() {
+  x = ET { h: 1, m: 2 };
+  y = ET { h: 1, m: 3 };
+  s = "{x == y} {x.equals(y)} {equals(x, y)}";
+  assert(s == "false true true", "plain equals: {s}");
+}
+
+fn test_every_type_meets_equatable() {
+  x = ET { h: 1, m: 2 };
+  s = "{same(x, ET { h: 1, m: 3 })} {same(x, ET { h: 1, m: 2 })} {same(3, 3)} {same("a", "b")}";
+  assert(s == "false true true false", "Equatable: {s}");
+}
+
+fn test_not_is_the_presence_test() {
+  n: EIn? = null;
+  a = EIn { a: 0, t: "" };
+  x = ET { h: 0, m: 0 };
+  s = "{!n} {!a} {!x}";
+  assert(s == "true false false", "presence: {s}");
+}
+
+fn main() {
+  test_equality_reads_every_level();
+  test_a_plain_equals_is_an_ordinary_method();
+  test_every_type_meets_equatable();
+  test_not_is_the_presence_test();
+}

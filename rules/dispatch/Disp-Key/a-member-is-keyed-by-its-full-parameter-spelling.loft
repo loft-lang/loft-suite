@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MEMBER OF AN OVERLOAD SET IS KEYED BY ITS FULL PARAMETER SPELLING (`@FR-Disp-Key`, with
+// `@FR-Disp-Select` choosing among them).  The rule names three parts of a type's identity the
+// key must carry — an integer's WIDTH, a `τ?`'s NULLABILITY and a collection's ELEMENT — so each
+// pair below is two members, and every call reaches the member of its own exact spelling (EXACT
+// beats every other rank, `Disp-Specific`).  A key that dropped any of the three would make two
+// of these definitions one, and the program would be refused as a redefinition or answer the
+// wrong member's text.
+//
+// Axes it MOVES: the integer width (integer, u8, i8, i16 — signed and unsigned, one and two
+//   bytes), nullability of a struct and of a scalar, the collection's element (integer, u8,
+//   text, a struct) and its kind (vector against hash), character against text, and the
+//   spelling (free against a `self` method set keyed by its SECOND parameter).
+// Values hand-computed: each call names the member whose parameter is spelled exactly as the
+//   argument's static type, and the body formats the argument.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts (and the compile: a key that merges two members refuses the file).
+// ARMED: no instrument.
+// WITNESS: each message prints the joined answers.
+// HOLDS: a member never answers for an argument of another width, nullability or element.
+
+struct KPt { x: integer }
+
+fn kw(x: integer) -> text { "integer {x}" }
+fn kw(x: u8) -> text { "u8 {x}" }
+fn kw(x: i8) -> text { "i8 {x}" }
+fn kw(x: i16) -> text { "i16 {x}" }
+
+fn kn(p: KPt) -> text { "KPt {p.x}" }
+fn kn(p: KPt?) -> text { if p == null { "KPt? null" } else { "KPt? {p.x}" } }
+
+fn ki(x: integer) -> text { "int {x}" }
+fn ki(x: integer?) -> text { "int? {x}" }
+
+fn kv(a: vector<integer>) -> text { "v-integer {len(a)}" }
+fn kv(a: vector<u8>) -> text { "v-u8 {len(a)}" }
+fn kv(a: vector<text>) -> text { "v-text {len(a)}" }
+fn kv(a: vector<KPt>) -> text { "v-KPt {len(a)}" }
+
+fn kh(a: hash<KPt[x]>) -> text { "hash {len(a)}" }
+fn kh(a: vector<KPt>) -> text { "vector {len(a)}" }
+
+fn kc(c: character) -> text { "character {c}" }
+fn kc(c: text) -> text { "text {c}" }
+
+fn km(self: KPt, x: u8) -> text { "m-u8 {self.x}/{x}" }
+fn km(self: KPt, x: integer) -> text { "m-integer {self.x}/{x}" }
+fn km(self: KPt, x: i8) -> text { "m-i8 {self.x}/{x}" }
+
+fn test_an_integer_width_keys_a_member() {
+  a: integer = 300;
+  b: u8 = 200;
+  c: i8 = -5;
+  d: i16 = -3000;
+  s = "{kw(a)}|{kw(b)}|{kw(c)}|{kw(d)}";
+  assert(s == "integer 300|u8 200|i8 -5|i16 -3000", "widths: {s}");
+}
+
+fn test_nullability_keys_a_member() {
+  p = KPt { x: 4 };
+  q: KPt? = null;
+  r: KPt? = KPt { x: 9 };
+  e: integer? = null;
+  f: integer? = 12;
+  g: integer = 13;
+  s = "{kn(p)}|{kn(q)}|{kn(r)}|{ki(g)}|{ki(e)}|{ki(f)}";
+  assert(s == "KPt 4|KPt? null|KPt? 9|int 13|int? null|int? 12", "nullability: {s}");
+}
+
+fn test_a_collection_element_keys_a_member() {
+  vi: vector<integer> = [1, 2];
+  vu: vector<u8> = [1, 2, 3];
+  vt: vector<text> = ["a"];
+  vp: vector<KPt> = [KPt { x: 1 }, KPt { x: 2 }, KPt { x: 3 }, KPt { x: 4 }];
+  s = "{kv(vi)}|{kv(vu)}|{kv(vt)}|{kv(vp)}";
+  assert(s == "v-integer 2|v-u8 3|v-text 1|v-KPt 4", "elements: {s}");
+  hh: hash<KPt[x]> = [KPt { x: 1 }, KPt { x: 2 }];
+  t = "{kh(hh)}|{kh(vp)}";
+  assert(t == "hash 2|vector 4", "collection kind: {t}");
+}
+
+fn test_character_and_text_are_two_members() {
+  s = "{kc('z')}|{kc("zz")}";
+  assert(s == "character z|text zz", "character/text: {s}");
+}
+
+fn test_a_method_set_is_keyed_past_its_receiver() {
+  p = KPt { x: 7 };
+  a: u8 = 250;
+  b: integer = -40;
+  c: i8 = -128;
+  s = "{p.km(a)}|{p.km(b)}|{p.km(c)}|{km(p, a)}";
+  assert(s == "m-u8 7/250|m-integer 7/-40|m-i8 7/-128|m-u8 7/250", "method set: {s}");
+}
+
+fn main() {
+  test_an_integer_width_keys_a_member();
+  test_nullability_keys_a_member();
+  test_a_collection_element_keys_a_member();
+  test_character_and_text_are_two_members();
+  test_a_method_set_is_keyed_past_its_receiver();
+}

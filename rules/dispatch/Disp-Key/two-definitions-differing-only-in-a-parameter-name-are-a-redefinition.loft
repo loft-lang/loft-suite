@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO DEFINITIONS DIFFERING ONLY IN A PARAMETER'S NAME ARE A REDEFINITION (`@FR-Disp-Key`):
+// a member is keyed by its parameter TYPES, never a parameter's name, so `kr(x: u8)` and
+// `kr(y: u8)` are one key twice.  The set already holds a second, distinct member (`kr(x:
+// integer)`), so the refusal must come from the key, not from the name having one definition.
+// One refusal per file: a refusal stops the file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the redefined name.
+// HOLDS: the other spelling (`integer`) is a member, not a redefinition.
+// @EXPECT_ERROR: Cannot redefine 'kr'
+
+fn kr(x: integer) -> text { "integer {x}" }
+fn kr(x: u8) -> text { "u8 {x}" }
+fn kr(y: u8) -> text { "u8 again {y}" }
+
+fn main() {
+  b: u8 = 3;
+  println(kr(b));
+}

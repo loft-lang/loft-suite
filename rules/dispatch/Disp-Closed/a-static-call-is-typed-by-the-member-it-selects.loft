@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STATIC CALL IS DECIDED AT COMPILE TIME AND TYPED BY THE MEMBER IT SELECTS
+// (`@FR-Disp-Closed`, crossed with `@FR-Disp-Return`): selection for a call whose argument types
+// are statically concrete runs at compile time and lowers to a direct call to the selected
+// member.  The observable half a program can read is the call's TYPE: the members of `cw` return
+// different types (allowed, `Disp-Return`, because no call here is decided at run time), so a
+// call at the variant `CFire` is a `u8` and a call at the variant `CIce` — which only the
+// enum-level member takes — is an `integer`, each read with `sizeof` and `type_name`.  A call
+// decided at run time could not have two result types; it would be refused.  The other half
+// (no runtime table; an uncalled member absent from a `--native-release` artefact) is not
+// observable from a program.
+//
+// Axes it MOVES: where the variant-typed argument comes from (a literal, a local, a parameter
+//   typed at the variant, the receiver of the method spelling), and which member the variant
+//   reaches (its own, or the enum-level one).
+// Values hand-computed: `cw(CFire)` is the constant 200 (u8, 1 byte); `cw(CEnt)` is `n * 1000`
+//   (integer, 8 bytes).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value, its size and its type name.
+// HOLDS: the same set called with an enum-held argument is refused by Disp-Return (its cell).
+
+enum CEnt { CFire { n: integer }, CIce { n: integer } }
+
+fn cw(self: CFire) -> u8 { 200 }
+fn cw(self: CEnt) -> integer { self.n * 1000 }
+
+fn through(x: CFire) -> u8 { cw(x) }
+
+fn test_a_static_call_takes_its_members_return_type() {
+  a = cw(CFire { n: 1 });
+  f = CIce { n: 2 };
+  b = cw(f);
+  s = "{a} {sizeof(a)} {type_name(a)}|{b} {sizeof(b)} {type_name(b)}";
+  assert(s == "200 1 u8|2000 8 integer", "static types: {s}");
+}
+
+fn test_a_variant_typed_parameter_and_receiver() {
+  g = CFire { n: 3 };
+  c = through(g);
+  d = g.cw();
+  h = CIce { n: 4 };
+  e = h.cw();
+  s = "{c} {sizeof(c)}|{d} {sizeof(d)}|{e} {sizeof(e)}";
+  assert(s == "200 1|200 1|4000 8", "parameter and receiver: {s}");
+}
+
+fn main() {
+  test_a_static_call_takes_its_members_return_type();
+  test_a_variant_typed_parameter_and_receiver();
+}

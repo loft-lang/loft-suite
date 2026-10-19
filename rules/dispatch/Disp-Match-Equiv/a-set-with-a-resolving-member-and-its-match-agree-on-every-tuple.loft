@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SET WHOSE SPECIFICITY ORDER MATTERS AND ITS CANONICAL MATCH AGREE ON EVERY TUPLE
+// (`@FR-Disp-Match-Equiv`, with `@FR-Disp-Dynamic` deciding at run time and
+// `@FR-Disp-Ambiguous`'s resolving third member).  The canonical `match` holds one arm per
+// definition in SPECIFICITY order and the enum-level definition as `_`.  The oracle twins in
+// loft (`34-…`, `35-…`) carry sets whose arms are disjoint, where any order would do; here two
+// members overlap at `(QFire, QIce)` and a third, more specific, takes that pair — so the match
+// is correct only with `(QFire, QIce)` written FIRST.  A second set crosses a nullable enum
+// argument: a null reaches the static selection, which in the match is the `_` arm.
+//
+// Axes it MOVES: overlapping members against disjoint ones, every variant pair of three
+//   variants, a nullable argument present at each variant and null, and the spelling of the
+//   twin (a set against a `match` on a tuple and on one value).
+// Values hand-computed per tuple (the same table as Disp-Dynamic's cell), and the set and the
+//   match must also agree with each other.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints both strings.
+// HOLDS: the match written with `(QFire, _)` first would answer "F,E" at (QFire, QIce) — the
+//   order is load-bearing, which is why it is the definition's.
+
+enum QEnt { QFire { n: integer }, QIce { n: integer }, QRock { n: integer } }
+
+fn mq(a: QFire, b: QEnt) -> text { "F,E {a.n}{b.n}" }
+fn mq(a: QEnt, b: QIce) -> text { "E,I {a.n}{b.n}" }
+fn mq(a: QFire, b: QIce) -> text { "F,I {a.n}{b.n}" }
+fn mq(a: QEnt, b: QEnt) -> text { "E,E {a.n}{b.n}" }
+
+fn mq_match(a: QEnt, b: QEnt) -> text {
+  match (a, b) {
+    (QFire, QIce) => "F,I {a.n}{b.n}",
+    (QFire, _) => "F,E {a.n}{b.n}",
+    (_, QIce) => "E,I {a.n}{b.n}",
+    _ => "E,E {a.n}{b.n}",
+  }
+}
+
+fn mo(a: QFire) -> text { "fire {a.n}" }
+fn mo(a: QEnt) -> text { if a == null { "any null" } else { "any {a.n}" } }
+
+fn mo_match(a: QEnt?) -> text {
+  match a {
+    QFire { n } => "fire {n}",
+    _ => if a == null { "any null" } else { "any {a.n}" },
+  }
+}
+
+fn pick(k: integer) -> QEnt? {
+  if k == 0 { QFire { n: 7 } } else if k == 1 { QIce { n: 8 } } else if k == 2 { QRock { n: 9 } } else { null }
+}
+
+fn test_every_pair_agrees() {
+  es: vector<QEnt> = [QFire { n: 1 }, QIce { n: 2 }, QRock { n: 3 }];
+  s = "";
+  m = "";
+  for a in es {
+    for b in es {
+      s += mq(a, b) + ";";
+      m += mq_match(a, b) + ";";
+    }
+  }
+  assert(s == "F,E 11;F,I 12;F,E 13;E,E 21;E,I 22;E,E 23;E,E 31;E,I 32;E,E 33;", "set: {s}");
+  assert(m == s, "match: {m} / set: {s}");
+}
+
+fn test_a_nullable_argument_agrees() {
+  s = "";
+  m = "";
+  for k in 0..4 {
+    x = pick(k);
+    s += mo(x) + ";";
+    m += mo_match(x) + ";";
+  }
+  assert(s == "fire 7;any 8;any 9;any null;", "set: {s}");
+  assert(m == s, "match: {m} / set: {s}");
+}
+
+fn main() {
+  test_every_pair_agrees();
+  test_a_nullable_argument_agrees();
+}

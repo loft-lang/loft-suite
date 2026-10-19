@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COLLECTION FIELD IS A 4-BYTE POINTER, A REFERENCE FIELD A WHOLE 12-BYTE DBREF
+// (`@FR-L-Ref`, crossed with `@FR-H-LongRef` for the element stride of a referenced type):
+// every stored collection field (vector, hash, sorted, index) is a 4-byte record pointer into
+// its own store, a `reference<T>` field is the full DbRef (12 bytes, aligned 4) and may name a
+// record in any store, an embedded struct is inline, and a collection's element stride is the
+// element's width — a record element's size, unless a link over its type elsewhere in the
+// program (a keyed collection of it, or a `reference<T>` to it) lays it out by reference
+// (`array`, 4 bytes per element, H-LongRef / H-Stride).
+//
+// Sizes hand-computed:
+//   LIt { k: integer, t: text } = 8 + 4 → 16.
+//   { v: vector<LIt>, b } = 4 + 1 → 8;  { s: sorted<LIt[k]>, b } → 8;  { i: index<LIt[k]>, b } → 8;
+//   { h: hash<LIt[k]>, b } → 8;  { r: reference<LRt>, b } = 12 + 1 → 16;  { r: reference<LRt>? }
+//   = 12;  { e: LPl, b } = 16 + 1 → 24 (inline, aligned 8).
+//   vector<LPl> of 3 (nothing links LPl): stride 16 → 48.  vector<LIt> of 3, where `hash<LIt[k]>`
+//   exists: 4 → 12.  vector<LRt> of 3, where `reference<LRt>` exists: 4 → 12.
+//   A reference to an element of another record's vector reads, and follows a later write to
+//   it, because it names the record, not a copy.
+//
+// Axes it MOVES: the collection kind of the field, reference dense and nullable, embedded
+//   against pointed-to, the element type linked and not, and a reference crossing stores.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes or values.
+// HOLDS: the record behind a reference is not copied (a write through its owner is seen).
+
+struct LIt { k: integer, t: text }
+struct LPl { k: integer, t: text }
+struct LRt { k: integer, t: text }
+struct LVF { v: vector<LIt>, b: boolean }
+struct LSF { s: sorted<LIt[k]>, b: boolean }
+struct LXF { i: index<LIt[k]>, b: boolean }
+struct LHF { h: hash<LIt[k]>, b: boolean }
+struct LRF { r: reference<LRt>, b: boolean }
+struct LRO { r: reference<LRt>? }
+struct LEF { e: LPl, b: boolean }
+struct LOwn { v: vector<LRt> }
+
+fn test_field_widths() {
+  s = "{sizeof(LIt)} {sizeof(LVF)} {sizeof(LSF)} {sizeof(LXF)} {sizeof(LHF)} {sizeof(LRF)} {sizeof(LRO)} {sizeof(LEF)}";
+  assert(s == "16 8 8 8 8 16 12 24", "fields: {s}");
+}
+
+fn test_element_strides() {
+  ps: vector<LPl> = [LPl { k: 1, t: "a" }, LPl { k: 2, t: "b" }, LPl { k: 3, t: "c" }];
+  vs: vector<LIt> = [LIt { k: 1, t: "a" }, LIt { k: 2, t: "b" }, LIt { k: 3, t: "c" }];
+  ws: vector<LRt> = [LRt { k: 1, t: "a" }, LRt { k: 2, t: "b" }, LRt { k: 3, t: "c" }];
+  s = "{size(ps)} {size(vs)} {size(ws)} {sizeof(LPl)} {sizeof(LRt)}";
+  assert(s == "48 12 12 16 16", "strides: {s}");
+  t = "{ps[2].t}{vs[2].t}{ws[2].t} {ps[1].k + vs[1].k + ws[1].k}";
+  assert(t == "ccc 6", "elements read back: {t}");
+}
+
+fn test_a_reference_names_a_record_in_another_store() {
+  owner = LOwn { v: [LRt { k: 1, t: "a" }, LRt { k: 2, t: "b" }] };
+  r = LRF { r: owner.v[1], b: true };
+  s = "{r.r.k} {r.r.t} {r.b}";
+  owner.v[1].t = "changed";
+  t = "{r.r.t}";
+  assert(s == "2 b true" && t == "changed", "reference: {s} / {t}");
+}
+
+fn main() {
+  test_field_widths();
+  test_element_strides();
+  test_a_reference_names_a_record_in_another_store();
+}

@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSUMER'S DEFINITION OF A SPELLING A LIBRARY'S SET ALREADY CARRIES IS A REDEFINITION
+// (`@FR-Disp-Key`, last sentence: "a consumer's definition of ANOTHER spelling joins it, while
+// one the set already carries is a redefinition").  The fixture library
+// `disp_key_fixture_lib.loft` beside this file exports `dk_hit(f: DkFire)` and
+// `dk_hit(x: integer)`; defining `dk_hit(f: DkFire)` again here would leave one of the two
+// bodies unreachable, so the program is refused, naming the library's definition.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the redefined name.
+// HOLDS: a parameter NAME different from the library's (`g` against `f`) does not make it a
+//   new spelling.
+// @EXPECT_ERROR: Cannot redefine 'dk_hit'
+
+use disp_key_fixture_lib::*;
+
+fn dk_hit(g: DkFire) -> text { "own fire {g.n}" }
+
+fn main() {
+  println(dk_hit(DkFire { n: 1 }));
+}

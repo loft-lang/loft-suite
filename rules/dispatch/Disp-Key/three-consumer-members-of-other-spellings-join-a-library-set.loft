@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): with THREE consumer definitions of a library
+//   set's name the file is refused — "Variable 'c' cannot change type from DkClay to DkRock" at
+//   the first consumer definition, and the same at the second and third: every consumer body is
+//   read on pass 2 against ONE parameter `c` (the third definition's), because the third
+//   definition does not join the library's set and registers as a fresh `n_dk_hit`.  Two
+//   consumer definitions compile and dispatch correctly.
+//
+// EVERY CONSUMER MEMBER OF ANOTHER SPELLING JOINS A LIBRARY'S SET (`@FR-Disp-Key`, last
+// sentence).  Three definitions of `dk_hit` beside the fixture library's two
+// (`disp_key_fixture_lib.loft`: `dk_hit(DkFire)`, `dk_hit(integer)`) make one set of five, and
+// each call reaches the member of its own spelling.
+//
+// Axes it MOVES: the number of consumer definitions (three — the one- and two-definition
+//   shapes are the sibling cell and the HOLDS line), struct spellings with distinct parameter
+//   names.
+// Values hand-computed: every call is EXACT for exactly one member.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: the file is refused at compile time.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the joined answers.
+// HOLDS: with two consumer definitions (`DkRock`, `DkSand`) the same calls answer as computed.
+
+use disp_key_fixture_lib::*;
+
+struct DkRock { n: integer }
+struct DkSand { n: integer }
+struct DkClay { n: integer }
+
+fn dk_hit(r: DkRock) -> text { "rock {r.n}" }
+fn dk_hit(s: DkSand) -> text { "sand {s.n}" }
+fn dk_hit(c: DkClay) -> text { "clay {c.n}" }
+
+fn test_three_consumer_members_join() {
+  s = "{dk_hit(DkRock { n: 1 })}|{dk_hit(DkSand { n: 2 })}|{dk_hit(DkClay { n: 3 })}|{dk_hit(4)}|{dk_hit(DkFire { n: 5 })}";
+  assert(s == "rock 1|sand 2|clay 3|lib integer 4|lib fire 5", "five members: {s}");
+}
+
+fn main() {
+  test_three_consumer_members_join();
+}

@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNTYPED LAMBDA TO A FREE SET IS REFUSED, NAMING THE MEMBERS AND THE CURE
+// (`@FR-Disp-Hint`): a name with several definitions offers no parse hint, so `|x| { x }` has
+// nothing to type `x` from; the call is refused at the lambda, naming the definitions and the
+// typed spelling `fn(x: <type>) -> <ret> { … }` that cures it — never typed from the first
+// member.  The attic holds the `self`-set shape (`1926`); this is the FREE set.  One refusal per
+// file.  The body does not read `x`: a body that does draws a second, cascading error — the
+// sibling `a-refused-lambda-that-reads-its-parameter-says-only-the-refusal.loft`.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members and the typed spelling.
+// HOLDS: a typed lambda picks its member (`1926b` in the attic).
+// @EXPECT_ERROR: cannot infer the type of lambda parameter 'x': `hl` is hl(fn(integer) -> integer) and hl(fn(text) -> text), so no single definition types the lambda — write its types, `fn(x: <type>) -> <ret> { … }`
+
+fn hl(f: fn(integer) -> integer) -> text { "int {f(2)}" }
+fn hl(f: fn(text) -> text) -> text { "text {f("a")}" }
+
+fn main() {
+  println(hl(|x| { 7 }));
+}

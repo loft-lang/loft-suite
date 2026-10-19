@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RUN-TIME-DECIDED CALL NEEDS THE MEMBERS IT CHOOSES BETWEEN TO AGREE (`@FR-Disp-Return`,
+// crossed with `@FR-Disp-Dynamic`): the members of one name may return different types, and a
+// call decided at compile time takes the selected member's own return type.  A call decided at
+// run time chooses only among the members its variant tuples reach, so a member those tuples
+// never reach — here `rr(RRock)`, a struct outside the enum, returning `text` — may disagree
+// with them.
+//
+// Values hand-computed: `rr(RFire)` is `n * 10`, `rr(REnt)` is `n + 1`; `rr(RRock)` formats.
+//
+// Axes it MOVES: static at a variant, static at a struct of another return type, run time over
+//   each variant of the enum, and the result used as an integer (summed), so a wrong return
+//   type would not just print.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: the sibling refusal cells — two members a run-time call does choose between, with
+//   different return types, are refused.
+
+enum REnt { RFire { n: integer }, RIce { n: integer } }
+struct RRock { n: integer }
+
+fn rr(a: RFire) -> integer { a.n * 10 }
+fn rr(a: REnt) -> integer { a.n + 1 }
+fn rr(a: RRock) -> text { "rock {a.n}" }
+
+fn test_a_member_outside_the_runtime_choice_may_disagree() {
+  x: REnt = RIce { n: 4 };
+  y: REnt = RFire { n: 5 };
+  t = rr(x) + rr(y);
+  s = "{rr(x)}|{rr(y)}|{rr(RRock { n: 6 })}|{rr(RFire { n: 7 })}|{t}";
+  assert(s == "5|50|rock 6|70|55", "returns: {s}");
+}
+
+fn main() {
+  test_a_member_outside_the_runtime_choice_may_disagree();
+}

@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): a `null` LITERAL argument reaches the DENSE
+//   member — `an(null)` over {an(ANPt), an(ANPt?)} answers "pt null", `ai(null)` over
+//   {ai(integer), ai(ANPt?)} answers "int null", `at(null)` over {at(text), at(ANPt?)} answers
+//   "text null" — each with the warning "`null` is stored into parameter 1 … declare it `ANPt?`",
+//   whose cure is already declared.  `null` synthesises no key identity, so
+//   `Parser::ranked_overloads` answers None and the call falls to the pre-dispatch ladder
+//   (`Data::select_fn`), which does not rank nullability.
+//
+// A NULL LITERAL REACHES THE NULLABLE MEMBER (`@FR-Disp-Applicable`: "after (F-Recv)'s
+// nullability routing, so a nullable argument reaches the `τ?` member where one is declared";
+// `@FR-Disp-Specific` ranks a null into a dense slot LOSSY, N-Store).  `null` is the most nullable
+// argument a call can be written with: it fits a `τ?` slot without loss and a dense slot only by
+// storing a null where none is declared.  So where a `τ?` member exists it is the selection.
+//
+// Axes it MOVES: the dense member's type (the same struct, a scalar, text) beside one `ANPt?`
+//   member, and the declaration order (nullable first and last).
+// Values hand-computed from the routing sentence.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: "pt null|int null|text null|pt null".
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the four answers.
+// HOLDS: a present `ANPt` still reaches the dense `an(ANPt)` member.
+
+struct ANPt { x: integer }
+
+fn an(p: ANPt) -> text { "pt {p.x}" }
+fn an(p: ANPt?) -> text { if p == null { "pt? null" } else { "pt? {p.x}" } }
+
+fn ai(x: integer) -> text { "int {x}" }
+fn ai(p: ANPt?) -> text { if p == null { "pt? null" } else { "pt? {p.x}" } }
+
+fn at(t: text) -> text { "text {t}" }
+fn at(p: ANPt?) -> text { if p == null { "pt? null" } else { "pt? {p.x}" } }
+
+fn ar(p: ANPt?) -> text { if p == null { "pt? null" } else { "pt? {p.x}" } }
+fn ar(p: ANPt) -> text { "pt {p.x}" }
+
+fn test_a_null_literal_takes_the_nullable_member() {
+  s = "{an(null)}|{ai(null)}|{at(null)}|{ar(null)}";
+  assert(s == "pt? null|pt? null|pt? null|pt? null", "null literal: {s}");
+  t = an(ANPt { x: 3 });
+  assert(t == "pt 3", "a present value: {t}");
+}
+
+fn main() {
+  test_a_null_literal_takes_the_nullable_member();
+}

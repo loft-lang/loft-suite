@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN `operator` DEFINITION IS ALSO AN ORDINARY METHOD (`@FR-Op-Name`, with `@FR-F-OneBody`):
+// `a.compare(b)` and `compare(a, b)` call the definition that backs `<`, and the same holds for
+// every built form — `plus` behind `+`, `negate` behind unary `-`, `to_text` behind `"{x}"`.
+// One body, three spellings: the method call, the bare call and the operator form answer alike.
+//
+// Axes it MOVES: the form (binary arithmetic, order, unary, format), the spelling (method,
+//   bare, operator), and the operand order of the bare call (`compare(b, a)`).
+// Values hand-computed: V2 adds componentwise, orders by `x`, negates both, formats "(x;y)".
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the three spellings' answers.
+// HOLDS: a plain `fn` of the same name would be callable by name but back no form (Op-Mark).
+
+struct V2 { x: integer, y: integer }
+
+operator compare(self: V2, o: V2) -> Ordering {
+  if self.x < o.x { Less } else if self.x > o.x { Greater } else { Equal }
+}
+operator plus(self: V2, o: V2) -> V2 { V2 { x: self.x + o.x, y: self.y + o.y } }
+operator negate(self: V2) -> V2 { V2 { x: 0 - self.x, y: 0 - self.y } }
+operator to_text(self: V2) -> text { "({self.x};{self.y})" }
+
+fn test_plus_by_every_spelling() {
+  a = V2 { x: 1, y: 2 };
+  b = V2 { x: 3, y: 4 };
+  c = a.plus(b);
+  d = plus(a, b);
+  e = a + b;
+  s = "{c.x},{c.y} {d.x},{d.y} {e.x},{e.y}";
+  assert(s == "4,6 4,6 4,6", "plus: {s}");
+}
+
+fn test_compare_by_every_spelling() {
+  a = V2 { x: 1, y: 2 };
+  b = V2 { x: 3, y: 4 };
+  s = "{a.compare(b)} {compare(b, a)} {compare(a, a)} {a < b} {b <= a}";
+  assert(s == "Less Greater Equal true false", "compare: {s}");
+}
+
+fn test_negate_and_to_text_by_every_spelling() {
+  a = V2 { x: 1, y: 2 };
+  n = a.negate();
+  m = negate(a);
+  o = -a;
+  s = "{n.x},{n.y} {m.x},{m.y} {o.x},{o.y}";
+  assert(s == "-1,-2 -1,-2 -1,-2", "negate: {s}");
+  t = "{a.to_text()} {to_text(a)} {a}";
+  assert(t == "(1;2) (1;2) (1;2)", "to_text: {t}");
+}
+
+fn main() {
+  test_plus_by_every_spelling();
+  test_compare_by_every_spelling();
+  test_negate_and_to_text_by_every_spelling();
+}

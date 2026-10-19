@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO MEMBERS RETURNING DIFFERENT INTEGER WIDTHS ARE REFUSED AT A RUN-TIME CALL
+// (`@FR-Disp-Return`, crossed with `@FR-Disp-Dynamic`): `rw(RFire) -> integer` and
+// `rw(REnt) -> u8` are both reached by a call with a `REnt`-held argument, and `integer` and
+// `u8` are two types (`Disp-Key` keys them apart) — so the call is refused naming the two, not
+// given the wider of them.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members with their returns.
+// HOLDS: a static call at `RFire` is not refused.
+// @EXPECT_ERROR: `rw(REnt)` is decided by the runtime variant, but its definitions return different types — rw(RFire) -> integer and rw(REnt) -> u8
+
+enum REnt { RFire { n: integer }, RIce { n: integer } }
+
+fn rw(a: RFire) -> integer { a.n }
+fn rw(_a: REnt) -> u8 { 7 }
+
+fn main() {
+  println("{rw(RFire { n: 2 })}");
+  x: REnt = RFire { n: 1 };
+  println("{rw(x)}");
+}

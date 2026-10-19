@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL NO MEMBER TAKES IS REFUSED, NAMING THE ARGUMENT TYPES AND THE DECLARED DEFINITIONS
+// (`@FR-Disp-Exhaustive`): for the STATIC types `(EPt, text)` no member of `ex` applies — a
+// struct converts to neither `integer` nor `float`, and the second position needs an integer —
+// so the call is refused at compile time; it never reaches a run-time "no applicable method".
+// One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the argument types and both members.
+// HOLDS: a call each member takes (`ex(1, 2)`, `ex(1.5, 2)`) is not refused.
+// @EXPECT_ERROR: no definition of `ex` takes (EPt, text) — declared: ex(integer, integer), ex(float, integer)
+
+struct EPt { x: integer }
+
+fn ex(a: integer, b: integer) -> text { "ii {a} {b}" }
+fn ex(a: float, b: integer) -> text { "fi {a} {b}" }
+
+fn main() {
+  println("{ex(1, 2)}|{ex(1.5, 2)}");
+  println(ex(EPt { x: 1 }, "t"));
+}

@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SET MISSING A VARIANT, WITHOUT AN ENUM-LEVEL MEMBER, IS REFUSED AT THE CALL
+// (`@FR-Disp-Dynamic`'s last sentence, in `M-Exhaust`'s shape; `@FR-Disp-Exhaustive` says no
+// "no applicable method" path exists at run time).  `dm(DFire)` and `dm(DIce)` cover two of
+// three variants and no member is declared at `DEnt`, so a call with a `DEnt`-held argument
+// would have no leaf for `DRock`: refused naming the missing tuple and the members declared.
+// One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the uncovered variant and the declared members.
+// HOLDS: a static call at `DFire` is not refused — the refusal is the enum-held call's.
+// @EXPECT_ERROR: `dm(DEnt)` has no definition for the pair (DRock) — declared: dm(DFire), dm(DIce)
+
+enum DEnt { DFire { n: integer }, DIce { n: integer }, DRock { n: integer } }
+
+fn dm(a: DFire) -> text { "fire {a.n}" }
+fn dm(a: DIce) -> text { "ice {a.n}" }
+
+fn main() {
+  println(dm(DFire { n: 0 }));
+  x: DEnt = DFire { n: 1 };
+  println(dm(x));
+}

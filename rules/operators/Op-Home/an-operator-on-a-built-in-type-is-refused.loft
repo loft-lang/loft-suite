@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR ON A BUILT-IN TYPE IS REFUSED (`@FR-Op-Home`: "the `self` type of an `operator`
+// definition is declared in the same source as the definition; on a built-in type it is
+// refused"): `operator times(self: boolean, …)` would give `*` a meaning on `boolean` that no
+// program declared, so it is refused at the definition.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the built-in type.
+// HOLDS: the same definition on a struct of this file compiles (Op-Name's cell).
+// @EXPECT_ERROR: `operator times` defines `*` for a type of its own package, and `boolean` is not one
+
+operator times(self: boolean, o: integer) -> integer { if self { o } else { 0 } }
+
+fn main() {
+  println("x");
+}

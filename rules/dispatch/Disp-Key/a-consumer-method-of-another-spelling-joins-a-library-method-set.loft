@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): the consumer's `fn dk_melt(self: DkFire, b: u8)`
+//   is refused "Cannot redefine 'dk_melt' (already defined at disp_key_fixture_lib.loft…)" and
+//   "cannot redefine method `dk_melt` on `DkFire`", though its full spelling (DkFire, u8) is not
+//   one the library's set carries ((DkFire, integer), (DkFire, text)).  A consumer method on
+//   the library's type under a NEW name (`fn glow(self: DkFire)`) compiles, and the same three
+//   members declared in ONE source form one set.
+//
+// A CONSUMER METHOD OF ANOTHER SPELLING JOINS A LIBRARY'S METHOD SET (`@FR-Disp-Key`, last
+// sentence: "a consumer's definition of ANOTHER spelling joins it"; `@FR-Disp-Specific` ranks
+// it).  The fixture library `disp_key_fixture_lib.loft` exports `dk_melt(self: DkFire, k:
+// integer)` and `dk_melt(self: DkFire, t: text)`; this file adds `(self: DkFire, b: u8)`, EXACT
+// for a `u8` argument where the library's `integer` member is WIDENED.
+//
+// Axes it MOVES: the spelling (a `self` method set, against the free set of the sibling cells),
+//   both call spellings (`f.dk_melt(b)` and `dk_melt(f, b)`).
+// Values hand-computed from the rank table.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: the file is refused at compile time.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the joined answers.
+// HOLDS: the library's members still answer an `integer` and a `text`.
+
+use disp_key_fixture_lib::*;
+
+fn dk_melt(self: DkFire, b: u8) -> text { "own melt u8 {self.n}/{b}" }
+
+fn test_a_consumer_method_joins_the_librarys_method_set() {
+  b: u8 = 9;
+  f = DkFire { n: 1 };
+  s = "{f.dk_melt(b)}|{dk_melt(f, b)}|{f.dk_melt(7)}|{f.dk_melt("s")}";
+  assert(s == "own melt u8 1/9|own melt u8 1/9|lib melt integer 1/7|lib melt text 1/s", "joined method set: {s}");
+}
+
+fn main() {
+  test_a_consumer_method_joins_the_librarys_method_set();
+}

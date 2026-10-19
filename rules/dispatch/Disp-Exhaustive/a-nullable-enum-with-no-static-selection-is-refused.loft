@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE ENUM ARGUMENT WITH NO STATIC SELECTION IS REFUSED (`@FR-Disp-Exhaustive`, with
+// `@FR-Disp-Dynamic`'s "nullable when the call has a static selection"): `en(EFire)` and
+// `en(EIce)` cover every PRESENT variant of `EEnt`, so a dense `EEnt` argument is covered by
+// the runtime dispatch — but a `EEnt?` may be null, and a null "reaches the static selection",
+// of which there is none (no member takes `EEnt` or `EEnt?`).  The call is refused at compile
+// time rather than given a run-time no-answer path for the null.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the nullable argument type and the declared members.
+// HOLDS: the dense call `en(d)` above it is covered and not refused.
+// @EXPECT_ERROR: no definition of `en` takes (EEnt?) — declared: en(EFire), en(EIce)
+
+enum EEnt { EFire { n: integer }, EIce { n: integer } }
+
+fn en(a: EFire) -> text { "fire {a.n}" }
+fn en(a: EIce) -> text { "ice {a.n}" }
+
+fn pick(k: integer) -> EEnt? { if k == 1 { EFire { n: 1 } } else if k == 2 { EIce { n: 2 } } else { null } }
+
+fn main() {
+  d: EEnt = EIce { n: 3 };
+  println(en(d));
+  x = pick(1);
+  println(en(x));
+}

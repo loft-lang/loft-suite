@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PAR LOOP CONSUMES RESULTS IN ITS SOURCE'S ORDER (`@FR-C-Order`, with `@FR-C-Det` making the
+// thread count irrelevant): the body sees `worker(x)` in the order `flatten(src)` produced the
+// elements — the written order of a vector, ascending for a range, character order for a text,
+// yield order for an iterator, key order for a `sorted` and an `index` — for every N.  The one
+// exception the rule names is a HASH, flattened by its bucket walk: its par order is not
+// promised, so only the MULTISET of results is asserted there, beside the sequential `for x in
+// h`, which IS key-ordered.
+//
+// Values hand-computed: squares of [5, 1, 4, 2] → 25;1;16;4; · of 2..7 → 4;9;16;25;36; ·
+//   "bca" as integers → 98;99;97; · gen(5) yields 0,3,6,9,12 → 0;9;36;81;144; · sorted by k
+//   [30 c, 10 a, 20 b] → a10;b20;c30; · index by k [3 z, 1 x, 2 y] → x1;y2;z3; · hash by k
+//   {7 p, 1 q, 4 r, 9 s}: par yields some order of p7 q1 r4 s9; sequential → q1;r4;p7;s9;.
+//
+// Axes it MOVES: the source kind (vector, range, text, iterator, sorted, index, hash), the
+//   thread count (1, 3, 8), and a source whose written order is not its sorted order.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints N and the consumed sequence.
+// HOLDS: every hash element is consumed exactly once under par.
+
+struct CKv { k: integer, v: text }
+
+fn sq(x: integer) -> integer { x * x }
+fn tag(e: CKv) -> text { "{e.v}{e.k}" }
+fn code(c: character) -> integer { c as integer }
+fn gen(n: integer) -> iterator<integer> {
+  for i in 0..n { yield i * 3; }
+}
+
+fn test_ordered_sources_keep_their_order_for_every_n() {
+  for n in [1, 3, 8] {
+    a = "";
+    for x in [5, 1, 4, 2] par(r = sq(x), n) { a += "{r};"; }
+    b = "";
+    for x in 2..7 par(r = sq(x), n) { b += "{r};"; }
+    c = "";
+    for ch in "bca" par(r = code(ch), n) { c += "{r};"; }
+    d = "";
+    for x in gen(5) par(r = sq(x), n) { d += "{r};"; }
+    s = "{a}|{b}|{c}|{d}";
+    assert(s == "25;1;16;4;|4;9;16;25;36;|98;99;97;|0;9;36;81;144;", "N={n}: {s}");
+  }
+}
+
+fn test_keyed_ordered_sources_keep_key_order_for_every_n() {
+  for n in [1, 3, 8] {
+    so: sorted<CKv[k]> = [CKv { k: 30, v: "c" }, CKv { k: 10, v: "a" }, CKv { k: 20, v: "b" }];
+    e = "";
+    for x in so par(r = tag(x), n) { e += "{r};"; }
+    ix: index<CKv[k]> = [CKv { k: 3, v: "z" }, CKv { k: 1, v: "x" }, CKv { k: 2, v: "y" }];
+    f = "";
+    for x in ix par(r = tag(x), n) { f += "{r};"; }
+    s = "{e}|{f}";
+    assert(s == "a10;b20;c30;|x1;y2;z3;", "N={n}: {s}");
+  }
+}
+
+fn test_a_hash_under_par_consumes_each_element_once() {
+  for n in [1, 3, 8] {
+    h: hash<CKv[k]> = [CKv { k: 7, v: "p" }, CKv { k: 1, v: "q" }, CKv { k: 4, v: "r" }, CKv { k: 9, v: "s" }];
+    o = ";";
+    cnt = 0;
+    for x in h par(r = tag(x), n) {
+      o += "{r};";
+      cnt += 1;
+    }
+    all = o.contains(";p7;") && o.contains(";q1;") && o.contains(";r4;") && o.contains(";s9;");
+    assert(cnt == 4 && len(o) == 13 && all, "N={n}: {o} ({cnt})");
+    q = "";
+    for x in h { q += tag(x) + ";"; }
+    assert(q == "q1;r4;p7;s9;", "the sequential hash walk is key-ordered: {q}");
+  }
+}
+
+fn main() {
+  test_ordered_sources_keep_their_order_for_every_n();
+  test_keyed_ordered_sources_keep_key_order_for_every_n();
+  test_a_hash_under_par_consumes_each_element_once();
+}

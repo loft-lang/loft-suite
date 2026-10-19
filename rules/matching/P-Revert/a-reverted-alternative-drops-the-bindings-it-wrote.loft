@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REVERTED ALTERNATIVE DROPS THE BINDINGS IT WROTE (`@FR-P-Revert`: "pop the anchor, rewind i
+// … drop bindings written after epoch", with `@FR-P-Anchor` and `@FR-P-Alt` — a name an
+// alternative does not bind reads as absent).  In `(A { p } B { q } | A C { r })` the first
+// alternative binds `p` from the first item and then fails at the second; the second
+// alternative matches the same `A` WITHOUT binding `p`.  So after the revert `p` must be absent
+// — a binding the failed alternative wrote must not survive into the alternative that matched.
+//
+// Values hand-computed: score = (p ?? 0) * 100 + (q ?? 0) * 10 + (r ?? 0) + len(rest) * 1000.
+//   [A1, B2, C7]: alternative 1 matches, p 1, q 2, one left → 1120.
+//   [A1, C2]: alternative 1 binds p 1 and fails; alternative 2 binds only r 2 → 2 (not 102).
+//   [A4, C3, B9, B8]: likewise, with two left → 2003 (not 2403).
+//
+// Axes it MOVES: the subject (an iterator, a vector), which alternative matches, a binding the
+//   failed alternative wrote that the matching one does not, and a rest after the group.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the four scores.
+// HOLDS: when the first alternative matches, its bindings are kept (1120).
+
+enum RE { A { p: integer }, B { q: integer }, C { r: integer } }
+
+fn it(v: vector<RE>) -> iterator<RE> {
+  for e in v { yield e; }
+}
+
+fn on_vec(v: vector<RE>) -> integer {
+  match v {
+    [(A { p } B { q } | A C { r }), ..rest] => (p ?? 0) * 100 + (q ?? 0) * 10 + (r ?? 0) + len(rest) * 1000,
+    _ => -1,
+  }
+}
+
+fn on_iter(v: vector<RE>) -> integer {
+  match it(v) {
+    [(A { p } B { q } | A C { r }), ..rest] => (p ?? 0) * 100 + (q ?? 0) * 10 + (r ?? 0) + len(rest) * 1000,
+    _ => -1,
+  }
+}
+
+fn test_a_reverted_binding_is_absent() {
+  ab: vector<RE> = [A { p: 1 }, B { q: 2 }, C { r: 7 }];
+  ac: vector<RE> = [A { p: 1 }, C { r: 2 }];
+  lg: vector<RE> = [A { p: 4 }, C { r: 3 }, B { q: 9 }, B { q: 8 }];
+  s = "{on_iter(ab)} {on_iter(ac)} {on_iter(lg)}|{on_vec(ab)} {on_vec(ac)} {on_vec(lg)}";
+  assert(s == "1120 2 2003|1120 2 2003", "bindings: {s}");
+}
+
+fn main() {
+  test_a_reverted_binding_is_absent();
+}

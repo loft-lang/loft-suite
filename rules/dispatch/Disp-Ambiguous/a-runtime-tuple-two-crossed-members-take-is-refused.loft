@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RUNTIME TUPLE TWO CROSSED MEMBERS TAKE IS REFUSED AT COMPILE TIME (`@FR-Disp-Ambiguous`
+// crossed with `@FR-Disp-Dynamic`): both arguments are held at the enum, so the call selects
+// per runtime variant pair, and each leaf is what `Disp-Select` picks for that pair.  At
+// `(AFire, AIce)` the members `ay(AFire, AEnt)` and `ay(AEnt, AIce)` both apply, neither is more
+// specific, and the enum-level `ay(AEnt, AEnt)` is LESS specific than both — so the dispatcher
+// would have a leaf with no answer, and the call is refused naming the pair and both members,
+// though the static types `(AEnt, AEnt)` alone are covered.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the variant pair and both members.
+// HOLDS: adding `ay(AFire, AIce)` resolves the pair (Disp-Dynamic's each-runtime-variant-tuple cell).
+// @EXPECT_ERROR: `ay(AEnt, AEnt)` is ambiguous at (AFire, AIce) — that pair is taken by ay(AFire, AEnt) and ay(AEnt, AIce)
+
+enum AEnt { AFire { n: integer }, AIce { n: integer }, ARock { n: integer } }
+
+fn ay(a: AFire, b: AEnt) -> text { "fire-any {a.n}{b.n}" }
+fn ay(a: AEnt, b: AIce) -> text { "any-ice {a.n}{b.n}" }
+fn ay(a: AEnt, b: AEnt) -> text { "any-any {a.n}{b.n}" }
+
+fn main() {
+  x: AEnt = AFire { n: 1 };
+  y: AEnt = ARock { n: 2 };
+  println(ay(x, y));
+}

@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR ON ANOTHER SOURCE'S TYPE IS REFUSED (`@FR-Op-Home`): `OhPt` is declared in the
+// fixture library `op_home_fixture_lib.loft` beside this file, so only that source may define an
+// operator on it — a consumer's `operator minus(self: OhPt, …)` would give `-` a meaning the
+// type's author never wrote, and two consumers could give it two.  Refused at the definition,
+// pointing at an ordinary method.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the foreign type.
+// HOLDS: the library's own `operator plus` on `OhPt` works (the fixture cell).
+// @EXPECT_ERROR: `operator minus` on `OhPt` can only be defined where `OhPt` is declared
+
+use op_home_fixture_lib::*;
+
+operator minus(self: OhPt, o: OhPt) -> OhPt { OhPt { x: self.x - o.x } }
+
+fn main() {
+  a = OhPt { x: 1 };
+  println("{a.minus(a).x}");
+}

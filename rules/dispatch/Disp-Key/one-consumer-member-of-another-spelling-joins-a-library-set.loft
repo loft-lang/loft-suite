@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): a consumer's LONE definition of a library set's
+//   name never joins the set; `dk_hit(b)` with `b: u8` answers the library's `dk_hit(integer)`
+//   ("lib integer 9") instead of the consumer's exact `dk_hit(u8)` ("own u8 9"), with no
+//   diagnostic.  The text and struct spellings pass only because no library member takes them.
+//
+// ONE CONSUMER MEMBER OF ANOTHER SPELLING JOINS A LIBRARY'S SET (`@FR-Disp-Key`, last sentence,
+// with `@FR-Disp-Specific` / `@FR-Disp-Select` ranking the joined set).  The fixture library
+// `disp_key_fixture_lib.loft` exports `dk_hit(DkFire)` and `dk_hit(integer)`.  This file defines
+// ONE more spelling per test program shape — here `dk_hit(u8)` — and that member must take part
+// in selection: for a `u8` argument it is EXACT where the library's `integer` member is only
+// WIDENED (C-Int), so it is the unique most specific.  A member that sits outside the set and
+// is reached only when no library member applies answers the library's body instead.
+//
+// Axes it MOVES: the consumer's spelling against the library's applicable member (a narrower
+//   integer the library's `integer` also takes, and a `text` no library member takes), and the
+//   number of consumer definitions (one — the two- and three-definition shapes are the sibling
+//   cells).
+// Values hand-computed from the rank table.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: `dk_hit(b)` answered "lib integer 9".
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the joined answers.
+// HOLDS: the library's own members still answer their own spellings.
+
+use disp_key_fixture_lib::*;
+
+fn dk_hit(x: u8) -> text { "own u8 {x}" }
+
+fn test_a_narrower_consumer_member_beats_the_librarys_wider_one() {
+  b: u8 = 9;
+  s = "{dk_hit(b)}|{dk_hit(3)}|{dk_hit(DkFire { n: 1 })}";
+  assert(s == "own u8 9|lib integer 3|lib fire 1", "joined set: {s}");
+}
+
+fn main() {
+  test_a_narrower_consumer_member_beats_the_librarys_wider_one();
+}

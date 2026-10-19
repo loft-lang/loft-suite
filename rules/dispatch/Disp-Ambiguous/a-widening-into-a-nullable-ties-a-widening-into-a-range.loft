@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WIDENING INTO A NULLABLE TIES A WIDENING INTO A RANGE (`@FR-Disp-Ambiguous`, ranked by
+// `@FR-Disp-Specific`'s "a nullability step adds to the base rank"): a `u8` into `u8?` is EXACT
+// plus the N-Intro step (WIDENED), a `u8` into `integer` is WIDENED with no step, so the two
+// members rank alike and the call is refused naming both.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: the tie is the call's, not the set's: a `u8?` argument reaches `an(u8?)` EXACT.
+// @EXPECT_ERROR: `an(u8)` is ambiguous — it is taken by an(integer) and an(u8?)
+
+fn an(x: integer) -> text { "integer {x}" }
+fn an(x: u8?) -> text { "u8? {x}" }
+
+fn main() {
+  b: u8 = 7;
+  println(an(b));
+}

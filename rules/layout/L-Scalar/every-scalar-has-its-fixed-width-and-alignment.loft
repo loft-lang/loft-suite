@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY SCALAR HAS ITS FIXED WIDTH AND ALIGNMENT (`@FR-L-Scalar`, with `@FR-L-Struct` packing by
+// descending alignment and `@FR-L-Align` rounding the size): boolean 1, character 4, single 4,
+// float 8, integer 8, text 4 (a handle); each aligned to its own width.  So the type, a local of
+// it, a vector of it and a struct holding it beside a boolean all answer sizes that follow from
+// the table alone.
+//
+// Sizes hand-computed:
+//   sizeof: boolean 1, character 4, single 4, float 8, integer 8, text 4 — as types and as locals.
+//   struct { b: boolean, f: float }         8 + 1 = 9  → align 8 → 16
+//   struct { c: character, b: boolean }     4 + 1 = 5  → align 4 → 8
+//   struct { t: text, b: boolean }          4 + 1 = 5  → align 4 → 8
+//   struct { s: single, b: boolean, c: character }  4 + 4 + 1 = 9 → align 4 → 12
+//   struct { a, b, c: boolean }             3 → align 1 → 3
+//   struct { i: integer, t: text }          8 + 4 = 12 → align 8 → 16
+//   vector byte sizes: 3 booleans 3, 3 characters 12, 2 singles 8, 2 texts 8, 1 float 8.
+//
+// Axes it MOVES: every scalar of the table, type against local spelling, alone against beside a
+//   narrower field, the field order written (narrow first and wide first), and vector stride.
+//   Values round-trip through the struct fields at the widths' edges.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes or values.
+// HOLDS: a field written after a wider one keeps its value (no overlap from a wrong offset).
+
+struct SBF { b: boolean, f: float }
+struct SCB { c: character, b: boolean }
+struct STB { t: text, b: boolean }
+struct SSBC { s: single, b: boolean, c: character }
+struct SBB { a: boolean, b: boolean, c: boolean }
+struct SIT { i: integer, t: text }
+
+fn test_the_scalar_widths() {
+  s = "{sizeof(boolean)} {sizeof(character)} {sizeof(single)} {sizeof(float)} {sizeof(integer)} {sizeof(text)}";
+  assert(s == "1 4 4 8 8 4", "types: {s}");
+  b = true;
+  c = 'x';
+  g = 1.5f;
+  f = 2.5;
+  i = 3;
+  t = "abc";
+  u = "{sizeof(b)} {sizeof(c)} {sizeof(g)} {sizeof(f)} {sizeof(i)} {sizeof(t)}";
+  assert(u == "1 4 4 8 8 4", "locals: {u}");
+}
+
+fn test_the_alignment_packs_and_pads_a_struct() {
+  s = "{sizeof(SBF)} {sizeof(SCB)} {sizeof(STB)} {sizeof(SSBC)} {sizeof(SBB)} {sizeof(SIT)}";
+  assert(s == "16 8 8 12 3 16", "structs: {s}");
+}
+
+fn test_a_vector_strides_by_the_width() {
+  vb: vector<boolean> = [true, false, true];
+  vc: vector<character> = ['a', 'b', 'c'];
+  vs: vector<single> = [1.0f, 2.0f];
+  vt: vector<text> = ["a", "b"];
+  vf: vector<float> = [1.0];
+  s = "{size(vb)} {size(vc)} {size(vs)} {size(vt)} {size(vf)}";
+  assert(s == "3 12 8 8 8", "strides: {s}");
+}
+
+fn test_fields_keep_their_values_at_the_edges() {
+  a = SBF { b: true, f: -0.125 };
+  c = SCB { c: '\u{10FFFF}', b: false };
+  d = SSBC { s: -3.5f, b: true, c: 'é' };
+  e = SBB { a: false, b: true, c: false };
+  g = SIT { i: 9223372036854775807, t: "tail" };
+  s = "{a.b} {a.f} {c.c as integer} {c.b} {d.s} {d.b} {d.c} {e.a}{e.b}{e.c} {g.i} {g.t}";
+  assert(s == "true -0.125 1114111 false -3.5 true é falsetruefalse 9223372036854775807 tail", "values: {s}");
+}
+
+fn main() {
+  test_the_scalar_widths();
+  test_the_alignment_packs_and_pads_a_struct();
+  test_a_vector_strides_by_the_width();
+  test_fields_keep_their_values_at_the_edges();
+}

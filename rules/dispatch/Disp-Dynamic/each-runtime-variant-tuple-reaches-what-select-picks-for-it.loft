@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EACH RUNTIME VARIANT TUPLE REACHES WHAT SELECTION PICKS FOR IT (`@FR-Disp-Dynamic`, each leaf
+// by `@FR-Disp-Select` / `@FR-Disp-Specific`, and `@FR-Disp-Ambiguous`'s third member resolving
+// an incomparable pair).  A call where an argument is held at the enum selects at run time on
+// the runtime variants, and each leaf is the member the static rules pick for that variant
+// tuple — including a position that is NOT enum-held, whose rank (u8 against integer) still
+// takes part in each leaf's choice.
+//
+// Leaves hand-computed:
+//   dy(DFire, DEnt) / dy(DEnt, DIce) / dy(DFire, DIce) / dy(DEnt, DEnt) over every pair of
+//     [DFire 1, DIce 2, DRock 3]: (F,F) F,E · (F,I) F,I — the third member beats the
+//     incomparable F,E and E,I · (F,R) F,E · (I,I) E,I · (R,I) E,I · the rest E,E.
+//   dk(DFire, u8) / dk(DEnt, integer) / dk(DIce, integer) with a u8 and an integer second
+//     argument: DFire+u8 → [EXACT, EXACT] fire,u8; DFire+integer → only dk(DEnt, integer);
+//     DIce+either → dk(DIce, integer) is better at the first position and no worse at the
+//     second; DRock → dk(DEnt, integer).
+//
+// Axes it MOVES: two enum-held positions against one enum-held position beside a width-ranked
+//   one, where the enum value comes from (a vector element, a function return, a struct field,
+//   a struct field of a vector element).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the joined leaves.
+// HOLDS: a static call at the variants reaches the same member as the runtime leaf (`dy(f, i)`).
+
+enum DEnt { DFire { n: integer }, DIce { n: integer }, DRock { n: integer } }
+struct DHolder { e: DEnt, k: u8 }
+
+fn dy(a: DFire, b: DEnt) -> text { "F,E {a.n}{b.n}" }
+fn dy(a: DEnt, b: DIce) -> text { "E,I {a.n}{b.n}" }
+fn dy(a: DFire, b: DIce) -> text { "F,I {a.n}{b.n}" }
+fn dy(a: DEnt, b: DEnt) -> text { "E,E {a.n}{b.n}" }
+
+fn dk(a: DFire, k: u8) -> text { "fire,u8 {a.n} {k}" }
+fn dk(a: DEnt, k: integer) -> text { "any,integer {a.n} {k}" }
+fn dk(a: DIce, k: integer) -> text { "ice,integer {a.n} {k}" }
+
+fn pick(i: integer) -> DEnt {
+  if i == 0 { DFire { n: 10 } } else if i == 1 { DIce { n: 11 } } else { DRock { n: 12 } }
+}
+
+fn test_every_pair_of_two_enum_held_positions() {
+  es: vector<DEnt> = [DFire { n: 1 }, DIce { n: 2 }, DRock { n: 3 }];
+  o = "";
+  for a in es {
+    for b in es {
+      o += dy(a, b) + ";";
+    }
+  }
+  assert(o == "F,E 11;F,I 12;F,E 13;E,E 21;E,I 22;E,E 23;E,E 31;E,I 32;E,E 33;", "pairs: {o}");
+  s = dy(DFire { n: 4 }, DIce { n: 5 });
+  assert(s == "F,I 45", "static at the variants: {s}");
+}
+
+fn test_a_width_ranked_position_beside_an_enum_held_one() {
+  b: u8 = 5;
+  i: integer = 6;
+  o = "";
+  for j in 0..3 {
+    o += dk(pick(j), b) + ";" + dk(pick(j), i) + ";";
+  }
+  assert(o == "fire,u8 10 5;any,integer 10 6;ice,integer 11 5;ice,integer 11 6;any,integer 12 5;any,integer 12 6;", "mixed: {o}");
+}
+
+fn test_an_enum_held_in_a_field() {
+  h = DHolder { e: DIce { n: 7 }, k: 8 };
+  s = dk(h.e, h.k);
+  hs: vector<DHolder> = [DHolder { e: DFire { n: 1 }, k: 2 }, DHolder { e: DRock { n: 3 }, k: 4 }];
+  p = "";
+  for x in hs {
+    p += dk(x.e, x.k) + ";";
+  }
+  assert(s == "ice,integer 7 8" && p == "fire,u8 1 2;any,integer 3 4;", "fields: {s} / {p}");
+}
+
+fn main() {
+  test_every_pair_of_two_enum_held_positions();
+  test_a_width_ranked_position_beside_an_enum_held_one();
+  test_an_enum_held_in_a_field();
+}

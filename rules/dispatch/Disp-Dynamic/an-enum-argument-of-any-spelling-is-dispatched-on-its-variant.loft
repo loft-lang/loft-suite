@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ENUM ARGUMENT OF ANY SPELLING IS DISPATCHED ON ITS VARIANT (`@FR-Disp-Dynamic`): the
+// runtime selection reads the value's variant, whatever expression produced it.  An `if` whose
+// arms are two different variants, a `match` yielding variants, a `??` whose subject is a
+// nullable enum and whose default is a third variant, and a tuple element are all typed at the
+// enum (the join of their arms), so each call dispatches at run time, and must reach the member
+// of the variant actually produced.
+//
+// Values hand-computed: `dk(DFire)` / `dk(DIce)` answer their own text, `dk(DEnt)` is the `_`
+//   arm and answers for `DRock`.
+//
+// Axes it MOVES: the argument spelling (if-arm, match result, coalesce result with a null and
+//   with a present subject, tuple element), and which arm runs.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints every answer.
+// HOLDS: a spelling whose static type is a VARIANT (a literal) is decided at compile time.
+
+enum DEnt { DFire { n: integer }, DIce { n: integer }, DRock { n: integer } }
+
+fn dk(a: DFire) -> text { "fire {a.n}" }
+fn dk(a: DIce) -> text { "ice {a.n}" }
+fn dk(a: DEnt) -> text { "any {a.n}" }
+
+fn pick(k: integer) -> DEnt? { if k == 1 { DFire { n: 1 } } else if k == 2 { DIce { n: 2 } } else { null } }
+
+fn test_every_spelling_reaches_its_variants_member() {
+  c = true;
+  s1 = dk(if c { DFire { n: 3 } } else { DIce { n: 4 } });
+  s2 = dk(if !c { DFire { n: 3 } } else { DIce { n: 4 } });
+  s3 = dk(pick(0) ?? DRock { n: 5 });
+  s4 = dk(pick(2) ?? DRock { n: 5 });
+  s7 = dk(pick(1) ?? DRock { n: 9 });
+  k = 1;
+  s5 = dk(match k { 1 => DFire { n: 6 }, _ => DIce { n: 7 } });
+  t: (DEnt, integer) = (DIce { n: 8 }, 0);
+  s6 = dk(t.0);
+  s = "{s1}|{s2}|{s3}|{s4}|{s7}|{s5}|{s6}";
+  assert(s == "fire 3|ice 4|any 5|ice 2|fire 1|fire 6|ice 8", "spellings: {s}");
+}
+
+fn main() {
+  test_every_spelling_reaches_its_variants_member();
+}

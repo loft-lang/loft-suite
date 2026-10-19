@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY TYPE HAS ONE LAYOUT, WHICHEVER SPELLING ASKS (`@FR-L-Total`: "layout(τ) is a TOTAL
+// function of the finished type τ: every registered type has exactly one (size, align,
+// offset-vector) … never by which backend, which run, or which call site reads it").  The size
+// of one type is read through every spelling a program has — the type named, a local of it, a
+// generic's parameter at that instance (`sizeof(x)` and `sizeof(T)`), a vector of it (stride ×
+// count), and a struct embedding it — and each must give the same number; and the kinds the
+// rule's "every registered type" spans are each asked: a scalar, a narrow integer, a struct, a
+// nested struct, a plain enum, a tuple, a generic struct instance and a nullable struct.  Both
+// backends run the cell against the same hand-computed numbers, which is the rule's other half.
+//
+// Sizes hand-computed (L-Struct packs by descending alignment, L-Align rounds):
+//   TIn { a: u8, n: integer } = 8 + 1 → 16 · TOut { i: TIn, c: character } = 16 + 4 → 24 ·
+//   (u8, integer, u16) = 8 + 2 + 1 → 16 · TBox<u8> = 1 + 1 → 2 · TBox<float> = 8 + 1 → 16 ·
+//   TPl (plain enum) 1 · TIn? sizes as TIn (16) · vector<TOut> of 2 → 48 ·
+//   struct { o: TOut, b: boolean } = 24 + 1 → 32.
+//
+// Axes it MOVES: the kind of type (eight kinds), the spelling that asks (type, local, generic
+//   value, generic type variable, vector stride, embedding field), and nullability.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints every spelling's answer.
+// HOLDS: the field values read back through the vector and the embedding are the ones written.
+
+struct TBox<T> { v: T, b: boolean }
+struct TIn { a: u8, n: integer }
+struct TOut { i: TIn, c: character }
+struct TWrap { o: TOut, b: boolean }
+enum TPl { R, G }
+
+fn sz<T>(x: T) -> integer { sizeof(x) }
+fn szt<T>(_x: T) -> integer { sizeof(T) }
+
+fn test_one_struct_answers_alike_through_every_spelling() {
+  o = TOut { i: TIn { a: 1, n: 2 }, c: 'x' };
+  vo: vector<TOut> = [o, TOut { i: TIn { a: 3, n: 4 }, c: 'y' }];
+  w = TWrap { o: TOut { i: TIn { a: 5, n: 6 }, c: 'z' }, b: true };
+  s = "{sizeof(TOut)} {sizeof(o)} {sz(o)} {szt(o)} {size(vo) / len(vo)} {sizeof(TWrap)}";
+  assert(s == "24 24 24 24 24 32", "TOut: {s}");
+  t = "{vo[1].i.a} {vo[1].i.n} {vo[0].c} {w.o.i.n} {w.o.c} {w.b}";
+  assert(t == "3 4 x 6 z true", "values: {t}");
+}
+
+fn test_every_kind_has_its_layout() {
+  t: (u8, integer, u16) = (1, 2, 3);
+  b1 = TBox { v: 3 as u8, b: true };
+  b2 = TBox { v: 2.5, b: false };
+  n: TIn? = TIn { a: 9, n: 8 };
+  i = 7;
+  u: u8 = 7;
+  s = "{sizeof(i)} {sz(u)} {sizeof(TIn)} {sizeof(TPl)} {sz(TPl.G)} {sizeof(t)} {sz(t)} {sizeof(b1)} {sz(b1)} {sizeof(b2)} {szt(b2)} {sizeof(n)}";
+  assert(s == "8 1 16 1 1 16 16 2 2 16 16 16", "kinds: {s}");
+}
+
+fn main() {
+  test_one_struct_answers_alike_through_every_spelling();
+  test_every_kind_has_its_layout();
+}

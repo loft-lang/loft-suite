@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EACH RANK BEATS THE NEXT AT ONE POSITION (`@FR-Disp-Specific`, `@FR-Disp-Select` picking the
+// winner).  An argument ranks against a parameter as EXACT, WIDENED (a variant into its enum, an
+// integer into a range that holds it, a present value into `τ?`), LOSSY (`τ?` into `τ`) or
+// CONVERTED, and a nullability step ADDS to the base rank.  Each set below holds two members
+// that both take the call and differ by one step of that order, so the more specific member is
+// the unique selection; and a two-position set shows "no worse at every position and better at
+// one".
+//
+// Ranks hand-computed (base + nullability step):
+//   u8 → u8 EXACT, u8 → integer WIDENED                                    : u8 member
+//   KFire → KFire EXACT, KFire → KEnt WIDENED                                : variant member
+//   u8? → integer? WIDENED (+0), u8? → u8 EXACT + LOSSY                    : integer? member
+//   integer? → integer LOSSY, integer? → float? CONVERTED (+0)             : integer member
+//   u8 → integer WIDENED, u8 → float CONVERTED                             : integer member
+//   (KFire, u8) → (KFire, integer) [EXACT, WIDENED] against (KEnt, integer) [WIDENED, WIDENED]
+//
+// Axes it MOVES: the rank pair (four adjacent pairs and one skip), the argument's nullability,
+//   the kind of widening (integer range, variant), and one against two positions.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the less specific member is still applicable (it answers when the other is absent —
+//   the `lone` twins below).
+
+enum KEnt { KFire { n: integer }, KIce { n: integer } }
+
+fn s1(x: u8) -> text { "u8 {x}" }
+fn s1(x: integer) -> text { "integer {x}" }
+
+fn s2(e: KFire) -> text { "fire {e.n}" }
+fn s2(e: KEnt) -> text { "ent {e.n}" }
+
+fn s3(x: integer?) -> text { "integer? {x}" }
+fn s3(x: u8) -> text { "u8 {x}" }
+
+fn s4(x: integer) -> text { "integer {x}" }
+fn s4(x: float?) -> text { "float? {x}" }
+
+fn s5(x: integer) -> text { "integer {x}" }
+fn s5(x: float) -> text { "float {x}" }
+
+fn s6(e: KFire, k: integer) -> text { "fire,integer {e.n} {k}" }
+fn s6(e: KEnt, k: integer) -> text { "ent,integer {e.n} {k}" }
+
+fn lone_widen(x: integer) -> text { "integer {x}" }
+fn lone_lossy(x: u8) -> text { "u8 {x}" }
+
+fn test_exact_beats_widened() {
+  b: u8 = 200;
+  s = "{s1(b)}|{s2(KFire { n: 3 })}|{lone_widen(b)}";
+  assert(s == "u8 200|fire 3|integer 200", "exact over widened: {s}");
+}
+
+fn test_widened_beats_lossy() {
+  b: u8? = 17;
+  s = s3(b);
+  assert(s == "integer? 17", "widened over lossy: {s}");
+}
+
+fn test_lossy_beats_converted() {
+  i: integer? = 23;
+  s = s4(i);
+  assert(s == "integer 23", "lossy over converted: {s}");
+}
+
+fn test_widened_beats_converted() {
+  b: u8 = 9;
+  s = s5(b);
+  assert(s == "integer 9", "widened over converted: {s}");
+}
+
+fn test_no_worse_everywhere_and_better_at_one() {
+  b: u8 = 4;
+  s = s6(KFire { n: 1 }, b);
+  e: KEnt = KIce { n: 2 };
+  t = s6(e, b);
+  assert(s == "fire,integer 1 4" && t == "ent,integer 2 4", "two positions: {s} / {t}");
+}
+
+fn main() {
+  test_exact_beats_widened();
+  test_widened_beats_lossy();
+  test_lossy_beats_converted();
+  test_widened_beats_converted();
+  test_no_worse_everywhere_and_better_at_one();
+}

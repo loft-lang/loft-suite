@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LONE DEFINITION AND A RECEIVER-SPLIT SET KEEP THEIR HINT (`@FR-Disp-Hint`: "A name with one
+// definition keeps its hint, and so does a `self` set whose members take different receivers:
+// in either spelling the receiver is typed before the arguments (F-Recv), and it names one
+// member").  A hint is what lets a literal take a width (`5` into `u8`, `[1, 200]` into
+// `vector<u8>`) and an untyped `|x|` lambda take its parameter type; so each of these calls
+// compiles only if the hint survived.
+//
+// Axes it MOVES: the hinted argument (a scalar literal at a narrow width, a vector literal of a
+//   narrow element, an untyped lambda taking an integer and a text), the shape (a lone free
+//   definition, a `self` set split by receiver), and the spelling (method and bare).
+// Values hand-computed from the bodies.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (a lost hint refuses the literal or the lambda), then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: a set whose members share a receiver offers no hint (the sibling refusal cells).
+
+struct HP { x: integer }
+struct HQ { y: integer }
+
+fn one(x: u8) -> text { "u8 {x}" }
+fn onev(v: vector<u8>) -> text { "u8s {len(v)} {v[1]}" }
+
+fn sw(self: HP, x: u8) -> text { "HP u8 {self.x} {x}" }
+fn sw(self: HQ, x: text) -> text { "HQ text {self.y} {x}" }
+
+fn sl(self: HP, f: fn(integer) -> integer) -> integer { f(self.x) }
+fn sl(self: HQ, f: fn(text) -> text) -> text { f("q{self.y}") }
+
+fn test_a_lone_definition_hints_a_narrow_literal() {
+  s = "{one(5)}|{onev([1, 200])}";
+  assert(s == "u8 5|u8s 2 200", "lone: {s}");
+}
+
+fn test_a_receiver_split_set_hints_its_arguments() {
+  p = HP { x: 3 };
+  q = HQ { y: 4 };
+  s = "{p.sw(250)}|{q.sw("t")}|{sw(p, 7)}";
+  assert(s == "HP u8 3 250|HQ text 4 t|HP u8 3 7", "split set, literal: {s}");
+  a = p.sl(|x| { x * 2 });
+  b = q.sl(|s| { "{s}!" });
+  assert(a == 6 && b == "q4!", "split set, lambda: {a} {b}");
+}
+
+fn main() {
+  test_a_lone_definition_hints_a_narrow_literal();
+  test_a_receiver_split_set_hints_its_arguments();
+}

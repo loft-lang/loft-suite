@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLAIN ENUM IS ONE BYTE, AND A VARIANT RECORD STARTS WITH ITS TAG WORD (`@FR-L-Enum`, with
+// `@FR-L-Align` rounding sizes and `@FR-L-Null` reserving 0 and 255).  A plain enum stores as a
+// 1-byte discriminant, numbered from 1; a data-carrying variant is a record whose first 8-byte
+// word holds the tag at offset 0, with its fields filling the rest of that word and then
+// following it, each aligned — so `A { s: u8 }` and `C { s: u8, c: character }` fit in the
+// first word (8 bytes) and `B { n: integer }` needs a second (16).  A struct-enum VALUE sizes
+// by the variant it holds at run time (LOFT_DATA.md § sizeof); its TYPE by the largest.
+//
+// Sizes hand-computed:
+//   P (plain): 1; struct { p: P, b: boolean } = 2; vector<P> of 3 = 3 bytes.
+//   A { s: u8 } = 8; B { n: integer } = 8 + 8 = 16; C { s: u8, c: character } = 8 (c at 4);
+//   D { t: text, s: u8 } = 8 (t at 4); F (no fields) = 1; E = the largest, 16.
+//   struct { e: E, b: boolean } = 16 + 1 → 24; vector<E> of 3 = 48.
+//   `as integer`: Red 1, Green 2, Blue 3; a nullable plain enum field holds null apart from them.
+//
+// Axes it MOVES: plain against data-carrying, where the enum sits (local, field, vector
+//   element, parameter), field width inside the variant (1, 4, 8 bytes, a text handle), the
+//   variant held (none, fits the first word, needs a second), nullable plain fields, and
+//   values at the edges (u8 255, integer -1).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes or values.
+// HOLDS: every variant round-trips its field values through a vector element.
+
+enum LP { Red, Green, Blue }
+enum LE { A { s: u8 }, B { n: integer }, C { s: u8, c: character }, D { t: text, s: u8 }, F }
+struct LHP { p: LP, b: boolean }
+struct LHE { e: LE, b: boolean }
+struct LHN { p: LP?, q: LP? }
+
+fn sz(x: LE) -> integer { sizeof(x) }
+
+fn test_a_plain_enum_is_one_byte_numbered_from_one() {
+  pv: vector<LP> = [LP.Blue, LP.Red, LP.Green];
+  s = "{sizeof(LP)} {sizeof(LHP)} {size(pv)} {LP.Red as integer} {LP.Green as integer} {pv[0] as integer}";
+  assert(s == "1 2 3 1 2 3", "plain: {s}");
+}
+
+fn test_a_variant_record_starts_with_its_tag_word() {
+  a = A { s: 1 };
+  b = B { n: 2 };
+  c = C { s: 3, c: 'd' };
+  d = D { t: "e", s: 4 };
+  s = "{sizeof(a)} {sizeof(b)} {sizeof(c)} {sizeof(d)} {sizeof(LE)} {sizeof(LHE)}";
+  assert(s == "8 16 8 8 16 24", "variant records: {s}");
+  e1: LE = F;
+  e2: LE = A { s: 1 };
+  t = "{sz(e1)} {sz(e2)} {sz(b)}";
+  assert(t == "1 8 16", "a value sizes by its runtime variant: {t}");
+}
+
+fn test_every_variant_round_trips_through_an_element() {
+  v: vector<LE> = [A { s: 255 }, B { n: -1 }, C { s: 9, c: 'z' }, D { t: "q", s: 0 }, F];
+  o = "";
+  for e in v {
+    o += match e { A { s } => "A{s}", B { n } => "B{n}", C { s, c } => "C{s}{c}", D { t, s } => "D{t}{s}", F => "F" } + ";";
+  }
+  assert(o == "A255;B-1;C9z;Dq0;F;" && size(v) == 80, "elements: {o} {size(v)}");
+}
+
+fn test_a_nullable_plain_enum_field_holds_null_apart() {
+  h = LHN { p: null, q: LP.Blue };
+  s = "{h.p == null} {h.q == null} {h.q as integer?} {sizeof(LHN)}";
+  h.p = LP.Red;
+  h.q = null;
+  t = "{h.p as integer?} {h.q == null}";
+  assert(s == "true false 3 2" && t == "1 true", "nullable: {s} / {t}");
+}
+
+fn main() {
+  test_a_plain_enum_is_one_byte_numbered_from_one();
+  test_a_variant_record_starts_with_its_tag_word();
+  test_every_variant_round_trips_through_an_element();
+  test_a_nullable_plain_enum_field_holds_null_apart();
+}

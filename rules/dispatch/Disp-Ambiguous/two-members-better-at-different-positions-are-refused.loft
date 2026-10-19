@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO MEMBERS BETTER AT DIFFERENT POSITIONS ARE REFUSED (`@FR-Disp-Ambiguous`, with
+// `@FR-Disp-Specific`'s "no worse at every position and better at one"): at `(AFire, u8)`,
+// `ax(AFire, integer)` is [EXACT, WIDENED] and `ax(AEnt, u8)` is [WIDENED, EXACT] — each better
+// at one position and worse at the other, and no third member beats both — so the static call
+// is refused naming both, in the order the set declares them.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: a member better at BOTH positions resolves it — Disp-Select's cell.
+// @EXPECT_ERROR: `ax(AFire, u8)` is ambiguous — it is taken by ax(AFire, integer) and ax(AEnt, u8)
+
+enum AEnt { AFire { n: integer }, AIce { n: integer } }
+
+fn ax(a: AFire, k: integer) -> text { "fire,integer {a.n} {k}" }
+fn ax(a: AEnt, k: u8) -> text { "ent,u8 {a.n} {k}" }
+
+fn main() {
+  b: u8 = 3;
+  println(ax(AFire { n: 1 }, b));
+}

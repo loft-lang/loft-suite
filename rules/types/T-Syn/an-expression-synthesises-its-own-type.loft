@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN EXPRESSION SYNTHESISES ITS OWN TYPE (`@FR-T-Syn`: Γ ⊢ e ⇒ τ), read back with `type_name`,
+// which names the type an expression synthesises, and `sizeof`, which sizes it.  With no expected
+// type around it (no annotation, no parameter), each expression below types from its own
+// spelling, by the rule that synthesises it: a literal by its form, a field by its declaration,
+// an operator by its operand rule (`@FR-N-Arith`), a coalesce by `@FR-N-Coal`, an index by
+// `@FR-N-Index` (nullable unless trusted by contract), an `if` by the join of its arms, a call by
+// its return.  The same synthesis is what a call into an overload set reads its arguments by
+// (`@FR-Disp-Hint`: "its arguments are typed from their own spelling"), so the second test sends
+// the same expressions into a set keyed by those types.
+//
+// Types hand-computed from the rules named:
+//   3 integer · 2.5 float · 'c' character · "t" text · true boolean · 1.5f single ·
+//   [1, 2] vector<integer> · (1, "a") (integer, text) · p.b u8 · v[0] u8 (a constant index is
+//   trusted) · v[i] u8? (a plain variable is not) · n ?? 0 integer · n integer? ·
+//   if c { 1 } else { 2 } integer · mk() Pt? · mk()? Pt · Ci { r: 1 } Ci · p.x + 1 integer ·
+//   1 + 2.5 float · p.b + 1 integer · if c { Ci } else { Sq } Sh · [p] vector<Pt>.
+//
+// Axes it MOVES: the expression form (literal of each base type, collection and tuple literals,
+//   field, constant and variable index, coalesce, `?`, if-join, call, arithmetic across widths
+//   and kinds) and the observer (type_name, sizeof, overload selection).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the joined type names or answers.
+// HOLDS: a synthesised type is not widened by where it is used (`p.b` stays `u8`).
+
+struct Pt { x: integer, b: u8 }
+enum Sh { Ci { r: integer }, Sq { s: integer } }
+
+fn mk() -> Pt? { Pt { x: 1, b: 2 } }
+
+fn ty(x: integer) -> text { "integer" }
+fn ty(x: u8) -> text { "u8" }
+fn ty(x: u8?) -> text { "u8?" }
+fn ty(x: float) -> text { "float" }
+fn ty(x: vector<integer>) -> text { "vector<integer>" }
+fn ty(x: Sh) -> text { "Sh" }
+
+fn test_each_form_synthesises_its_type() {
+  v: vector<u8> = [1, 2];
+  p = Pt { x: 1, b: 2 };
+  n: integer? = 4;
+  c = true;
+  i = 1;
+  r = [type_name(3), type_name(2.5), type_name('c'), type_name("t"), type_name(true), type_name(1.5f),
+    type_name([1, 2]), type_name((1, "a")), type_name(p.b), type_name(v[0]), type_name(v[i]),
+    type_name(n ?? 0), type_name(n), type_name(if c { 1 } else { 2 }), type_name(mk()), type_name(mk()?),
+    type_name(Ci { r: 1 }), type_name(p.x + 1), type_name(1 + 2.5), type_name(p.b + 1),
+    type_name(if c { Ci { r: 1 } } else { Sq { s: 2 } }), type_name([p])];
+  o = "";
+  for t in r {
+    o += t + "|";
+  }
+  assert(o == "integer|float|character|text|boolean|single|vector<integer>|(integer, text)|u8|u8|u8?|integer|integer?|integer|Pt?|Pt|Ci|integer|float|integer|Sh|vector<Pt>|", "synthesis: {o}");
+  s = "{sizeof(p.b)} {sizeof(p.b + 1)} {sizeof(1.5f)} {sizeof('c')}";
+  assert(s == "1 8 4 4", "sizes of synthesised types: {s}");
+}
+
+fn test_a_set_reads_the_synthesised_type() {
+  v: vector<u8> = [1, 2];
+  p = Pt { x: 1, b: 2 };
+  c = false;
+  i = 0;
+  s = "{ty(p.b)}|{ty(p.b + 1)}|{ty(v[0])}|{ty(v[i])}|{ty(1 + 2.5)}|{ty([1, 2])}|{ty(if c { Ci { r: 1 } } else { Sq { s: 2 } })}";
+  assert(s == "u8|integer|u8|u8?|float|vector<integer>|Sh", "selection by synthesis: {s}");
+}
+
+fn main() {
+  test_each_form_synthesises_its_type();
+  test_a_set_reads_the_synthesised_type();
+}

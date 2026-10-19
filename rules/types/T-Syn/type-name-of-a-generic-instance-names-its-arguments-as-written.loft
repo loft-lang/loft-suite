@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): `type_name` of a generic struct instance renders
+//   the instance's internal KEY — `TBox<integer(0, 255)s1>`, `TBox<integer(-32768, 32767)s2>`,
+//   `TBox<vector<integer(0, 255)s1>>` — where loft#1824 made every other position name the width
+//   as the program wrote it (`u8`, `i16`).  `Data::type_name_with` (data.rs) answers a
+//   `Type::Reference` by the definition's `name`, which for an instance is the monomorph key; it
+//   does not render the template and its arguments through `integer_name`.  The instance itself
+//   is right: `sizeof` reads its one-byte field.
+//
+// THE TYPE AN INSTANCE LITERAL SYNTHESISES IS NAMED AS THE PROGRAM WRITES IT (`@FR-T-Syn`, with
+// `@FR-G-Type` giving the literal its instance): `TBox { v: 3 as u8, b: true }` synthesises
+// `TBox<u8>`, the type a program spells, so `type_name` — the observer of a synthesised type —
+// names it so, as it names a `u8` local `u8` and a `vector<u8>` `vector<u8>`.
+//
+// Values hand-computed: TBox<u8> = 1 + 1 → 2; TBox<float> = 8 + 1 → 16.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: "TBox<integer(0, 255)s1>".
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the names and sizes.
+// HOLDS: a non-integer argument (`float`) is already named as written.
+
+struct TBox<T> { v: T, b: boolean }
+
+fn test_an_instance_is_named_as_written() {
+  a = TBox { v: 3 as u8, b: true };
+  w: TBox<u8> = TBox { v: 4, b: false };
+  f = TBox { v: 3 as i16, b: true };
+  d: vector<u8> = [1];
+  e = TBox { v: d, b: true };
+  g = TBox { v: 2.5, b: true };
+  s = "{type_name(a)}|{type_name(w)}|{type_name(f)}|{type_name(e)}|{type_name(g)}|{sizeof(a)} {sizeof(g)}";
+  assert(s == "TBox<u8>|TBox<u8>|TBox<i16>|TBox<vector<u8>>|TBox<float>|2 16", "instances: {s}");
+}
+
+fn main() {
+  test_an_instance_is_named_as_written();
+}
