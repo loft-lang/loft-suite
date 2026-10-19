@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COALESCE PROVES THE UNION OF ITS SUBJECT AND ITS DEFAULT (`@FR-N-Coal`, crossed with
+// `@FR-N-Arith` and `@FR-N-Cast`).  Since the narrowing ruling (loft#2065) a range is proved at
+// the store from the expression's shape, and `x ?? d` had no shape there: `((src[i] ?? 0) % 256)
+// as u8` over a `vector<u8>` was refused "narrowing cast from integer to u8 may not fit", though
+// the subject is a byte and the default is 0, so the remainder is 0..=255.
+//
+// Axes it MOVES: the subject present and absent, the default inside and at the edge of the
+// width, a `%` and a `&` around the coalesce, and a store straight into a `u8` local.
+// Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: cab835774 — interpret and native: the file is refused at compile time,
+//   "narrowing cast from integer to u8 may not fit at runtime".
+// CHANNEL: the compile (exit) and then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: a default outside the width (`?? 300` into `u8`) and a wide source (`vector<integer>`)
+//   are still refused.
+
+fn test_a_coalesce_of_a_byte_fits_a_byte() {
+  src: vector<u8> = [1, 2, 3];
+  i = 1;
+  c = ((src[i] ?? 0) % 256) as u8;
+  e = ((src[9] ?? 255) % 256) as u8;
+  f = ((src[2] ?? 0) & 255) as u8;
+  d: u8 = src[i] ?? 7;
+  g: u8 = src[9] ?? 7;
+  assert(c == 2 && e == 255 && f == 3 && d == 2 && g == 7, "{c} {e} {f} {d} {g}");
+}
+
+fn main() {
+  test_a_coalesce_of_a_byte_fits_a_byte();
+}
