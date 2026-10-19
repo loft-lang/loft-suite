@@ -1,7 +1,7 @@
 # The sandbox policy for the cells beside it (formal/capabilities.md § Cap-Set).  `spawn` is
 # gated `world#append` and its `count` parameter is locked `spawn.count#default`.
 [sandbox]
-call = ["fn:set_default", "fn:set_override"]
+call = ["fn:set_default", "fn:set_override", "fn:set_folded", "fn:set_named", "fn:set_local", "fn:set_param", "fn:pass_one"]
 locked = ["fn:set_locked"]
 parentlock = ["fn:set_parent_lock"]
 lockonly = ["fn:set_lock_only"]

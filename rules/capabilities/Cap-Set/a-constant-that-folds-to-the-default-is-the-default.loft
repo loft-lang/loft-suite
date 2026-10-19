@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSTANT THAT FOLDS TO THE DEFAULT IS THE DEFAULT (`@FR-Cap-Set`, crossed with `@FR-N-Arith`).
+// `(Cap-Set)` admits an argument to a locked parameter when `a ≡ default(p)`; owner ruling
+// 2026-10-19: `≡` is "folds at compile time to the default's value", so `2 - 1` and a named
+// constant holding 1 are the default and need no lock.  A variable is not, whatever it holds —
+// the proof belongs to the expression written at the call (the refused twins are the sibling
+// `a-variable-holding-the-default-is-an-override.loft`).
+//
+// @falsified-at: 29440fa35 — interpret: `set_folded` and `set_named` are refused "overrides a
+//   parameter the host pinned with `spawn.count#default`" (≡ read as the same literal).
+// CHANNEL: the asserts (admission refuses the whole file at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each message prints the value computed in the sandbox.
+// HOLDS: a literal default and an omitted argument stay free (the sibling admitted cell).
+
+capability world
+capability spawn.count
+
+ONE = 1;
+
+fn spawn(kind: text, count: integer = 1 spawn.count#default) -> integer world#append { len(kind) * 10 + count }
+
+fn set_folded() -> integer { spawn("gob", 2 - 1) + spawn("orc", 3 * 4 - 11) }
+fn set_named() -> integer { spawn("troll!", ONE) }
+
+fn test_a_folded_constant_is_the_default() {
+  // 3 * 10 + 1 twice, 6 * 10 + 1.
+  assert(set_folded() == 62 && set_named() == 61, "62 61: {set_folded()} {set_named()}");
+}

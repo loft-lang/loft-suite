@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIABLE HOLDING THE DEFAULT IS AN OVERRIDE (`@FR-Cap-Set`, `@FR-Cap-Deny`).  The refused twins
+// of `a-constant-that-folds-to-the-default-is-the-default.loft`: a local assigned 1 and a parameter
+// a caller passes 1 both hold the default's value, but `≡` asks the expression at the call (owner
+// ruling 2026-10-19), and a variable folds to nothing — so each is an override, refused under a
+// profile that grants the call but not the lock.
+//
+// @falsified-at: none — the refusal held on the tree the ruling landed on, as it did before it.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names `spawn.count#default`.
+// HOLDS: a folded constant stays the default (the sibling file).
+
+capability world
+capability spawn.count
+
+fn spawn(kind: text, count: integer = 1 spawn.count#default) -> integer world#append { len(kind) * 10 + count }
+
+// @EXPECT_ERROR: sandboxed `set_local` overrides a parameter the host pinned with `spawn.count#default` — not granted
+fn set_local() -> integer { one = 1; spawn("gob", one) }
+
+// @EXPECT_ERROR: sandboxed `set_param` overrides a parameter the host pinned with `spawn.count#default` — not granted
+fn set_param(n: integer) -> integer { spawn("gob", n) }
+
+fn pass_one() -> integer { set_param(1) }
