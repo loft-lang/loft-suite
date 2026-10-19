@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPTIONAL CAPTURE IS THE NULLABLE OF ITS FIELD TYPE (`@FR-P-Opt-Ty` crossed with `@FR-N-Opt`
+// and `@FR-P-Opt`).  P-Opt-Ty: a capture inside `(a)?` is "promoted to τ? (via (N-Opt))"; N-Opt:
+// `τ?` is a type for every τ that has a value to spend on absence; P-Opt: an absent group binds
+// its captures null and moves no cursor.  So the capture of a payload field reads the field's
+// value when the group matched and null when it did not, at every field type that has a null —
+// text, integer, vector, boolean, a struct, a plain enum, and a narrow `u8` below its top code.
+// The P-Opt cells beside this rule measure the group's place and width with text and integer
+// captures; this one moves the CAPTURED TYPE.  (A `u8` capture of 255 and a TUPLE capture are
+// not here: the first is an owner question — a present 255 is the `u8?` null code — and the
+// second is `an-optional-tuple-capture-is-the-in-flight-absent-tuple`, a live defect.)
+//
+// Axes it MOVES: the captured field's type (seven kinds), present and absent.  Values
+// hand-computed: absent reads null, so each `??` answers its default.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints present|absent.
+// HOLDS: `matching/P-Opt/2048-an-optional-group-stands-anywhere-in-a-slice`.
+
+struct PoIn { k: integer }
+enum PoCol { Red, Green }
+enum PoTok {
+  PoNum { n: integer },
+  PoT { s: text },
+  PoI { i: integer },
+  PoV { xs: vector<integer> },
+  PoF { f: boolean },
+  PoS { st: PoIn },
+  PoC { c: PoCol },
+  PoB { b: u8 },
+  PoEnd
+}
+
+fn po_t(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoT { s })?, PoEnd] => "{s ?? "-"}", _ => "x" } }
+fn po_i(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoI { i })?, PoEnd] => "{i ?? -1}", _ => "x" } }
+fn po_v(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoV { xs })?, PoEnd] => "{len(xs ?? [9, 9, 9])} {xs == null}", _ => "x" } }
+fn po_f(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoF { f })?, PoEnd] => "{f == null} {f ?? true}", _ => "x" } }
+fn po_s(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoS { st })?, PoEnd] => "{st == null} {(st ?? PoIn { k: -1 }).k}", _ => "x" } }
+fn po_c(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoC { c })?, PoEnd] => "{c == null} {c == PoCol.Green}", _ => "x" } }
+fn po_b(v: vector<PoTok>) -> text { match v { [PoNum { n }, (PoB { b })?, PoEnd] => "{b ?? -1} {b == null}", _ => "x" } }
+
+fn test_scalar_and_text_captures() {
+  e: PoTok = PoTok.PoEnd;
+  n = PoNum { n: 1 };
+  t = "{po_t([n, PoT { s: "ab" }, e])}|{po_t([n, e])}";
+  i = "{po_i([n, PoI { i: 7 }, e])}|{po_i([n, e])}";
+  f = "{po_f([n, PoF { f: false }, e])}|{po_f([n, e])}";
+  b = "{po_b([n, PoB { b: 254 }, e])}|{po_b([n, e])}";
+  assert(t == "ab|-" && i == "7|-1" && f == "false false|true true" && b == "254 false|-1 true", "{t} {i} {f} {b}");
+}
+
+fn test_heap_and_enum_captures() {
+  e: PoTok = PoTok.PoEnd;
+  n = PoNum { n: 1 };
+  v = "{po_v([n, PoV { xs: [1, 2] }, e])}|{po_v([n, e])}";
+  s = "{po_s([n, PoS { st: PoIn { k: 4 } }, e])}|{po_s([n, e])}";
+  c = "{po_c([n, PoC { c: PoCol.Green }, e])}|{po_c([n, e])}";
+  assert(v == "2 false|3 true" && s == "false 4|true -1" && c == "false true|true false", "{v} {s} {c}");
+}
+
+fn main() {
+  test_scalar_and_text_captures();
+  test_heap_and_enum_captures();
+}

@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO CLOSURES SHARE A STRUCT FIELD IN BOTH DIRECTIONS (`@FR-L-CapWrite` crossed with
+// `@FR-L-CapHeap`).  L-CapWrite: a captured scalar the closure reassigns is shared in the WRITE
+// direction, and a later call sees what the previous one wrote; sharing one such variable
+// between TWO closures is refused, and "the cure the refusal names is a struct field, which is
+// (L-CapHeap) and shares in both directions".  This cell builds the cure: two closures over one
+// struct, each writing a scalar field and a text field, called directly and through a fn-typed
+// parameter, interleaved with the enclosing body's own write — every write is seen by every
+// reader.  Beside it, the single-closure write-direction case at its own value.
+//
+// Axes it MOVES: closures per state (one scalar capture, two struct captures), the caller of
+// the closure (direct, through a `fn()` parameter), the writer (each closure, the enclosing
+// body), the field kind (integer, text).  Values hand-computed in the comments.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: `two-closures-reassigning-one-scalar-are-refused` beside it.
+
+struct CwCtr { n: integer, t: text }
+
+fn cw_call(h: fn()) { h(); }
+
+fn test_two_closures_over_one_struct_see_each_others_writes() {
+  c = CwCtr { n: 1, t: "" };
+  f = fn() { c.n += 10; c.t += "f"; };
+  g = fn() -> integer { c.n += 100; c.t += "g"; c.n };
+  f();                 // 11, "f"
+  a = g();             // 111, "fg"
+  c.n += 1000;         // 1111
+  cw_call(f);          // 1121, "fgf"
+  b = g();             // 1221, "fgfg"
+  assert(a == 111 && b == 1221, "the closures' answers: {a} {b}");
+  assert(c.n == 1221 && c.t == "fgfg", "the struct: {c.n} {c.t}");
+}
+
+fn test_one_closure_reassigning_a_scalar_keeps_its_own_write() {
+  m = 5;
+  k = fn() { m = m * 2; };
+  k();                 // 10
+  cw_call(k);          // 20
+  assert(m == 20, "one closure's writes: {m}");
+}
+
+fn main() {
+  test_two_closures_over_one_struct_see_each_others_writes();
+  test_one_closure_reassigning_a_scalar_keeps_its_own_write();
+}

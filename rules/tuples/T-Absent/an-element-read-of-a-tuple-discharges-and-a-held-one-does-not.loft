@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ELEMENT READ OF A TUPLE DISCHARGES, AND A HELD ONE DOES NOT NEED TO (`@FR-T-Absent` crossed
+// with `@FR-N-Index`).  N-Index: `v[i]` is `τ?` for a plain variable index — out of range there
+// is no element — and a CONSTANT index is trusted non-null by contract yet "a genuine overrun
+// there faults to null at run time".  T-Absent: the in-flight `(τ₁, …, τₙ)?` such a read
+// produces is the one absent tuple; `t?` / `t ?? d` discharge it, `t == null` asks its members
+// (all null), and `t.i` on it is `τᵢ?`; "The refusal is on the SUBJECT: (N-Index) trusts a
+// CONSTANT index, so `v[0]` is typed without the `?` yet is still an element read that can miss,
+// and it discharges like `v[i]`."  A tuple that exists — a loop variable — compares `== null`
+// false.  The T-Absent cells beside this one measure generators, arithmetic and declarations;
+// this one moves the INDEX (a variable inside and past the end, a constant inside and past it)
+// and the reading operator.
+//
+// Axes it MOVES: the index (variable hit, variable miss, constant hit, constant miss), the read
+// (`??`, `?`, `== null`, a member `t.i ?? d`), the members (dense, all-null-able holding nulls).
+// Values hand-computed; `?` gives each member's default (0, "").
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the T-Absent cells beside it; `a-call-result-tuple-exists-and-refuses-a-discharge` (ignored).
+
+fn test_a_variable_index_hit_and_miss() {
+  v: vector<(integer, text)> = [(1, "a"), (2, "b")];
+  i = 1;
+  j = 5;
+  a = v[i] ?? (0, "z");
+  b = v[j] ?? (0, "z");
+  c = v[j]?;
+  assert(a.0 == 2 && a.1 == "b" && b.0 == 0 && b.1 == "z", "??: {a.0}{a.1} {b.0}{b.1}");
+  assert(c.0 == 0 && c.1 == "", "?: [{c.0}][{c.1}]");
+  assert(v[i] != null && v[j] == null, "== null: {v[i] == null} {v[j] == null}");
+  assert((v[j].0 ?? -1) == -1 && (v[i].1 ?? "-") == "b", "members: {v[j].0 ?? -1} {v[i].1 ?? "-"}");
+}
+
+fn test_a_constant_index_hit_and_miss() {
+  v: vector<(integer, text)> = [(1, "a"), (2, "b")];
+  d = v[9] ?? (7, "c");
+  e = v[0] ?? (7, "c");
+  assert(d.0 == 7 && d.1 == "c" && e.0 == 1 && e.1 == "a", "constant: {d.0}{d.1} {e.0}{e.1}");
+}
+
+fn test_an_element_holding_only_nulls_reads_as_a_miss() {
+  w: vector<(integer?, text?)> = [(null, null), (3, "x")];
+  k = 0;
+  assert(w[k] == null && w[1] != null && len(w) == 2, "all-null element: {w[k] == null} {w[1] == null}");
+}
+
+fn test_a_loop_variable_tuple_exists() {
+  v: vector<(integer, text)> = [(1, "a"), (2, "b")];
+  t = "";
+  for e in v { t += "{e.0}{e == null}"; }
+  assert(t == "1false2false", "loop: {t}");
+}
+
+fn main() {
+  test_a_variable_index_hit_and_miss();
+  test_a_constant_index_hit_and_miss();
+  test_an_element_holding_only_nulls_reads_as_a_miss();
+  test_a_loop_variable_tuple_exists();
+}

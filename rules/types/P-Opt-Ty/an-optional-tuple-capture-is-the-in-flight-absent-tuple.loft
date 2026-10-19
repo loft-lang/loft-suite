@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT, both backends (18594597b).  `--interpret`: the ABSENT arm leaves the tuple
+//   capture unwritten — `pr.0 ?? -1` reads 0 (silent-wrong) for an `(integer, integer)` member,
+//   and a `text` member SIGSEGVs in `OpFormatInt`.  `--native`: the file does not compile,
+//   rustc E0308 "expected `(i64, String)`, found `()`" — the absent arm assigns `()`.  The
+//   capture's absent value is `Parser::null(&var_type)` in `bind_alternation_captures`
+//   (`src/parser/control.rs`), which has no tuple form; T-Absent's representation of the absent
+//   tuple is a tuple of member nulls.
+//
+// AN OPTIONAL TUPLE CAPTURE IS THE IN-FLIGHT ABSENT TUPLE (`@FR-P-Opt-Ty` crossed with `@FR-N-Opt`
+// and `@FR-T-Absent`).  P-Opt-Ty promotes a capture inside `(a)?` to `τ?` "via (N-Opt)", and N-Opt
+// refuses a DECLARED `(τ₁, …, τₙ)?` — a tuple has no value of its own to spend on absence.  T-Absent
+// names the one tuple that can be absent: the IN-FLIGHT `(τ₁, …, τₙ)?` a read that misses produces,
+// which "lives in a local VARIABLE and nowhere else", represented by all-null members — and a
+// pattern capture is such a local.  So the capture of a tuple field inside an absent group is that
+// tuple: `t.i` is `τᵢ?` and null, `t == null` is true; inside a matched group it is the field.
+//
+// Values hand-computed: present `(3, "q")`, absent all null.
+//
+// @falsified-at: none — written against a live defect; it fails on 18594597b on both backends.
+// CHANNEL: native: the compile; interpret: a SIGSEGV, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the members, -1 / "-" for null.
+// HOLDS: `an-optional-capture-is-the-nullable-of-its-field-type` beside it.
+
+enum PtTok { PtNum { n: integer }, PtP { pr: (integer, text) }, PtEnd }
+
+fn pt_pp(v: vector<PtTok>) -> text {
+  match v {
+    [PtNum { n }, (PtP { pr })?, PtEnd] => "{pr.0 ?? -1}/{pr.1 ?? "-"}/{pr == null}",
+    _ => "x"
+  }
+}
+
+fn main() {
+  e: PtTok = PtTok.PtEnd;
+  a = pt_pp([PtNum { n: 1 }, PtP { pr: (3, "q") }, e]);
+  b = pt_pp([PtNum { n: 1 }, e]);
+  assert(a == "3/q/false", "present: {a}");
+  assert(b == "-1/-/true", "absent: {b}");
+}

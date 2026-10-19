@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT WIDENED INTO ITS ENUM COPIES AT EVERY POSITION (`@FR-B-Copy` crossed with
+// `@FR-C-Var`).  B-Copy names the `(C-Var)` widening `c: E = s` from a variant as "a copy like
+// any other"; the cell beside this one (`a-struct-enum-whole-value-bind-copies-like-a-struct`)
+// measures that at a LOCAL bind with a scalar payload.  This one holds the widening fixed and
+// moves the POSITION the widened value lands in: a struct literal's field, a field assignment,
+// an appended element, a tuple member, a nullable local, a function's return, and a variant
+// whose payload owns a vector.  In each, a write to the variant after the widening must not
+// reach the copy, and a write to the copy must not reach the variant.
+//
+// Axes it MOVES: destination position (literal field, field store, element, tuple member,
+// `E?` local, return), payload kind (scalar, vector), write direction (source → copy,
+// copy → source).  Values hand-computed: every copy keeps the value at the widening.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value the copy holds.
+// HOLDS: the local-bind widening cell beside it.
+
+enum WdSh { WdCi { n: integer }, WdSq { n: integer } }
+enum WdHp { WdTag { n: integer, tags: vector<integer> }, WdBare { n: integer } }
+
+struct WdHolder { e: WdSh, k: integer }
+
+fn wd_widen(p: WdCi) -> WdSh {
+  p
+}
+
+fn test_a_widening_into_a_literal_field_copies() {
+  ci = WdCi { n: 11 };
+  h = WdHolder { e: ci, k: 2 };
+  ci.n = 99;
+  assert(h.e.n == 11, "a variant widened into a literal field aliased it: {h.e.n}");
+  h.e.n = 12;
+  assert(ci.n == 99, "a write through the field reached the variant: {ci.n}");
+}
+
+fn test_a_widening_into_a_field_store_copies() {
+  ci = WdCi { n: 21 };
+  h = WdHolder { e: WdSq { n: 0 }, k: 3 };
+  h.e = ci;
+  ci.n = 98;
+  assert(h.e.n == 21 && h.k == 3, "a variant stored into an enum field aliased it: {h.e.n} {h.k}");
+  assert(h.e is WdCi, "the stored field lost its variant");
+}
+
+fn test_a_widening_into_an_element_copies() {
+  ci = WdCi { n: 31 };
+  v: vector<WdSh> = [WdSq { n: 1 }];
+  v += [ci];
+  ci.n = 97;
+  assert(len(v) == 2, "the append changed the length to {len(v)}");
+  assert(v[1].n == 31 && v[0].n == 1, "a variant appended into vector<E> aliased it: {v[1].n} {v[0].n}");
+  v[1].n = 32;
+  assert(ci.n == 97, "a write through the element reached the variant: {ci.n}");
+}
+
+fn test_a_widening_into_a_tuple_member_copies() {
+  ci = WdCi { n: 41 };
+  t: (integer, WdSh) = (5, ci);
+  ci.n = 96;
+  m = t.1;
+  assert(t.0 == 5 && m.n == 41, "a variant widened into a tuple member aliased it: {t.0} {m.n}");
+}
+
+fn test_a_widening_into_a_nullable_local_copies() {
+  ci = WdCi { n: 51 };
+  c: WdSh? = ci;
+  ci.n = 95;
+  assert((c ?? WdSq { n: -1 }).n == 51, "a variant widened into `E?` aliased it");
+}
+
+fn test_a_widening_return_is_fresh() {
+  ci = WdCi { n: 61 };
+  r = wd_widen(ci);
+  ci.n = 94;
+  assert(r.n == 61, "a variant parameter returned as its enum aliased the caller's: {r.n}");
+  r.n = 62;
+  assert(ci.n == 94, "a write to the returned enum reached the caller's variant: {ci.n}");
+}
+
+fn test_a_widening_deep_copies_a_heap_payload() {
+  tg = WdTag { n: 71, tags: [1, 2] };
+  c: WdHp = tg;
+  tg.tags += [3];
+  seen = -1;
+  first = -1;
+  if c is WdTag { tags } {
+    seen = len(tags);
+    first = tags[0] ?? -2;
+  }
+  assert(seen == 2 && first == 1 && len(tg.tags) == 3, "a widened payload vector was shared: {seen} {first} {len(tg.tags)}");
+}
+
+fn main() {
+  test_a_widening_into_a_literal_field_copies();
+  test_a_widening_into_a_field_store_copies();
+  test_a_widening_into_an_element_copies();
+  test_a_widening_into_a_tuple_member_copies();
+  test_a_widening_into_a_nullable_local_copies();
+  test_a_widening_return_is_fresh();
+  test_a_widening_deep_copies_a_heap_payload();
+}

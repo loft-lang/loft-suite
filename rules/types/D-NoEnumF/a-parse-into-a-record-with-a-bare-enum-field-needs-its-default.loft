@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): the file compiles, and
+//   `t as NpPixel` of a text missing `tint` answers a record whose NON-null `tint: NpColour`
+//   reads `null` (`{tint:null,x:4}`, `tint == null` true) — the enum's 0, which D-NoEnumF says
+//   a bare enum field may never silently zero-fill to.  `NpPixel.parse(t)` does the same.  The
+//   variant cast of the same record shape IS refused ("`as Tinted` needs a default `Tinted` …
+//   has no default: field `tint: Colour` …"), so one record answers two ways by the cast's
+//   source.  Owner-checkable reading: refuse like the variant cast, cure `= <variant>` or `E?`.
+//
+// A PARSE INTO A RECORD WITH A BARE ENUM FIELD NEEDS ITS DEFAULT (`@FR-D-NoEnumF` crossed with
+// `@FR-N-Cast` and `@FR-N-Parse`).  N-Parse folds into N-Cast: "a parse is a cast", and a text
+// parse into a struct leaves every misfit or missing field AT ITS DEFAULT (STDLIB.md
+// `record#errors`, @C148).  D-NoEnumF: a bare enum field without `= expr` HAS no default, and
+// "the partiality is a TYPE rule": where a cast would need the default of such a record —
+// `s as Tinted` on a variant — the cast is refused at compile time.  A parse needs the same
+// default for every field the text omits, so `t as NpPixel` must be refused the same way.
+//
+// @EXPECT_ERROR: has no default: field `tint: NpColour`
+//
+// @falsified-at: none — written against a live defect; it compiles and answers null on 18594597b.
+// CHANNEL: the compile diagnostic (absent on 18594597b).
+// ARMED: no instrument.
+// WITNESS: the record prints `{tint:null,x:4}`.
+// HOLDS: `a-variant-cast-needing-a-default-of-a-bare-enum-field-is-refused` beside it.
+
+enum NpColour { Red, Green }
+struct NpPixel { tint: NpColour, x: integer }
+
+fn main() {
+  t = "{{\"x\":4}}";
+  w = t as NpPixel;
+  assert(w.tint != null && w.x == 4, "a non-null enum field read null: {w}");
+}

@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO CLOSURES REASSIGNING ONE SCALAR ARE REFUSED (`@FR-L-CapWrite` crossed with
+// `@FR-L-CapHeap`).  "Sharing one such variable between TWO closures is refused (a decided
+// limit, not a gap); the cure the refusal names is a struct field, which is (L-CapHeap)."  The
+// refusal must name that cure.
+//
+// @EXPECT_ERROR: hold the shared state in a struct field instead
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the variable and the struct-field cure.
+// HOLDS: `two-closures-share-a-struct-field-in-both-directions` beside it.
+
+fn main() {
+  n = 1;
+  f = fn() { n += 10; };
+  g = fn() { n += 100; };
+  f();
+  g();
+  assert(n == 111, "unreachable");
+}

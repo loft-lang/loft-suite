@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK TO A PART OF FOREIGN DATA REFUSES AN APPEND (`@FR-Const-Foreign` crossed with
+// `@FR-B-View`).  Const-Foreign: "a `&` link to a part is a VIEW (B-View), read-only like the
+// value; every write — through the value, a view or a link — is Const-Value's compile-time
+// error".  The part here is a vector MEMBER of a `-> const T` producer's record and the write
+// an append through `r = &b.xs`, so the refusal covers a write that grows, not only one that
+// overwrites.
+//
+// @EXPECT_ERROR: Cannot modify 'r'
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the link `r`.
+// HOLDS: the struct-view refusal beside it.
+
+struct CfIn { v: integer }
+struct CfBox { inner: CfIn, xs: vector<integer> }
+
+fn cf_mk() -> const CfBox { CfBox { inner: CfIn { v: 1 }, xs: [1, 2] } }
+
+fn main() {
+  b = cf_mk();
+  r = &b.xs;
+  r += [3];
+  assert(len(b.xs) == 2, "unreachable");
+}

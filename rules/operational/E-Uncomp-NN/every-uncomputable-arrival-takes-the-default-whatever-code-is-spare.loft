@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY UNCOMPUTABLE ARRIVAL TAKES THE DEFAULT, WHATEVER CODE IS SPARE (`@FR-E-Uncomp-NN`
+// crossed with `@FR-L-Narrow-Spare`).  E-Uncomp-NN: an uncomputable result whose target cannot
+// hold null is the target type's DEFAULT — 0 where the range admits it, else the bound nearest
+// zero — never a wrapped, truncated or reinterpreted value.  L-Narrow-Spare: a code left spare
+// inside the storage width "is not a place to put one", because two ranges one value apart
+// would otherwise answer differently.  So every way an unfitting result arrives — an overflow
+// above the range, a step below it, a product, a division and a modulo by zero — lands on the
+// same default for a range that leaves one code spare and its twin that leaves none, at a
+// range that holds zero, one wholly above it (default its minimum) and one wholly below it
+// (default its maximum, the bound nearest zero).
+//
+// Axes it MOVES: the arrival (`+=` above, `-=` below, `*=`, `/=` by 0, `%=` by 0), the spare
+// code (one, none), where zero lies (inside, below the range, above it), the slot (local,
+// element).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `layout/L-Narrow-Spare/two-aliases-one-value-apart-answer-an-overflow-alike`.
+
+type UsSp = integer limit(0, 254) size(1);
+type UsFu = integer limit(0, 255) size(1);
+type UsHiSp = integer limit(1000, 1254) size(1);
+type UsHiFu = integer limit(1000, 1255) size(1);
+type UsLoSp = integer limit(-255, -1) size(1);
+type UsLoFu = integer limit(-256, -1) size(1);
+
+fn test_zero_inside_the_range() {
+  z = 0;
+  a: UsSp = 200;
+  a *= 2;
+  b: UsFu = 200;
+  b *= 2;
+  c: UsSp = 3;
+  c -= 5;
+  d: UsFu = 3;
+  d -= 5;
+  e: UsSp = 9;
+  e %= z;
+  f: UsFu = 9;
+  f %= z;
+  assert(a == 0 && b == 0 && c == 0 && d == 0 && e == 0 && f == 0, "zero inside: {a} {b} {c} {d} {e} {f}");
+}
+
+fn test_zero_below_the_range() {
+  z = 0;
+  a: UsHiSp = 1001;
+  a -= 5;
+  b: UsHiFu = 1001;
+  b -= 5;
+  c: UsHiSp = 1250;
+  c += 10;
+  d: UsHiFu = 1250;
+  d += 10;
+  e: UsHiSp = 1100;
+  e /= z;
+  f: UsHiFu = 1100;
+  f /= z;
+  assert(a == 1000 && b == 1000 && c == 1000 && d == 1000 && e == 1000 && f == 1000, "minimum: {a} {b} {c} {d} {e} {f}");
+}
+
+fn test_zero_above_the_range() {
+  z = 0;
+  a: UsLoSp = -250;
+  a -= 10;
+  b: UsLoFu = -250;
+  b -= 10;
+  c: UsLoSp = -5;
+  c += 10;
+  d: UsLoFu = -5;
+  d += 10;
+  e: UsLoSp = -7;
+  e /= z;
+  f: UsLoFu = -7;
+  f /= z;
+  assert(a == -1 && b == -1 && c == -1 && d == -1 && e == -1 && f == -1, "maximum: {a} {b} {c} {d} {e} {f}");
+}
+
+fn test_an_element_alike() {
+  z = 0;
+  vs: vector<UsHiSp> = [1100, 1200];
+  vf: vector<UsHiFu> = [1100, 1200];
+  vs[0] /= z;
+  vf[0] /= z;
+  vs[1] += 100;
+  vf[1] += 100;
+  assert(len(vs) == 2 && vs[0] == 1000 && vf[0] == 1000 && vs[1] == 1000 && vf[1] == 1000, "elements: {vs[0]} {vf[0]} {vs[1]} {vf[1]}");
+}
+
+fn main() {
+  test_zero_inside_the_range();
+  test_zero_below_the_range();
+  test_zero_above_the_range();
+  test_an_element_alike();
+}

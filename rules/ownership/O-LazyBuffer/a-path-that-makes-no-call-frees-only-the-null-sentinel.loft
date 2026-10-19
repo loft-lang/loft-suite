@@ -1,0 +1,99 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PATH THAT MAKES NO CALL FREES ONLY THE NULL SENTINEL (`@FR-O-LazyBuffer` crossed with
+// `@FR-H-FreeNull`).  O-LazyBuffer: a hidden return buffer is minted in front of the statement
+// that hands it to a callee, behind a null test, at most once per activation and only on a path
+// that makes the call; a path that does not leaves the slot at the null sentinel, "and every
+// exit's free of the sentinel is a no-op (H-FreeNull), so no release moves".  So a function
+// whose record-returning call sits on SOME paths answers right on every path, frees what the
+// calling paths minted, and frees nothing on the others — the leak gate reads both.
+//
+// Axes it MOVES: what keeps the call off a path (an `if` arm, an early `return` before it, a
+// loop that runs zero times, a `match` arm, a `null` arm of a nullable return), the call's
+// count on the paths that make it (once, once per loop pass).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the O-LazyBuffer cells beside it.
+
+struct LbRec { a: integer, v: vector<integer> }
+
+fn lb_mk(n: integer) -> LbRec { LbRec { a: n, v: [n, n] } }
+
+fn lb_mk_opt(n: integer) -> LbRec? {
+  if n > 0 { lb_mk(n) } else { null }
+}
+
+fn lb_if(c: boolean) -> integer {
+  if c {
+    r = lb_mk(5);
+    r.a + len(r.v)
+  } else {
+    0
+  }
+}
+
+fn lb_early(n: integer) -> integer {
+  if n < 0 { return -1; }
+  r = lb_mk(n);
+  r.a
+}
+
+fn lb_loop(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    r = lb_mk(i);
+    t += r.a + len(r.v);
+  }
+  t
+}
+
+fn lb_match(c: integer) -> integer {
+  match c {
+    0 => lb_mk(7).a,
+    1 => {
+      r = lb_mk(8);
+      r.a * 2
+    },
+    _ => 3
+  }
+}
+
+fn lb_opt(n: integer) -> integer {
+  r = lb_mk_opt(n);
+  if r == null { -5 } else { r.a }
+}
+
+fn test_an_if_arm_without_the_call() {
+  assert(lb_if(true) == 7 && lb_if(false) == 0, "if: {lb_if(true)} {lb_if(false)}");
+}
+
+fn test_an_early_return_before_the_call() {
+  assert(lb_early(-3) == -1 && lb_early(4) == 4, "early: {lb_early(-3)} {lb_early(4)}");
+}
+
+fn test_a_loop_that_runs_zero_times_and_four_times() {
+  // n = 4: (0+2) + (1+2) + (2+2) + (3+2) = 14
+  assert(lb_loop(0) == 0 && lb_loop(4) == 14, "loop: {lb_loop(0)} {lb_loop(4)}");
+}
+
+fn test_every_arm_of_a_match() {
+  assert(lb_match(0) == 7 && lb_match(1) == 16 && lb_match(2) == 3, "match: {lb_match(0)} {lb_match(1)} {lb_match(2)}");
+}
+
+fn test_a_nullable_return_on_its_null_arm() {
+  assert(lb_opt(0) == -5 && lb_opt(9) == 9, "nullable: {lb_opt(0)} {lb_opt(9)}");
+}
+
+fn main() {
+  test_an_if_arm_without_the_call();
+  test_an_early_return_before_the_call();
+  test_a_loop_that_runs_zero_times_and_four_times();
+  test_every_arm_of_a_match();
+  test_a_nullable_return_on_its_null_arm();
+}

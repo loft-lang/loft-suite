@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): an UNANNOTATED literal whose elements are slices is
+//   typed as a collection of iterators.  `vv[0][0] = 66` is refused "Indexing a non vector —
+//   keyed collections … have no generic-constructor expression", and `vv.len()` / `"{vv}"` is an
+//   internal compiler error, "index out of bounds … [src/scopes/scan.rs:272]".  Annotated
+//   (`vv: vector<vector<integer>> = …`) the same literal answers `[[66,50],[10]]`.
+//
+// A SLICE AS A LITERAL ELEMENT IS A FRESH VECTOR (`@FR-Slice-Value` crossed with `@FR-H-Alloc`).
+// "The value is owed at EVERY vector-typed position, not only a bind: … a literal's element
+// take[s] the slice as the fresh vector a bind would make of it (`Parser::iterator_as_vector`,
+// one home)."  So `[src[3..], src[..1]]` is a `vector<vector<integer>>` of two fresh vectors,
+// each its own store (H-Alloc): a write into one reaches neither the other nor the source.
+//
+// Values hand-computed from `src = [10, 20, 30, 40, 50]`.
+//
+// @falsified-at: none — written against a live defect; it fails on 18594597b on both backends.
+// CHANNEL: the compile (a refusal, then an internal compiler error), then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: `a-slice-is-a-fresh-value-at-every-vector-position` beside it.
+
+fn main() {
+  src = [10, 20, 30, 40, 50];
+  vv = [src[3..], src[..1]];
+  vv[0][0] = 66;
+  assert(vv.len() == 2 && vv[0].len() == 2 && vv[1].len() == 1, "the shape: {vv}");
+  assert(vv[0][0] == 66 && vv[0][1] == 50 && vv[1][0] == 10 && src[3] == 40, "the values: {vv} {src}");
+}

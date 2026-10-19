@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CAPTURED `&` PARAMETER SHARES ITS HEAP POINTEE AND COPIES ITS SCALAR (`@FR-L-CapRef` crossed
+// with `@FR-L-CapHeap` and `@FR-L-CapScalar`).  L-CapRef asks the share-or-copy question of
+// what a `&T` parameter points AT: a `&S` / `&vector<τ>` is SHARED by L-CapHeap — a field
+// write, an element write and an append from inside the closure reach the caller, and a
+// mutation of the source AFTER the capture is visible inside the closure — while a
+// `&integer` / `&text` is COPIED at creation by L-CapScalar: the closure answers the value the
+// parameter had when the closure was formed, and the function's own write after that still
+// reaches the caller through the `&`.
+//
+// Axes it MOVES: the pointee kind (struct, vector, integer, text), the write's direction
+// (inside the closure → the caller, the enclosing body after capture → the closure), the write
+// kind (field, element, append, compound).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the closure's answer and the caller's value.
+// HOLDS: `a-closure-write-to-a-captured-ref-scalar-is-refused` beside it.
+
+struct CrS { k: integer, v: vector<integer> }
+
+fn cr_struct(p: &CrS) -> integer {
+  g = fn(d: integer) { p.k += d; p.v += [d]; p.v[0] = 40; };
+  g(2);
+  p.k += 100;
+  h = fn() -> integer { p.k };
+  p.k += 1000;
+  h()
+}
+
+fn cr_vector(v: &vector<integer>) -> integer {
+  g = fn(d: integer) { v += [d]; v[0] = 70; };
+  g(5);
+  h = fn() -> integer { len(v) };
+  v += [6];
+  h()
+}
+
+fn cr_integer(n: &integer) -> integer {
+  g = fn() -> integer { n * 10 };
+  n = 7;
+  g()
+}
+
+fn cr_text(s: &text) -> text {
+  g = fn() -> text { s + "!" };
+  s += "z";
+  g()
+}
+
+fn test_a_ref_struct_is_shared_both_ways() {
+  s = CrS { k: 1, v: [1] };
+  r = cr_struct(s);
+  // k: 1 +2 (closure) +100 +1000 = 1103, read by `h` after the last write
+  assert(r == 1103 && s.k == 1103, "struct: {r} {s.k}");
+  assert(len(s.v) == 2 && s.v[0] == 40 && s.v[1] == 2, "struct vector: {len(s.v)} {s.v[0]} {s.v[1]}");
+}
+
+fn test_a_ref_vector_is_shared_both_ways() {
+  v = [1, 2];
+  r = cr_vector(v);
+  // [1,2] +[5] -> [70,2,5] +[6] -> four elements
+  assert(r == 4 && len(v) == 4 && v[0] == 70 && v[3] == 6, "vector: {r} {len(v)} {v[0]}");
+}
+
+fn test_a_ref_scalar_is_copied_at_creation() {
+  n = 3;
+  r = cr_integer(n);
+  assert(r == 30 && n == 7, "integer: {r} {n}");
+  t = "ab";
+  q = cr_text(t);
+  assert(q == "ab!" && t == "abz", "text: {q} {t}");
+}
+
+fn main() {
+  test_a_ref_struct_is_shared_both_ways();
+  test_a_ref_vector_is_shared_both_ways();
+  test_a_ref_scalar_is_copied_at_creation();
+}

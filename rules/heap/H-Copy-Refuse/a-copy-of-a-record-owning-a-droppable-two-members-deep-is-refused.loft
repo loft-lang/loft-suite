@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COPY OF A RECORD OWNING A DROPPABLE TWO MEMBERS DEEP IS REFUSED (`@FR-H-Copy-Refuse` crossed
+// with `@FR-H-Lease`).  H-Lease: a structure whose type owns a droppable — declares `OpDrop`
+// "or holds a member that does, at any depth" — holds its own lease, so a copy makes a second
+// structure and takes a second lease or is refused.  H-Copy-Refuse: a COPY of such a type
+// without `OpCopy` — "the type itself, or a member at any depth" — is a compile-time error on
+// the line that writes it.  The droppable here sits two records down (`Outer.mid.r`) and the
+// copy is a whole-value bind of a parameter (B-Copy).
+//
+// @EXPECT_ERROR: cannot copy `p` here
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the copied parameter.
+// HOLDS: `a-byte-move-of-a-refused-droppable-is-legal-and-runs-no-hook` beside it.
+
+struct CrR { id: integer }
+fn OpDrop(self: CrR) { println("D{self.id}"); }
+struct CrMid { r: CrR, n: integer }
+struct CrOuter { mid: CrMid, k: integer }
+
+fn cr_bind(p: CrOuter) -> integer {
+  x = p;
+  x.k
+}
+
+fn main() {
+  o = CrOuter { mid: CrMid { r: CrR { id: 1 }, n: 2 }, k: 3 };
+  assert(cr_bind(o) == 3, "unreachable");
+}

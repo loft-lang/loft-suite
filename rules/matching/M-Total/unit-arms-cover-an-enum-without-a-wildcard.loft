@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// UNIT ARMS COVER AN ENUM WITHOUT A WILDCARD (`@FR-M-Total` crossed with `@FR-M-Unit`).  M-Total:
+// `total(V) = true`, so a match whose every variant has a bare unit arm is exhaustive with no
+// `_`; a guarded arm for a variant secures nothing, but a later BARE arm for the same variant
+// does; an alternation of bare variants covers each of them.  M-Unit: a unit pattern selects
+// exactly its own variant.  The refusals beside this cell are the other half.
+//
+// Axes it MOVES: the enum (plain, a struct-enum with unit and payload variants), the arm form
+// (bare, an alternation, a guard followed by a bare arm for the same variant), the subject
+// (every variant).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the two refusal cells beside it.
+
+enum MuC { Red, Green, Blue }
+enum MuSh { MuCircle { r: integer }, MuEmpty, MuDot }
+
+fn mu_plain(c: MuC) -> integer {
+  match c {
+    Red => 1,
+    Green => 2,
+    Blue => 3
+  }
+}
+
+fn mu_alt(c: MuC) -> integer {
+  match c {
+    Red | Blue => 10,
+    Green => 20
+  }
+}
+
+fn mu_guard_then_bare(c: MuC, x: integer) -> integer {
+  match c {
+    Red if x > 5 => 100,
+    Red => 101,
+    Green => 102,
+    Blue => 103
+  }
+}
+
+fn mu_shape(s: MuSh) -> integer {
+  match s {
+    MuCircle { r } => r * 2,
+    MuEmpty => -1,
+    MuDot => 0
+  }
+}
+
+fn test_bare_unit_arms_cover_every_variant() {
+  t = "{mu_plain(MuC.Red)}{mu_plain(MuC.Green)}{mu_plain(MuC.Blue)}";
+  assert(t == "123", "bare arms: {t}");
+}
+
+fn test_an_alternation_covers_each_of_its_variants() {
+  t = "{mu_alt(MuC.Red)} {mu_alt(MuC.Green)} {mu_alt(MuC.Blue)}";
+  assert(t == "10 20 10", "alternation: {t}");
+}
+
+fn test_a_bare_arm_after_a_guard_covers_the_variant() {
+  t = "{mu_guard_then_bare(MuC.Red, 9)} {mu_guard_then_bare(MuC.Red, 1)} {mu_guard_then_bare(MuC.Blue, 9)}";
+  assert(t == "100 101 103", "guard then bare: {t}");
+}
+
+fn test_unit_variants_beside_a_payload_variant() {
+  a: MuSh = MuCircle { r: 4 };
+  b: MuSh = MuEmpty;
+  c: MuSh = MuDot;
+  t = "{mu_shape(a)} {mu_shape(b)} {mu_shape(c)}";
+  assert(t == "8 -1 0", "struct-enum: {t}");
+}
+
+fn main() {
+  test_bare_unit_arms_cover_every_variant();
+  test_an_alternation_covers_each_of_its_variants();
+  test_a_bare_arm_after_a_guard_covers_the_variant();
+  test_unit_variants_beside_a_payload_variant();
+}

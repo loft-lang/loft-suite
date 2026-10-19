@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT CAST TAKES THE DEFAULT ITS FIELDS CHOOSE (`@FR-D-NoEnumF` crossed with `@FR-N-Cast`
+// and its checked form `(N-Cast?)`).  D-NoEnumF's cures make a default exist: a field `= <variant>`, or the
+// field typed `E?`, which defaults to null (D-Opt).  With either, the asserting cast `s as V` of a
+// value holding another variant answers V with every field at that default (and warns
+// `variant-cast-default`); the CHECKED cast `s as V?` answers null on a miss and needs no default
+// at all (N-Cast?); a cast after `is` is a hit.  The refusal beside this cell is the case with no
+// cure applied.
+//
+// Axes it MOVES: the field's cure (`= Green`, `E?`, none — only through `as V?` and `is`), the
+// cast (asserting, checked, after `is`), hit and miss.  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: `as NcDef` answers a `NcDef` with every field at its default
+// @EXPECT_WARNING: `as NcOpt` answers a `NcOpt` with every field at its default
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts and the two warnings.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `a-variant-cast-needing-a-default-of-a-bare-enum-field-is-refused` beside it.
+
+enum NcColour { Red, Green }
+enum NcSh {
+  NcDef { tint: NcColour = Green, x: integer },
+  NcOpt { tint: NcColour?, x: integer },
+  NcBare { tint: NcColour, x: integer },
+  NcPlain { x: integer }
+}
+
+fn test_a_miss_takes_the_fields_own_default() {
+  s: NcSh = NcPlain { x: 3 };
+  a = s as NcDef;
+  b = s as NcOpt;
+  assert(a.x == 0 && a.tint == NcColour.Green, "= Green: {a.x}");
+  assert(b.x == 0 && b.tint == null, "NcColour?: {b.x}");
+}
+
+fn test_a_checked_cast_needs_no_default() {
+  s: NcSh = NcPlain { x: 3 };
+  h: NcSh = NcBare { tint: NcColour.Red, x: 8 };
+  m = s as NcBare?;
+  k = h as NcBare?;
+  assert(m == null && k != null && (k ?? NcBare { tint: NcColour.Green, x: -1 }).x == 8, "checked: {m == null}");
+}
+
+fn test_a_cast_after_is_is_a_hit() {
+  h: NcSh = NcBare { tint: NcColour.Green, x: 9 };
+  got = -1;
+  if h is NcBare {
+    w = h as NcBare;
+    got = w.x;
+    assert(w.tint == NcColour.Green, "the hit's enum field");
+  }
+  assert(got == 9, "after is: {got}");
+}
+
+fn main() {
+  test_a_miss_takes_the_fields_own_default();
+  test_a_checked_cast_needs_no_default();
+  test_a_cast_after_is_is_a_hit();
+}

@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNFITTING VALUE AND A NULL VIEW ARE ONE WRITE THAT DID NOT TAKE (`@FR-E-Uncomp-NN` crossed
+// with `@FR-H-WriteNull` and `@FR-H-Write-Else`).  H-WriteNull: a write through `nullref` has no
+// store to update and is a no-op step.  E-Uncomp-NN: an uncomputable or unfitting result into a
+// narrow non-nullable slot is the slot's DEFAULT.  H-Write-Else names both as the same event —
+// its `else` runs "exactly when it did NOT take — (H-WriteNull) or (H-WriteOOB) at the element
+// … a null view at any step of the place's path, a value the slot cannot hold ((E-Uncomp-NN), a
+// narrow non-nullable slot)" — and "a stored null is a landed write".  So each arm below runs
+// once: for a null view, for an index past the end, for a step past the range, for a division
+// by zero, and ONCE for a write that is both through a null view and unfitting; the slot that
+// exists holds its default, and a null stored into a nullable field runs no arm.
+//
+// Axes it MOVES: why the write did not take (a null view, past the end, past the range, by
+// zero, a null view AND unfitting), the slot (local, field, field of an element, a field
+// through a null `reference`), the operator (`=`, `+=`, `/=`).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints which arms ran and the slots.
+// HOLDS: `operational/E-Uncomp-Seen/a-store-that-did-not-take-is-seen-only-beside-it`.
+
+type WnPct = integer limit(0, 100);
+struct WnIn { m: WnPct, o: integer? }
+struct WnD { at: reference<WnIn>?, ins: vector<WnIn>, p: WnPct }
+
+fn test_every_write_that_did_not_take_runs_its_arm_once() {
+  z = 0;
+  t = "";
+  x: WnPct = 50;
+  x /= z else { t += "a"; };
+  d = WnD { at: null, ins: [WnIn { m: 5, o: 1 }], p: 60 };
+  d.at.m = 7 else { t += "c"; };
+  d.at.m += 200 else { t += "d"; };
+  d.at.m /= z else { t += "e"; };
+  d.ins[0].o = null else { t += "f"; };
+  d.ins[3].m = 1 else { t += "g"; };
+  d.p += 50 else { t += "h"; };
+  d.ins[0].m /= z else { t += "i"; };
+  assert(t == "acdeghi", "the arms that ran: {t}");
+  assert(x == 0 && d.p == 0 && d.ins[0].m == 0, "the defaults: {x} {d.p} {d.ins[0].m}");
+  assert(d.ins[0].o == null && len(d.ins) == 1 && d.at == null, "the rest: {d.ins[0].o ?? -1} {len(d.ins)}");
+}
+
+fn test_a_write_that_landed_runs_no_arm() {
+  t = "";
+  x: WnPct = 50;
+  x += 50 else { t += "a"; };
+  h = WnD { at: null, ins: [WnIn { m: 5, o: 1 }], p: 60 };
+  h.ins[0].m = 9 else { t += "b"; };
+  h.ins[0].o = null else { t += "c"; };
+  assert(t == "" && x == 100 && h.ins[0].m == 9 && h.ins[0].o == null, "landed: {t} {x} {h.ins[0].m}");
+}
+
+fn main() {
+  test_every_write_that_did_not_take_runs_its_arm_once();
+  test_a_write_that_landed_runs_no_arm();
+}

@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DIVISION BY ZERO INTO A DENSE NARROW SLOT IS ITS DEFAULT, AND SILENT (`@FR-E-Uncomp-NN`
+// crossed with `@FR-E-Report`).  E-Report: an uncomputable divide or modulo by zero yields null
+// and reports NOTHING, guarded or not — the null is the signal.  E-Uncomp-NN: where the target
+// type cannot hold null (a non-nullable declared range) the answer is the type's DEFAULT — `0`
+// where the range admits it, else the bound nearest zero — never a value derived from the
+// machine representation.  So `x /= z` and `x %= z` with `z == 0` leave a dense narrow slot at
+// its default, a nullable one null, a plain `integer` result null, and the run prints nothing
+// at run time (the compile-time `narrow-fallback` advice is the only line, by design).
+//
+// Axes it MOVES: the operator (`/=`, `%=`), the slot (local, field, element, parameter
+// returned), the range (0 inside it, 0 outside it so the default is 1000, the `u8` template),
+// nullability.  Values hand-computed; -1 stands for null.  The "reports nothing" half is
+// measured by hand on stderr — the suite reads no run-time output.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `operational/E-Uncomp/1246-a-nullable-narrow-slot-answers-null`.
+
+type EuPct = integer limit(0, 100);
+type EuHi = integer limit(1000, 1100) size(2);
+struct EuR { p: EuPct, h: EuHi }
+
+fn eu_div(p: EuPct, z: integer) -> EuPct {
+  p /= z;
+  p
+}
+
+fn test_a_local_takes_its_default() {
+  z = 0;
+  a: EuPct = 50;
+  a /= z;
+  b: EuPct = 50;
+  b %= z;
+  c: EuHi = 1050;
+  c /= z;
+  e: u8 = 7;
+  e /= z;
+  assert(a == 0 && b == 0 && c == 1000 && e == 0, "locals: {a} {b} {c} {e}");
+}
+
+fn test_a_field_and_an_element_take_their_default() {
+  z = 0;
+  r = EuR { p: 40, h: 1040 };
+  r.p /= z;
+  r.h %= z;
+  v: vector<EuPct> = [30, 31];
+  v[0] /= z;
+  assert(r.p == 0 && r.h == 1000, "fields: {r.p} {r.h}");
+  assert(len(v) == 2 && v[0] == 0 && v[1] == 31, "element: {v[0]} {v[1]}");
+}
+
+fn test_a_parameter_returned_takes_its_default() {
+  z = 0;
+  assert(eu_div(60, z) == 0, "parameter: {eu_div(60, z)}");
+}
+
+fn test_a_nullable_slot_and_a_plain_result_are_null() {
+  z = 0;
+  d: EuPct? = 50;
+  d /= z;
+  n = 9 / z;
+  m = 9 % z;
+  assert(d == null && n == null && m == null, "null: {d ?? -1} {n ?? -1} {m ?? -1}");
+}
+
+fn main() {
+  test_a_local_takes_its_default();
+  test_a_field_and_an_element_take_their_default();
+  test_a_parameter_returned_takes_its_default();
+  test_a_nullable_slot_and_a_plain_result_are_null();
+}

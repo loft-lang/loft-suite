@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GUARDED LOCKED WRITE RUNS ITS ARM AND REPORTS NOTHING (`@FR-E-Report` crossed with
+// `@FR-H-WriteLocked`).  E-Report: a write that did not take is reported once when the statement
+// has no `else` — "a lock fault excepted, which reports its own under (H-WriteLocked)" — and "a
+// store with an `else` reports nothing (the arm owns the failure)".  H-WriteLocked: a write to a
+// locked store is never a silent successful write; the store keeps its bytes.  So with an `else`
+// on every write to a `#lock`ed record, each arm runs, the record keeps every byte, and the run
+// neither halts nor prints.  The `H-WriteLocked` cell beside this rule measures one guarded
+// scalar write; this one moves the WRITE KIND.  The unguarded half — the development halt with
+// the lock report, and the production log-and-discard — is loft's `tests/locked_writes.rs`: a
+// development halt ends the whole `loft --tests` process on the interpreter, so it cannot be a
+// suite cell.
+//
+// Axes it MOVES: the write kind (a scalar field, a text field, a vector element, a keyed
+// record's field, a compound `+=`).  Values hand-computed: every arm runs, nothing changes.
+// "Reports nothing" is measured by hand on stderr — the suite reads no run-time output.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints which arms ran and the record.
+// HOLDS: `heap/H-WriteLocked/a-write-that-names-nothing-in-a-locked-store-is-no-lock-fault`.
+
+struct WlE { k: integer, v: integer }
+struct WlD { n: integer, name: text, xs: vector<integer>, hs: hash<WlE[k]> }
+
+fn wl_mk() -> WlD { WlD { n: 7, name: "abc", xs: [1, 2, 3], hs: [WlE { k: 5, v: 50 }] } }
+
+fn test_every_guarded_write_kind_runs_its_arm() {
+  d = wl_mk();
+  d#lock = true;
+  t = "";
+  d.n = 99 else { t += "a"; };
+  d.name = "zz" else { t += "b"; };
+  d.xs[1] = 77 else { t += "c"; };
+  d.hs[5].v = 9 else { t += "d"; };
+  d.n += 1 else { t += "e"; };
+  assert(t == "abcde", "arms: {t}");
+  assert(d.n == 7 && d.name == "abc" && len(d.xs) == 3 && d.xs[1] == 2 && (d.hs[5].v ?? -1) == 50, "the record moved: {d.n} {d.name} {d.xs}");
+}
+
+fn test_an_unlocked_guarded_write_takes_and_skips_its_arm() {
+  d = wl_mk();
+  t = "";
+  d.n = 99 else { t += "a"; };
+  d.xs[1] = 77 else { t += "c"; };
+  assert(t == "" && d.n == 99 && d.xs[1] == 77, "control: {t} {d.n} {d.xs}");
+}
+
+fn main() {
+  test_every_guarded_write_kind_runs_its_arm();
+  test_an_unlocked_guarded_write_takes_and_skips_its_arm();
+}

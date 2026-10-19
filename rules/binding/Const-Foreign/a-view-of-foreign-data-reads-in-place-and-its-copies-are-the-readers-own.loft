@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW OF FOREIGN DATA READS IN PLACE, AND ITS COPIES ARE THE READER'S OWN
+// (`@FR-Const-Foreign` crossed with `@FR-B-View` and `@FR-B-Copy`).  Foreign data "is traversed
+// and read, whole or in parts, in place"; a struct projection of it is a VIEW (B-View) and
+// reads the producer's values; and "the cure is a copy, which is the reader's own":
+// `c = t.0 + "!"`, `w = v` (B-Copy).  So a copy taken of the WHOLE record, of a vector member,
+// of a struct VIEW and of a text member each takes a write, and the foreign value keeps its
+// bytes.  The refusals beside this cell are the other half.
+//
+// Axes it MOVES: what is copied (the whole record, a vector member, a struct view, a text
+// member), what is read through a view (a member record, an element record by index, a loop
+// variable).  Values hand-computed from the producer `cf_mk`.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: the two refusal cells beside it.  The WHOLE-record copy `w = b` is its own file,
+//   `a-whole-copy-of-a-foreign-record-is-the-readers-own`, ignored while it is refused.
+
+struct CfIn { v: integer }
+struct CfBox { inner: CfIn, xs: vector<integer>, ins: vector<CfIn>, name: text }
+
+fn cf_mk() -> const CfBox {
+  CfBox { inner: CfIn { v: 1 }, xs: [1, 2], ins: [CfIn { v: 5 }, CfIn { v: 6 }], name: "ab" }
+}
+
+fn test_views_read_the_foreign_values_in_place() {
+  b = cf_mk();
+  s = b.inner;
+  e = b.ins[1];
+  sum = 0;
+  for x in b.ins { sum += x.v; }
+  assert(s.v == 1 && e.v == 6 && sum == 11 && len(b.ins) == 2, "views: {s.v} {e.v} {sum} {len(b.ins)}");
+}
+
+fn test_a_copy_of_a_struct_view_is_writable() {
+  b = cf_mk();
+  s = b.inner;
+  t = s;
+  t.v = 7;
+  assert(t.v == 7 && s.v == 1 && b.inner.v == 1, "copy of a view: {t.v} {s.v} {b.inner.v}");
+}
+
+fn test_a_copy_of_a_vector_member_is_writable() {
+  b = cf_mk();
+  w = b.xs;
+  w[0] = 9;
+  w += [3];
+  assert(len(w) == 3 && w[0] == 9 && w[2] == 3, "the copy: {len(w)} {w[0]} {w[2]}");
+  assert(len(b.xs) == 2 && b.xs[0] == 1, "the foreign member moved: {len(b.xs)} {b.xs[0]}");
+}
+
+fn test_a_computed_text_from_a_member_is_the_readers_own() {
+  b = cf_mk();
+  c = b.name + "!";
+  c += "?";
+  assert(c == "ab!?" && b.name == "ab", "text: {c} {b.name}");
+}
+
+fn main() {
+  test_views_read_the_foreign_values_in_place();
+  test_a_copy_of_a_struct_view_is_writable();
+  test_a_copy_of_a_vector_member_is_writable();
+  test_a_computed_text_from_a_member_is_the_readers_own();
+}

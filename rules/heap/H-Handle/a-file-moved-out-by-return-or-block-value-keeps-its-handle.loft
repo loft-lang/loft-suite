@@ -1,0 +1,118 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FILE MOVED OUT BY A RETURN OR A BLOCK VALUE KEEPS ITS HANDLE (`@FR-H-Handle` crossed with
+// `@FR-H-Move`).  H-Handle: every `File` record that names the handle holds a lease, the record
+// returns it once at its death, and "a `File` placed where it MOVES (H-Move) keeps the handle
+// open for the structure that holds it".  H-Move names four positions that move; the H-Move cell
+// `a-file-local-moved-into-a-structure-keeps-its-handle` measures the first two (a fresh value
+// and an owned local placed into a literal, an append, a field, a tuple).  This one measures the
+// other two — a `return` whose every value is an owned variable or a fresh value, and a block
+// whose value is a variable declared in that block — and a move that crosses two frames (a
+// record holding the File returned, then appended by the caller).  In each, the File's local
+// dies in the callee and the caller's later write must still land.
+//
+// Axes it MOVES: the moving position (`return f`, a `return` of an `if` over two owned or fresh
+// values, a block value, a record returned then appended), the arm taken.
+// Expected values by hand: the callee writes "x", the caller "y", so each file reads "xy".
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the file's contents.
+// HOLDS: the H-Move file cell.
+
+struct HmBox { h: File, tag: integer }
+
+fn scratch(tag: text) -> text {
+  d = "{temp_dir() ?? "/tmp"}/loft_suite_handle_move_{tag}_{now()}_{ticks()}";
+  mkdir_all(d);
+  d
+}
+
+fn clean(d: text) {
+  for n in list_dir(d) ?? [] { delete("{d}/{n}"); }
+  rmdir(d);
+}
+
+fn holds(p: text) -> text { file(p).content() ?? "" }
+
+fn hm_return(d: text) -> File {
+  f = file("{d}/ret.txt");
+  f += "x";
+  return f;
+}
+
+fn hm_return_join(d: text, c: boolean) -> File {
+  f = file("{d}/a.txt");
+  f += "x";
+  g = file("{d}/b.txt");
+  g += "x";
+  return if c { f } else { g };
+}
+
+fn hm_block(d: text) -> File {
+  r = {
+    f = file("{d}/blk.txt");
+    f += "x";
+    f
+  };
+  r
+}
+
+fn hm_box(d: text) -> HmBox {
+  f = file("{d}/box.txt");
+  f += "x";
+  HmBox { h: f, tag: 7 }
+}
+
+fn test_a_returned_file_keeps_its_handle() {
+  d = scratch("ret");
+  f = hm_return(d);
+  f += "y";
+  got = holds("{d}/ret.txt");
+  clean(d);
+  assert(got == "xy", "return f: {got}");
+}
+
+fn test_a_returned_join_keeps_the_arm_it_chose() {
+  d = scratch("join");
+  f = hm_return_join(d, true);
+  f += "y";
+  g = hm_return_join(d, false);
+  g += "z";
+  a = holds("{d}/a.txt");
+  b = holds("{d}/b.txt");
+  clean(d);
+  // the first call writes x to both and y to a; the second writes x to both again and z to b
+  assert(a == "xyx" && b == "xxz", "return of a join: {a} {b}");
+}
+
+fn test_a_block_value_keeps_its_handle() {
+  d = scratch("blk");
+  f = hm_block(d);
+  f += "y";
+  got = holds("{d}/blk.txt");
+  clean(d);
+  assert(got == "xy", "a block value: {got}");
+}
+
+fn test_a_record_returned_then_appended_keeps_its_handle() {
+  d = scratch("box");
+  bs: vector<HmBox> = [];
+  bs += [hm_box(d)];
+  h = bs[0].h;
+  h += "y";
+  got = holds("{d}/box.txt");
+  n = len(bs);
+  t = bs[0].tag;
+  clean(d);
+  assert(got == "xy" && n == 1 && t == 7, "a record moved across two frames: {got} {n} {t}");
+}
+
+fn main() {
+  test_a_returned_file_keeps_its_handle();
+  test_a_returned_join_keeps_the_arm_it_chose();
+  test_a_block_value_keeps_its_handle();
+  test_a_record_returned_then_appended_keeps_its_handle();
+}

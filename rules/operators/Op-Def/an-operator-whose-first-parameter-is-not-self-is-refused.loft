@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR WHOSE FIRST PARAMETER IS NOT `self` IS REFUSED (`@FR-Op-Def` crossed with
+// `@FR-Op-Back`).  Op-Def: refused unless "its first parameter is `self` of a user type
+// (Op-Home)"; Op-Back's table reads every row as a call on the LEFT operand (`a + b` is
+// `a.plus(b)`), which is what `self` names.  A `plus` of the right arity whose first
+// parameter is named otherwise is refused at the definition.
+//
+// @EXPECT_ERROR: its first parameter is `self`
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the method form.
+// HOLDS: `an-operator-name-that-is-no-form-is-refused` beside it.
+
+struct OdM { c: integer }
+
+operator plus(a: OdM, o: OdM) -> OdM { OdM { c: a.c + o.c } }
+
+fn main() {
+  m = OdM { c: 1 };
+  assert(m.c == 1, "unreachable");
+}

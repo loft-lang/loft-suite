@@ -1,0 +1,182 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WRITE THROUGH A VIEW OF THE CONTAINER DOES NOT REACH THE RESULT'S FIELD (`@FR-O-ViewField`
+// crossed with `@FR-B-View` and `@FR-F-Ret`).  O-ViewField lets a returned record's vector field
+// be delivered as a VIEW of the element the callee appended to a parameter's container — only
+// where no site can tell: "A declined view is a copy, never a stale read."  B-View makes a
+// struct projection of that container (`e = sc.ops[0]`, a loop variable, `p = sc.ops[0].pts[0]`)
+// an alias that writes through, and such a write is not a B-Disturb event (an overwrite of a
+// place moves nothing), so it is exactly the write a span test that looks for disturbance can
+// miss.  The result is the caller's own fresh value (F-Ret): what its field holds after the
+// write through the view is what the callee put there.
+//
+// Each site sits in its own function, because O-ViewField decides over EVERY call site of a
+// function at once and one declining site would hide the others.  Every site reads the field
+// only as a VALUE (a length, a `const` argument), which is what admits the view.
+//
+// Axes it MOVES: the view that writes (an element view, a loop variable, a nested element
+// view, a direct nested place, a CALLEE handed the container, an element or a point), the depth of the write (a field of an element of the viewed
+// vector, a sibling scalar field of the element).  Values hand-computed: `vf_pts(3)` is
+// (0,0) (1,2) (2,4), whose sum is 9.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.  The view is a
+// native rewrite; the interpreter keeps the record form and measures the oracle.
+//
+// @falsified-at: none — a conformance guard; every cell but the callee-handed-the-container one
+//   answered as hand-computed on 18594597b, interpret and native.  That cell is a live
+//   silent-wrong `--native` defect, `@IGNORE`d below.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the result field's sum and the container's.
+// HOLDS: loft `tests/scripts/164-view-field.loft` (the admissions and declines).
+
+struct VfPt { px: integer = 0, py: integer = 0 }
+struct VfOp { pts: vector<VfPt>, ow: integer = 0 }
+struct VfSc { ops: vector<VfOp>, seen: integer = 0 }
+struct VfMark { matched: boolean = false, mpts: vector<VfPt> }
+
+fn vf_pts(n: integer) -> vector<VfPt> {
+  o: vector<VfPt> = [];
+  for i in 0..n { o += [VfPt { px: i, py: i * 2 }]; }
+  o
+}
+
+fn vf_sum(v: const vector<VfPt>) -> integer { t = 0; for p in v { t += p.px + p.py; } t }
+
+fn vf1(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+fn vf2(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+fn vf3(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+fn vf4(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+fn vf5(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+
+fn vf6(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+fn vf7(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+fn vf8(sc: VfSc, n: integer) -> VfMark {
+  p = vf_pts(n);
+  sc.ops += [VfOp { pts: p, ow: n }];
+  VfMark { matched: true, mpts: p }
+}
+
+// The writes a CALLEE makes: the container handed whole, one element handed, one point handed.
+fn vf_write_container(s: VfSc) { s.ops[0].pts[1].py = 70; }
+fn vf_write_element(o: VfOp) { o.pts[0].px = 50; }
+fn vf_write_point(q: VfPt) { q.px = 40; }
+
+fn test_an_element_view_writing_a_point_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf1(sc, 3);
+  e = sc.ops[0];
+  e.pts[0].px = 50;
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "an element view's write reached the result: {got} {len(m.mpts)}");
+  assert(vf_sum(sc.ops[0].pts) == 59, "the view did not write through: {vf_sum(sc.ops[0].pts)}");
+}
+
+fn test_a_loop_variable_writing_a_point_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf2(sc, 3);
+  for o in sc.ops { o.pts[1].py = 70; }
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "a loop variable's write reached the result: {got} {len(m.mpts)}");
+  assert(vf_sum(sc.ops[0].pts) == 77, "the loop variable did not write through: {vf_sum(sc.ops[0].pts)}");
+}
+
+fn test_a_nested_element_view_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf3(sc, 3);
+  q = sc.ops[0].pts[2];
+  q.px = 40;
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "a nested view's write reached the result: {got} {len(m.mpts)}");
+  assert(vf_sum(sc.ops[0].pts) == 47, "the nested view did not write through: {vf_sum(sc.ops[0].pts)}");
+}
+
+fn test_a_direct_nested_write_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf4(sc, 3);
+  sc.ops[0].pts[0].py = 30;
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "a direct nested write reached the result: {got} {len(m.mpts)}");
+  assert(vf_sum(sc.ops[0].pts) == 39, "the direct write was lost: {vf_sum(sc.ops[0].pts)}");
+}
+
+fn test_a_sibling_scalar_write_leaves_the_result_and_the_points() {
+  sc = VfSc { ops: [] };
+  m = vf5(sc, 3);
+  e = sc.ops[0];
+  e.ow = 8;
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3 && sc.ops[0].ow == 8, "a sibling write: {got} {len(m.mpts)} {sc.ops[0].ow}");
+}
+
+// These three sites read NOTHING of the container after the call: the site's only reads are
+// the result's length and a `const` argument, which is the shape the view admits.
+// @IGNORE — DEFECT, silent-wrong, `--native` only (18594597b): the result reads 77 where its
+//   own copy holds 9 — the callee's write `s.ops[0].pts[1].py = 70` reaches it; the interpreter
+//   answers 9.  The site
+//   test licenses a user call by the callee's B-DISTURB summary (relocations), which a
+//   fixed-width write into the viewed vector's element is not (`hoist.rs` `namings_avoid_place`,
+//   the `n_` call arm).  `LOFT_NO_VIEW_FIELD=1` answers 9.
+fn test_a_callee_writing_into_the_container_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf6(sc, 3);
+  vf_write_container(sc);
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "a callee's write into the container reached the result: {got} {len(m.mpts)}");
+}
+
+fn test_a_callee_writing_into_the_element_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf7(sc, 3);
+  vf_write_element(sc.ops[0]);
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "a callee's write into the element reached the result: {got} {len(m.mpts)}");
+}
+
+fn test_a_callee_writing_a_point_does_not_reach_the_result() {
+  sc = VfSc { ops: [] };
+  m = vf8(sc, 3);
+  vf_write_point(sc.ops[0].pts[0]);
+  got = vf_sum(m.mpts);
+  assert(got == 9 && len(m.mpts) == 3, "a callee's write into a point reached the result: {got} {len(m.mpts)}");
+}
+
+fn main() {
+  test_an_element_view_writing_a_point_does_not_reach_the_result();
+  test_a_loop_variable_writing_a_point_does_not_reach_the_result();
+  test_a_nested_element_view_does_not_reach_the_result();
+  test_a_direct_nested_write_does_not_reach_the_result();
+  test_a_sibling_scalar_write_leaves_the_result_and_the_points();
+  // test_a_callee_writing_into_the_container_does_not_reach_the_result();  -- @IGNORE above
+  test_a_callee_writing_into_the_element_does_not_reach_the_result();
+  test_a_callee_writing_a_point_does_not_reach_the_result();
+}

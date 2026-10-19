@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO ALIASES ONE VALUE APART ANSWER AN OVERFLOW ALIKE (`@FR-L-Narrow-Spare` crossed with
+// `@FR-L-Narrow-Alias`).  L-Narrow-Alias: a stored width is written in a `type` alias and
+// nowhere else, so whether a declared range leaves a width's top code SPARE is decidable at the
+// declaration.  L-Narrow-Spare: that spareness must not decide semantics — every slot of a
+// non-null narrow type gives the type's DEFAULT for a value that does not fit, "two ranges one
+// value apart would otherwise answer differently".  So `limit(0, 254) size(1)` (code 255 spare)
+// and `limit(0, 255) size(1)` (no code spare) answer an overflow the same way, and so do
+// `limit(1000, 1254)` and `limit(1000, 1255)`, whose default is the bound nearest zero, 1000.
+// The cell beside this one (`1634-…`) moves the frame boundary over ranges with many spare
+// codes; this one holds the slot kinds and moves the spareness by exactly one value.
+//
+// The unfitting value arrives through the compound step `x += n`, the one place the language
+// cannot demand a spelling and takes the default (it advises `narrow-fallback`).
+//
+// Axes it MOVES: spare code (one, none), default (0, the minimum 1000), slot kind (local,
+// field, element, parameter-and-return).  Values hand-computed: every overflow reads the
+// default and none reads null.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the four answers.
+// HOLDS: `1634-a-narrow-types-default-is-the-same-at-every-frame-boundary` beside it.
+
+type NsSp = integer limit(0, 254) size(1);
+type NsFu = integer limit(0, 255) size(1);
+type NsHiSp = integer limit(1000, 1254) size(1);
+type NsHiFu = integer limit(1000, 1255) size(1);
+
+struct NsR { s: NsSp, f: NsFu, hs: NsHiSp, hf: NsHiFu }
+
+fn ns_bump_s(p: NsSp) -> NsSp { p += 3; p }
+fn ns_bump_f(p: NsFu) -> NsFu { p += 3; p }
+fn ns_bump_hs(p: NsHiSp) -> NsHiSp { p += 3; p }
+fn ns_bump_hf(p: NsHiFu) -> NsHiFu { p += 3; p }
+
+fn test_a_local_overflow() {
+  a: NsSp = 254;
+  a += 1;
+  b: NsFu = 255;
+  b += 1;
+  c: NsHiSp = 1254;
+  c += 1;
+  d: NsHiFu = 1255;
+  d += 1;
+  assert(a == 0 && b == 0 && c == 1000 && d == 1000, "locals: {a} {b} {c} {d}");
+  assert(a != null && b != null, "a non-null narrow read null");
+}
+
+fn test_a_field_overflow() {
+  r = NsR { s: 250, f: 250, hs: 1250, hf: 1250 };
+  r.s += 10;
+  r.f += 10;
+  r.hs += 10;
+  r.hf += 10;
+  assert(r.s == 0 && r.f == 0 && r.hs == 1000 && r.hf == 1000, "fields: {r.s} {r.f} {r.hs} {r.hf}");
+}
+
+fn test_an_element_overflow() {
+  vs: vector<NsSp> = [254, 1];
+  vf: vector<NsFu> = [255, 1];
+  vs[0] += 1;
+  vf[0] += 1;
+  assert(len(vs) == 2 && len(vf) == 2 && vs[0] == 0 && vf[0] == 0 && vs[1] == 1 && vf[1] == 1, "elements: {vs[0]} {vf[0]}");
+}
+
+fn test_a_parameter_overflow_returned() {
+  a = ns_bump_s(253);
+  b = ns_bump_f(254);
+  c = ns_bump_hs(1253);
+  d = ns_bump_hf(1254);
+  assert(a == 0 && b == 0 && c == 1000 && d == 1000, "parameters: {a} {b} {c} {d}");
+}
+
+fn main() {
+  test_a_local_overflow();
+  test_a_field_overflow();
+  test_an_element_overflow();
+  test_a_parameter_overflow_returned();
+}

@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BYTE MOVE OF A REFUSED DROPPABLE IS LEGAL AND RUNS NO HOOK (`@FR-H-Copy-Refuse` crossed with
+// `@FR-H-Lease`, `@FR-H-Move` and `@FR-H-Drop`).  H-Lease: "Moving bytes without making a
+// structure — a vector's growth, a keyed collection's rebalance, a store's compaction — is not
+// a copy."  So a type that owns a droppable and declares NO `OpCopy` — every copy of it is
+// refused (H-Copy-Refuse) — still grows in a vector, reorders in a `sorted` and rehashes in a
+// `hash`, and a value the function owns placed into a vector is a MOVE (H-Move), not a copy.
+// None of these is refused and none runs a hook; each record is dropped once, at its
+// container's death (H-Drop).  The `H-Drop` cell `two-structures-are-two-leases-and-a-byte-move-
+// is-neither` measures the byte moves on a type WITH `OpCopy`; this one removes the `OpCopy`,
+// which is the axis that decides whether the compiler may call a byte move a copy.
+//
+// Axes it MOVES: the byte move (vector growth, a member two deep in a growing vector, a sorted
+// reorder, a hash growth), the placement (a fresh call result, an owned local moved).
+// Traces hand-computed: D<n> a drop, L<n> a length; a keyed collection's records are the
+// author's to release (`@FR-H-Drop-Not`), so their traces carry no D.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts (each compares the whole trace).
+// ARMED: no instrument — each hook writes this cell's trace file.
+// WITNESS: each message prints the trace.
+// HOLDS: the refusal cell beside it.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_refuse_bytemove.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct BmR { id: integer }
+fn OpDrop(self: BmR) { note("D{self.id}"); }
+fn mk(i: integer) -> BmR { BmR { id: i } }
+struct BmMid { r: BmR, n: integer }
+struct BmK { k: integer, r: BmR }
+
+fn grow() { v: vector<BmR> = []; for i in 0..40 { v += [mk(i)]; } note("L{len(v)}"); }
+fn grow_deep() { v: vector<BmMid> = []; for i in 0..30 { v += [BmMid { r: mk(i), n: i }]; } note("L{len(v)}"); }
+fn reorder() { s: sorted<BmK[k]> = [BmK { k: 50, r: mk(50) }]; for i in 0..5 { s += [BmK { k: 10 - i, r: mk(10 - i) }]; } note("L{len(s)}"); }
+fn rehash() { h: hash<BmK[k]> = []; for i in 0..40 { h += [BmK { k: i, r: mk(i) }]; } note("L{len(h)}"); }
+fn moved() { a = mk(7); v: vector<BmR> = []; v += [a]; note("L{len(v)}"); }
+
+fn upto(n: integer) -> text {
+  t = "";
+  for i in 0..n { t += ",D{i}"; }
+  t
+}
+
+fn test_a_growing_vector_runs_no_hook_until_it_dies() {
+  drain(); grow();
+  t = drain();
+  assert(t == "L40{upto(40)}", "vector growth: {t}");
+}
+
+fn test_a_member_two_deep_in_a_growing_vector_runs_no_hook() {
+  drain(); grow_deep();
+  t = drain();
+  assert(t == "L30{upto(30)}", "nested growth: {t}");
+}
+
+fn test_a_sorted_reorder_and_a_hash_growth_run_no_hook() {
+  drain(); reorder();
+  t1 = drain();
+  rehash();
+  t2 = drain();
+  assert(t1 == "L6" && t2 == "L40", "keyed byte moves: {t1} | {t2}");
+}
+
+fn test_an_owned_local_moved_into_a_vector_drops_once() {
+  drain(); moved();
+  t = drain();
+  assert(t == "L1,D7", "a move: {t}");
+}
+
+fn main() {
+  test_a_growing_vector_runs_no_hook_until_it_dies();
+  test_a_member_two_deep_in_a_growing_vector_runs_no_hook();
+  test_a_sorted_reorder_and_a_hash_growth_run_no_hook();
+  test_an_owned_local_moved_into_a_vector_drops_once();
+}

@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONVERSION IS NAMED FOR THE TYPE IT ANSWERS (`@FR-Op-Conv` crossed with `@FR-Op-Back`).
+// Op-Back's row `x as T` is the call `x.to_t()`; Op-Conv says how `t` is spelled — T's name in
+// snake case, an all-capital run one word (`HTTPRequest` → `http_request`), a digit staying with
+// the word before it (`Vec2` → `vec2`) — and that T is a base type or a non-generic struct or
+// enum, `x as text` calling `to_text` with an EMPTY spec where only the spec form is defined.
+// The Op-Conv cell beside this one measures text and struct sources into one-word structs; this
+// one moves the TARGET's spelling (two words, a capital run, a digit) and its kind (a struct, an
+// enum, `integer`, `float`, `boolean`, `text` through the spec form).
+//
+// Axes it MOVES: the target name's shape, the target kind, `as text` against `"{x}"` and
+// `"{x:spec}"`.  Values hand-computed from the definitions.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `513-first-grade-conversions` beside it; the two refusals beside it.
+
+struct DateTime { s: integer }
+struct HTTPRequest { n: integer }
+struct Vec2 { x: integer, y: integer }
+enum OcColour { Red, Green }
+struct OcCel { deg: integer }
+
+operator to_date_time(self: OcCel) -> DateTime { DateTime { s: self.deg * 10 } }
+operator to_http_request(self: OcCel) -> HTTPRequest { HTTPRequest { n: self.deg + 1 } }
+operator to_vec2(self: OcCel) -> Vec2 { Vec2 { x: self.deg, y: -self.deg } }
+operator to_oc_colour(self: OcCel) -> OcColour { if self.deg > 10 { OcColour.Green } else { OcColour.Red } }
+operator to_integer(self: OcCel) -> integer { self.deg * 3 }
+operator to_float(self: OcCel) -> float { self.deg as float + 0.5 }
+operator to_boolean(self: OcCel) -> boolean { self.deg != 0 }
+operator to_text(self: OcCel, spec: text) -> text { "C<{spec}>{self.deg}" }
+
+fn test_struct_targets_of_every_name_shape() {
+  c = OcCel { deg: 4 };
+  d = c as DateTime;
+  h = c as HTTPRequest;
+  v = c as Vec2;
+  assert(d.s == 40 && h.n == 5 && v.x == 4 && v.y == -4, "structs: {d.s} {h.n} {v.x} {v.y}");
+}
+
+fn test_an_enum_and_the_base_targets() {
+  c = OcCel { deg: 4 };
+  w = OcCel { deg: 12 };
+  k = c as OcColour;
+  kw = w as OcColour;
+  i = c as integer;
+  f = c as float;
+  b = c as boolean;
+  assert(k == OcColour.Red && kw == OcColour.Green && i == 12 && f == 4.5 && b, "enum and base: {i} {f} {b}");
+}
+
+fn test_text_through_the_spec_form() {
+  c = OcCel { deg: 4 };
+  t = c as text;
+  s = "[{c}] [{c:x}]";
+  assert(t == "C<>4" && s == "[C<>4] [C<x>4]", "text: {t} {s}");
+}
+
+fn main() {
+  test_struct_targets_of_every_name_shape();
+  test_an_enum_and_the_base_targets();
+  test_text_through_the_spec_form();
+}

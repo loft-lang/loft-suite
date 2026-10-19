@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SITE THAT TAKES THE FIELD KEEPS EVERY SITE'S COPY (`@FR-O-ViewField` crossed with
+// `@FR-O-Move`).  O-Move: a returned heap value's ownership moves to the caller's binding, and
+// "if the return BORROWS a parameter, the return type records it and the caller COPIES to obtain
+// its own store".  O-ViewField lets a returned record's vector field be such a borrow — a view
+// of the element the callee appended — only where EVERY site merely reads it: "One site that
+// stores, appends to, iterates, rebinds, returns or hands the field to a by-value parameter
+// declines the function whole, and every site keeps the owning copy."  So beside a site that
+// only reads, a second site that RETURNS the record up a frame, one that APPENDS to the field,
+// one that ITERATES it and one that hands it to a by-value parameter that writes it — each in
+// its own function pair — and in every one the result is the caller's own: a write to the
+// container after the call reaches no result, and a write to the result reaches no container.
+//
+// Axes it MOVES: the consuming site's use (return the record, append to the field, iterate it,
+// pass it by value to a writer), and the reading site beside it.  Values hand-computed:
+// `mv_pts(3)` is (0,0) (1,2) (2,4), sum 9.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the result's and the container's sums.
+// HOLDS: loft `tests/scripts/164-view-field.loft` (the decline cells).
+
+struct MvPt { px: integer = 0, py: integer = 0 }
+struct MvOp { pts: vector<MvPt>, ow: integer = 0 }
+struct MvSc { ops: vector<MvOp>, seen: integer = 0 }
+struct MvMark { matched: boolean = false, mpts: vector<MvPt> }
+
+fn mv_pts(n: integer) -> vector<MvPt> {
+  o: vector<MvPt> = [];
+  for i in 0..n { o += [MvPt { px: i, py: i * 2 }]; }
+  o
+}
+
+fn mv_sum(v: const vector<MvPt>) -> integer { t = 0; for p in v { t += p.px + p.py; } t }
+
+fn mv_a(sc: MvSc, n: integer) -> MvMark { p = mv_pts(n); sc.ops += [MvOp { pts: p, ow: n }]; MvMark { matched: true, mpts: p } }
+fn mv_b(sc: MvSc, n: integer) -> MvMark { p = mv_pts(n); sc.ops += [MvOp { pts: p, ow: n }]; MvMark { matched: true, mpts: p } }
+fn mv_c(sc: MvSc, n: integer) -> MvMark { p = mv_pts(n); sc.ops += [MvOp { pts: p, ow: n }]; MvMark { matched: true, mpts: p } }
+fn mv_d(sc: MvSc, n: integer) -> MvMark { p = mv_pts(n); sc.ops += [MvOp { pts: p, ow: n }]; MvMark { matched: true, mpts: p } }
+
+fn mv_up(sc: MvSc) -> MvMark { mv_a(sc, 3) }
+fn mv_scribble(v: vector<MvPt>) -> integer { v[0].px = 500; mv_sum(v) }
+
+fn mv_reader_a() -> integer { sc = MvSc { ops: [] }; m = mv_a(sc, 3); len(m.mpts) * 100 + mv_sum(m.mpts) }
+fn mv_reader_b() -> integer { sc = MvSc { ops: [] }; m = mv_b(sc, 3); len(m.mpts) * 100 + mv_sum(m.mpts) }
+fn mv_reader_c() -> integer { sc = MvSc { ops: [] }; m = mv_c(sc, 3); len(m.mpts) * 100 + mv_sum(m.mpts) }
+fn mv_reader_d() -> integer { sc = MvSc { ops: [] }; m = mv_d(sc, 3); len(m.mpts) * 100 + mv_sum(m.mpts) }
+
+fn test_a_record_returned_up_a_frame_is_the_callers_own() {
+  sc = MvSc { ops: [] };
+  m = mv_up(sc);
+  sc.ops[0].pts[0].px = 70;
+  m.mpts[1].py = 80;
+  assert(mv_sum(m.mpts) == 87 && mv_sum(sc.ops[0].pts) == 79, "returned up: {mv_sum(m.mpts)} {mv_sum(sc.ops[0].pts)}");
+  assert(mv_reader_a() == 309, "the reading site: {mv_reader_a()}");
+}
+
+fn test_an_append_to_the_field_reaches_no_container() {
+  sc = MvSc { ops: [] };
+  m = mv_b(sc, 3);
+  m.mpts += [MvPt { px: 10, py: 10 }];
+  assert(len(m.mpts) == 4 && len(sc.ops[0].pts) == 3 && mv_sum(sc.ops[0].pts) == 9, "append: {len(m.mpts)} {len(sc.ops[0].pts)}");
+  assert(mv_reader_b() == 309, "the reading site: {mv_reader_b()}");
+}
+
+fn test_an_iteration_after_a_container_write_reads_the_copy() {
+  sc = MvSc { ops: [] };
+  m = mv_c(sc, 3);
+  sc.ops[0].pts[2].px = 60;
+  t = 0;
+  for q in m.mpts { t += q.px; }
+  assert(t == 3 && mv_sum(sc.ops[0].pts) == 67, "iterate: {t} {mv_sum(sc.ops[0].pts)}");
+  assert(mv_reader_c() == 309, "the reading site: {mv_reader_c()}");
+}
+
+fn test_a_by_value_writer_of_the_field_reaches_no_container() {
+  sc = MvSc { ops: [] };
+  m = mv_d(sc, 3);
+  w = mv_scribble(m.mpts);
+  // the writer's own copy sums 500 + 0 + 1 + 2 + 2 + 4; neither the result nor the container moved
+  assert(w == 509 && mv_sum(sc.ops[0].pts) == 9, "by-value writer: {w} {mv_sum(sc.ops[0].pts)}");
+  assert(mv_reader_d() == 309, "the reading site: {mv_reader_d()}");
+}
+
+fn main() {
+  test_a_record_returned_up_a_frame_is_the_callers_own();
+  test_an_append_to_the_field_reaches_no_container();
+  test_an_iteration_after_a_container_write_reads_the_copy();
+  test_a_by_value_writer_of_the_field_reaches_no_container();
+}

@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REPETITION CAPTURE IS A DENSE VECTOR OF ITS ELEMENT (`@FR-P-Rep-Ty` crossed with `@FR-N-Dense`).
+// P-Rep-Ty: the capture inside `(a)*` / `(a)+` has type `vector<τ>` "via (N-Dense)"; N-Dense:
+// `vector<τ>` stores τ — its elements are non-null unless written `vector<τ?>`.  So a capture —
+// of a group run over a struct-enum and of a scalar typed rest — is an ordinary dense vector: it
+// is returned as, bound to and passed as a `vector<τ>`, it takes appends of τ, its elements read
+// non-null, and storing a `null` into it is N-Store's warning for a dense element.
+//
+// Axes it MOVES: the run (a group `(x: Num)*`, a typed rest `xs: integer*`), where the capture
+// goes (returned, bound to a declared `vector<τ>`, passed to a `vector<τ>` parameter, appended
+// to), the element read (iterated, indexed by a constant).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: `null` is stored into element 0 of this vector literal of the non-null scalar type `integer`
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts and the warning.
+// ARMED: no instrument.
+// WITNESS: each message prints the lengths and sums.
+// HOLDS: the P-Rep cells.
+
+enum PtToken { PtPunct { #lexeme sym: text }, PtNum { value: integer } }
+
+fn pt_p(s: text) -> PtToken { PtPunct { sym: s } }
+fn pt_n(i: integer) -> PtToken { PtNum { value: i } }
+
+fn pt_total(v: vector<PtToken>) -> integer {
+  t = 0;
+  for e in v { if e is PtNum { value } { t += value; } }
+  t
+}
+
+fn pt_grab(v: vector<PtToken>) -> vector<PtToken> {
+  match v { ["(", (x: PtNum)*, ")"] => x, _ => [] }
+}
+
+fn pt_rest(v: vector<integer>) -> vector<integer> {
+  match v { [0, xs: integer*] => xs, _ => [] }
+}
+
+fn pt_null_into(v: vector<integer>) -> integer {
+  match v { [0, xs: integer*] => { xs += [null]; len(xs) }, _ => -1 }
+}
+
+fn test_a_group_capture_is_a_dense_vector() {
+  v = [pt_p("("), pt_n(3), pt_n(4), pt_p(")")];
+  x = pt_grab(v);
+  assert(len(x) == 2 && pt_total(x) == 7, "returned: {len(x)} {pt_total(x)}");
+  y: vector<PtToken> = match v { ["(", (q: PtNum)*, ")"] => q, _ => [] };
+  y += [pt_n(9)];
+  assert(len(y) == 3 && pt_total(y) == 16 && y[0] != null, "bound and appended: {len(y)} {pt_total(y)}");
+}
+
+fn test_a_typed_rest_is_a_dense_vector() {
+  z = pt_rest([0, 5, 6]);
+  z += [7];
+  s = 0;
+  for e in z { s += e; }
+  assert(len(z) == 3 && s == 18 && z[0] == 5 && z[0] != null, "rest: {len(z)} {s}");
+}
+
+fn test_a_null_into_a_capture_is_a_dense_elements_warning() {
+  assert(pt_null_into([0, 5, 6]) == 3, "the capture took the element: {pt_null_into([0, 5, 6])}");
+}
+
+fn main() {
+  test_a_group_capture_is_a_dense_vector();
+  test_a_typed_rest_is_a_dense_vector();
+  test_a_null_into_a_capture_is_a_dense_elements_warning();
+}

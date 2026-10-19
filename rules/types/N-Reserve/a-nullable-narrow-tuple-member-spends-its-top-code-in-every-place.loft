@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE NARROW TUPLE MEMBER SPENDS ITS TOP CODE IN EVERY PLACE (`@FR-N-Reserve` crossed with
+// `@FR-L-Tuple`).  N-Reserve: a `u8?` ranges over 0..=254 "in a local, a field, an element, a
+// parameter and a return alike — and in a TUPLE MEMBER … `layout.md` `(L-Tuple)` makes a member a
+// field, and since loft#1640 it is bounded like one"; a RUN-TIME value outside the usable range
+// reads null, and "`e as u8?` yields `255` … assign the same cast into a `u8?` and it is null".
+// So a tuple member typed `u8?` given the in-flight 255 holds null whichever way the tuple is
+// made — a member assignment, a literal bound to a declared tuple local, a literal returned
+// through a declared tuple return, a literal stored as a vector element — and a dense `u8`
+// member's unfitting value takes its default.  254 fits everywhere.
+//
+// Axes it MOVES: how the member is written (member assignment, literal into a local, literal
+// returned, literal as a vector element), the value (254, 255 in flight), the nullability.
+// Values hand-computed; -1 stands for null.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell but the two LITERAL ones answered as
+//   hand-computed on 18594597b, interpret and native.  Those two are a live silent-wrong
+//   defect, `@IGNORE`d below: a tuple literal's member keeps the in-flight 255.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the members, -1 for null.
+// HOLDS: `a-constant-a-nullable-narrow-tuple-member-cannot-hold-is-refused` beside it.
+
+fn tr_mk(n: integer) -> (u8?, integer) { (n as u8?, n) }
+
+fn test_a_member_assignment_lands_null() {
+  m = 255;
+  x: (u8?, integer) = (5, 1);
+  x.0 = m as u8?;
+  assert(x.0 == null && x.1 == 1, "member assignment: {x.0 ?? -1}");
+}
+
+fn test_a_literal_stored_as_an_element_lands_null() {
+  n = 254;
+  m = 255;
+  v: vector<(u8?, integer)> = [(n as u8?, 3), (m as u8?, 4)];
+  assert(len(v) == 2 && (v[0].0 ?? -1) == 254 && v[1].0 == null && v[1].1 == 4, "element: {v[0].0 ?? -1} {v[1].0 ?? -1}");
+}
+
+fn test_a_dense_narrow_member_takes_its_default() {
+  w: (u8, integer) = (250, 1);
+  w.0 += 10;
+  assert(w.0 == 0 && w.1 == 1, "dense member: {w.0}");
+}
+
+fn test_a_fitting_value_is_kept_everywhere() {
+  n = 254;
+  t: (u8?, integer) = (n as u8?, 1);
+  r = tr_mk(254);
+  assert((t.0 ?? -1) == 254 && (r.0 ?? -1) == 254 && r.1 == 254, "254: {t.0 ?? -1} {r.0 ?? -1}");
+}
+
+// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): `u.0` reads 255 — the reserved null
+//   code of a `u8?`, as a value — and `u.0 == null` is false.  A tuple literal's members pass
+//   through `convert` alone (`src/parser/convert.rs`, the per-member loop of the tuple arm), which
+//   applies N-Store but not the `guard_declared_range` the member assignment applies
+//   (`src/parser/expressions.rs`, the loft#1640 branch).
+fn test_a_literal_bound_to_a_declared_tuple_lands_null() {
+  m = 255;
+  u: (u8?, integer) = (m as u8?, 2);
+  assert(u.0 == null && u.1 == 2, "literal into a local: {u.0 ?? -1}");
+}
+
+// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): `s.0` reads 255; the same literal
+//   arm, reached through a declared `-> (u8?, integer)` return.
+fn test_a_literal_returned_through_a_declared_tuple_lands_null() {
+  s = tr_mk(255);
+  assert(s.0 == null && s.1 == 255, "literal returned: {s.0 ?? -1}");
+}
+
+fn main() {
+  test_a_member_assignment_lands_null();
+  test_a_literal_stored_as_an_element_lands_null();
+  test_a_dense_narrow_member_takes_its_default();
+  test_a_fitting_value_is_kept_everywhere();
+}

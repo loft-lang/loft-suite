@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TYPED REST LEAVES ITS TAIL WHERE A GREEDY RUN TAKES IT (`@FR-P-Rep-Scalar` crossed with
+// `@FR-P-Rep`).  P-Rep: `(a)*` matches greedily from the cursor and stops at the FIRST element
+// `a` fails on — the run is not shortened afterwards for what follows it.  P-Rep-Scalar: a scalar
+// repetition `xs:T*` names the vector's own element type, so every element matches it "and
+// (P-Rep)'s greedy run would take all of them.  It is instead the slice's ONE rest", with the
+// fixed tail read from the END.  So the same shape — a run, then a tail the run's own pattern
+// also matches — answers differently by kind: the typed rest gives the last element to the
+// tail; a group run over a struct-enum takes it and the tail finds nothing, while a tail the
+// group pattern does NOT match still follows the run.
+//
+// Axes it MOVES: the run kind (a scalar typed rest, a group run over a variant), the tail (a
+// literal the run also matches, a variant pattern the run also matches, a bare name, a variant
+// the run does not match), the subject (all elements alike, a different last element, a
+// different element mid-run, empty).  Values hand-computed from the two rules.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `a-scalar-repetition-is-a-typed-rest` beside it, `P-Rep/35m-mid-slice-repetition`.
+
+enum PrW { PrV { n: integer }, PrZ }
+
+fn pr_v(i: integer) -> PrW { PrV { n: i } }
+
+fn rest_int(v: vector<integer>) -> text { match v { [xs: integer*, 5] => "{len(xs)}", _ => "none" } }
+fn rest_text(v: vector<text>) -> text { match v { [ws: text*, "x"] => "{ws}", _ => "none" } }
+fn run_then_variant(w: vector<PrW>) -> text { match w { [(x: PrV)*, PrV { n }] => "{len(x)} {n}", _ => "none" } }
+fn run_then_other(w: vector<PrW>) -> text { match w { [(x: PrV)*, PrZ] => "{len(x)}", _ => "none" } }
+fn run_then_name(w: vector<PrW>) -> text { match w { [(x: PrV)*, last] => "{len(x)} {last is PrZ}", _ => "none" } }
+
+fn test_a_typed_rest_gives_the_last_element_to_its_tail() {
+  t = "{rest_int([5, 5, 5])}|{rest_int([0, 0, 5])}|{rest_int([5])}|{rest_int([])}";
+  assert(t == "2|2|0|none", "integer rest: {t}");
+  u = rest_text(["x", "x"]);
+  assert(u == "[\"x\"]", "text rest: {u}");
+}
+
+fn test_a_greedy_run_takes_a_tail_its_own_pattern_matches() {
+  all_v = [pr_v(1), pr_v(2), pr_v(3)];
+  t = "{run_then_variant(all_v)}|{run_then_name(all_v)}";
+  assert(t == "none|none", "greedy run over a matching tail: {t}");
+}
+
+fn test_a_greedy_run_leaves_a_tail_it_does_not_match() {
+  w2: vector<PrW> = [pr_v(1), pr_v(2), PrZ];
+  w3: vector<PrW> = [pr_v(1), PrZ, pr_v(2), PrZ];
+  t = "{run_then_other(w2)}|{run_then_name(w2)}|{run_then_variant(w2)}|{run_then_other(w3)}";
+  assert(t == "2|2 true|none|none", "greedy run before another tail: {t}");
+}
+
+fn main() {
+  test_a_typed_rest_gives_the_last_element_to_its_tail();
+  test_a_greedy_run_takes_a_tail_its_own_pattern_matches();
+  test_a_greedy_run_leaves_a_tail_it_does_not_match();
+}

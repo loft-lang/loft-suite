@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (both backends, 18594597b): `w = b` of a `-> const T` RECORD is refused at
+//   the first write through `w`, "it holds read-only data … copy it first (`w = w`, a bind
+//   copies)" — the cure it names is the bind it refused.  `Parser::value_is_foreign` reads a
+//   bare `Var` of a foreign-bound local as foreign, so the copy is marked value-const.
+//
+// A WHOLE COPY OF A FOREIGN RECORD IS THE READER'S OWN (`@FR-Const-Foreign` crossed with
+// `@FR-B-Copy` and `@FR-B-View`).  Const-Foreign: "The cure is a copy, which is the reader's
+// own: … `w = v` (B-Copy)."  A plain whole-value bind copies (B-Copy), so `w = b` of a record
+// a `-> const T` producer answered is writable, every member of it — a member record, a vector
+// member, a text member — and the foreign value keeps its bytes.  The same cure already holds
+// for a `vector<u8>` producer (loft `tests/issues.rs` `a_copy_of_foreign_data_is_writable`),
+// for a copy of a struct VIEW and for a vector member's copy (the cell beside this one); this
+// cell moves the copied value to the WHOLE record.
+//
+// Values hand-computed from the producer `cf_mk`.
+//
+// @falsified-at: none — written against a live defect; it fails on 18594597b on both backends
+//   with the compile refusal quoted above.
+// CHANNEL: the compile diagnostic, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: `a-view-of-foreign-data-reads-in-place-and-its-copies-are-the-readers-own`.
+
+struct CfIn { v: integer }
+struct CfBox { inner: CfIn, xs: vector<integer>, name: text }
+
+fn cf_mk() -> const CfBox { CfBox { inner: CfIn { v: 1 }, xs: [1, 2], name: "ab" } }
+
+fn main() {
+  b = cf_mk();
+  w = b;
+  w.inner.v = 9;
+  w.xs += [3];
+  w.name = "zz";
+  assert(w.inner.v == 9 && len(w.xs) == 3 && w.name == "zz", "the copy: {w.inner.v} {len(w.xs)} {w.name}");
+  assert(b.inner.v == 1 && len(b.xs) == 2 && b.name == "ab", "the foreign value moved: {b.inner.v} {len(b.xs)} {b.name}");
+}

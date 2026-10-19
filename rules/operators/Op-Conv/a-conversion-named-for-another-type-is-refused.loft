@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONVERSION NAMED FOR ANOTHER TYPE IS REFUSED (`@FR-Op-Conv` crossed with `@FR-Op-Def`).
+// Op-Conv: `x as T` calls `x.to_t()` "and the definition answers exactly T", `t` being T's
+// snake-case name — so `Vec2`'s conversion is `to_vec2`.  Op-Def checks a definition where it is
+// written; `operator to_vec` answering a `Vec2` names no type it answers and is refused there.
+//
+// @EXPECT_ERROR: whose conversion is `to_vec2`
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the right conversion name.
+// HOLDS: `a-conversion-is-named-for-the-type-it-answers` beside it.
+
+struct Vec2 { x: integer }
+struct OcCel { deg: integer }
+
+operator to_vec(self: OcCel) -> Vec2 { Vec2 { x: self.deg } }
+
+fn main() {
+  c = OcCel { deg: 4 };
+  assert(c.deg == 4, "unreachable");
+}

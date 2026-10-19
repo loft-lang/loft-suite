@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARSE IN ONE ASSIGNMENT MAKES THE JOINED LOCAL NULLABLE (`@FR-N-Join` crossed with
+// `@FR-N-Parse` and `@FR-N-Cast`).  N-Join: an inferred `a = e₁ … a = eₙ` has type ⨆ τᵢ, "made
+// OPTIONAL iff some τᵢ is optional" — `integer ⊔ integer? = integer?`.  N-Parse folds into N-Cast:
+// a parse is a cast, `s as τ?` the CHECKED one (null on a bad parse), `s as τ ?? d` the
+// assert-or-default form, non-null.  So a local assigned a constant and a checked parse — in
+// either order, in a value `if`, in a loop — is `τ?` and holds null where the parse failed; a
+// local assigned only non-null spellings stays `τ`; and storing the joined `τ?` into a declared
+// `τ` is N-Store's warning, which is the witness that the join was optional.
+//
+// Axes it MOVES: the order (constant first, parse first), the join site (two assignments, the
+// arms of a value `if`, a loop's passes), the parse's result (good, bad), the type (integer,
+// float), the discharged spelling (`?? d`).  Values hand-computed; -1 stands for null.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: a nullable `integer?` is stored into the local `k` of the non-null type `integer`
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts and the warning.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the N-Join cells beside it.
+
+fn test_two_assignments_join_in_either_order() {
+  bad = "x7";
+  good = "42";
+  a = 1;
+  first = a;
+  a = bad as integer?;
+  b = good as integer?;
+  second = b ?? -1;
+  b = 5;
+  assert(first == 1 && a == null && second == 42 && (b ?? -1) == 5, "orders: {first} {a ?? -1} {second} {b ?? -1}");
+}
+
+fn test_the_arms_of_a_value_if_join() {
+  bad = "x7";
+  good = "42";
+  c = if bad.len() > 1 { bad as integer? } else { 0 };
+  d = if bad.len() > 9 { 3 } else { good as integer? };
+  assert(c == null && (d ?? -1) == 42, "if arms: {c ?? -1} {d ?? -1}");
+}
+
+fn test_a_loop_and_a_float_join() {
+  h = 0;
+  seen = 0;
+  for w in ["1", "x", "3"] {
+    h = w as integer?;
+    if h == null { seen += 1; }
+  }
+  f = 1.5;
+  was = f;
+  f = "nope" as float?;
+  assert((h ?? -1) == 3 && seen == 1, "loop: {h ?? -1} {seen}");
+  assert(was == 1.5 && f == null, "float: {was}");
+}
+
+fn test_a_discharged_parse_keeps_the_local_dense() {
+  e = 2;
+  before = e;
+  e = "x7" as integer ?? 9;
+  assert(before == 2 && e == 9, "discharged: {before} {e}");
+}
+
+fn test_the_joined_local_warns_into_a_dense_slot() {
+  b = 1;
+  before = b;
+  b = "42" as integer?;
+  k: integer = b;
+  assert(before == 1 && k == 42, "the store: {before} {k}");
+}
+
+fn main() {
+  test_two_assignments_join_in_either_order();
+  test_the_arms_of_a_value_if_join();
+  test_a_loop_and_a_float_join();
+  test_a_discharged_parse_keeps_the_local_dense();
+  test_the_joined_local_warns_into_a_dense_slot();
+}

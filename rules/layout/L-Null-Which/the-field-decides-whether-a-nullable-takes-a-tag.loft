@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIELD DECIDES WHETHER A NULLABLE TAKES A TAG (`@FR-L-Null-Which` crossed with `@FR-L-Null`
+// and `@FR-L-Null-Tag`).  L-Null: τ ≈ τ? — a nullable field has the SAME bytes as its not-null
+// form, absence a sentinel in them.  L-Null-Which: which of L-Null and L-Null-Tag governs a
+// FIELD is decided by the field — a `reference<S>` pointer takes L-Null (a 12-byte pointer,
+// `nullref` for absence), an EMBEDDED `S` takes L-Null-Tag (a discriminant beside the payload,
+// so size(S?) > size(S)), and a struct-enum slot keeps its absence in its own discriminant.  A
+// view taken out of either kind holds the PAYLOAD's address, so a later clear of the slot is
+// not visible through it.  The cells beside this rule measure bindings and patterns; this one
+// measures the LAYOUT every field kind answers and the clear-after-view on both kinds.
+//
+// Sizes hand-computed: `LnIn { integer, u8 }` is 9 -> 16; an embedded `LnIn?` is a tag plus 16
+// -> 24; a `reference<LnIn>` (and `?`) is the 12-byte pointer; `integer?`, `text?` and `u8?`
+// are their dense twins' 8, and a struct-enum `LnE { k: integer }` is a discriminant plus 8 ->
+// 16 in both spellings.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the measured sizes or the values.
+// HOLDS: the L-Null-Which cells beside it.
+
+struct LnIn { a: integer, b: u8 }
+enum LnE { LnX { k: integer }, LnY { k: integer } }
+
+struct LnA1 { n: integer }
+struct LnA2 { n: integer? }
+struct LnB1 { r: reference<LnIn> }
+struct LnB2 { r: reference<LnIn>? }
+struct LnC1 { i: LnIn }
+struct LnC2 { i: LnIn? }
+struct LnD1 { t: text, u: u8 }
+struct LnD2 { t: text?, u: u8? }
+struct LnF1 { e: LnE }
+struct LnF2 { e: LnE? }
+
+struct LnHold { ins: vector<LnIn> }
+struct LnPtr { r: reference<LnIn>? }
+struct LnEmb { i: LnIn?, k: integer }
+
+fn test_a_sentinel_field_lays_out_like_its_dense_twin() {
+  assert(sizeof(LnA1) == 8 && sizeof(LnA2) == 8, "integer?: {sizeof(LnA1)} {sizeof(LnA2)}");
+  assert(sizeof(LnB1) == 12 && sizeof(LnB2) == 12, "reference<S>?: {sizeof(LnB1)} {sizeof(LnB2)}");
+  assert(sizeof(LnD1) == 8 && sizeof(LnD2) == 8, "text? and u8?: {sizeof(LnD1)} {sizeof(LnD2)}");
+  assert(sizeof(LnF1) == 16 && sizeof(LnF2) == 16, "struct-enum?: {sizeof(LnF1)} {sizeof(LnF2)}");
+}
+
+fn test_an_embedded_record_takes_a_tag() {
+  assert(sizeof(LnC1) == 16 && sizeof(LnC2) == 24, "embedded S?: {sizeof(LnC1)} {sizeof(LnC2)}");
+}
+
+fn test_a_view_of_a_tagged_field_survives_its_clear() {
+  c = LnEmb { i: LnIn { a: 5, b: 6 }, k: 1 };
+  v = c.i;
+  c.i = null;
+  assert((v ?? LnIn { a: -1, b: 0 }).a == 5 && c.i == null && c.k == 1, "tagged: {(v ?? LnIn { a: -1, b: 0 }).a} {c.k}");
+  d = LnEmb { k: 2 };
+  assert(d.i == null && (d.i ?? LnIn { a: -9, b: 0 }).a == -9 && d.k == 2, "an omitted tagged field is absent");
+}
+
+fn test_a_view_of_a_pointer_field_survives_its_clear() {
+  h = LnHold { ins: [LnIn { a: 7, b: 8 }] };
+  p = LnPtr { r: h.ins[0] };
+  w = p.r;
+  p.r = null;
+  assert((w ?? LnIn { a: -1, b: 0 }).a == 7 && p.r == null && h.ins[0].a == 7 && len(h.ins) == 1, "pointer: {(w ?? LnIn { a: -1, b: 0 }).a}");
+}
+
+fn main() {
+  test_a_sentinel_field_lays_out_like_its_dense_twin();
+  test_an_embedded_record_takes_a_tag();
+  test_a_view_of_a_tagged_field_survives_its_clear();
+  test_a_view_of_a_pointer_field_survives_its_clear();
+}

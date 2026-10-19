@@ -1,0 +1,130 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOOK RUNS ONCE ON EVERY PATH OUT OF A SCOPE (`@FR-H-Drop` crossed with `@FR-O-Complete`).
+// H-Drop: the hook runs ONCE per structure that holds a lease, at the owner's scope end, in
+// reverse declaration order — and "a drop's fix has to be RIGHT on every path, which is why
+// (O-Complete)'s per-path clause and this rule meet so often".  O-Complete: per binding, per
+// path, complete — every `match`/`if` arm.  The H-Drop cells beside this one measure an `if`
+// arm, a value branch, loop passes and returns one at a time; this one crosses the EXIT kind
+// with the arm kind: a `return` from inside a `match` arm, a `match` arm that falls out, a
+// `match` arm that binds nothing, a `continue` and a `break` out of a loop body, and a
+// `return` from inside a loop inside the function — each path must drop every live binding
+// exactly once, innermost first.
+//
+// Axes it MOVES: the exit (`return`, arm end, `continue`, `break`, falling off the end), the
+// scope it leaves (a `match` arm, a loop body, nested loop-in-function), the path taken (every
+// arm of each).  Traces hand-computed: D<n> a drop, E/N/X/P<n> the body's own marks.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts (each compares the whole trace).
+// ARMED: no instrument — each hook writes this cell's trace file.
+// WITNESS: each message prints the trace.
+// HOLDS: the H-Drop cells beside it.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_drop_every_path.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct DpR { id: integer }
+fn OpDrop(self: DpR) { note("D{self.id}"); }
+fn mk(i: integer) -> DpR { DpR { id: i } }
+
+fn in_match(c: integer) -> integer {
+  a = mk(1);
+  match c {
+    0 => {
+      b = mk(2);
+      return 10 + b.id;
+    },
+    1 => {
+      b = mk(3);
+      note("A{b.id}");
+    },
+    _ => {}
+  }
+  note("E");
+  a.id
+}
+
+fn in_loop() {
+  for i in 0..5 {
+    x = mk(10 + i);
+    if i == 2 { break; }
+    if i == 0 { continue; }
+    note("P{x.id}");
+  }
+  note("X");
+}
+
+fn return_from_loop(n: integer) -> integer {
+  a = mk(30);
+  for i in 0..n {
+    b = mk(31 + i);
+    if i == 1 { return b.id; }
+  }
+  note("N");
+  a.id
+}
+
+fn test_a_return_from_a_match_arm_drops_the_arm_and_the_frame() {
+  drain();
+  r = in_match(0);
+  t = drain();
+  assert(r == 12 && t == "D2,D1", "return from an arm: {r} {t}");
+}
+
+fn test_a_match_arm_that_falls_out_drops_at_its_own_end() {
+  drain();
+  r = in_match(1);
+  t = drain();
+  assert(r == 1 && t == "A3,D3,E,D1", "an arm that falls out: {r} {t}");
+}
+
+fn test_a_match_arm_that_binds_nothing_drops_only_the_frame() {
+  drain();
+  r = in_match(7);
+  t = drain();
+  assert(r == 1 && t == "E,D1", "an arm with no binding: {r} {t}");
+}
+
+fn test_continue_and_break_drop_the_pass() {
+  drain();
+  in_loop();
+  t = drain();
+  assert(t == "D10,P11,D11,D12,X", "continue and break: {t}");
+}
+
+fn test_a_return_from_a_loop_drops_the_pass_and_the_frame() {
+  drain();
+  r = return_from_loop(3);
+  t = drain();
+  assert(r == 32 && t == "D31,D32,D30", "return from a loop: {r} {t}");
+  r2 = return_from_loop(1);
+  t2 = drain();
+  assert(r2 == 30 && t2 == "D31,N,D30", "the loop runs out: {r2} {t2}");
+}
+
+fn main() {
+  test_a_return_from_a_match_arm_drops_the_arm_and_the_frame();
+  test_a_match_arm_that_falls_out_drops_at_its_own_end();
+  test_a_match_arm_that_binds_nothing_drops_only_the_frame();
+  test_continue_and_break_drop_the_pass();
+  test_a_return_from_a_loop_drops_the_pass_and_the_frame();
+}

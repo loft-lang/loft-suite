@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TUPLE PACKS BY DESCENDING ALIGNMENT AND PADS TO ITS LARGEST (`@FR-L-Tuple` crossed with
+// `@FR-L-Align`).  L-Tuple: a stored tuple is a synthetic `__tuple<…>` record packed by L-Struct
+// — largest alignment first, the size rounded up to the largest member alignment (L-Align) —
+// and that order has no effect on a member's name or on `t.i`.  The cell beside this one
+// (`a-record-is-padded-to-its-alignment`) measures tuples whose largest member is 8 bytes; this
+// one moves the largest alignment down to 4 and 2, nests a tuple in a tuple on both sides of
+// the size question, and writes every member through `t.i` in a vector element, where the
+// stored layout is the one read.
+//
+// Sizes hand-computed:
+//   (u8, u16)                2 + 1 = 3, align 2      -> 4
+//   (u8, i32, u8)            4 + 1 + 1 = 6, align 4  -> 8
+//   (text, u8)               4 + 1 = 5, align 4      -> 8
+//   (u16, integer)           8 + 2 = 10, align 8     -> 16
+//   ((u8, u16), u8)          4 + 1 = 5, align 2      -> 6
+//   (u8, (integer, u8))      16 + 1 = 17, align 8    -> 24
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the measured size or the values.
+// HOLDS: `a-record-is-padded-to-its-alignment` beside it.
+
+fn test_the_sizes() {
+  assert(sizeof((u8, u16)) == 4, "(u8, u16) {sizeof((u8, u16))}");
+  assert(sizeof((u8, i32, u8)) == 8, "(u8, i32, u8) {sizeof((u8, i32, u8))}");
+  assert(sizeof((text, u8)) == 8, "(text, u8) {sizeof((text, u8))}");
+  assert(sizeof((u16, integer)) == 16, "(u16, integer) {sizeof((u16, integer))}");
+  assert(sizeof(((u8, u16), u8)) == 6, "((u8, u16), u8) {sizeof(((u8, u16), u8))}");
+  assert(sizeof((u8, (integer, u8))) == 24, "(u8, (integer, u8)) {sizeof((u8, (integer, u8)))}");
+}
+
+fn test_a_two_byte_aligned_element_keeps_every_member() {
+  v: vector<(u8, u16)> = [(1, 65000), (250, 2), (7, 300)];
+  v[1].1 += 3;
+  v[2].0 = 9;
+  assert(size(v) == 12 && len(v) == 3, "stride: {size(v)} {len(v)}");
+  assert(v[0].0 == 1 && v[0].1 == 65000 && v[1].0 == 250 && v[1].1 == 5 && v[2].0 == 9 && v[2].1 == 300, "values: {v[1].1} {v[2].0}");
+}
+
+fn test_a_four_byte_aligned_element_keeps_every_member() {
+  v: vector<(u8, i32, u8)> = [(1, -2000000000, 2), (3, 2000000000, 4)];
+  v[0].2 = 200;
+  v[1].1 -= 1;
+  assert(size(v) == 16, "stride: {size(v)}");
+  assert(v[0].0 == 1 && v[0].1 == -2000000000 && v[0].2 == 200 && v[1].0 == 3 && v[1].1 == 1999999999 && v[1].2 == 4, "values: {v[0].2} {v[1].1}");
+}
+
+fn test_a_nested_tuple_element_keeps_every_member() {
+  v: vector<((u8, u16), u8)> = [((1, 2), 3), ((4, 60000), 5)];
+  v[1].0.1 += 1;
+  v[0].1 = 33;
+  assert(size(v) == 12, "stride: {size(v)}");
+  assert(v[0].0.0 == 1 && v[0].0.1 == 2 && v[0].1 == 33 && v[1].0.0 == 4 && v[1].0.1 == 60001 && v[1].1 == 5, "values: {v[1].0.1} {v[0].1}");
+  w: vector<(u8, (integer, u8))> = [(9, (-7, 8))];
+  w[0].1.0 *= 3;
+  assert(size(w) == 24 && w[0].0 == 9 && w[0].1.0 == -21 && w[0].1.1 == 8, "wide nested: {size(w)} {w[0].1.0}");
+}
+
+fn main() {
+  test_the_sizes();
+  test_a_two_byte_aligned_element_keeps_every_member();
+  test_a_four_byte_aligned_element_keeps_every_member();
+  test_a_nested_tuple_element_keeps_every_member();
+}

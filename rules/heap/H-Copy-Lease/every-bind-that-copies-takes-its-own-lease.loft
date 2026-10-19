@@ -1,0 +1,156 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY BIND THAT COPIES TAKES ITS OWN LEASE (`@FR-H-Copy-Lease` crossed with `@FR-B-Copy`).
+// B-Copy says a plain bind of a whole value copies, and for a type with `OpCopy` "it takes a
+// second lease (H-Copy-Lease)".  The cells beside this rule (`tests/copy_lease.rs`, and the
+// `H-Drop` cell `two-structures-are-two-leases-and-a-byte-move-is-neither`) measure the FIRST
+// bind of a parameter, a member copied into a literal or a vector, and a `??`.  This cell holds
+// the hook fixed and moves the B-Copy POSITION: a REBIND of a local that already holds a copy
+// (the displaced copy is dropped after the new one is made, `@FR-H-Drop`), the join of two
+// parameters in a value `if`, a NULLABLE destination, a `(C-Var)` widening of a variant
+// parameter into its enum, two copies in one frame, and a write through the copy.
+// `OpCopy` renumbers the new structure by +100, so the trace tells the copy from the source.
+//
+// Axes it MOVES: bind position (rebind, branch join on both arms, `H?` destination, enum
+// widening), copies per frame (one, two), the write direction.  Traces hand-computed from
+// H-Copy-Lease (C before the copy is read), H-Drop (a displaced copy drops after the new value
+// is computed; scope end drops in reverse declaration order) and B-Copy (the source is
+// untouched by a write to the copy).
+//
+// @falsified-at: none — a conformance guard; every cell but the REBIND one answered as hand-computed
+//   on 18594597b, interpret and native.  The rebind cell is a live defect, `@IGNORE`d below: a
+//   local holding a copy of a parameter, rebound, never runs the displaced copy's hook.
+// CHANNEL: the asserts (each compares the whole trace).
+// ARMED: no instrument — each hook call is written to this cell's trace file.
+// WITNESS: each message prints the trace.
+// HOLDS: leak and panic clean on both backends.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_bind_lease.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn OpCopy(self: H) { note("C{self.id}"); self.id += 100; }
+fn mk(i: integer) -> H { H { id: i } }
+
+enum W { WH { h: H, k: integer }, WN { k: integer } }
+
+fn rebind(p: H, q: H) {
+  x = p;
+  note("R{x.id}");
+  x = q;
+  note("R{x.id}");
+}
+
+fn join(p: H, q: H, c: boolean) {
+  x = if c { p } else { q };
+  note("R{x.id}");
+}
+
+fn nullable_dest(p: H) {
+  x: H? = p;
+  note("R{x.id}");
+}
+
+fn widen(p: WH) {
+  x: W = p;
+  note("K{x.k}");
+}
+
+fn two(p: H, q: H) {
+  x = p;
+  y = q;
+  note("R{x.id}{y.id}");
+}
+
+fn write_copy(p: H) -> integer {
+  x = p;
+  x.id += 5;
+  p.id
+}
+
+// @IGNORE — DEFECT (both backends, 18594597b): the displaced copy's hook never runs; the trace
+//   reads `C1,R101,C2,R102,D102` — `D101` is missing.  The scopes pass's latest-assignment
+//   memo (`owned_refs`) reads `x = p` off a parameter as a borrow, so `displaced_drop` declines.
+fn test_a_rebind_copies_the_new_value_then_drops_the_displaced_copy() {
+  drain();
+  a = mk(1);
+  b = mk(2);
+  rebind(a, b);
+  t = drain();
+  assert(t == "C1,R101,C2,D101,R102,D102", "rebind: {t}");
+  assert(a.id == 1 && b.id == 2, "the sources moved: {a.id} {b.id}");
+}
+
+fn test_a_join_of_two_parameters_copies_the_arm_that_ran() {
+  drain();
+  a = mk(3);
+  b = mk(4);
+  join(a, b, true);
+  t1 = drain();
+  join(a, b, false);
+  t2 = drain();
+  assert(t1 == "C3,R103,D103", "join, true arm: {t1}");
+  assert(t2 == "C4,R104,D104", "join, false arm: {t2}");
+}
+
+fn test_a_nullable_destination_takes_a_lease() {
+  drain();
+  a = mk(5);
+  nullable_dest(a);
+  t = drain();
+  assert(t == "C5,R105,D105", "H? destination: {t}");
+}
+
+fn test_a_variant_widened_into_its_enum_copies_its_member() {
+  drain();
+  w = WH { h: mk(6), k: 7 };
+  widen(w);
+  t = drain();
+  assert(t == "C6,K7,D106", "(C-Var) widening of a variant parameter: {t}");
+}
+
+fn test_two_copies_drop_in_reverse_declaration_order() {
+  drain();
+  a = mk(8);
+  b = mk(9);
+  two(a, b);
+  t = drain();
+  assert(t == "C8,C9,R108109,D109,D108", "two copies: {t}");
+}
+
+fn test_a_write_through_the_copy_leaves_the_source() {
+  drain();
+  a = mk(10);
+  r = write_copy(a);
+  t = drain();
+  assert(r == 10 && a.id == 10, "the source moved: {r} {a.id}");
+  assert(t == "C10,D115", "write through the copy: {t}");
+}
+
+fn main() {
+  // test_a_rebind_copies_the_new_value_then_drops_the_displaced_copy();  -- @IGNORE above
+  test_a_join_of_two_parameters_copies_the_arm_that_ran();
+  test_a_nullable_destination_takes_a_lease();
+  test_a_variant_widened_into_its_enum_copies_its_member();
+  test_two_copies_drop_in_reverse_declaration_order();
+  test_a_write_through_the_copy_leaves_the_source();
+}

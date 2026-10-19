@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT CAST NEEDING A DEFAULT OF A BARE ENUM FIELD IS REFUSED (`@FR-D-NoEnumF` crossed with
+// `@FR-N-Cast`).  N-Cast: `as τ` is an ASSERTION, refused at compile time where it cannot be
+// kept; a cast to a variant answers the variant with every field at its default when the value
+// holds another (@C131).  D-NoEnumF: a bare enum field without `= expr` has NO default — "the two
+// places the domain STOPS" — and the partiality "is a TYPE rule … in the same family as (N-Cast)'s
+// provable-fit requirement".  So `s as Tinted`, whose `tint: Colour` has no default, is refused,
+// naming both cures (a field default, `Colour?`) and both safe spellings (`is` first, `as V?`).
+// The D-NoEnumF cells beside this one measure a literal and `x?`; this one is the cast.
+//
+// @EXPECT_ERROR: record `Tinted` has no default: field `tint: NcColour` is an enum with no explicit choice
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the record, the field and the cures.
+// HOLDS: `a-variant-cast-takes-the-default-its-fields-choose` beside it.
+
+enum NcColour { Red, Green }
+enum NcSh { Tinted { tint: NcColour, x: integer }, Plain { x: integer } }
+
+fn main() {
+  s: NcSh = Plain { x: 3 };
+  w = s as Tinted;
+  assert(w.x == 0, "unreachable");
+}

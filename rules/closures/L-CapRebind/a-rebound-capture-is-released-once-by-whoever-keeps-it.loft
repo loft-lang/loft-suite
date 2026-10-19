@@ -1,0 +1,131 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REBOUND CAPTURE IS RELEASED ONCE, BY WHOEVER KEEPS IT (`@FR-L-CapRebind` crossed with
+// `@FR-L-CapOwn` and `@FR-H-Drop`).  L-CapRebind: a whole-value rebind of a captured heap local
+// leaves the closure record on the store it was built with (answering the build-time value) and
+// moves the local to a fresh store; "the store the record keeps is released ONCE (L-CapOwn): by
+// the record's cascade where it adopted it, else at the local's scope end", and a second rebind
+// before the next build replaces the local's own store in place.  L-CapOwn: a record that
+// LEAVES its frame takes the release over.  A hook (`OpDrop`) makes each release visible, so a
+// release that is lost or doubled shows in the trace.
+//
+// The cell beside this rule (`a-captured-keyed-local-keeps-its-store-through-every-rebind`)
+// holds the closure INSIDE its frame and the capture hook-free; this one moves the closure out
+// of the frame (returned) and gives the captured value a hook.
+//
+// Axes it MOVES: the closure's fate (returned, left behind), rebinds before the return (one,
+// two), the captured kind (a record, a vector of records rebound to `[]`).
+// Traces hand-computed: M<n> is a mint, D<n> a drop, F<n> the closure's answer, X the caller's
+// last statement before its scope end.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts (each compares the whole trace).
+// ARMED: no instrument — each hook writes this cell's trace file.
+// WITNESS: each message prints the trace.
+// HOLDS: leak clean on both backends.
+
+struct RbH { id: integer }
+fn OpDrop(self: RbH) { note("D{self.id}"); }
+fn mk(i: integer) -> RbH { note("M{i}"); RbH { id: i } }
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_caprebind_own.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+fn count(t: text, part: text) -> integer {
+  n = 0;
+  for p in t.split(',') { if p == part { n += 1; } }
+  n
+}
+
+// returned after one rebind: the record adopts the build-time store, the frame frees the new one
+fn rb_once(i: integer) -> fn() -> integer {
+  h = mk(i);
+  f = fn() -> integer { h.id };
+  h = mk(i + 1);
+  f
+}
+
+// returned after two rebinds: the second replaces the local's own store in place
+fn rb_twice(i: integer) -> fn() -> integer {
+  h = mk(i);
+  f = fn() -> integer { h.id };
+  h = mk(i + 1);
+  h = mk(i + 2);
+  f
+}
+
+// returned over a vector rebound to `[]`
+fn rb_vector(i: integer) -> fn() -> integer {
+  w = [mk(i)];
+  f = fn() -> integer { len(w) };
+  w = [];
+  f
+}
+
+// left behind: both stores are released at the local's scope end
+fn rb_stay(i: integer) -> integer {
+  h = mk(i);
+  f = fn() -> integer { h.id };
+  h = mk(i + 1);
+  r = f();
+  r * 100 + h.id
+}
+
+fn c_once() { g = rb_once(10); note("F{g()}"); note("X"); }
+fn c_twice() { g = rb_twice(1); note("F{g()}"); note("X"); }
+fn c_vector() { g = rb_vector(5); note("F{g()}"); note("X"); }
+
+fn test_a_returned_closure_releases_its_build_time_store() {
+  drain();
+  c_once();
+  t = drain();
+  assert(t == "M10,M11,D11,F10,X,D10", "one rebind, returned: {t}");
+}
+
+fn test_a_second_rebind_replaces_the_locals_own_store() {
+  drain();
+  c_twice();
+  t = drain();
+  assert(t == "M1,M2,M3,D2,D3,F1,X,D1", "two rebinds, returned: {t}");
+}
+
+fn test_a_vector_rebound_to_empty_keeps_the_records_store() {
+  drain();
+  c_vector();
+  t = drain();
+  assert(t == "M5,F1,X,D5", "vector rebound to []: {t}");
+}
+
+fn test_a_closure_left_behind_leaves_both_releases_to_the_frame() {
+  drain();
+  r = rb_stay(20);
+  t = drain();
+  assert(r == 2021, "the closure answered the build-time value: {r}");
+  assert(count(t, "M20") == 1 && count(t, "M21") == 1 && count(t, "D20") == 1 && count(t, "D21") == 1 && len(t.split(',')) == 4,
+    "left behind: {t}");
+}
+
+fn main() {
+  test_a_returned_closure_releases_its_build_time_store();
+  test_a_second_rebind_replaces_the_locals_own_store();
+  test_a_vector_rebound_to_empty_keeps_the_records_store();
+  test_a_closure_left_behind_leaves_both_releases_to_the_frame();
+}

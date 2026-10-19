@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE NARROW RECEIVER REACHES ITS NULLABLE TWIN, AND A NULLABLE WIDE ONE WARNS INTO THE
+// DENSE BODY (`@FR-F-Recv` crossed with `@FR-N-Store` and `@FR-N-Intro`).  F-Recv: `m(τ)` and
+// `m(τ?)` are two definitions and a call reaches the one spelled for its receiver's own
+// nullability; a `τ` receiver reaching `m(τ?)` is N-Intro and free; a `τ?` receiver reaching
+// `m(τ)` is N-Store's case — a warning for a wide τ (the null arrives in the body), the error
+// of the refusal cell beside this one for a narrow τ.  The existing cells hold the receiver to
+// a struct; this one moves it to a narrow scalar (`u8`) and a wide one (`integer`), in both
+// call spellings, present and absent.
+//
+// Values hand-computed: `fu(u8)` answers self + 1, `fu(u8?)` 1000 + self or 500 when absent;
+// `fw(integer)` answers self * 2, which is null for an absent receiver (N-Prop).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 1 of `fw`
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 1 of `fw`
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 1 of `fw`
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts and the warnings.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the refusal cell beside it.
+
+fn fu(self: u8) -> integer { self + 1 }
+fn fu(self: u8?) -> integer { if self == null { 500 } else { 1000 + self } }
+
+fn fw(self: integer) -> integer { self * 2 }
+
+fn test_a_narrow_receiver_reaches_the_definition_of_its_own_nullability() {
+  b: u8? = 7;
+  z: u8? = null;
+  c: u8 = 9;
+  d = b?;
+  assert(b.fu() == 1007 && fu(b) == 1007, "present u8?: {b.fu()} {fu(b)}");
+  assert(z.fu() == 500 && fu(z) == 500, "absent u8?: {z.fu()} {fu(z)}");
+  assert(c.fu() == 10 && fu(c) == 10, "dense u8: {c.fu()} {fu(c)}");
+  assert(d.fu() == 8, "a discharged receiver reaches the dense body: {d.fu()}");
+}
+
+fn test_a_wide_nullable_receiver_warns_into_the_dense_body() {
+  n: integer? = 21;
+  z: integer? = null;
+  a = n.fw();
+  b = fw(n);
+  c = z.fw() ?? -1;
+  assert(a == 42 && b == 42 && c == -1, "integer? into fw(integer): {a} {b} {c}");
+}
+
+fn main() {
+  test_a_narrow_receiver_reaches_the_definition_of_its_own_nullability();
+  test_a_wide_nullable_receiver_warns_into_the_dense_body();
+}

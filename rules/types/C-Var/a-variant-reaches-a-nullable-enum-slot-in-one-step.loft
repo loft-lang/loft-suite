@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT REACHES A NULLABLE ENUM SLOT IN ONE STEP (`@FR-C-Var` crossed with `@FR-N-Intro` and
+// `@FR-B-Copy`).  C-Var: `Reference(S) ⤳ Enum(E)` for S a variant of E, "and plain Enum ⤳ Integer
+// tag"; its NB: "the null INTRO `S ⤳ S?` is (N-Intro)", the only null-direction conversion.  So
+// a variant flows into an `E?` slot by the two composed — widen, then introduce — at every slot
+// kind, and the slot then holds a present `E` of that variant; a widening is a copy (B-Copy), so
+// a later write to the variant does not reach it.  The C-Var cells beside this one measure
+// dispatch and joins over dense `E`; this one moves the destination to `E?` and the slot kind,
+// and pins the plain-enum tag conversion (1-based: an enum's 0 is its null).
+//
+// Axes it MOVES: the destination slot (local from a literal, local from a variant local, a
+// nullable parameter, a nullable return on both arms, a nullable field, a `vector<E?>` element),
+// the variant written after the widening, the plain-enum tag (implicit into `integer`, and `as`).
+// Values hand-computed; -1 is the absent arm.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the C-Var cells beside it.
+
+enum CvSh { CvCi { r: integer }, CvSq { w: integer } }
+enum CvCol { Red, Green, Blue }
+struct CvH { s: CvSh?, ss: vector<CvSh?> }
+
+fn cv_take(e: CvSh?) -> integer {
+  match e {
+    CvCi { r } => r,
+    CvSq { w } => w * 10,
+    _ => -1
+  }
+}
+
+fn cv_give(c: boolean) -> CvSh? {
+  if c { CvCi { r: 4 } } else { null }
+}
+
+fn cv_give_sq() -> CvSh? { CvSq { w: 5 } }
+
+fn test_a_local_and_a_parameter() {
+  a: CvSh? = CvCi { r: 1 };
+  ci = CvCi { r: 2 };
+  b: CvSh? = ci;
+  ci.r = 20;
+  assert(cv_take(a) == 1 && cv_take(b) == 2 && cv_take(ci) == 20, "locals and a parameter: {cv_take(a)} {cv_take(b)} {cv_take(ci)}");
+}
+
+fn test_a_nullable_return_on_both_arms() {
+  t = "{cv_take(cv_give(true))} {cv_take(cv_give(false))} {cv_take(cv_give_sq())}";
+  assert(t == "4 -1 50", "returns: {t}");
+}
+
+fn test_a_field_and_an_element() {
+  ci = CvCi { r: 20 };
+  h = CvH { s: CvSq { w: 3 }, ss: [] };
+  h.ss += [CvCi { r: 6 }];
+  h.ss += [ci];
+  h.s = ci;
+  ci.r = 21;
+  assert(cv_take(h.s) == 20 && len(h.ss) == 2 && cv_take(h.ss[0]) == 6 && cv_take(h.ss[1]) == 20, "field and elements: {cv_take(h.s)} {cv_take(h.ss[1])}");
+}
+
+fn test_a_plain_enum_is_its_one_based_tag() {
+  x: integer = CvCol.Blue;
+  y: CvCol? = CvCol.Green;
+  z = CvCol.Red as integer;
+  assert(x == 3 && y == CvCol.Green && z == 1, "tags: {x} {z}");
+}
+
+fn main() {
+  test_a_local_and_a_parameter();
+  test_a_nullable_return_on_both_arms();
+  test_a_field_and_an_element();
+  test_a_plain_enum_is_its_one_based_tag();
+}

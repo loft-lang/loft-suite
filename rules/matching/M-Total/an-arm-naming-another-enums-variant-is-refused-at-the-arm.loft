@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ARM NAMING ANOTHER ENUM'S VARIANT IS REFUSED AT THE ARM (`@FR-M-Total` crossed with
+// `@FR-M-Unit`).  M-Total: on an enum subject "an arm naming something that is NOT a variant of
+// the subject's enum is a static error at the arm (M-Unit) rather than an arm that never
+// fires."  The M-Unit cell beside this rule measures names that resolve to nothing; this one
+// names a real unit VARIANT — of a different enum — in a match that is otherwise total.
+//
+// @EXPECT_ERROR: 'Up' is not a variant of MtC
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the arm's variant and the subject's enum.
+// HOLDS: `matching/M-Unit/a-match-arm-names-a-variant-that-exists`.
+
+enum MtC { Red, Green, Blue }
+enum MtD { Up, Down }
+
+fn mt_f(c: MtC) -> integer {
+  match c {
+    Red => 1,
+    Green => 2,
+    Blue => 3,
+    Up => 4
+  }
+}
+
+fn main() {
+  assert(mt_f(MtC.Red) == 1, "unreachable");
+}

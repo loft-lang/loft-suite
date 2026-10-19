@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE — DEFECT (missing refusal, both backends, 18594597b): `mk()?` and `mk() ?? (0, "z")`
+//   compile and answer the tuple, while the same discharge on a local (`t?`), a field (`h.p?`)
+//   and a literal is refused "has nothing to discharge — … a tuple that EXISTS".  The subject
+//   test `Parser::tuple_subject_is_held` (`src/parser/operators.rs`) admits only a `Var` or a
+//   `Tuple` spelling, so a CALL subject is read as a possible element read.
+//
+// A CALL RESULT TUPLE EXISTS AND REFUSES A DISCHARGE (`@FR-T-Absent` crossed with `@FR-N-Index`).
+// T-Absent: exactly one tuple can be absent, the in-flight `(τ₁, …, τₙ)?` a read that MISSES
+// produces (an element read under N-Index, a keyed miss, a generic `T?` at a tuple); "Every
+// OTHER tuple EXISTS, whatever its members hold: … a declared member-nullable return, a field
+// read", and `t?` / `t ?? d` on a tuple that exists is a REFUSAL.  A call to a function declared
+// `-> (integer, text)` answers a tuple that exists; no N-Index read is involved.
+//
+// @EXPECT_ERROR: has nothing to discharge
+//
+// @falsified-at: none — written against a live defect; it compiles on 18594597b on both backends.
+// CHANNEL: the compile diagnostic (absent on 18594597b).
+// ARMED: no instrument.
+// WITNESS: the program runs and prints the tuple's member.
+// HOLDS: `an-element-read-of-a-tuple-discharges-and-a-held-one-does-not` beside it.
+
+fn ta_mk() -> (integer, text) { (1, "a") }
+
+fn main() {
+  x = ta_mk()?;
+  assert(x.0 == 1, "the call's tuple: {x.0}");
+}

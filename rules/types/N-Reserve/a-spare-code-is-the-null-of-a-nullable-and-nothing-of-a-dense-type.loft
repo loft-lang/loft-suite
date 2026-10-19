@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SPARE CODE IS THE NULL OF A NULLABLE AND NOTHING OF A DENSE TYPE (`@FR-N-Reserve` crossed
+// with `@FR-L-Narrow-Spare`).  N-Reserve: only a narrow width whose range EXACTLY fills its
+// storage spends an edge — `u8?` ranges over 0..=254 because 255 is its null — while a range
+// with room left (`limit(0, 254) size(1)?`) keeps every value it declares, its null in the
+// spare code; and "the COMPLEMENT is the same statement: a NON-null narrow reserves nothing,
+// because it has no null to encode — and that holds however much room its declared range
+// leaves".  L-Narrow-Spare: so the dense type's unfitting value is its DEFAULT, never a null
+// kept in the spare code.  The N-Reserve cells beside this one measure `u8?` and constants;
+// this one puts a spare-code type beside its full-width twin, nullable and dense, and runs the
+// same values through both.
+//
+// A checked cast (`as τ?`) of a run-time value lands each value in a slot; 254 fits all four
+// types, 255 fits only `u8`'s range and is `u8?`'s null.
+//
+// Axes it MOVES: the range (one code spare, none), nullability (`τ?`, `τ`), the value (the top
+// of the spare range, one above it).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers, -1 for null.
+// HOLDS: the N-Reserve cells beside it.
+
+type NrSp = integer limit(0, 254) size(1);
+
+fn test_a_nullable_with_a_spare_code_keeps_its_top_value() {
+  n = 254;
+  m = 255;
+  x: NrSp? = n as NrSp?;
+  y: NrSp? = m as NrSp?;
+  assert((x ?? -1) == 254 && y == null, "NrSp?: {x ?? -1} {y ?? -1}");
+}
+
+fn test_a_full_width_nullable_spends_its_top_value() {
+  n = 254;
+  m = 255;
+  z: u8? = n as u8?;
+  w: u8? = m as u8?;
+  assert((z ?? -1) == 254 && w == null, "u8?: {z ?? -1} {w ?? -1}");
+}
+
+fn test_a_dense_type_keeps_no_null_in_its_spare_code() {
+  a: NrSp = 254;
+  a += 1;
+  b: u8 = 255;
+  b += 1;
+  assert(a == 0 && b == 0 && a != null && b != null, "dense: {a} {b}");
+  v: vector<NrSp> = [254];
+  v[0] += 1;
+  assert(len(v) == 1 && v[0] == 0 && v[0] != null, "dense element: {v[0]}");
+}
+
+fn main() {
+  test_a_nullable_with_a_spare_code_keeps_its_top_value();
+  test_a_full_width_nullable_spends_its_top_value();
+  test_a_dense_type_keeps_no_null_in_its_spare_code();
+}

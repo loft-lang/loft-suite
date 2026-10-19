@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE IS A FRESH VALUE AT EVERY VECTOR POSITION (`@FR-Slice-Value` crossed with
+// `@FR-H-Alloc`).  Slice-Value: `v[a..b]` yields a FRESH sub-collection, a vector by H-Alloc (a
+// fresh store), and "the value is owed at EVERY vector-typed position, not only a bind: an
+// argument, a return, a block tail, a struct field's value and a literal's element"; a
+// scalar-element slice is copied in one block, any other element by element, "both are the
+// same fresh value"; and the subject is evaluated EXACTLY ONCE.  The cells beside this rule
+// measure bounds and receivers; this one holds the bounds simple and moves the POSITION and
+// the ELEMENT KIND, and writes through the slice and through the source after it: a fresh
+// value is independent in both directions and has exactly the slice's length.
+//
+// Axes it MOVES: position (bind, argument, return, struct field; a literal element and a block
+// tail are the two `@IGNORE`d files beside this one),
+// element kind (integer — one block; a record with a text — element by element), write
+// direction (slice → source, source → slice), the subject (a variable, a call with an effect).
+// Values hand-computed from `src = [10, 20, 30, 40, 50]`.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the slice and the source.
+// HOLDS: the bounds cells beside it.  A literal ELEMENT and a block TAIL are owed the same value
+//   and are refused or crash on 18594597b — `a-slice-as-a-literal-element-is-a-fresh-vector`,
+//   `a-slice-as-a-block-tail-is-a-fresh-vector`, both `@IGNORE`d.
+
+struct SvR { n: integer, t: text }
+struct SvHold { xs: vector<integer> }
+
+fn sv_src() -> vector<integer> { [10, 20, 30, 40, 50] }
+
+fn sv_take(v: vector<integer>) -> integer {
+  v += [1];
+  v[0] = 5;
+  len(v) * 100 + v[0]
+}
+
+fn sv_tail(v: vector<integer>) -> vector<integer> { v[2..] }
+
+fn sv_mk(c: &integer) -> vector<integer> {
+  c += 1;
+  [1, 2, 3, 4]
+}
+
+fn test_a_bound_slice_is_independent_both_ways() {
+  src = sv_src();
+  s = src[1..4];
+  s[0] = 99;
+  s += [7];
+  src[3] = 44;
+  assert(len(s) == 4 && s[0] == 99 && s[2] == 40 && s[3] == 7, "the slice: {s}");
+  assert(len(src) == 5 && src[1] == 20 && src[3] == 44, "the source: {src}");
+}
+
+fn test_a_slice_argument_is_the_callees_own() {
+  src = sv_src();
+  r = sv_take(src[1..3]);
+  assert(r == 305, "the callee's answer: {r}");
+  assert(len(src) == 5 && src[1] == 20, "the source: {src}");
+}
+
+fn test_a_returned_slice_is_fresh() {
+  src = sv_src();
+  r = sv_tail(src);
+  r[0] = 1;
+  assert(len(r) == 3 && r[0] == 1 && r[2] == 50, "the result: {r}");
+  assert(src[2] == 30 && len(src) == 5, "the source: {src}");
+}
+
+fn test_a_slice_field_value_is_fresh() {
+  src = sv_src();
+  h = SvHold { xs: src[..2] };
+  h.xs[0] = 77;
+  src[1] = 21;
+  assert(len(h.xs) == 2 && h.xs[0] == 77 && h.xs[1] == 20, "the field: {h.xs}");
+  assert(src[0] == 10, "the source: {src}");
+}
+
+fn test_a_record_slice_copies_element_by_element() {
+  recs = [SvR { n: 1, t: "a" }, SvR { n: 2, t: "b" }, SvR { n: 3, t: "c" }];
+  rs = recs[-2..];
+  rs[0].n = 9;
+  rs[0].t += "!";
+  recs[2].t = "z";
+  assert(len(rs) == 2 && rs[0].n == 9 && rs[0].t == "b!" && rs[1].t == "c", "the slice: {rs[0].n} {rs[0].t} {rs[1].t}");
+  assert(len(recs) == 3 && recs[1].n == 2 && recs[1].t == "b", "the source: {recs[1].n} {recs[1].t}");
+}
+
+fn test_the_subject_is_evaluated_once() {
+  c = 0;
+  s = sv_mk(c)[1..3];
+  assert(c == 1 && len(s) == 2 && s[0] == 2 && s[1] == 3, "once: {c} {s}");
+}
+
+fn main() {
+  test_a_bound_slice_is_independent_both_ways();
+  test_a_slice_argument_is_the_callees_own();
+  test_a_returned_slice_is_fresh();
+  test_a_slice_field_value_is_fresh();
+  test_a_record_slice_copies_element_by_element();
+  test_the_subject_is_evaluated_once();
+}

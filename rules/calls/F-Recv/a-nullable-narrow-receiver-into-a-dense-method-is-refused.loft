@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE NARROW RECEIVER INTO A DENSE METHOD IS REFUSED (`@FR-F-Recv` crossed with
+// `@FR-N-Store`).  F-Recv: "a `τ?` receiver reaching `m(τ)` is (N-Store)'s case and warns" when
+// only the dense method is declared.  N-Store makes that store a WARNING for most τ and a hard
+// ERROR for a narrow width (u8…u32), where the null collides with a real value.  The cells
+// beside this rule measure the warning on a struct receiver; this one moves the receiver to
+// `u8?`, where the same case must be the error.
+//
+// @EXPECT_ERROR: a nullable `u8?` cannot be stored into parameter 1 of `fu`
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the receiver slot and the method.
+// HOLDS: `a-nullable-narrow-receiver-reaches-its-nullable-twin` beside it.
+
+fn fu(self: u8) -> integer { self + 1 }
+
+fn main() {
+  b: u8? = 7;
+  assert(b.fu() == 8, "unreachable");
+}

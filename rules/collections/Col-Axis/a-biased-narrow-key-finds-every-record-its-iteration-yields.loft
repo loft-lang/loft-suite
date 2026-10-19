@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BIASED NARROW KEY FINDS EVERY RECORD ITS ITERATION YIELDS (`@FR-Col-Axis` crossed with
+// `@FR-L-Narrow-Decode`).  L-Narrow-Decode: a narrow slot holds `value - start`, and every
+// decode adds `start` back.  Col-Axis, its keyed refinement: a key or coordinate field's VALUE
+// is the one its declared type decodes, whatever kind of collection asks, "so a lookup answers
+// a record for exactly the keys its own iteration yields".  The L-Narrow-Decode cell beside it
+// measures a negative range in a `sorted` and a `hash`; this one holds the property fixed —
+// every key the iteration yields is looked up and must answer its own record — and moves the
+// collection KIND (hash, sorted, index, spatial), the BIAS (positive 1000, negative -100,
+// a two-byte range at 70000) and the keys' position in the range (both edges and inside).
+//
+// Values hand-computed: every lookup answers the record's own `n`; a sorted walk is ascending.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the walk and the lookups that answered.
+// HOLDS: `layout/L-Narrow-Decode/1630-a-range-wholly-below-zero-is-declarable`.
+
+type CaYr = integer limit(1000, 1100) size(1);
+type CaNg = integer limit(-100, -1) size(1);
+type CaBig = integer limit(70000, 70300) size(2);
+
+struct CaY { k: CaYr, n: integer }
+struct CaN { k: CaNg, n: integer }
+struct CaB { k: CaBig, n: integer }
+struct CaP { const x: CaYr, const y: CaNg, n: integer }
+
+fn test_a_hash_finds_every_biased_key() {
+  h: hash<CaY[k]> = [CaY { k: 1000, n: 1 }, CaY { k: 1100, n: 2 }, CaY { k: 1050, n: 3 }, CaY { k: 1001, n: 4 }];
+  found = 0;
+  for e in h {
+    g = h[e.k];
+    if g != null && g.n == e.n { found += 1; }
+  }
+  assert(found == 4 && len(h) == 4, "hash: {found} of {len(h)}");
+  assert((h[1100] ?? CaY { k: 1000, n: -1 }).n == 2 && h[1099] == null, "hash literal lookups");
+}
+
+fn test_a_sorted_walk_is_ascending_and_finds_every_key() {
+  s: sorted<CaN[k]> = [CaN { k: -1, n: 1 }, CaN { k: -100, n: 2 }, CaN { k: -50, n: 3 }];
+  walk = "";
+  found = 0;
+  for e in s {
+    walk += "{e.k} ";
+    g = s[e.k];
+    if g != null && g.n == e.n { found += 1; }
+  }
+  assert(walk == "-100 -50 -1 " && found == 3, "sorted: {walk} {found}");
+}
+
+fn test_an_index_finds_every_two_byte_key() {
+  ix: index<CaB[k]> = [CaB { k: 70300, n: 1 }, CaB { k: 70000, n: 2 }, CaB { k: 70150, n: 3 }];
+  walk = "";
+  found = 0;
+  for e in ix {
+    walk += "{e.k} ";
+    g = ix[e.k];
+    if g != null && g.n == e.n { found += 1; }
+  }
+  assert(walk == "70000 70150 70300 " && found == 3, "index: {walk} {found}");
+}
+
+fn test_a_spatial_finds_every_biased_point() {
+  sp: spatial<CaP[x, y]> = [CaP { x: 1000, y: -100, n: 1 }, CaP { x: 1100, y: -1, n: 2 }, CaP { x: 1050, y: -50, n: 3 }];
+  found = 0;
+  total = 0;
+  for e in sp {
+    total += 1;
+    g = sp[e.x, e.y];
+    if g != null && g.n == e.n { found += 1; }
+  }
+  assert(found == 3 && total == 3, "spatial: {found} of {total}");
+}
+
+fn main() {
+  test_a_hash_finds_every_biased_key();
+  test_a_sorted_walk_is_ascending_and_finds_every_key();
+  test_an_index_finds_every_two_byte_key();
+  test_a_spatial_finds_every_biased_point();
+}

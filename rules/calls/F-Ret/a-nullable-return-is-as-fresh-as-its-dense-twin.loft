@@ -1,0 +1,99 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE RETURN IS AS FRESH AS ITS DENSE TWIN (`@FR-F-Ret` crossed with `@FR-N-Road`).
+// F-Ret: the value a function returns is FRESH and independent — mutating it reaches neither
+// another call's result nor the callee's input.  N-Road: which delivery a value takes answers
+// identically for τ and τ?, and the dense spelling is not the oracle — F-Ret is.  The N-Road
+// cells beside this rule measure a RECORD return; this one moves the returned value to a
+// VECTOR field of a parameter, a whole vector parameter, a struct field of a parameter, a text
+// field and a minted vector of records, each spelled `-> τ` and `-> τ?`, and writes through
+// the result.  Every pair must answer the same, and that answer is F-Ret's.
+//
+// Axes it MOVES: what is returned (a vector field projection, a vector parameter, a struct
+// field projection, a text field, a mint), the spelling (`τ`, `τ?`), what is written after (the
+// result, the source).  Values hand-computed: the source holds [1, 2], `In { k: 5 }`, "ab".
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the result and the source.
+// HOLDS: the N-Road record cells.
+
+struct RfIn { k: integer }
+struct RfH { v: vector<integer>, inner: RfIn, t: text }
+struct RfS { n: integer }
+
+fn rf_field(h: RfH) -> vector<integer> { h.v }
+fn rf_field_n(h: RfH) -> vector<integer>? { h.v }
+fn rf_param(p: vector<integer>) -> vector<integer> { p }
+fn rf_param_n(p: vector<integer>) -> vector<integer>? { p }
+fn rf_inner(h: RfH) -> RfIn { h.inner }
+fn rf_inner_n(h: RfH) -> RfIn? { h.inner }
+fn rf_text(h: RfH) -> text { h.t }
+fn rf_text_n(h: RfH) -> text? { h.t }
+fn rf_mint() -> vector<RfS> { [RfS { n: 1 }, RfS { n: 2 }] }
+fn rf_mint_n() -> vector<RfS>? { [RfS { n: 1 }, RfS { n: 2 }] }
+
+fn rf_h() -> RfH { RfH { v: [1, 2], inner: RfIn { k: 5 }, t: "ab" } }
+
+fn test_a_returned_vector_field_is_fresh_in_both_spellings() {
+  h = rf_h();
+  a = rf_field(h);
+  b: vector<integer>? = rf_field_n(h);
+  a[0] = 99;
+  b += [7];
+  assert(len(h.v) == 2 && h.v[0] == 1, "the source moved: {len(h.v)} {h.v[0]}");
+  assert(len(a) == 2 && a[0] == 99, "dense: {len(a)} {a[0]}");
+  assert(len(b) == 3 && (b[2] ?? -1) == 7 && (b[0] ?? -1) == 1, "nullable: {len(b)}");
+}
+
+fn test_a_returned_vector_parameter_is_fresh_in_both_spellings() {
+  src = [1, 2];
+  a = rf_param(src);
+  b: vector<integer>? = rf_param_n(src);
+  a += [3];
+  b += [4, 5];
+  assert(len(src) == 2, "the argument moved: {len(src)}");
+  assert(len(a) == 3 && len(b) == 4, "results: {len(a)} {len(b)}");
+}
+
+fn test_a_returned_struct_field_is_fresh_in_both_spellings() {
+  h = rf_h();
+  a = rf_inner(h);
+  b = rf_inner_n(h);
+  a.k = 50;
+  if b != null { b.k = 60; }
+  assert(h.inner.k == 5, "the source field moved: {h.inner.k}");
+  assert(a.k == 50 && (b ?? RfIn { k: -1 }).k == 60, "results: {a.k} {(b ?? RfIn { k: -1 }).k}");
+}
+
+fn test_a_returned_text_field_is_fresh_in_both_spellings() {
+  h = rf_h();
+  a = rf_text(h);
+  b = rf_text_n(h) ?? "";
+  a += "!";
+  b += "?";
+  assert(h.t == "ab" && a == "ab!" && b == "ab?", "text: {h.t} {a} {b}");
+}
+
+fn test_two_calls_answer_independent_values_in_both_spellings() {
+  a = rf_mint();
+  b = rf_mint();
+  c: vector<RfS>? = rf_mint_n();
+  d: vector<RfS>? = rf_mint_n();
+  a[0].n = 10;
+  c += [RfS { n: 3 }];
+  assert(b[0].n == 1 && len(b) == 2, "dense calls shared: {b[0].n} {len(b)}");
+  assert(len(c) == 3 && len(d) == 2, "nullable calls shared: {len(c)} {len(d)}");
+}
+
+fn main() {
+  test_a_returned_vector_field_is_fresh_in_both_spellings();
+  test_a_returned_vector_parameter_is_fresh_in_both_spellings();
+  test_a_returned_struct_field_is_fresh_in_both_spellings();
+  test_a_returned_text_field_is_fresh_in_both_spellings();
+  test_two_calls_answer_independent_values_in_both_spellings();
+}

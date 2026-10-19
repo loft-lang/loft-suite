@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD THROUGH A FN-TYPED PARAMETER IS THE CALLER'S TO KEEP (`@FR-O-Opaque` crossed with
+// `@FR-O-Buffer` and `@FR-F-Ret`).  O-Buffer: a callee's record result arrives through a hidden
+// return buffer the caller owns; the callee either fills it or mints its own, and which, "no
+// static bit can say (O-Opaque)".  O-Opaque: a call through a fn-typed PARAMETER has empty deps
+// whatever its target does, so "the caller assumes the return BORROWS every heap argument it
+// passed" — it must not release its argument on the arm where the closure handed it back.  The
+// O-Move cell `1327-…` measures a VECTOR result; this one moves the result to a RECORD (the
+// hidden-buffer road) and the closure's answer over handing back its argument, minting, and
+// projecting a member record, each called many times with an allocation between calls so a
+// release of the caller's record would be reused and read back wrong.  The result is the
+// caller's own (F-Ret): a write through it reaches neither the argument nor the next result.
+//
+// Axes it MOVES: what the closure answers (its argument, a fresh record, a member record of its
+// argument), the caller's use (read, write through the result), repetitions (one, 300 with a
+// filler record between).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell but the write-through one answered as
+//   hand-computed on 18594597b, interpret and native.  That cell is a live silent-wrong defect,
+//   `@IGNORE`d below.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument.
+// WITNESS: each message prints the sums and the caller's record.
+// HOLDS: `ownership/O-Move/1327-an-opaque-fn-ref-return-may-be-its-argument`.
+
+struct OqIn { k: integer }
+struct OqS { n: integer, v: vector<integer>, inner: OqIn }
+
+fn oq_apply(s: OqS, g: fn(OqS) -> OqS) -> integer {
+  r = g(s);
+  r.n * 1000 + len(r.v)
+}
+
+fn oq_apply_in(s: OqS, g: fn(OqS) -> OqIn) -> integer {
+  r = g(s);
+  r.k
+}
+
+fn oq_write(s: OqS, g: fn(OqS) -> OqS) -> integer {
+  r = g(s);
+  r.n = 99;
+  r.v += [3];
+  r.inner.k = 77;
+  s.n * 1000 + len(s.v) * 10 + s.inner.k
+}
+
+fn oq_mk() -> OqS { OqS { n: 5, v: [1, 2], inner: OqIn { k: 4 } } }
+
+fn test_a_closure_handing_back_its_argument_leaves_the_callers_record() {
+  g = fn(p: OqS) -> OqS { p };
+  s = oq_mk();
+  t = 0;
+  for i in 0..300 {
+    t += oq_apply(s, g);
+    filler = OqS { n: i, v: [i, i, i], inner: OqIn { k: i } };
+    t += filler.n - i;
+  }
+  assert(t == 300 * 5002, "the sum: {t}");
+  assert(s.n == 5 && len(s.v) == 2 && s.v[1] == 2 && s.inner.k == 4, "the caller's record: {s.n} {len(s.v)} {s.inner.k}");
+}
+
+fn test_a_closure_minting_a_record_is_released_by_the_call() {
+  g = fn(p: OqS) -> OqS { OqS { n: p.n + 1, v: [p.n], inner: OqIn { k: 0 } } };
+  s = oq_mk();
+  t = 0;
+  for i in 0..300 { t += oq_apply(s, g); }
+  assert(t == 300 * 6001 && s.n == 5, "minted: {t} {s.n}");
+}
+
+fn test_a_closure_answering_a_member_record_leaves_the_callers_record() {
+  g = fn(p: OqS) -> OqIn { p.inner };
+  s = oq_mk();
+  t = 0;
+  for i in 0..300 {
+    t += oq_apply_in(s, g);
+    filler = OqIn { k: i * 7 };
+    t += filler.k - i * 7;
+  }
+  assert(t == 300 * 4 && s.inner.k == 4 && s.n == 5, "member: {t} {s.inner.k}");
+}
+
+// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): answers 99107 — every write through
+//   the result `r = g(s)` lands in the caller's `s` (n 99, three elements, k 77), while the
+//   compiler warns `lost-write` ("the mutation lands in the copy").  A named `ident(p) -> S { p }`
+//   passed through the same parameter does it too; called directly, either one copies, and a
+//   VECTOR result through the parameter copies.  `use_analysis::opaque_callref_bind` routes a
+//   record bind through the run-time adopt-or-copy (`OpBindFnRefResult`) only when the binding's
+//   deps are EMPTY, and the O-Opaque assumed borrow gives this binding deps on `s` — so it is a
+//   plain bind and views the argument.
+fn test_a_write_through_the_result_reaches_no_argument() {
+  g = fn(p: OqS) -> OqS { p };
+  s = oq_mk();
+  got = oq_write(s, g);
+  assert(got == 5024, "the argument after the write: {got}");
+  assert(s.n == 5 && len(s.v) == 2 && s.inner.k == 4, "the caller's record: {s.n} {len(s.v)} {s.inner.k}");
+}
+
+fn main() {
+  test_a_closure_handing_back_its_argument_leaves_the_callers_record();
+  test_a_closure_minting_a_record_is_released_by_the_call();
+  test_a_closure_answering_a_member_record_leaves_the_callers_record();
+  // test_a_write_through_the_result_reaches_no_argument();  -- @IGNORE above
+}

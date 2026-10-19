@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY ROW OF THE TABLE REACHES THE DEFINITION THAT COMPILES (`@FR-Op-Back` crossed with
+// `@FR-Op-Def` and `@FR-Op-Conv`).  Op-Def: an `operator` definition is checked where it is
+// written, "so a definition that compiles backs its form".  Op-Back: the table of forms — `<`,
+// `<=`, `>`, `>=` call `compare`, `+ - * / %` call `plus minus times divided_by remainder`,
+// unary `-` calls `negate`, `x as T` calls `to_t` (Op-Conv), `for e in x` calls `next`, and
+// `"{x}"` calls `to_text`.  The Op-Back cells beside this one measure the arithmetic rows; this
+// one defines EVERY row on one type and reaches each through its form, with a right operand of
+// another type where the table allows one (`U`), and an answer of another type (`V`).
+//
+// Axes it MOVES: the row (all eleven forms and the four comparisons), the right operand's type
+// (the same type, an integer), the answer's type (the same type, an integer, an Ordering, an
+// optional for `next`).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the Op-Back cells beside it, the Op-Def refusals.
+
+struct ObM { c: integer }
+struct ObCnt { at: integer, stop: integer }
+
+operator compare(self: ObM, other: ObM) -> Ordering {
+  if self.c < other.c { Less } else if self.c > other.c { Greater } else { Equal }
+}
+operator plus(self: ObM, other: ObM) -> ObM { ObM { c: self.c + other.c } }
+operator minus(self: ObM, other: integer) -> ObM { ObM { c: self.c - other } }
+operator times(self: ObM, other: integer) -> ObM { ObM { c: self.c * other } }
+operator divided_by(self: ObM, other: integer) -> ObM { ObM { c: self.c / other ?? 0 } }
+operator remainder(self: ObM, other: integer) -> integer { self.c % other ?? -1 }
+operator negate(self: ObM) -> ObM { ObM { c: -self.c } }
+operator to_integer(self: ObM) -> integer { self.c * 100 }
+operator to_text(self: ObM) -> text { "M{self.c}" }
+operator next(self: ObCnt) -> integer? {
+  if self.at >= self.stop { null } else { self.at += 1; self.at }
+}
+
+fn test_the_comparison_rows() {
+  a = ObM { c: 7 };
+  b = ObM { c: 3 };
+  s = "{a < b} {a <= b} {a > b} {a >= b} {b < a} {a <= a}";
+  assert(s == "false false true true true true", "compare: {s}");
+}
+
+fn test_the_arithmetic_rows() {
+  a = ObM { c: 7 };
+  b = ObM { c: 3 };
+  r = a + b;
+  m = a - 2;
+  t = a * 3;
+  d = a / 2;
+  q = a % 4;
+  n = -a;
+  assert(r.c == 10 && m.c == 5 && t.c == 21 && d.c == 3 && q == 3 && n.c == -7, "arithmetic: {r.c} {m.c} {t.c} {d.c} {q} {n.c}");
+}
+
+fn test_the_conversion_iteration_and_text_rows() {
+  a = ObM { c: 7 };
+  i = a as integer;
+  tot = 0;
+  for e in ObCnt { at: 0, stop: 4 } { tot += e; }
+  s = "{a}";
+  assert(i == 700 && tot == 10 && s == "M7", "as / for / text: {i} {tot} {s}");
+}
+
+fn main() {
+  test_the_comparison_rows();
+  test_the_arithmetic_rows();
+  test_the_conversion_iteration_and_text_rows();
+}

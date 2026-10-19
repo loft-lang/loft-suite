@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD PACKS BY DESCENDING ALIGNMENT AND PADS TO ITS LARGEST (`@FR-L-Struct` crossed with
+// `@FR-L-Align`).  L-Struct: a struct packs its fields by DESCENDING alignment and its size is
+// the packed total rounded up to align(τ).  L-Align: align of a scalar is its width (1, 2, 4,
+// 8; a text handle and a record pointer 4), a record's is the largest of its fields', and the
+// field after an INLINED record starts aligned too.  The L-Align cells beside this rule measure
+// records with 8-byte members and a text; this one moves the LARGEST alignment (8, 4, 2, 1),
+// writes the fields so that declaration order and alignment order disagree (so a layout in
+// written order answers a different size), and inlines a record of a smaller and of a larger
+// alignment than its neighbour.  Each record's fields are written and read back, as an element
+// too, so a field placed over another shows as a value.
+//
+// Sizes hand-computed (L-Struct, then rounded up by L-Align):
+//   SaA { u8, integer, u16, u8 }    8 + 2 + 1 + 1 = 12 -> 16   (written order would be 24)
+//   SaB { u8, u16, i32, u8 }        4 + 2 + 1 + 1 = 8  -> 8    (written order would be 12)
+//   SaC { u8, u8, u8 }              3, align 1     -> 3
+//   SaD { u16, u8 }                 3, align 2     -> 4
+//   SaE { text, u8 }                4 + 1 = 5      -> 8
+//   SaF { SaB, u8 }                 8 + 1 = 9, align 4 -> 12
+//   SaG { u8, SaA }                 16 + 1 = 17, align 8 -> 24
+//   SaH { boolean, float, single }  8 + 4 + 1 = 13 -> 16
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the measured size or the values.
+// HOLDS: `layout/L-Align/pln110-size-struct`, `layout/L-Tuple/a-record-is-padded-to-its-alignment`.
+
+struct SaA { a: u8, b: integer, c: u16, d: u8 }
+struct SaB { a: u8, b: u16, c: i32, d: u8 }
+struct SaC { a: u8, b: u8, c: u8 }
+struct SaD { a: u16, b: u8 }
+struct SaE { t: text, b: u8 }
+struct SaF { inner: SaB, x: u8 }
+struct SaG { x: u8, inner: SaA }
+struct SaH { b: boolean, f: float, s: single }
+
+fn test_the_sizes() {
+  assert(sizeof(SaA) == 16, "SaA {sizeof(SaA)}");
+  assert(sizeof(SaB) == 8, "SaB {sizeof(SaB)}");
+  assert(sizeof(SaC) == 3, "SaC {sizeof(SaC)}");
+  assert(sizeof(SaD) == 4, "SaD {sizeof(SaD)}");
+  assert(sizeof(SaE) == 8, "SaE {sizeof(SaE)}");
+  assert(sizeof(SaF) == 12, "SaF {sizeof(SaF)}");
+  assert(sizeof(SaG) == 24, "SaG {sizeof(SaG)}");
+  assert(sizeof(SaH) == 16, "SaH {sizeof(SaH)}");
+}
+
+fn test_the_strides() {
+  vb: vector<SaB> = [SaB { a: 1, b: 2, c: 3, d: 4 }, SaB { a: 5, b: 6, c: 7, d: 8 }, SaB { a: 9, b: 10, c: 11, d: 12 }];
+  vc: vector<SaC> = [SaC { a: 1, b: 2, c: 3 }, SaC { a: 4, b: 5, c: 6 }];
+  vd: vector<SaD> = [SaD { a: 1, b: 2 }, SaD { a: 3, b: 4 }, SaD { a: 5, b: 6 }];
+  assert(size(vb) == 24 && size(vc) == 6 && size(vd) == 12, "strides: {size(vb)} {size(vc)} {size(vd)}");
+}
+
+fn test_every_field_keeps_its_own_bytes() {
+  a = SaA { a: 251, b: -123456789012, c: 65001, d: 7 };
+  a.c -= 1;
+  a.d += 1;
+  assert(a.a == 251 && a.b == -123456789012 && a.c == 65000 && a.d == 8, "SaA: {a.a} {a.b} {a.c} {a.d}");
+  b = SaB { a: 250, b: 65000, c: -2000000000, d: 3 };
+  assert(b.a == 250 && b.b == 65000 && b.c == -2000000000 && b.d == 3, "SaB: {b.a} {b.b} {b.c} {b.d}");
+  e = SaE { t: "tex", b: 200 };
+  e.t += "t";
+  assert(e.t == "text" && e.b == 200, "SaE: {e.t} {e.b}");
+  h = SaH { b: true, f: 2.5, s: 1.5f };
+  assert(h.b && h.f == 2.5 && h.s == 1.5f, "SaH: {h.b} {h.f} {h.s}");
+}
+
+fn test_an_inlined_record_and_its_neighbour() {
+  f = SaF { inner: SaB { a: 1, b: 2, c: 3, d: 4 }, x: 99 };
+  f.inner.c = 70000;
+  f.x = 98;
+  assert(f.inner.a == 1 && f.inner.b == 2 && f.inner.c == 70000 && f.inner.d == 4 && f.x == 98, "SaF: {f.inner.c} {f.x}");
+  g = SaG { x: 17, inner: SaA { a: 1, b: 2, c: 3, d: 4 } };
+  g.inner.b = 5000000000;
+  assert(g.x == 17 && g.inner.a == 1 && g.inner.b == 5000000000 && g.inner.c == 3 && g.inner.d == 4, "SaG: {g.x} {g.inner.b}");
+  vg: vector<SaG> = [g, SaG { x: 18, inner: SaA { a: 9, b: 8, c: 7, d: 6 } }];
+  vg[1].inner.c = 600;
+  assert(size(vg) == 48 && vg[0].x == 17 && vg[1].x == 18 && vg[1].inner.c == 600 && vg[1].inner.d == 6, "vector<SaG>: {size(vg)} {vg[1].inner.c}");
+}
+
+fn main() {
+  test_the_sizes();
+  test_the_strides();
+  test_every_field_keeps_its_own_bytes();
+  test_an_inlined_record_and_its_neighbour();
+}

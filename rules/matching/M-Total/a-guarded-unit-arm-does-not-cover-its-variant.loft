@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GUARDED UNIT ARM DOES NOT COVER ITS VARIANT (`@FR-M-Total` crossed with `@FR-M-Unit`).
+// M-Unit: `V` matches an enum value whose variant is the unit variant V.  M-Total: `total(V)`
+// is true, but `total(pat if cond) = false` — "a GUARDED arm NEVER secures totality, whatever its
+// pattern" — and on an enum subject "a variant counts as covered only by a TOTAL arm"; a variant
+// left uncovered with no `_` is a static error naming it.  Here the only arm for `Red` is
+// guarded, every other variant has a bare unit arm, and there is no `_`.
+//
+// @EXPECT_ERROR: match on MtC is not exhaustive — missing: Red
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the missing variant.
+// HOLDS: `unit-arms-cover-an-enum-without-a-wildcard` beside it.
+
+enum MtC { Red, Green, Blue }
+
+fn mt_f(c: MtC, x: integer) -> integer {
+  match c {
+    Red if x > 0 => 1,
+    Green => 2,
+    Blue => 3
+  }
+}
+
+fn main() {
+  assert(mt_f(MtC.Green, 1) == 2, "unreachable");
+}

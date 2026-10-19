@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WIDENED TUPLE MEMBER IS A LINK TARGET IN EVERY RECORD HOME (`@FR-C-Var` crossed with
+// `@FR-T-Ref-Rep`).  T-Ref-Rep: the tuple a `&(…)` names is a `__tuple<τ₁, …, τₙ>` RECORD — "the
+// same record a heap-tuple RETURN, the loop variable over a `vector<(…)>`, a `vector<(…)>`
+// element and a struct's tuple field already are" — and "the record's members are the LOCAL's
+// types, never the literal's … because a variant widens into its enum (types.md (C-Var))".  The
+// C-Var cell beside this one measures a tuple LOCAL; this one moves the record's home to the
+// other four, each filled from a variant literal, and links each to a `&(integer, Entity)`
+// parameter that writes both members — the other variant into the enum member.
+//
+// Axes it MOVES: the record home (a vector element, a struct's tuple field, a loop variable over
+// a vector of tuples, a heap-tuple return bound to a local), the write through the link (the
+// integer member, the enum member to the other variant).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the members.
+// HOLDS: `a-declared-tuple-with-an-enum-member-keeps-its-type-as-a-reference-source` beside it.
+
+enum TrEntity { TrFire { n: integer }, TrWall { n: integer } }
+struct TrHost { tag: integer, pair: (integer, TrEntity) }
+
+fn tr_bump(t: &(integer, TrEntity)) { t.0 = t.0 + 1; }
+fn tr_to_fire(t: &(integer, TrEntity)) { t.1 = TrFire { n: t.0 * 10 }; }
+fn tr_name(e: TrEntity) -> text {
+  match e { TrFire { n } => "fire {n}", TrWall { n } => "wall {n}" }
+}
+fn tr_mk(k: integer) -> (integer, TrEntity) { (k, TrWall { n: k + 5 }) }
+
+fn test_a_vector_element() {
+  v: vector<(integer, TrEntity)> = [(1, TrWall { n: 6 }), (2, TrFire { n: 7 })];
+  tr_bump(v[0]);
+  tr_to_fire(v[1]);
+  assert(len(v) == 2 && v[0].0 == 2 && tr_name(v[0].1) == "wall 6", "element 0: {v[0].0} {tr_name(v[0].1)}");
+  assert(v[1].0 == 2 && tr_name(v[1].1) == "fire 20", "element 1: {v[1].0} {tr_name(v[1].1)}");
+}
+
+fn test_a_struct_tuple_field() {
+  h = TrHost { tag: 9, pair: (3, TrWall { n: 4 }) };
+  tr_bump(h.pair);
+  tr_to_fire(h.pair);
+  assert(h.tag == 9 && h.pair.0 == 4 && tr_name(h.pair.1) == "fire 40", "field: {h.pair.0} {tr_name(h.pair.1)}");
+}
+
+fn test_a_loop_variable() {
+  v: vector<(integer, TrEntity)> = [(1, TrWall { n: 6 }), (5, TrWall { n: 8 })];
+  for t in v { tr_bump(t); }
+  assert(v[0].0 == 2 && v[1].0 == 6 && tr_name(v[1].1) == "wall 8", "loop: {v[0].0} {v[1].0}");
+}
+
+fn test_a_heap_tuple_return_bound_to_a_local() {
+  w = tr_mk(7);
+  tr_bump(w);
+  first = tr_name(w.1);
+  tr_to_fire(w);
+  assert(w.0 == 8 && first == "wall 12" && tr_name(w.1) == "fire 80", "return: {w.0} {first} {tr_name(w.1)}");
+}
+
+fn main() {
+  test_a_vector_element();
+  test_a_struct_tuple_field();
+  test_a_loop_variable();
+  test_a_heap_tuple_return_bound_to_a_local();
+}

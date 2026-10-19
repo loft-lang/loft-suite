@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT PATTERN BINDS THE PAYLOAD OF A NULLABLE SLOT (`@FR-M-Variant` crossed with
+// `@FR-L-Null`).  M-Variant: `V { f₁, …, fₘ }` matches a value whose variant is V and binds each
+// fⱼ to the payload field of that name.  L-Null: a nullable struct-enum has its not-null form's
+// bytes, its absence the discriminant 0 in them — so `E?` is matched from the same bytes as
+// `E`, an absent value matches no variant (it reaches `_`, or a `null` arm), and the binding
+// is by NAME whatever order the pattern lists the fields in.  A vector payload binding is a
+// view of the matched value, so a write through it lands there.  The M-Variant cell beside
+// this one dispatches a null enum; this one moves the nullable SLOT the subject is read from
+// (a local, a parameter, a field, a field never written, a vector element, a call result).
+//
+// Axes it MOVES: the slot (local, parameter, field present / omitted, `vector<E?>` element,
+// a `-> E?` return), the answer (each variant, absent), the field order in the pattern, the
+// payload kind (scalars, a vector written through the binding).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the description.
+// HOLDS: `1778-a-null-enum-through-a-dispatcher-answers-the-typed-null` beside it.
+
+enum MvSh { MvCi { r: integer, tag: text }, MvSq { w: integer, h: integer }, MvBag { items: vector<integer> } }
+struct MvHold { s: MvSh?, n: integer }
+
+fn mv_desc(s: MvSh?) -> text {
+  match s {
+    MvCi { r, tag } => "ci {r} {tag}",
+    MvSq { h, w } => "sq {w}x{h}",
+    MvBag { items } => "bag {len(items)}",
+    _ => "none"
+  }
+}
+
+fn mv_mk(c: integer) -> MvSh? {
+  if c == 0 { null } else if c == 1 { MvCi { r: 3, tag: "t" } } else { MvSq { w: 4, h: 5 } }
+}
+
+fn test_a_local_and_a_parameter() {
+  a: MvSh? = MvCi { r: 1, tag: "a" };
+  b: MvSh? = null;
+  assert(mv_desc(a) == "ci 1 a" && mv_desc(b) == "none", "{mv_desc(a)} | {mv_desc(b)}");
+  m = match b { null => "isnull", _ => "other" };
+  assert(m == "isnull", "a null arm: {m}");
+}
+
+fn test_a_field_present_and_omitted() {
+  h = MvHold { s: MvSq { w: 2, h: 3 }, n: 1 };
+  h2 = MvHold { n: 2 };
+  assert(mv_desc(h.s) == "sq 2x3" && mv_desc(h2.s) == "none", "{mv_desc(h.s)} | {mv_desc(h2.s)}");
+}
+
+fn test_every_element_of_a_nullable_vector() {
+  v: vector<MvSh?> = [MvCi { r: 9, tag: "v" }, null, MvSq { w: 7, h: 8 }];
+  t = "";
+  for e in v { t += mv_desc(e) + ";"; }
+  assert(t == "ci 9 v;none;sq 7x8;" && len(v) == 3, "{t}");
+}
+
+fn test_a_nullable_return_on_every_arm() {
+  t = "{mv_desc(mv_mk(0))} | {mv_desc(mv_mk(1))} | {mv_desc(mv_mk(2))}";
+  assert(t == "none | ci 3 t | sq 4x5", "{t}");
+}
+
+fn test_a_vector_payload_binding_writes_through() {
+  a: MvSh? = MvBag { items: [1] };
+  match a {
+    MvBag { items } => { items += [2, 3]; },
+    _ => {}
+  }
+  assert(mv_desc(a) == "bag 3", "a write through the payload binding: {mv_desc(a)}");
+}
+
+fn main() {
+  test_a_local_and_a_parameter();
+  test_a_field_present_and_omitted();
+  test_every_element_of_a_nullable_vector();
+  test_a_nullable_return_on_every_arm();
+  test_a_vector_payload_binding_writes_through();
+}
