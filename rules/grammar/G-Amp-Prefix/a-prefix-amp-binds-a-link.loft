@@ -7,8 +7,8 @@
 // live link to a variable, an element, a field, or a parenthesised variable, and a `&τ`
 // parameter or a `x: &τ` annotation links without a `&` at the use.  The one field form is a
 // `reference<τ>` struct field (`B-Ref-StoredRef`).  `&a == &b` is the identity question on
-// records (`E-Eq`), the other position that admits a leading `&` — see the report on
-// `(G-Amp-Prefix)`'s single named exception.  Hand-computed values in each message.
+// records (`E-Eq`), the rule's second named exception (owner ruling 2026-10-19).  Hand-computed
+// values in each message.
 //
 // @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
 // CHANNEL: the asserts.
@@ -19,8 +19,10 @@
 struct Item { n: integer }
 struct Link { link: reference<Item> }
 struct Pool { items: vector<Item> }
+struct Two { a: Item, b: Item }
 
 fn bump(n: &integer) { n += 10; }
+fn same(p: Item, q: Item) -> boolean { &p == &q }
 
 fn test_a_link_to_a_variable() {
   a = 3;
@@ -69,4 +71,18 @@ fn test_identity_on_both_sides() {
   r = 0;
   if &x == &z { r = 1; }
   assert(r == 1, "in a condition: {r}");
+}
+
+fn test_identity_on_elements_fields_and_params() {
+  v = [Item { n: 1 }, Item { n: 1 }];
+  e1 = &v[0] == &v[0];
+  e2 = &v[0] == &v[1];
+  t = Two { a: Item { n: 2 }, b: Item { n: 2 } };
+  f1 = &t.a == &t.a;
+  f2 = &t.a == &t.b;
+  x = Item { n: 3 };
+  p1 = same(x, x);
+  p2 = same(x, v[0]);
+  assert(e1 && !e2 && f1 && !f2 && t.a == t.b, "elements/fields: {e1} {e2} {f1} {f2}");
+  assert(p1 && !p2, "params: {p1} {p2}");
 }
