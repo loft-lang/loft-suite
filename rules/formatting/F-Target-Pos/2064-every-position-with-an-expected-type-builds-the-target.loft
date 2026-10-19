@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY POSITION WITH AN EXPECTED TYPE BUILDS THE TARGET; A HOLE IS NOT ONE (`@FR-F-Target-Pos`,
+// crossed with `@FR-F-Interp` and `@FR-F-Target`).  Owner ruling 2026-10-19: a call argument and a
+// return position target.  Axes moved: a second argument, a method argument, an early `return`
+// and the tail after it, both branches of an `if`, a call result passed on, a lambda's body, a
+// template with no hole; and inside a target's hole, a keyed lookup, a vector element and a bare
+// literal stay VALUES (the template's destination does not reach into the hole), while a call
+// written in a text template's hole still builds its own parameter (loft#2064).
+//
+// @falsified-at: 3cae84177 — interpret and native: every call inside an assert message's hole
+//   is refused "expected Q, got text on argument N".
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the call log that moved.
+// HOLDS: an annotated binding and a struct field build the target as before (the sibling cell).
+
+struct Q { const log: vector<text> }
+struct W { n: integer }
+fn lit(self: Q, s: text) { self.log += ["L({s})"]; }
+fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
+fn cat(v: vector<text>) -> text { r = ""; for x in v { r += x; } r }
+fn take(q: Q) -> text { cat(q.log) }
+fn take2(a: integer, q: Q) -> text { "{a}{cat(q.log)}" }
+fn sink(self: W, q: Q) -> text { "{self.n}{cat(q.log)}" }
+fn early(n: integer) -> Q { if n > 5 { return "big{n}"; } "small{n}" }
+fn branch(n: integer) -> Q { if n > 5 { "b{n}" } else { "s{n}" } }
+fn test_positions() {
+  n = 4;
+  assert(take2(1, "x{n}") == "1L(x)I(4)", "second arg: {take2(1, "x{n}")}");
+  w = W { n: 3 };
+  assert(w.sink("m{n}") == "3L(m)I(4)", "method arg: {w.sink("m{n}")}");
+  assert(cat(early(9).log) == "L(big)I(9)", "early return: {cat(early(9).log)}");
+  assert(cat(early(2).log) == "L(small)I(2)", "tail after early: {cat(early(2).log)}");
+  assert(cat(branch(7).log) == "L(b)I(7)" && cat(branch(1).log) == "L(s)I(1)", "if branches");
+  assert(take(early(8)) == "L(big)I(8)", "a call result passed on");
+  f = fn(k: integer) -> Q { "lam{k}" };
+  assert(cat(f(5).log) == "L(lam)I(5)", "lambda return: {cat(f(5).log)}");
+  assert(take("plain") == "L(plain)", "no hole: {take("plain")}");
+}
+fn hole_text(self: Q, v: text) { self.log += ["T({v})"]; }
+struct E { name: text, n: integer }
+struct Db { es: hash<E[name]> }
+fn test_lookups_inside_a_target_hole() {
+  db = Db { es: [E { name: "a", n: 7 }, E { name: "b", n: 9 }] };
+  q: Q = "x{db.es["b"].n}y{db.es["a"].name}";
+  assert(cat(q.log) == "L(x)I(9)L(y)T(a)", "keyed: {cat(q.log)}");
+  v = [3, 5];
+  r: Q = "{v[1]}{"seed"}";
+  assert(cat(r.log) == "I(5)T(seed)", "element + literal: {cat(r.log)}");
+  s = "{db.es["b"].n}-{cat(q.log)}";
+  assert(s == "9-L(x)I(9)L(y)T(a)", "text template: {s}");
+}

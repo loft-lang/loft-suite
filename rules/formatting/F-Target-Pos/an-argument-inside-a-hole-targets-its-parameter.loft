@@ -4,22 +4,17 @@
 // AN ARGUMENT INSIDE A HOLE TARGETS ITS PARAMETER (`@FR-F-Target-Pos`, crossed with
 // `@FR-F-Interp`).  A hole holds an arbitrary expression parsed at full language level
 // `(F-Interp)`, so a call written inside a hole meets its parameters exactly as the same call
-// does outside one.  Where a call argument targets (the compiler and LOFT_LITERALS.md say it
-// does; the rule text says it does not — see the sibling cell
-// `an-annotated-binding-and-a-field-build-the-target.loft`), it targets inside a hole too.
+// does outside one, and a call argument targets, so it targets inside a hole too.
 //
-// ⚠ DEFECT, conditional on the ruling (reported by the rule walk, 2026-10-18): `a =
-// take("x{n}")` builds a `Q`, but `"{take("x{n}")}"` is refused "expected Q, got text on
-// argument 1 of call to take" on both backends.  The gate that stops a string inside a hole
-// from inheriting the TEMPLATE's destination (`!self.in_format_expr`, src/parser/vectors.rs)
-// also stops it from taking the destination of a call written in that hole.
+// loft#2064: `a = take("x{n}")` built a `Q`, but `"{take("x{n}")}"` was refused "expected Q,
+// got text on argument 1 of call to take" on both backends — the gate that keeps the TEMPLATE's
+// destination out of a hole also kept out the destination of a call written in that hole.
 //
-// @IGNORE — the defect above, and the pending F-Target-Pos ruling it depends on.
-// @falsified-at: none — the expected behaviour does not exist on any build yet; this cell is
-//   the receipt the fix must turn green.
+// @falsified-at: 3cae84177 — interpret and native: the hole's call is refused "expected Q, got
+//   text on argument 1 of call to take".
 // CHANNEL: the asserts (today: a compile refusal).
 // ARMED: no instrument.
-// WITNESS: today `expected Q, got text on argument 1 of call to take`.
+// WITNESS: the message prints both counts.
 // HOLDS: `q: Q = "{"seed"}"` still hands "seed" to `hole_text` as a value.
 
 struct Q { const log: vector<text> }

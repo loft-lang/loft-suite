@@ -7,12 +7,8 @@
 // (its declared type is the expected type).  An UNannotated binding expects nothing, so the
 // same template is a `text`.
 //
-// ⚠ The rule text says a call ARGUMENT and a RETURN position do NOT target ("measured:
-// `expected Query, got text`").  The compiler threads both (loft#837, `seed_leaving_value_hint`
-// and `argument_hint`), and LOFT_LITERALS.md § "Building a value instead of text" PROMISES
-// both ("a function parameter, or a return type").  That is a disagreement between the formal
-// rule and the user documentation, reported for a ruling; the last function measures today's
-// behaviour and is ignored until the ruling says which text is the contract.
+// A call ARGUMENT and a RETURN position target too (owner ruling 2026-10-19: the rule text had
+// said they did not, while the compiler and LOFT_LITERALS.md said they did; the rule changed).
 //
 // @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
 // CHANNEL: the asserts.
@@ -61,8 +57,6 @@ fn test_an_unannotated_binding_is_text() {
   assert(s == "a4" && len(s) == 2, "[{s}]");
 }
 
-// @IGNORE — the rule text says these two positions do not target; the documentation and the
-// compiler say they do.  Pending the ruling (see the header).
 fn test_a_return_and_an_argument() {
   n = 4;
   assert(cat(build(9).log) == "L(r)I(9)", "{cat(build(9).log)}");
