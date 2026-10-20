@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CLOSURE REPLACING A CAPTURED `&` RECORD REACHES THE CALLER (`@FR-L-CapRef`, with
+// `@FR-L-CapHeap` sharing the pointee): a `&S` / `&vector` parameter is captured as its
+// pointee, which is SHARED, so a whole-value replace from inside the closure (`p = S { … }`)
+// lands in the caller's record exactly as a field write does.  Only a COPIED pointee (`&` scalar
+// or text, `@FR-L-CapScalar`) refuses the replace (the sibling refusal cell).
+//
+// Axes it MOVES: the pointee kind (a struct, a vector), a field write after the replace inside
+// the same closure, the closure called twice, the leak gate over the replaced records.  Values
+// hand-computed: the caller reads what the closure wrote last.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native (the owner's 2026-10-20 reading of L-CapRef narrowed the refusal).
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument.
+// WITNESS: each message prints the caller's values.
+// HOLDS: `a-closure-write-to-a-captured-ref-scalar-is-refused.loft` (the copied kind refuses).
+
+struct CrS { k: integer, t: text }
+
+fn cr_replace(p: &CrS) {
+  g = fn() {
+    p = CrS { k: 9, t: "nine" };
+    p.k += 1;
+  };
+  g();
+  g();
+}
+
+fn cr_replace_vector(v: &vector<integer>) {
+  g = fn() { v = [9, 8, 7]; };
+  g();
+}
+
+fn test_a_replaced_record_reaches_the_caller() {
+  s = CrS { k: 1, t: "one" };
+  cr_replace(s);
+  assert(s.k == 10 && s.t == "nine", "the caller's record: {s.k} {s.t}");
+}
+
+fn test_a_replaced_vector_reaches_the_caller() {
+  v = [1, 2];
+  cr_replace_vector(v);
+  assert(len(v) == 3 && v[0] == 9 && v[2] == 7, "the caller's vector: {v}");
+}
+
+fn main() {
+  test_a_replaced_record_reaches_the_caller();
+  test_a_replaced_vector_reaches_the_caller();
+}
