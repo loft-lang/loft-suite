@@ -1,12 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): a block whose tail is a slice is typed as the
-//   iterator the slice lowers from.  `b = { src[1..3] }` is an internal compiler error, "index
-//   out of bounds: the len is 0 but the index is 18446744073709551615 [src/scopes/scan.rs:272]"
-//   (the slice's `break` reaches the scopes pass outside any loop), with and without an
-//   annotation on `b`.  An `if` arm of the same slice is materialised (loft#1941).
-//
 // A SLICE AS A BLOCK TAIL IS A FRESH VECTOR (`@FR-Slice-Value` crossed with `@FR-H-Alloc`).
 // "The value is owed at EVERY vector-typed position, not only a bind: … a block tail … take[s]
 // the slice as the fresh vector a bind would make of it."  So the block answers a fresh
@@ -14,7 +8,7 @@
 //
 // Values hand-computed from `src = [10, 20, 30, 40, 50]`.
 //
-// @falsified-at: none — written against a live defect; it fails on 18594597b on both backends.
+// @falsified-at: 18594597b (loft#2084) — it fails there on both backends.
 // CHANNEL: the compile (an internal compiler error), then the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the values.

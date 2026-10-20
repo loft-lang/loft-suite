@@ -1,21 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): the refusal is followed by two more errors,
-//   "Cannot redefine 'negate' (already defined at default/01_code.loft…)" before it and
-//   "Syntax error: unexpected '->'" after it: `Data::add_fn` answers `u32::MAX` for a method
-//   whose receiver's attribute table already holds the name (data.rs, the `existing` branch's
-//   `return u32::MAX`), so `parse_function` reports "not a function" with the lexer parked
-//   before `->`.  The `#dup` shadow the free-function redefinition uses (data.rs, "Report and
-//   CONTINUE") is not applied there.  The Op-Home message itself is pre-empted by the collision.
-//
 // AN OPERATOR ON A BUILT-IN TYPE THE STDLIB HAS A METHOD FOR SAYS ONLY THE REFUSAL
 // (`@FR-Op-Home`): `operator negate(self: float)` is on a built-in type and is refused; the stdlib
 // already holds a `negate` on `float`, which makes it a collision too, but the program has one
 // mistake and its diagnostics must say one — never a syntax error against a well-formed
 // signature.  One refusal per file.
 //
-// @falsified-at: 18594597b — interpret and native: the claimed error plus "Cannot redefine
+// @falsified-at: 18594597b (loft#2086) — interpret and native: the claimed error plus "Cannot redefine
 //   'negate'" and "Syntax error: unexpected '->'".
 // CHANNEL: the compile (the expected diagnostic, and no other).
 // ARMED: no instrument.

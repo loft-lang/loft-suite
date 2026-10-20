@@ -1,11 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): `w = b` of a `-> const T` RECORD is refused at
-//   the first write through `w`, "it holds read-only data … copy it first (`w = w`, a bind
-//   copies)" — the cure it names is the bind it refused.  `Parser::value_is_foreign` reads a
-//   bare `Var` of a foreign-bound local as foreign, so the copy is marked value-const.
-//
 // A WHOLE COPY OF A FOREIGN RECORD IS THE READER'S OWN (`@FR-Const-Foreign` crossed with
 // `@FR-B-Copy` and `@FR-B-View`).  Const-Foreign: "The cure is a copy, which is the reader's
 // own: … `w = v` (B-Copy)."  A plain whole-value bind copies (B-Copy), so `w = b` of a record
@@ -17,7 +12,7 @@
 //
 // Values hand-computed from the producer `cf_mk`.
 //
-// @falsified-at: none — written against a live defect; it fails on 18594597b on both backends
+// @falsified-at: 18594597b (loft#2083) — it fails there on both backends
 //   with the compile refusal quoted above.
 // CHANNEL: the compile diagnostic, then the asserts.
 // ARMED: no instrument.

@@ -1,19 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): the refusal fires and is followed by a second
-//   error, "Unknown variable 'x'", at the body's read of the refused parameter; the file is
-//   then failed for an error it does not claim.  The same cascade follows the lone-lambda
-//   refusal "Cannot infer type for lambda parameter 'x'" (attic `1067b` and `1926` dodge it by
-//   never reading the parameter).
-//
 // A REFUSED LAMBDA THAT READS ITS PARAMETER SAYS ONLY THE REFUSAL (`@FR-Disp-Hint`): the
 // refusal of an untyped `|x|` at a set is the whole answer for that lambda — it names the
 // definitions and the cure — and the body's use of `x` is not a second mistake to report.  One
 // refusal per file; a second, cascading error makes the file's diagnostics say something the
 // program did not get wrong.
 //
-// @falsified-at: 18594597b — interpret and native: the refusal plus "Unknown variable 'x'".
+// @falsified-at: 18594597b (loft#2085) — interpret and native: the refusal plus "Unknown variable 'x'".
 // CHANNEL: the compile (the expected diagnostic).
 // ARMED: no instrument.
 // WITNESS: the diagnostic names both members and the typed spelling.

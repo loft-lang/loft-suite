@@ -1,14 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): a `null` LITERAL argument reaches the DENSE
-//   member — `an(null)` over {an(ANPt), an(ANPt?)} answers "pt null", `ai(null)` over
-//   {ai(integer), ai(ANPt?)} answers "int null", `at(null)` over {at(text), at(ANPt?)} answers
-//   "text null" — each with the warning "`null` is stored into parameter 1 … declare it `ANPt?`",
-//   whose cure is already declared.  `null` synthesises no key identity, so
-//   `Parser::ranked_overloads` answers None and the call falls to the pre-dispatch ladder
-//   (`Data::select_fn`), which does not rank nullability.
-//
 // A NULL LITERAL REACHES THE NULLABLE MEMBER (`@FR-Disp-Applicable`: "after (F-Recv)'s
 // nullability routing, so a nullable argument reaches the `τ?` member where one is declared";
 // `@FR-Disp-Specific` ranks a null into a dense slot LOSSY, N-Store).  `null` is the most nullable
@@ -21,7 +13,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: 18594597b — interpret and native: "pt null|int null|text null|pt null".
+// @falsified-at: 18594597b (loft#2081) — interpret and native: "pt null|int null|text null|pt null".
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: the message prints the four answers.

@@ -1,12 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE — DEFECT (both backends, 18594597b): an UNANNOTATED literal whose elements are slices is
-//   typed as a collection of iterators.  `vv[0][0] = 66` is refused "Indexing a non vector —
-//   keyed collections … have no generic-constructor expression", and `vv.len()` / `"{vv}"` is an
-//   internal compiler error, "index out of bounds … [src/scopes/scan.rs:272]".  Annotated
-//   (`vv: vector<vector<integer>> = …`) the same literal answers `[[66,50],[10]]`.
-//
 // A SLICE AS A LITERAL ELEMENT IS A FRESH VECTOR (`@FR-Slice-Value` crossed with `@FR-H-Alloc`).
 // "The value is owed at EVERY vector-typed position, not only a bind: … a literal's element
 // take[s] the slice as the fresh vector a bind would make of it (`Parser::iterator_as_vector`,
@@ -15,7 +9,7 @@
 //
 // Values hand-computed from `src = [10, 20, 30, 40, 50]`.
 //
-// @falsified-at: none — written against a live defect; it fails on 18594597b on both backends.
+// @falsified-at: 18594597b (loft#2084) — it fails there on both backends.
 // CHANNEL: the compile (a refusal, then an internal compiler error), then the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the values.
