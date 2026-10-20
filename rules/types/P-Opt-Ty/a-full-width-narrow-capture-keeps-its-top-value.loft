@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FULL-WIDTH NARROW CAPTURE KEEPS ITS TOP VALUE (`@FR-P-Opt-Ty`, crossed with `@FR-N-Reserve`).
+// A capture an optional group binds is nullable, and the capture is a SLOT: a `u8` field captured
+// as `u8?` could not keep 255 (a `u8?` holds 0..=254, its top code being its null), so binding
+// the capture to a local read null for a present byte.  The capture keeps its field's RANGE
+// with a spare code beside it — `integer limit(0, 255)?` — so every value of the field survives
+// (owner ruling 2026-10-20).  Storing it on into a declared `u8?` slot still follows N-Reserve:
+// a run-time value outside that slot's range reads null there, as any value does.
+//
+// Values hand-computed: present 255 → c = 255, w = 255; absent → both null (-1 via `??`).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: the present byte bound to `c` read null
+//   ("c=-1 c-absent=true w=255").
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints both reads.
+// HOLDS: the absent arm reads null on both trees.
+
+enum FwTok { FwNum { n: integer }, FwByte { b: u8 }, FwEnd }
+
+fn fw_read(ts: vector<FwTok>) -> text {
+  match ts {
+    [FwNum { n }, (FwByte { b })?, FwEnd] => {
+      c = b;
+      w: integer? = b;
+      "{n}:{c ?? -1}/{c == null}/{w ?? -1}"
+    },
+    _ => "no match"
+  }
+}
+
+fn test_a_present_top_byte_survives_the_binding() {
+  s = fw_read([FwNum { n: 1 }, FwByte { b: 255 }, FwEnd]);
+  t = fw_read([FwNum { n: 2 }, FwByte { b: 7 }, FwEnd]);
+  u = fw_read([FwNum { n: 3 }, FwEnd]);
+  assert(s == "1:255/false/255" && t == "2:7/false/7" && u == "3:-1/true/-1", "{s} | {t} | {u}");
+}
+
+fn main() {
+  test_a_present_top_byte_survives_the_binding();
+}

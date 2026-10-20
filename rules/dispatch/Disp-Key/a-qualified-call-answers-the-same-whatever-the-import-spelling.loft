@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A QUALIFIED CALL ANSWERS THE SAME WHATEVER THE IMPORT SPELLING (`@FR-Disp-Key`):
+// a qualified `disp_key_fixture_lib::dk_hit(b)` names the package whose definition the author
+// means, so it reaches only the definitions that package declares — never a consumer member
+// that joined its set — whatever the import spelling (owner ruling 2026-10-20).  Here the
+// library is imported without `*`, so the bare name is the consumer's own.
+//
+// Values hand-computed: `b: u8` → the library's `dk_hit(integer)` (WIDENED) for the qualified
+// call; the bare call picks by the set the import makes visible.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; this import spelling answered so on 18594597b, interpret
+//   and native (the star twin is the one that moved).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints both answers.
+// HOLDS: `one-consumer-member-of-another-spelling-joins-a-library-set.loft` (the bare call).
+
+use disp_key_fixture_lib;
+
+fn dk_hit(x: u8) -> text { "own u8 {x}" }
+
+fn test_the_qualified_call_is_the_librarys() {
+  b: u8 = 9;
+  s = "{disp_key_fixture_lib::dk_hit(b)}|{dk_hit(b)}";
+  assert(s == "lib integer 9|own u8 9", "qualified|bare: {s}");
+}
+
+fn main() {
+  test_the_qualified_call_is_the_librarys();
+}

@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABILITY STEP ON A WIDENING IS NO CONVERSION (`@FR-D-Rank`, with `@FR-Disp-Specific`).
+// D-Rank makes GENERIC incomparable with CONVERTED only — the conversion is what has no order
+// against an instantiation.  A `u8?` into an `integer` parameter is a widening (C-Int) with a
+// nullability step on top (N-Store): no conversion, so the concrete member ranks above the
+// generic one, exactly as a plain `u8` (WIDENED) and an `integer?` (LOSSY) already did.  The
+// ranks are compared per step, not by their sum (owner ruling 2026-10-20).
+//
+// Ranks hand-computed:
+//   dn(integer) | dn<T>(T):  u8? WIDENED+LOSSY, i16? WIDENED+LOSSY → the concrete member.
+//   dw(integer) | dw(float) | dw<T>(T):  u8? → integer WIDENED+LOSSY (3), float CONVERTED+LOSSY,
+//     T GENERIC → integer beats both; float and T stay unordered between themselves, which
+//     does not matter once integer is the unique minimum.
+//
+// Axes it MOVES: the argument's width (u8, i16) under a nullability step, a set with a second
+//   concrete member that converts.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b — interpret and native: the calls are refused as ambiguous between
+//   the concrete and the generic member.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the answers.
+// HOLDS: `a-conversion-and-an-instantiation-are-not-ranked.loft` (a real conversion stays apart).
+
+fn dn(x: integer) -> text { "integer {x}" }
+fn dn<T>(_x: T) -> text { "generic" }
+
+fn dw(x: integer) -> text { "integer {x}" }
+fn dw(x: float) -> text { "float {x}" }
+fn dw<T>(_x: T) -> text { "generic" }
+
+fn test_a_widened_nullable_takes_the_concrete_member() {
+  a: u8? = 3;
+  b: i16? = -4;
+  s = "{dn(a)}|{dn(b)}|{dw(a)}";
+  assert(s == "integer 3|integer -4|integer 3", "per-step ranks: {s}");
+}
+
+fn main() {
+  test_a_widened_nullable_takes_the_concrete_member();
+}

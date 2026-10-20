@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARSE WHOSE ELEMENT HAS A BARE ENUM FIELD IS REFUSED (`@FR-D-NoEnumF`, `@FR-N-Cast`): the
+// asserting `text as T` promises every field a value at any depth, and an element of a vector
+// field is such a depth — `CeItem.tint` has no default, so `text as CeBag` is refused at
+// compile time like the top-level case (loft#2079).
+//
+// @falsified-at: 18594597b (loft#2079) — interpret and native: the file compiles.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the refusal names the field.
+// HOLDS: `a-parse-into-a-record-with-a-bare-enum-field-needs-its-default.loft` (the top level).
+// @EXPECT_ERROR: has no default: field `tint: CeColour`
+
+enum CeColour { Red, Blue }
+struct CeItem { tint: CeColour, n: integer }
+struct CeBag { items: vector<CeItem> }
+
+fn main() {
+  b = `{{"items":[{{"n":1}}]}}` as CeBag;
+  println("{len(b.items)}");
+}

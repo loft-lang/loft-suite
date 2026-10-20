@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHECKED PARSE ANSWERS NULL FOR AN ENUM FIELD IT CANNOT FILL; A DECLARED DEFAULT FILLS IT
+// (`@FR-D-NoEnumF`, crossed with `@FR-N-Cast` and @C148).  A bare enum field has no zero — its 0
+// is its null — so a text that leaves it without a value (omitted, `null`, or a variant the enum
+// does not have) produces no value of the type, and the checked `text as T?` answers null.  A
+// field that declares `= <variant>` takes that variant instead, and a variant the enum does not
+// have is a value that did not fit, listed under `#errors` (owner ruling 2026-10-20, loft#2079).
+//
+// Values hand-computed: CpColour has Red, Blue; "Green" names neither.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b (loft#2079) — interpret and native: every unfilled field answered a
+//   present record with `tint:null`; the declared default read null; "Green" listed nothing.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the record and its errors.
+// HOLDS: a text that names the variant answers it (the present cell).
+
+enum CpColour { Red, Blue }
+struct CpBare { tint: CpColour, x: integer }
+struct CpDefault { tint: CpColour = Blue, x: integer }
+
+fn test_an_unfilled_bare_enum_field_answers_null() {
+  a = `{{"x":4}}` as CpBare?;
+  b = `{{"x":4,"tint":null}}` as CpBare?;
+  c = `{{"x":4,"tint":"Green"}}` as CpBare?;
+  assert(a == null && b == null && c == null, "unfilled: {a} {b} {c}");
+}
+
+fn test_a_named_variant_is_kept() {
+  p = `{{"x":4,"tint":"Red"}}` as CpBare?;
+  assert(p != null && p.tint == Red && p.x == 4, "present: {p}");
+}
+
+fn test_a_declared_default_fills_the_field() {
+  d = `{{"x":4}}` as CpDefault;
+  e = `{{"x":5,"tint":"Green"}}` as CpDefault;
+  assert(d.tint == Blue && d.x == 4, "omitted: {d}");
+  assert(e.tint == Blue && e.x == 5 && len(e#errors) == 1, "unknown variant: {e} {e#errors}");
+}
+
+fn main() {
+  test_an_unfilled_bare_enum_field_answers_null();
+  test_a_named_variant_is_kept();
+  test_a_declared_default_fills_the_field();
+}
