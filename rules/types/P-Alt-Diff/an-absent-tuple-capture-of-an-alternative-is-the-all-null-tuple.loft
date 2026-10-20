@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ABSENT TUPLE CAPTURE OF AN ALTERNATIVE IS THE ALL-NULL TUPLE (`@FR-P-Alt-Diff`, with
+// `@FR-T-Absent` giving the absent tuple its representation).  A name bound by one alternative
+// and not another is absent on the other, and for a tuple-typed name absence is a tuple of
+// member nulls: each member reads its `??` default and the tuple compares equal to `null`.
+//
+// Axes it MOVES: the alternation form (an arm-level `|`, an arm-level `,`, tuple-pattern
+// alternatives `(1, pr) | (2, _)`), the arm taken (present and absent), a nested tuple member.
+// Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b (loft#2075) — interpret: the absent arm read stale or zero members or
+//   crashed; native: the tuple-alternative form did not compile (rustc E0425).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints both arms' answers.
+// HOLDS: the present arm (`6/y/-1/false`) was the control.
+
+enum AtTok { AtP { pr: (integer, text) }, AtQ { k: integer } }
+
+fn at_or(t: AtTok) -> text {
+  match t {
+    AtP { pr } | AtQ { k } => "{pr.0 ?? -1}/{pr.1 ?? "-"}/{k ?? -1}/{pr == null}",
+  }
+}
+
+fn at_multi(t: AtTok) -> text {
+  match t {
+    AtP { pr }, AtQ { k } => "{pr.0 ?? -1}/{pr.1 ?? "-"}/{k ?? -1}/{pr == null}",
+  }
+}
+
+fn at_tuple_alt(t: (integer, (integer, text))) -> text {
+  match t {
+    (1, pr) | (2, _) => "{pr.0 ?? -1}/{pr.1 ?? "-"}/{pr == null}",
+    _ => "x"
+  }
+}
+
+fn test_an_or_pattern_absent_tuple_capture_is_all_null() {
+  a = at_or(AtP { pr: (6, "y") });
+  b = at_or(AtQ { k: 4 });
+  assert(a == "6/y/-1/false" && b == "-1/-/4/true", "or: {a} | {b}");
+}
+
+fn test_a_multi_pattern_absent_tuple_capture_is_all_null() {
+  a = at_multi(AtP { pr: (6, "y") });
+  b = at_multi(AtQ { k: 4 });
+  assert(a == "6/y/-1/false" && b == "-1/-/4/true", "multi: {a} | {b}");
+}
+
+fn test_a_tuple_alternative_absent_tuple_capture_is_all_null() {
+  a = at_tuple_alt((1, (5, "k")));
+  b = at_tuple_alt((2, (5, "k")));
+  assert(a == "5/k/false" && b == "-1/-/true", "tuple alternatives: {a} | {b}");
+}
+
+fn main() {
+  test_an_or_pattern_absent_tuple_capture_is_all_null();
+  test_a_multi_pattern_absent_tuple_capture_is_all_null();
+  test_a_tuple_alternative_absent_tuple_capture_is_all_null();
+}

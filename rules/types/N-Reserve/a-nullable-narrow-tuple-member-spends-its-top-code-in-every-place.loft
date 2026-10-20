@@ -17,9 +17,8 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: none — a conformance guard; every cell but the two LITERAL ones answered as
-//   hand-computed on 18594597b, interpret and native.  Those two are a live silent-wrong
-//   defect, `@IGNORE`d below: a tuple literal's member keeps the in-flight 255.
+// @falsified-at: 18594597b (loft#2074) — the two literal cells and the tuple-value cell read 255
+//   for the u8? member (u.0 == null false), both backends; the others answered as hand-computed.
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the members, -1 for null.
@@ -54,22 +53,26 @@ fn test_a_fitting_value_is_kept_everywhere() {
   assert((t.0 ?? -1) == 254 && (r.0 ?? -1) == 254 && r.1 == 254, "254: {t.0 ?? -1} {r.0 ?? -1}");
 }
 
-// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): `u.0` reads 255 — the reserved null
-//   code of a `u8?`, as a value — and `u.0 == null` is false.  A tuple literal's members pass
-//   through `convert` alone (`src/parser/convert.rs`, the per-member loop of the tuple arm), which
-//   applies N-Store but not the `guard_declared_range` the member assignment applies
-//   (`src/parser/expressions.rs`, the loft#1640 branch).
 fn test_a_literal_bound_to_a_declared_tuple_lands_null() {
   m = 255;
   u: (u8?, integer) = (m as u8?, 2);
   assert(u.0 == null && u.1 == 2, "literal into a local: {u.0 ?? -1}");
 }
 
-// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): `s.0` reads 255; the same literal
-//   arm, reached through a declared `-> (u8?, integer)` return.
 fn test_a_literal_returned_through_a_declared_tuple_lands_null() {
   s = tr_mk(255);
   assert(s.0 == null && s.1 == 255, "literal returned: {s.0 ?? -1}");
+}
+
+// loft#2074's sibling — a tuple VALUE converted member by member into a `u8?` member.
+fn test_a_tuple_value_widened_into_a_nullable_narrow_member_lands_null() {
+  m = 255;
+  wv: (integer?, integer) = (m, 1);
+  a: (u8?, integer) = wv;
+  n = 254;
+  wf: (integer?, integer) = (n, 2);
+  b: (u8?, integer) = wf;
+  assert(a.0 == null && a.1 == 1 && (b.0 ?? -1) == 254, "tuple value: {a.0 ?? -1} {b.0 ?? -1}");
 }
 
 fn main() {
@@ -77,4 +80,7 @@ fn main() {
   test_a_literal_stored_as_an_element_lands_null();
   test_a_dense_narrow_member_takes_its_default();
   test_a_fitting_value_is_kept_everywhere();
+  test_a_literal_bound_to_a_declared_tuple_lands_null();
+  test_a_literal_returned_through_a_declared_tuple_lands_null();
+  test_a_tuple_value_widened_into_a_nullable_narrow_member_lands_null();
 }
