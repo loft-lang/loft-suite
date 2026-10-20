@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLAIN BIND OF A FN-REF RESULT OWNS A COPY ON EVERY ARM (`@FR-O-Opaque`, `@FR-B-Copy`,
+// `@FR-O-Unknown`).  A call through a fn-typed parameter is typed as borrowing every heap
+// argument (O-Opaque), but `r = g(s)` is still a PLAIN bind, so `r` is independent (B-Copy):
+// whichever store the call handed back — the argument itself, a capture, or one it minted —
+// a write through `r` reaches nothing the caller holds, and the minted store is released.
+//
+// Axes it MOVES: the target (a lambda handing its argument back, a named function doing the
+// same, a minting function, a closure handing its capture back), the result's nullability
+// (`fn(S) -> S?`), a re-set of the bound local, and a loop of 1000 calls under the leak gate.
+// Values hand-computed: `via` answers s.n * 1000 + the write; the loop sums (i - 0) for i in
+// 0..1000 = 499500, times 1000.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b (loft#2078) — interpret and native: "99099 99099 7099 60060 99 4099
+//   3 99000000 | 99 99 7 60 99 4" — every handed-back argument rewritten by the write.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument.
+// WITNESS: the message prints every answer and every caller record.
+// HOLDS: the minting target (`fresh`) and the capture (`cap`) were already right.
+
+struct S { n: integer }
+
+fn ident(p: S) -> S { p }
+fn fresh(p: S) -> S { S { n: p.n + 1 } }
+fn opt(p: S) -> S? { p }
+
+fn via(s: S, g: fn(S) -> S) -> integer {
+  r = g(s);
+  r.n = 99;
+  s.n * 1000 + r.n
+}
+
+fn via_twice(s: S, g: fn(S) -> S) -> integer {
+  r = g(s);
+  r.n = 50;
+  r = g(s);
+  r.n = 60;
+  s.n * 1000 + r.n
+}
+
+fn via_nullable(s: S, g: fn(S) -> S?) -> integer {
+  r = g(s);
+  if r != null {
+    r.n = 99;
+  }
+  s.n
+}
+
+fn test_every_target_leaves_the_callers_record() {
+  a = S { n: 5 };
+  v1 = via(a, fn(p: S) -> S { p });
+  b = S { n: 6 };
+  v2 = via(b, ident);
+  c = S { n: 7 };
+  v3 = via(c, fresh);
+  d = S { n: 8 };
+  v5 = via_twice(d, ident);
+  e = S { n: 9 };
+  v6 = via_nullable(e, opt);
+  cap = S { n: 3 };
+  f = S { n: 4 };
+  v7 = via(f, fn(p: S) -> S { cap });
+  total = 0;
+  for i in 0..1000 {
+    x = S { n: i };
+    total += via(x, ident) - 99;
+  }
+  s = "{v1} {v2} {v3} {v5} {v6} {v7} {cap.n} {total} | {a.n} {b.n} {c.n} {d.n} {e.n} {f.n}";
+  assert(s == "5099 6099 7099 8060 9 4099 3 499500000 | 5 6 7 8 9 4", s);
+}
+
+fn main() {
+  test_every_target_leaves_the_callers_record();
+}

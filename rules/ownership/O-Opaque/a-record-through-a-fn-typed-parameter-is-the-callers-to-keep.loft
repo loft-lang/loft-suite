@@ -19,9 +19,8 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: none — a conformance guard; every cell but the write-through one answered as
-//   hand-computed on 18594597b, interpret and native.  That cell is a live silent-wrong defect,
-//   `@IGNORE`d below.
+// @falsified-at: 18594597b (loft#2078) — interpret and native: the write-through cell answered
+//   99107, the caller's record rewritten; the other cells answered as hand-computed there.
 // CHANNEL: the asserts and the leak gate.
 // ARMED: no instrument.
 // WITNESS: each message prints the sums and the caller's record.
@@ -83,14 +82,7 @@ fn test_a_closure_answering_a_member_record_leaves_the_callers_record() {
   assert(t == 300 * 4 && s.inner.k == 4 && s.n == 5, "member: {t} {s.inner.k}");
 }
 
-// @IGNORE — DEFECT, silent-wrong, both backends (18594597b): answers 99107 — every write through
-//   the result `r = g(s)` lands in the caller's `s` (n 99, three elements, k 77), while the
-//   compiler warns `lost-write` ("the mutation lands in the copy").  A named `ident(p) -> S { p }`
-//   passed through the same parameter does it too; called directly, either one copies, and a
-//   VECTOR result through the parameter copies.  `use_analysis::opaque_callref_bind` routes a
-//   record bind through the run-time adopt-or-copy (`OpBindFnRefResult`) only when the binding's
-//   deps are EMPTY, and the O-Opaque assumed borrow gives this binding deps on `s` — so it is a
-//   plain bind and views the argument.
+// loft#2078 — on 18594597b every write through `r = g(s)` landed in the caller's `s` (99107).
 fn test_a_write_through_the_result_reaches_no_argument() {
   g = fn(p: OqS) -> OqS { p };
   s = oq_mk();
@@ -103,5 +95,5 @@ fn main() {
   test_a_closure_handing_back_its_argument_leaves_the_callers_record();
   test_a_closure_minting_a_record_is_released_by_the_call();
   test_a_closure_answering_a_member_record_leaves_the_callers_record();
-  // test_a_write_through_the_result_reaches_no_argument();  -- @IGNORE above
+  test_a_write_through_the_result_reaches_no_argument();
 }
