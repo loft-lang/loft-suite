@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GATED CALL ON SCRIPT-OWNED DATA NEEDS ITS GRANT (`@FR-Cap-Own`, `@FR-Cap-Call`).  Cap-Own frees
+// what a script does to its own values, but a call of a gated function reaches into the host
+// whatever its arguments are — the gate guards what the function does — so `peek_own(5)`, whose
+// only argument is a literal the script owns, is judged by Cap-Call and refused under a profile
+// that grants nothing (owner ruling 2026-10-20: Cap-Own excludes a gated call).
+//
+// @falsified-at: none — a conformance guard; the refusal held on 18594597b on both backends.
+// CHANNEL: the expected diagnostic (an admission refusal at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml (no capability granted).
+// WITNESS: the refusal names the gate the call needs.
+// HOLDS: `a-value-the-script-built-is-written-freely.loft` (owned data is free).
+// @EXPECT_ERROR: sandboxed `own_gated_call` reaches `peek_own`, which needs capability `vault#read` — not granted
+
+capability vault
+
+fn peek_own(x: integer) -> integer vault#read { x + 100 }
+
+fn own_gated_call() -> integer { peek_own(5) }
+
+fn main() {
+  println("{own_gated_call()}");
+}

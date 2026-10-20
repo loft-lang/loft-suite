@@ -2,7 +2,7 @@
 # runs under a profile that grants NO capability — only the stdlib's `code` library, which any
 # arithmetic or collection work reaches (SANDBOX.md § allow_libs).
 [sandbox]
-own = ["fn:own_build", "fn:own_copy_write", "fn:own_param_write", "fn:own_param_append", "fn:own_alias_write"]
+own = ["fn:own_build", "fn:own_copy_write", "fn:own_param_write", "fn:own_param_append", "fn:own_alias_write", "fn:own_gated_call"]
 
 [profile.own]
 allow_libs = ["code"]
