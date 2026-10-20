@@ -18,9 +18,8 @@
 // is computed; scope end drops in reverse declaration order) and B-Copy (the source is
 // untouched by a write to the copy).
 //
-// @falsified-at: none — a conformance guard; every cell but the REBIND one answered as hand-computed
-//   on 18594597b, interpret and native.  The rebind cell is a live defect, `@IGNORE`d below: a
-//   local holding a copy of a parameter, rebound, never runs the displaced copy's hook.
+// @falsified-at: 18594597b — interpret and native: the REBIND cell read `C1,R101,C2,R102,D102`
+//   (the displaced copy's hook never ran, loft#2080); every other cell answered as hand-computed.
 // CHANNEL: the asserts (each compares the whole trace).
 // ARMED: no instrument — each hook call is written to this cell's trace file.
 // WITNESS: each message prints the trace.
@@ -87,9 +86,6 @@ fn write_copy(p: H) -> integer {
   p.id
 }
 
-// @IGNORE — DEFECT (both backends, 18594597b): the displaced copy's hook never runs; the trace
-//   reads `C1,R101,C2,R102,D102` — `D101` is missing.  The scopes pass's latest-assignment
-//   memo (`owned_refs`) reads `x = p` off a parameter as a borrow, so `displaced_drop` declines.
 fn test_a_rebind_copies_the_new_value_then_drops_the_displaced_copy() {
   drain();
   a = mk(1);
@@ -147,7 +143,7 @@ fn test_a_write_through_the_copy_leaves_the_source() {
 }
 
 fn main() {
-  // test_a_rebind_copies_the_new_value_then_drops_the_displaced_copy();  -- @IGNORE above
+  test_a_rebind_copies_the_new_value_then_drops_the_displaced_copy();
   test_a_join_of_two_parameters_copies_the_arm_that_ran();
   test_a_nullable_destination_takes_a_lease();
   test_a_variant_widened_into_its_enum_copies_its_member();

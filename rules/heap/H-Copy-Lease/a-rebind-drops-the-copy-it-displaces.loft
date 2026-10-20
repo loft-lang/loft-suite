@@ -1,0 +1,126 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REBIND DROPS THE COPY IT DISPLACES (`@FR-H-Copy-Lease` crossed with `@FR-H-Drop`'s
+// reassignment clause, loft#2080).  A local bound to a COPY of a parameter owns that copy
+// (H-Copy-Lease: the copy takes its own lease), so the statement that rebinds it displaces a
+// record of the local's own, and its hook runs after the new value is computed.  The cell holds
+// the hook fixed and moves what the rebind brings in and where it stands: a fresh value, a
+// struct holding the droppable (the synthesized cascades), a rebind inside a loop (displacing
+// the previous pass's copy), a rebind in one arm of a branch (both arms run), an owned fresh
+// value displaced by a parameter's copy, and a MOVE out of a second local copy (H-Move: the
+// local owns its copy, so `x = y` moves it — no new copy, `y` is spent).
+// `OpCopy` renumbers the new structure by +100, so the trace tells the copy from the source.
+//
+// Axes it MOVES: the right-hand side (fresh value, a parameter's copy, a move of an owned
+// local), the holder (the droppable itself, a struct of it), the position (straight line, a
+// loop's second pass, one branch arm).  Traces hand-computed from H-Copy-Lease, H-Drop (a
+// displaced record drops after the new value; scope end drops in reverse declaration order)
+// and H-Move.
+//
+// @falsified-at: 18594597b — interpret and native: every rebind that displaced a parameter's
+//   copy left out its `D` (`A:C1,R101,R9,D9,`, the loop's second pass left out `D102`); the
+//   branch's false arm and the owned-then-copy cell answered right.
+// CHANNEL: the asserts (each compares the whole trace).
+// ARMED: no instrument — each hook call is written to this cell's trace file.
+// WITNESS: each message prints the trace.
+// HOLDS: leak and panic clean on both backends; the sources are never moved.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_rebind_drop.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn OpCopy(self: H) { note("C{self.id}"); self.id += 100; }
+fn mk(i: integer) -> H { H { id: i } }
+struct G { h: H }
+
+fn fresh(p: H) { x = p; note("R{x.id}"); x = mk(9); note("R{x.id}"); }
+fn held(p: G, q: G) { x = p; note("R{x.h.id}"); x = q; note("R{x.h.id}"); }
+fn looped(p: H, q: H) { x = p; for _ in 0..2 { x = q; note("R{x.id}"); } }
+fn arm(p: H, q: H, c: boolean) { x = p; if c { x = q; } note("R{x.id}"); }
+fn owned_first(q: H) { x = mk(5); x = q; note("R{x.id}"); }
+fn moved(p: H, q: H) { x = p; y = q; x = y; note("R{x.id}"); }
+
+fn test_a_fresh_value_displaces_the_copy() {
+  drain();
+  a = mk(1);
+  fresh(a);
+  t = drain();
+  assert(t == "C1,R101,D101,R9,D9", "fresh: {t}");
+  assert(a.id == 1, "the source moved: {a.id}");
+}
+
+fn test_a_struct_holding_the_droppable_drops_through_its_cascade() {
+  drain();
+  a = G { h: mk(1) };
+  b = G { h: mk(2) };
+  held(a, b);
+  t = drain();
+  assert(t == "C1,R101,C2,D101,R102,D102", "held: {t}");
+  assert(a.h.id == 1 && b.h.id == 2, "the sources moved: {a.h.id} {b.h.id}");
+}
+
+fn test_a_loop_drops_each_pass_s_displaced_copy() {
+  drain();
+  a = mk(1);
+  b = mk(2);
+  looped(a, b);
+  t = drain();
+  assert(t == "C1,C2,D101,R102,C2,D102,R102,D102", "loop: {t}");
+}
+
+fn test_one_arm_of_a_branch_drops_what_it_displaces() {
+  drain();
+  a = mk(1);
+  b = mk(2);
+  arm(a, b, true);
+  t1 = drain();
+  arm(a, b, false);
+  t2 = drain();
+  assert(t1 == "C1,C2,D101,R102,D102", "arm taken: {t1}");
+  assert(t2 == "C1,R101,D101", "arm not taken: {t2}");
+}
+
+fn test_a_copy_displaces_an_owned_fresh_value() {
+  drain();
+  b = mk(2);
+  owned_first(b);
+  t = drain();
+  assert(t == "C2,D5,R102,D102", "owned first: {t}");
+}
+
+fn test_a_move_out_of_a_second_copy_displaces_the_first() {
+  drain();
+  a = mk(1);
+  b = mk(2);
+  moved(a, b);
+  t = drain();
+  assert(t == "C1,C2,D101,R102,D102", "moved: {t}");
+}
+
+fn main() {
+  test_a_fresh_value_displaces_the_copy();
+  test_a_struct_holding_the_droppable_drops_through_its_cascade();
+  test_a_loop_drops_each_pass_s_displaced_copy();
+  test_one_arm_of_a_branch_drops_what_it_displaces();
+  test_a_copy_displaces_an_owned_fresh_value();
+  test_a_move_out_of_a_second_copy_displaces_the_first();
+}
