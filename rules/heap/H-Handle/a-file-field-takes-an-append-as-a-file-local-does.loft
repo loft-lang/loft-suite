@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FILE FIELD TAKES AN APPEND AS A FILE LOCAL DOES (`@FR-H-Handle`): a `File` is a handle, and
+// `f += x` writes `x` through it wherever the handle sits.  Read into a local first
+// (`h = b.h; h += x`) the write compiled; written through the field itself it was refused
+// "No matching operator '+='" — one write, two spellings, one refused.
+//
+// Axes it MOVES: the place (a field, a local), two appends in a row, the handle released at
+// the end of its block before the file is read back.  Values hand-computed: "ab" + "cd".
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 18594597b (loft#2088) — interpret and native: refused at compile time,
+//   "No matching operator '+=' on 'File' and 'text'".
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints both files' contents.
+// HOLDS: the local spelling was already right.
+
+struct HfBox { h: File, n: integer }
+
+fn hf_path(tag: text) -> text { "{temp_dir() ?? "/tmp"}/loft_suite_file_field_{tag}_{ticks()}.txt" }
+
+fn test_a_field_and_a_local_append_alike() {
+  pf = hf_path("field");
+  pl = hf_path("local");
+  {
+    b = HfBox { h: file(pf), n: 1 };
+    b.h += "ab";
+    b.h += "cd";
+  }
+  {
+    h = file(pl);
+    h += "ab";
+    h += "cd";
+  }
+  f = file(pf).content();
+  l = file(pl).content();
+  delete(pf);
+  delete(pl);
+  assert(f == "abcd" && l == "abcd", "field {f} local {l}");
+}
+
+fn main() {
+  test_a_field_and_a_local_append_alike();
+}
