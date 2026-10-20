@@ -31,7 +31,7 @@
 
 enum Shape95 { Dot, Circle { r: float }, Rect { w: integer, h: integer }, Label { t: text, sizes: vector<integer> } }
 struct In95 { n: integer, name: text, v: vector<integer> }
-struct Out95 { a: integer, q: In95?, s: Shape95 }
+struct Out95 { a: integer, q: In95?, s: Shape95? }
 struct Many95 { shapes: vector<Shape95> }
 
 fn shape(d: text) -> text {

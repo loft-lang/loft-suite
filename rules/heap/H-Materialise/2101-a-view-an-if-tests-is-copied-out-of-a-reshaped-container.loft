@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2101 (`@FR-H-Materialise`, `@FR-E-Report`) — A VIEW AN `if` TESTS IS COPIED OUT OF A
+// RESHAPED CONTAINER.  `c = v[0]; v.remove(0); if c.n == 1 …` — an `if` that mentions `c` makes
+// its element read the silent peer (E-Report's guarded half, "an emission choice no program can
+// tell apart"), and the materialise copy recognised only the plain read, so `c` stayed a view
+// and read the element that moved into its place.  The cell moves the element kind (enum,
+// struct), the disturbance (removal, growth, reassignment), the guard (a comparison, a null
+// test, an assert with a built message), the container's place (a local, a record's vector
+// field) and the position (a loop that rebinds each pass).  Controls: an out-of-range read under
+// a null test with no disturbance stays silent and null, and an undisturbed view still writes
+// through.  Every value is worked out by hand in the cell.
+//
+// @falsified-at: 97ed152d1 — interpret (native not measured there): five cells answered from
+//   the next element (`enum removal: other 2`, `struct removal: other 2`, `null-test guard: b`,
+//   `field vector: other 4`, `loop rebind: 50`); growth and reassignment held.
+// CHANNEL: the asserts.
+// WITNESS: `struct removal: other 2`.
+// HOLDS: the growth, reassignment and two control cells on both trees.
+
+enum E { A { n: integer }, B { n: integer } }
+struct S { n: integer, t: text }
+struct W { es: vector<S> }
+
+fn test_enum_removal_if() {
+  v: vector<E> = [A { n: 1 }, B { n: 2 }];
+  c = v[0];
+  v.remove(0);
+  got = if c.n == 1 { "one" } else { "other {c.n}" };
+  assert(got == "one" && len(v) == 1, "enum removal: {got}");
+}
+fn test_struct_removal_if() {
+  v: vector<S> = [S { n: 1, t: "a" }, S { n: 2, t: "b" }];
+  c = v[0];
+  v.remove(0);
+  got = if c.n == 1 { c.t } else { "other {c.n}" };
+  assert(got == "a" && len(v) == 1, "struct removal: {got}");
+}
+fn test_struct_growth_if() {
+  v: vector<S> = [S { n: 1, t: "a" }];
+  c = v[0];
+  for i in 0..40 { v += [S { n: i + 10, t: "g" }]; }
+  got = if c.n == 1 { c.t } else { "other {c.n}" };
+  assert(got == "a" && len(v) == 41, "growth: {got}");
+}
+fn test_reassigned_if() {
+  v: vector<S> = [S { n: 5, t: "five" }];
+  c = v[0];
+  v = [S { n: 9, t: "nine" }];
+  got = if c.n > 0 { c.t } else { "none" };
+  assert(got == "five" && len(v) == 1, "reassigned: {got}");
+}
+fn test_null_test_guard() {
+  v: vector<S> = [S { n: 1, t: "a" }, S { n: 2, t: "b" }];
+  c = v[0];
+  v.remove(0);
+  got = if c { c.t } else { "null" };
+  assert(got == "a", "null-test guard: {got}");
+}
+fn test_field_vector_if() {
+  w = W { es: [S { n: 3, t: "x" }, S { n: 4, t: "y" }] };
+  c = w.es[0];
+  w.es.remove(0);
+  got = if c.n == 3 { c.t } else { "other {c.n}" };
+  assert(got == "x" && len(w.es) == 1, "field vector: {got}");
+}
+fn test_loop_rebind_if() {
+  v: vector<S> = [S { n: 10, t: "a" }, S { n: 20, t: "b" }, S { n: 30, t: "c" }];
+  s = 0;
+  for _ in 0..2 { c = v[0]; v.remove(0); if c.n > 0 { s += c.n; } }
+  assert(s == 30 && len(v) == 1, "loop rebind: {s}");
+}
+fn test_assert_message() {
+  v: vector<S> = [S { n: 1, t: "a" }, S { n: 2, t: "b" }];
+  c = v[0];
+  v.remove(0);
+  assert(c.n == 1, "assert message: {c.n}");
+}
+fn test_out_of_range_null_test_undisturbed() {
+  v: vector<S> = [S { n: 1, t: "a" }];
+  c = v[9];
+  got = if c { "some" } else { "none" };
+  assert(got == "none" && len(v) == 1, "out of range: {got}");
+}
+fn test_write_through_undisturbed_view_still_reaches() {
+  v: vector<S> = [S { n: 1, t: "a" }];
+  c = v[0];
+  if c.n == 1 { c.n = 7; }
+  assert(v[0].n == 7, "write-through: {v[0].n}");
+}
