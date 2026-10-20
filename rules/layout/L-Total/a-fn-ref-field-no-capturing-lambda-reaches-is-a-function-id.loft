@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FN-REF FIELD NO CAPTURING LAMBDA REACHES IS A FUNCTION ID (`@FR-L-Total`, `@FR-L-Ref`): the
+// program decides the layout, and this program assigns only plain functions to `LtH.f`, so the
+// field is the 4-byte function id alone.  The twin cell, the same declaration in a program that
+// assigns a capturing lambda, measures 8.  Values hand-computed: 4 bytes, 2 * 5 + 1 = 11.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native (owner 2026-10-20: layout is an optimisation of the program, chosen by
+//   how the program uses the type).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes.
+// HOLDS: `a-fn-ref-field-a-capturing-lambda-reaches-carries-its-closure.loft` (8).
+
+struct LtH { f: fn(integer) -> integer }
+
+fn lt_twice(v: integer) -> integer { 2 * v + 1 }
+
+fn test_a_plain_fn_ref_field_is_four_bytes() {
+  h = LtH { f: lt_twice };
+  s = "{sizeof(LtH)} {h.f(5)}";
+  assert(s == "4 11", "plain: {s}");
+}
+
+fn main() {
+  test_a_plain_fn_ref_field_is_four_bytes();
+}

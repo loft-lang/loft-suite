@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD THE PROGRAM LINKS IS STORED BY ID IN ITS VECTOR (`@FR-L-Total`, `@FR-H-LongRef`): this
+// program holds a `reference<LtP>`, so a referenced record must not move, and every
+// `vector<LtP>` stores 4-byte record ids with the records pushed out.  The record itself keeps
+// its size, and every value reads the same as in the inline twin.  Values hand-computed:
+// sizeof 16, three ids → 12.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native (owner 2026-10-20: layout is an optimisation of the program, chosen by
+//   how the program uses the type).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes.
+// HOLDS: `a-record-nothing-links-is-stored-inline.loft` (48).
+
+struct LtP { k: integer, t: text }
+struct LtHold { r: reference<LtP> }
+
+fn test_a_linked_record_vector_holds_ids() {
+  v: vector<LtP> = [LtP { k: 1, t: "a" }, LtP { k: 2, t: "b" }, LtP { k: 3, t: "c" }];
+  s = "{sizeof(LtP)} {size(v)} {v[2].t}{v[1].k}";
+  assert(s == "16 12 c2", "by id: {s}");
+}
+
+fn main() {
+  test_a_linked_record_vector_holds_ids();
+}

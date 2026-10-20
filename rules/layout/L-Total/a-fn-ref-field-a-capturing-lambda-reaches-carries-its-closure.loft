@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FN-REF FIELD A CAPTURING LAMBDA REACHES CARRIES ITS CLOSURE (`@FR-L-Total`, `@FR-L-Ref`): the
+// same declaration as the twin cell, in a program that assigns a capturing lambda to `LtH.f`,
+// lays the field out as the function id followed by its closure record's id: 8 bytes, and the
+// lambda reads its capture.  Values hand-computed: 8 bytes, 5 + 3 = 8.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native (owner 2026-10-20: layout is an optimisation of the program, chosen by
+//   how the program uses the type).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes.
+// HOLDS: `a-fn-ref-field-no-capturing-lambda-reaches-is-a-function-id.loft` (4).
+
+struct LtH { f: fn(integer) -> integer }
+
+fn test_a_capturing_fn_ref_field_is_eight_bytes() {
+  k = 3;
+  h = LtH { f: fn(v: integer) -> integer { v + k } };
+  s = "{sizeof(LtH)} {h.f(5)}";
+  assert(s == "8 8", "capturing: {s}");
+}
+
+fn main() {
+  test_a_capturing_fn_ref_field_is_eight_bytes();
+}

@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD NOTHING LINKS IS STORED INLINE IN ITS VECTOR (`@FR-L-Total`, `@FR-H-LongRef`): no
+// reference to `LtP` and no keyed collection of it exists in this program, so a `vector<LtP>`
+// holds its records inline at their size.  The twin cell links the same declaration and stores
+// ids.  Values hand-computed: sizeof 8 + 4 → 16 (aligned to 8), three elements → 48.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native (owner 2026-10-20: layout is an optimisation of the program, chosen by
+//   how the program uses the type).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes.
+// HOLDS: `a-record-the-program-links-is-stored-by-id.loft` (12).
+
+struct LtP { k: integer, t: text }
+
+fn test_an_unlinked_record_vector_is_inline() {
+  v: vector<LtP> = [LtP { k: 1, t: "a" }, LtP { k: 2, t: "b" }, LtP { k: 3, t: "c" }];
+  s = "{sizeof(LtP)} {size(v)} {v[2].t}{v[1].k}";
+  assert(s == "16 48 c2", "inline: {s}");
+}
+
+fn main() {
+  test_an_unlinked_record_vector_is_inline();
+}
