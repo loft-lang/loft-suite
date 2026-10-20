@@ -23,9 +23,8 @@
 // Cross-backend; `main` runs every cell so the leak gate reads the file.  The view is a
 // native rewrite; the interpreter keeps the record form and measures the oracle.
 //
-// @falsified-at: none — a conformance guard; every cell but the callee-handed-the-container one
-//   answered as hand-computed on 18594597b, interpret and native.  That cell is a live
-//   silent-wrong `--native` defect, `@IGNORE`d below.
+// @falsified-at: 18594597b (loft#2077) — `--native`: the callee-handed-the-container cell read 77
+//   (the interpreter 9); every other cell answered as hand-computed there.
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the result field's sum and the container's.
@@ -140,12 +139,7 @@ fn test_a_sibling_scalar_write_leaves_the_result_and_the_points() {
 
 // These three sites read NOTHING of the container after the call: the site's only reads are
 // the result's length and a `const` argument, which is the shape the view admits.
-// @IGNORE — DEFECT, silent-wrong, `--native` only (18594597b): the result reads 77 where its
-//   own copy holds 9 — the callee's write `s.ops[0].pts[1].py = 70` reaches it; the interpreter
-//   answers 9.  The site
-//   test licenses a user call by the callee's B-DISTURB summary (relocations), which a
-//   fixed-width write into the viewed vector's element is not (`hoist.rs` `namings_avoid_place`,
-//   the `n_` call arm).  `LOFT_NO_VIEW_FIELD=1` answers 9.
+// loft#2077 — on 18594597b `--native` read 77 here: the callee's write reached the view.
 fn test_a_callee_writing_into_the_container_does_not_reach_the_result() {
   sc = VfSc { ops: [] };
   m = vf6(sc, 3);
@@ -176,7 +170,7 @@ fn main() {
   test_a_nested_element_view_does_not_reach_the_result();
   test_a_direct_nested_write_does_not_reach_the_result();
   test_a_sibling_scalar_write_leaves_the_result_and_the_points();
-  // test_a_callee_writing_into_the_container_does_not_reach_the_result();  -- @IGNORE above
+  test_a_callee_writing_into_the_container_does_not_reach_the_result();
   test_a_callee_writing_into_the_element_does_not_reach_the_result();
   test_a_callee_writing_a_point_does_not_reach_the_result();
 }
