@@ -17,7 +17,7 @@
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the synthesised argument type and the declared members.
 // HOLDS: a `u8`-typed local (`b: u8 = 5; hn(b)`) reaches `hn(u8)` EXACT.
-// @EXPECT_ERROR: no definition of `hn` takes (integer) — declared: hn(u8), hn(text)
+// @EXPECT_ERROR: no definition of `hn` takes (integer) — declared: hn(u8), hn(text); a literal takes no width from the call — write `5 as u8`
 
 fn hn(x: u8) -> text { "u8 {x}" }
 fn hn(t: text) -> text { "text {t}" }

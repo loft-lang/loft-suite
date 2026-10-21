@@ -14,7 +14,7 @@
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the uncovered variant and the declared members.
 // HOLDS: a static call at `DFire` is not refused — the refusal is the enum-held call's.
-// @EXPECT_ERROR: `dm(DEnt)` has no definition for the pair (DRock) — declared: dm(DFire), dm(DIce)
+// @EXPECT_ERROR: `dm(DEnt)` has no definition for the variant (DRock) — declared: dm(DFire), dm(DIce)
 
 enum DEnt { DFire { n: integer }, DIce { n: integer }, DRock { n: integer } }
 
