@@ -136,7 +136,7 @@ fn test_errors_nested_path() {
 // produced text that is not JSON, so the parse of EVERYTHING returned null.
 
 enum JShape { JCircle { r: integer }, JSquare { side: integer }, JDot }
-struct JHolder { kind: JShape, n: integer }
+struct JHolder { kind: JShape = JDot, n: integer }
 struct JNote { note: text?, n: integer }
 struct JShapes { items: vector<JShape> }
 
