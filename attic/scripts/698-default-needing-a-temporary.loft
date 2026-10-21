@@ -24,10 +24,8 @@
 // function that returns the record.  Controls: a supplied literal (which always worked),
 // the empty `= []` (loft#697) and plain literal defaults (which never needed a temporary).
 //
-// `tests/scripts/102-expected-errors.loft` pins the two shapes that stay refused: a
-// non-empty KEYED default (loft has no keyed literal as a value at all — a plain local
-// `h: hash<K[k]> = [K { … }]` is refused identically) and one that reads `$` AND needs a
-// temporary (it cannot move into a function that has no record).
+// A default that reads `$` AND needs a temporary is lowered too, into a function OF THE
+// RECORD: `rules/calls/F-Default-Field/a-field-default-reads-the-record-it-fills.loft`.
 
 struct It698 { it_a: integer, it_b: integer }
 

@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Default-Field` — a field's `= e` default fills the field at each construction that
+// omits it, AFTER every field that construction writes, with `$` bound to the record as it
+// stands; any `e` that is well-formed as the field's value is well-formed as its default.  A
+// default that reads `$` and builds a value (a format string, a concatenation, a vector, a
+// struct, a call) is lowered into a function OF THE RECORD, called with the record at each
+// construction — the same function a store upgrade calls to fill an added field (@PLN196).
+// @falsified-at: cb53613c1 — interpret exit 1 -> 0, native exit 1 -> 0 (the default was refused there)
+//   CHANNEL: exit — the control refuses the program at compile time.
+//   WITNESS: on cb53613c1 both backends exit 1 with "both reads `$` and needs a temporary
+//   value" at the first building default; here every assertion passes.
+//   HOLDS: asserts, leak and panic are equal on both trees (the control never runs an
+//   assertion), so the exit code is the whole measurement.
+//
+// Every record is built twice with different values, because a default that read a value the
+// previous construction left behind passes on a single one.
+//
+// Controls that were right before: a default reading `$` without building (`$.id * 2`), a
+// default reading an EARLIER default (`$.a + 1`), and a supplied field beating its default.
+//
+// Axes this file MOVES:  the default's shape (arithmetic, format string, method + concat, vector
+//                        literal, `if` over variants, nested struct literal, nullable `if`, user
+//                        call), the construction site (a literal, a function returning the
+//                        record), a supplied field beside defaulted ones.
+// Axes it HOLDS FIXED:   a top-level struct (not a vector element), integer and text inputs.
+
+enum Size95 { Small, Big }
+struct P95 { x: integer, y: integer }
+fn describe95(l: text, p: integer) -> text { "{l}@{p}" }
+
+struct Item95 {
+  id: integer,
+  label: text,
+  price: integer,
+  a: integer = $.id * 2,
+  b: integer = $.a + 1,
+  title: text = "{$.id}: {$.label}",
+  shout: text = $.label.to_uppercase() + "!",
+  tags: vector<text> = [$.label, "x"],
+  size: Size95 = if $.price > 10 { Big } else { Small },
+  at: P95 = P95 { x: $.id, y: $.price },
+  half: integer? = if $.price % 2 == 0 { $.price / 2 } else { null },
+  word: text = describe95($.label, $.price)
+}
+
+fn line95(x: Item95) -> text {
+  "{x.a} {x.b} {x.title} {x.shout} {x.tags} {x.size} {x.at.x},{x.at.y} {x.half ?? -1} {x.word}"
+}
+
+fn made95(id: integer, label: text, price: integer) -> Item95 {
+  Item95 { id: id, label: label, price: price }
+}
+
+fn test_a_field_default_reads_the_record_it_fills() {
+  pen = Item95 { id: 7, label: "pen", price: 12 };
+  assert(line95(pen) == "14 15 7: pen PEN! [\"pen\",\"x\"] Big 7,12 6 pen@12", line95(pen));
+  ink = Item95 { id: 2, label: "ink", price: 3 };
+  assert(line95(ink) == "4 5 2: ink INK! [\"ink\",\"x\"] Small 2,3 -1 ink@3", line95(ink));
+  // Built in a called function: the default reads that function's record.
+  cap = made95(9, "cap", 20);
+  assert(line95(cap) == "18 19 9: cap CAP! [\"cap\",\"x\"] Big 9,20 10 cap@20", line95(cap));
+  // A supplied field beats its default; the defaults around it still read the record.
+  own = Item95 { id: 3, label: "own", price: 5, title: "given", b: 0 };
+  assert(line95(own) == "6 0 given OWN! [\"own\",\"x\"] Small 3,5 -1 own@5", line95(own));
+}
