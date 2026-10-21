@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WORK BUFFER HANDED BY VALUE IS WRITTEN THROUGH (`@FR-R-WorkBuffer` crossed with
+// `@FR-F-ParamHeap`).  R-WorkBuffer admits a hand-off of the buffer to a loft-bodied callee BY VALUE
+// "because a by-value heap parameter is a view for the call's duration (F-ParamHeap)": the
+// parameter and the argument share the store, so a write THROUGH the parameter — an element set, an
+// append — is the caller's.  When the caller's vector is a work buffer, that store is a third
+// frame's pooled buffer; the writes must still land in it and be read back by the frame that
+// declared the local, and each new call must start from a cleared buffer.
+//
+// Values hand-computed: a_bump(x): v = [x]; bump: v[0] += 100, v += [9] → [x+100, 9]
+//   → len·1000 + v[0]·10 + v[1] = 2000 + 10x + 1000 + 9 → a_bump(1) 3019, a_bump(2) 3029,
+//   a_bump(3) 3039, a_bump(4) 3049.  sites(x) = a_bump(x) + a_bump(x+1): sites(1) 6048,
+//   sites(3) 6088.  A loop of five calls from one site: Σ a_bump(i), i in 0..5 = 5·3009 + 10·10
+//   = 15145.
+//
+// Axes it MOVES: the write through the parameter (an element compound-set, an append that grows
+//   it), one site, two sites of one frame, a loop of calls from one site.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_WORK_BUFFER=1, LOFT_NO_WORK_BUFFER_POOL=1,
+//   LOFT_WORK_BUFFER_NULL=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.  LOFT_TRACE_WORK_BUFFER=1
+//   names `n_a_bump local=v PROMOTED to a caller buffer` with `callee n_bump param 0 … Owned`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the answer.
+// HOLDS: `a-work-buffer-rebound-by-value-stays-the-callers` beside it.
+
+fn bump(p: vector<integer>) {
+  p[0] += 100;
+  p += [9];
+}
+
+fn a_bump(x: integer) -> integer {
+  v: vector<integer> = [];
+  v += [x];
+  bump(v);
+  len(v) * 1000 + v[0] * 10 + v[1]
+}
+
+fn sites(x: integer) -> integer {
+  a_bump(x) + a_bump(x + 1)
+}
+
+fn test_a_write_through_the_parameter_reaches_the_buffer() {
+  a = a_bump(1);
+  b = a_bump(2);
+  assert(a == 3019 && b == 3029, "a_bump: {a} {b}");
+}
+
+fn test_two_sites_and_a_loop_each_start_cleared() {
+  s = "{sites(1)} {sites(3)}";
+  assert(s == "6048 6088", "sites: {s}");
+  t = 0;
+  for i in 0..5 { t += a_bump(i); }
+  assert(t == 15145, "loop: {t}");
+}
+
+fn main() {
+  test_a_write_through_the_parameter_reaches_the_buffer();
+  test_two_sites_and_a_loop_each_start_cleared();
+}

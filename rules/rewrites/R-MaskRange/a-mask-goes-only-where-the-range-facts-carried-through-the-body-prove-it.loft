@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MASK GOES ONLY WHERE THE RANGE FACTS CARRIED THROUGH THE BODY PROVE IT (`@FR-R-MaskRange`
+// crossed with `@FR-R-Range`).  R-MaskRange drops `e & m` (m = 2^k - 1) inside an inlined body
+// "when e provably lies in 0 ..= m", and the `??` of `x / c` when x converts a ranged
+// integer and c a finite non-zero literal; "the facts are (R-Range)'s, carried statement by
+// statement through the body ... an `if` keeps only what both arms agree on", and it extends
+// R-Range by the xor rule (`a ^ b` over two non-negative ranges lies in 0 ..= 2^k - 1).  The
+// cells feed one leaf every kind of argument fact — literal, counter, parameter, the result of
+// a mask — and put the claim at its edge: an `if` whose arms disagree, a xor whose bound
+// exceeds the mask, a local that reads itself, a literal that leaves the mask's range.  A mask
+// dropped without its proof answers a value outside `0 ..= m`.
+//
+// Axes it MOVES: the argument's fact (a literal in range, one out of range, a loop counter, a
+// parameter — unranged, null), the operator before the mask (+, *, ^, >>, an `if` merge), the
+// mask's width (255, 65535), the `??` (a non-zero literal divisor, a ranged numerator; an
+// unranged one).  Values hand-computed in each comment.
+//
+// Firing read under `LOFT_NO_CACHE=1 LOFT_TRACE_INLINE_LEAF=1` on `loft --interpret <cell>`
+// (`main`; a warm program cache replays the parse and the trace reads nothing): every helper
+// call is inlined; the masks dropped are the counter's in m1, the in-range literal arm's in m2,
+// the self-reading local's in m4 (8 of its masks and folds), and m5's — the parameter call
+// keeps its mask and `??`, the literal one drops them.  The IR phase applies it on both backends — but not under
+// `--tests`, which observes function entries and keeps every call — so the suite's lanes check
+// the values only.  `LOFT_NO_MASK_RANGE=1`, `LOFT_NO_INLINE_LEAF=1` and `LOFT_NO_RANGE_ARITH=1`
+// answer the same.
+//
+// @falsified-at: none — a conformance guard; a mask dropped over the disagreeing `if` (m2)
+//   answers 300 where the mask answers 44.
+// CHANNEL: the asserts.
+// ARMED: the switches above.
+// WITNESS: each message prints the value.
+// HOLDS: the interpreter is the oracle, and the switch A/B is the falsifier (both backends
+//   share the IR rewrite).
+
+fn byte_of(x: integer) -> integer { (x * 3 + 1) & 255 }
+fn split(x: integer) -> integer {
+  y = if x > 10 { x * 30 } else { x };
+  y & 255
+}
+fn mix(a: integer, b: integer) -> integer { (a ^ b) & 255 }
+fn wide_mix(a: integer, b: integer) -> integer { ((a * 300) ^ b) & 255 }
+fn churn(h: integer) -> integer {
+  hx = h & 65535;
+  hx = (hx ^ (hx >> 3)) & 65535;
+  hx = (hx * 5) & 65535;
+  hx
+}
+fn half(x: integer) -> float { ((x as float) / 4.0 ?? -1.0) * 2.0 }
+
+// m1 — literal and counter arguments in range: byte_of(10) = 31; Σ byte_of(i) over 0..8 =
+// 3·28 + 8 = 92; out of range: byte_of(100) = 301 & 255 = 45.
+fn test_literal_and_counter_arguments() {
+  s = 0;
+  for i in 0..8 { s += byte_of(i); }
+  assert(byte_of(10) == 31 && s == 92 && byte_of(100) == 45, "m1 {byte_of(10)} {s} {byte_of(100)}");
+}
+
+// m2 — an `if` whose arms disagree: split(5) = 5 (the in-range arm); split(10) = 10;
+// split(11) = 330 & 255 = 74; split(20) = 600 & 255 = 88 → the mask stays.
+fn test_an_if_whose_arms_disagree() {
+  assert(split(5) == 5 && split(10) == 10 && split(11) == 74 && split(20) == 88, "m2 {split(11)} {split(20)}");
+}
+
+// m3 — xor over two bytes stays a byte: mix(170, 85) = 255; mix(200, 100) = 172; with one
+// operand past the mask's range: wide_mix(1, 7) = (300 ^ 7) & 255 = 299 & 255 = 43.
+fn test_xor_of_two_ranges() {
+  assert(mix(170, 85) == 255 && mix(200, 100) == 172 && wide_mix(1, 7) == 43, "m3 {mix(200, 100)} {wide_mix(1, 7)}");
+}
+
+// m4 — a local that reads itself, statement by statement: churn(1000): hx = 1000; 1000 ^ 125 =
+// 917; 917·5 = 4585.  churn(70000): 70000 & 65535 = 4464 = 0x1170, >> 3 = 558 = 0x22E,
+// xor = 0x135E = 4958; ·5 = 24790.
+fn test_a_local_that_reads_itself() {
+  assert(churn(1000) == 4585 && churn(70000) == 24790, "m4 {churn(1000)} {churn(70000)}");
+}
+
+// m5 — a parameter argument (unranged by shape) and a null: the mask and the `??` stay.
+// half(6) = 3.0; through a parameter p = 10 → 5.0; byte_of(p) = 31.
+fn via(p: integer) -> float { half(p) + (byte_of(p) as float) }
+fn test_a_parameter_argument_keeps_its_guards() {
+  assert(half(6) == 3.0 && via(10) == 36.0, "m5 {half(6)} {via(10)}");
+}
+
+fn main() {
+  test_literal_and_counter_arguments();
+  test_an_if_whose_arms_disagree();
+  test_xor_of_two_ranges();
+  test_a_local_that_reads_itself();
+  test_a_parameter_argument_keeps_its_guards();
+}

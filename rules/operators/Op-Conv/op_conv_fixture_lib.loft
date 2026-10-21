@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for this directory's foreign-type conversion cells (`@FR-Op-Conv`,
+// `@FR-Op-Home`): one pub record type, `OcPt`, declared in a source other than the cells', and a
+// builder for it.  The cells beside it `use op_conv_fixture_lib` — the flat file in the script's
+// own directory is where `use` resolves it.  Run on its own it is a cell too.
+//
+// @falsified-at: none — a conformance guard; the library's own call answered as hand-computed,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the fields.
+// HOLDS: nothing outside the library is reached when it runs alone.
+
+pub struct OcPt { pub x: integer, pub y: integer }
+
+pub fn oc_pt(x: integer, y: integer) -> OcPt { OcPt { x: x, y: y } }
+
+fn test_the_builder_builds() {
+  p = oc_pt(3, 4);
+  assert(p.x == 3 && p.y == 4, "oc_pt: {p.x} {p.y}");
+}

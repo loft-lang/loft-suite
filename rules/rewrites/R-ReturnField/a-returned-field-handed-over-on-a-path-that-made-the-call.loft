@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RETURNED FIELD IS HANDED OVER ON A PATH THAT MADE THE CALL (`@FR-R-ReturnField` crossed with
+// `@FR-O-LazyBuffer`).  R-ReturnField answers `p = mk(…); return p.b` (and the natural `mk(…).a`)
+// as the local's own store at the field's position, provided every statement between the root's
+// mint and the copy "is a bind or the mint-or-release guard of a hidden buffer the lifted call is
+// handed (`@FR-O-LazyBuffer`…)".  O-LazyBuffer mints that buffer in front of the call, on a path
+// that makes it, and leaves it null elsewhere.  So a function whose other exit returns a literal
+// WITHOUT making the call (the buffer never minted), a lifted call inside a branch, and a root
+// that a forwarding callee filled, must each answer the field the call built, and the literal
+// exit its literal — in a loop that takes each path in turn, with no store left behind (the leak
+// gate reads it).
+//
+// Values hand-computed (mk(n) = Pair{ a: In{n, "a{n}"}, b: In{2n, "b{n}"}, k: 3n }):
+//   cond(true, 4) → mk(4).b = {8, b4};  cond(false, 4) → {-1, none}
+//   lifted(true, 5) → mk(5).a = {5, a5};  lifted(false, 5) → {0, zero}
+//   chained(2) → fwd(2) = mk(3) → .b = {6, b3}
+//   looped(4): s = 10s + x.n + y.n + len(x.tag) with x = cond(i even, i), y = lifted(i % 3 ≠ 0, i):
+//     i0: 0+0+2 → 2; i1: −1+1+4 → 24; i2: 4+2+2 → 248; i3: −1+0+4 → 2483
+//
+// Axes it MOVES: the path (the call made, an early literal exit, a literal tail), the root (a
+//   bound local, a lifted call, a forwarded result), a loop alternating the paths.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_RETURN_FIELD=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: LOFT_TRACE_PLACE=1 says `[return-field] fn=n_cond root=p: ADMITTED (presence-tested)`,
+//   `fn=n_lifted root=__ret_root_1: ADMITTED …`, `fn=n_chained root=p: ADMITTED …`.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the record.
+// HOLDS: tests/scripts/a-returned-field-of-an-owned-local-hands-its-store-over.loft in loft.
+
+struct In { n: integer, tag: text }
+struct Pair { a: In, b: In, k: integer }
+
+fn mk(n: integer) -> Pair {
+  Pair { a: In { n: n, tag: "a{n}" }, b: In { n: n * 2, tag: "b{n}" }, k: n * 3 }
+}
+
+fn fwd(n: integer) -> Pair {
+  mk(n + 1)
+}
+
+fn cond(c: boolean, n: integer) -> In {
+  if !c { return In { n: -1, tag: "none" }; }
+  p = mk(n);
+  return p.b;
+}
+
+fn lifted(c: boolean, n: integer) -> In {
+  if c { return mk(n).a; }
+  In { n: 0, tag: "zero" }
+}
+
+fn chained(n: integer) -> In {
+  p = fwd(n);
+  return p.b;
+}
+
+fn looped(n: integer) -> integer {
+  s = 0;
+  for i in 0..n {
+    x = cond(i % 2 == 0, i);
+    y = lifted(i % 3 != 0, i);
+    s = s * 10 + x.n + y.n + len(x.tag);
+  }
+  s
+}
+
+fn test_each_path_answers_its_own_record() {
+  a = cond(true, 4);
+  b = cond(false, 4);
+  c = lifted(true, 5);
+  d = lifted(false, 5);
+  e = chained(2);
+  s = "{a.n} {a.tag} {b.n} {b.tag} {c.n} {c.tag} {d.n} {d.tag} {e.n} {e.tag}";
+  assert(s == "8 b4 -1 none 5 a5 0 zero 6 b3", "paths: {s}");
+}
+
+fn test_a_loop_takes_the_paths_in_turn() {
+  s = looped(4);
+  assert(s == 2483, "looped: {s}");
+}
+
+fn main() {
+  test_each_path_answers_its_own_record();
+  test_a_loop_takes_the_paths_in_turn();
+}

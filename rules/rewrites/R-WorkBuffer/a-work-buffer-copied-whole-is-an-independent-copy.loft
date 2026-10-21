@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WORK BUFFER COPIED WHOLE IS AN INDEPENDENT COPY (`@FR-R-WorkBuffer` crossed with `@FR-B-Copy`).
+// R-WorkBuffer makes a callee's scalar vector local the CALLER's storage, and lets a loft-bodied
+// callee take it BY VALUE because "a bind or a field store copies (B-Copy)" — nothing the callee
+// keeps can hold the buffer by identity.  And it declines a local "copied WHOLE into … another
+// local", whose copy elision would otherwise turn the buffer into a shared store.  So the copies
+// B-Copy promises hold on both sides of the buffer: inside a by-value callee, `w = p` and
+// `Hold { items: p }` are independent of `p` (and so of the caller's buffer); in the buffer's own
+// frame, `w = v` is independent of `v`.  Every value is the same with the buffer, without it, and
+// with the pool off; two call sites of one frame each see their own values.
+//
+// Values hand-computed:
+//   a_copy(x): v = [x, x+1]; copier: w = [99, x+1, 100], h.items = [77, x+1, 5], p[0] = x
+//     → copier = 3·1000 + 3·100 + 99 + 77 + x = 3476 + x; a_copy = copier·100 + 2·10 + x
+//     → a_copy(1) = 347721, a_copy(2) = 347822, a_copy(3) = 347923
+//   a_local(x): v = [x] → w = [x, 5], v[0] = 3 → 2·100 + 10x + 3 → a_local(1) 213, a_local(2) 223
+//   pooled(x) = a_copy(x) + a_copy(x+1) + a_local(x): pooled(1) = 347721 + 347822 + 213 = 695756
+//
+// Axes it MOVES: where the copy is taken (a bind and a field store in the by-value callee, a bind
+//   in the buffer's frame), which side writes after the copy (the copy, the source), one site
+//   against two sites of one frame.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_WORK_BUFFER=1, LOFT_NO_WORK_BUFFER_POOL=1,
+//   LOFT_WORK_BUFFER_NULL=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.  LOFT_TRACE_WORK_BUFFER=1
+//   names `n_a_copy local=v PROMOTED to a caller buffer` and `n_a_local local=v keeps its store:
+//   copied whole into another place` (and `local=w PROMOTED`).
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the answer.
+// HOLDS: `a-frame-pools-its-work-buffers-across-call-sites` beside it.
+
+struct Hold { items: vector<integer>, k: integer }
+
+fn copier(p: vector<integer>) -> integer {
+  w = p;
+  w += [100];
+  w[0] = 99;
+  h = Hold { items: p, k: 1 };
+  h.items += [5];
+  h.items[0] = 77;
+  len(w) * 1000 + len(h.items) * 100 + w[0] + h.items[0] + p[0]
+}
+
+fn a_copy(x: integer) -> integer {
+  v: vector<integer> = [];
+  v += [x];
+  v += [x + 1];
+  c = copier(v);
+  c * 100 + len(v) * 10 + v[0]
+}
+
+fn a_local(x: integer) -> integer {
+  v: vector<integer> = [];
+  v += [x];
+  w = v;
+  w += [5];
+  v[0] = 3;
+  len(w) * 100 + w[0] * 10 + v[0]
+}
+
+fn pooled(x: integer) -> integer {
+  a_copy(x) + a_copy(x + 1) + a_local(x)
+}
+
+fn test_a_copy_in_the_by_value_callee_leaves_the_buffer() {
+  a = a_copy(1);
+  b = a_copy(2);
+  c = a_copy(3);
+  assert(a == 347721 && b == 347822 && c == 347923, "a_copy: {a} {b} {c}");
+}
+
+fn test_a_copy_in_the_buffers_frame_is_independent() {
+  a = a_local(1);
+  b = a_local(2);
+  assert(a == 213 && b == 223, "a_local: {a} {b}");
+}
+
+fn test_two_sites_of_one_frame() {
+  p = pooled(1);
+  assert(p == 695756, "pooled: {p}");
+}
+
+fn main() {
+  test_a_copy_in_the_by_value_callee_leaves_the_buffer();
+  test_a_copy_in_the_buffers_frame_is_independent();
+  test_two_sites_of_one_frame();
+}

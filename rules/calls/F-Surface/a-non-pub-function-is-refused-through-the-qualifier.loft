@@ -1,0 +1,16 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NON-PUB FUNCTION IS REFUSED THROUGH THE QUALIFIER (`@FR-F-Surface`): "an item L declares
+// without `pub` is refused — "`name` is not `pub` in `L`"".
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the item and the library.
+// HOLDS: `a-pub-item-is-reached-by-either-spelling` beside it.
+// @EXPECT_ERROR: `fs_priv` is not `pub` in `f_surface_fixture_lib`
+
+fn main() {
+  println("{f_surface_fixture_lib::fs_priv(1)}");
+}

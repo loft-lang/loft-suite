@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A START-STEPPED LOOP ENTERS PAST ITS STEP ONLY WHEN IT ROTATES (`@FR-R-StartStep` crossed with
+// `@FR-R-Rotate`).  R-StartStep: "where the loop rotates (R-Rotate) ... the interpreter seeds
+// `i#index = next` before the loop, steps `i#index` at the test, and enters PAST the step: the
+// first round tests the start itself.  A `continue` jumps to the step."  R-Rotate lays the
+// test after the body and patches each `continue` FORWARD to it.  Composed, the rotated loop's
+// single entry jump lands between the step and the test, every `continue` lands on the step,
+// and `LOFT_NO_LOOP_ROTATE=1` (no rotation) takes the two-counter form back.  What can go
+// wrong is the round count: a first round that steps before it tests (a start skipped), a
+// `continue` that lands on the test (an endless round), a range that is empty at its start.
+// Each cell counts rounds beside values over computed starts.
+//
+// Axes it MOVES: the range at entry (empty start == end, backward, one round, many), the start
+// (a parameter, an expression, at i64::MIN + 1 — where `start - 1` would be the null sentinel),
+// the exit (the test, `continue`, `break`), nesting (an inner start-stepped loop whose start is
+// the outer variable).  Values hand-computed in each comment.
+//
+// Firing read under `LOFT_TRACE_START_STEP=1` ("i steps one counter") and `loft introspect` on
+// the interpreter.  Interpreter generator rules; `--native` is the oracle.
+// `LOFT_NO_START_STEP=1` and `LOFT_NO_LOOP_ROTATE=1` on `--interpret` answer the same.
+//
+// @falsified-at: none — a conformance guard; an entry landing on the step skips each range's
+//   start (s1 39 for 42), a `continue` patched to the test never ends s2.
+// CHANNEL: the asserts (and the timeout for a `continue` that never steps).
+// ARMED: the switches above, on --interpret.
+// WITNESS: each message prints the sum and the rounds.
+// HOLDS: --native is the oracle.
+
+fn sum_rounds(a: integer, b: integer) -> integer {
+  t = 0;
+  rounds = 0;
+  for i in a..b { t += i; rounds += 1; }
+  t * 1000 + rounds
+}
+
+fn odd_sum(a: integer, b: integer) -> integer {
+  t = 0;
+  for i in a..b { if i % 2 == 0 { continue; } t += i; }
+  t
+}
+
+// s1 — the start itself is the first round: 3..9 → 3+…+8 = 33, 6 rounds; 9..12 → 30, 3;
+// 3..4 → 3, 1 round.
+fn test_the_first_round_tests_the_start() {
+  assert(sum_rounds(3, 9) == 33006 && sum_rounds(9, 12) == 30003 && sum_rounds(3, 4) == 3001, "s1 {sum_rounds(3, 9)}");
+}
+
+// s2 — a `continue` lands on the step: odd values of 2..11 → 3+5+7+9 = 24; of -5..0 → -5-3-1 = -9.
+fn test_a_continue_lands_on_the_step() {
+  assert(odd_sum(2, 11) == 24 && odd_sum(-5, 0) == -9, "s2 {odd_sum(2, 11)} {odd_sum(-5, 0)}");
+}
+
+// s3 — empty at the start: start == end and start > end run no round.
+fn test_ranges_empty_at_their_start() {
+  assert(sum_rounds(7, 7) == 0 && sum_rounds(8, 2) == 0 && odd_sum(5, 5) == 0, "s3");
+}
+
+// s4 — a start at i64::MIN + 1 (the sentinel is i64::MIN): three rounds, the values summed as
+// offsets from the start: 0 + 1 + 2 = 3.
+fn test_a_start_one_above_the_sentinel() {
+  lo = -9223372036854775807;
+  t = 0;
+  rounds = 0;
+  for i in lo..lo + 3 { t += i - lo; rounds += 1; }
+  assert(t == 3 && rounds == 3, "s4 {t} {rounds}");
+}
+
+// s5 — nested: the inner loop's start is the outer variable, a `break` in the inner one at
+// j == 4: k in 1..4, j in k..6 until 4: k=1: 1+2+3 = 6; k=2: 2+3 = 5; k=3: 3 → 14; inner
+// rounds 3 + 2 + 1 = 6 (the breaking round not counted).
+fn test_a_nested_start_stepped_loop_with_a_break() {
+  t = 0;
+  inner = 0;
+  for k in 1..4 {
+    for j in k..6 { if j == 4 { break; } t += j; inner += 1; }
+  }
+  assert(t == 14 && inner == 6, "s5 {t} {inner}");
+}
+
+fn main() {
+  test_the_first_round_tests_the_start();
+  test_a_continue_lands_on_the_step();
+  test_ranges_empty_at_their_start();
+  test_a_start_one_above_the_sentinel();
+  test_a_nested_start_stepped_loop_with_a_break();
+}

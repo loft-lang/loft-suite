@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO VARIANT MEMBERS BETTER AT DIFFERENT POSITIONS ARE REFUSED (`@FR-Disp-Specific` crossed with
+// `@FR-C-Var`; the refusal is `@FR-Disp-Ambiguous`).  `(CIce, CFire)` into `(CIce, CEnt)` ranks
+// [EXACT, WIDENED] and into `(CEnt, CFire)` [WIDENED, EXACT]: each is better at one position and
+// worse at the other, so neither is more specific and the call is refused at compile time, naming
+// both — with every argument a STATIC variant, so no run-time selection could settle it.
+//
+// @EXPECT_ERROR: `cv8(CIce, CFire)` is ambiguous — it is taken by cv8(CIce, CEnt) and cv8(CEnt, CFire)
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names `cv8(CIce, CEnt)` and `cv8(CEnt, CFire)`.
+// HOLDS: `a-variant-widens-into-its-enum-before-the-nullable-of-it` (the uncrossed sets answer).
+
+enum CEnt { CFire { n: integer }, CIce { n: integer } }
+
+fn cv8(e: CIce, k: CEnt) -> text { "ice,ent {e.n}{k.n}" }
+fn cv8(e: CEnt, k: CFire) -> text { "ent,fire {e.n}{k.n}" }
+
+fn main() {
+  println(cv8(CIce { n: 1 }, CFire { n: 2 }));
+}

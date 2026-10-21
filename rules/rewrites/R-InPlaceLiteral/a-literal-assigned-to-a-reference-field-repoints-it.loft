@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LITERAL ASSIGNED TO A REFERENCE FIELD RE-POINTS IT (`@FR-R-InPlaceLiteral` crossed with
+// `@FR-H-RefSet`).  R-InPlaceLiteral writes a record literal into the place it is assigned to — but
+// "a `reference<T>` field is not such a place: its read is the record it points at, and an
+// assignment re-points it (H-RefSet), so a literal assigned to one is built in a record of its
+// own".  H-RefSet: `h.r = x` makes the field name x's record "and never writes into the record the
+// field named before".  So assigning a literal to a reference field — at a local's field, at an
+// element's field, nested in an element literal, in an appended element, and when the reference
+// named an inline sub-record of its own holder — leaves the formerly named record exactly as it
+// was, while the literal reads that record's values first.
+//
+// Values hand-computed:
+//   p1 = P{1, "one"}; h.r = p1; h.r = P{h.r.x + 10, "{h.r.t}!"} → p1 {1, one}, h.r {11, one!};
+//     then p1.x = 5 → h.r.x stays 11
+//   p2 = P{2, two} named by hs[0].r and hs[1].r; hs[0].r = P{20, new} → p2 {2, two}, hs[1].r.x 2
+//   hs[1] = H{ r: P{30, lit}, k: 9 } (a nested literal in an element literal) → p2.x 2, 30 9 lit
+//   hs += [H{ r: P{40, app}, k: 4 }] → 3 elements, hs[2].r {40, app}, p2.x 2
+//   n.r = n.inner, then n.r = P{n.r.x · 2, re} → n.inner {3, in}, n.r.x 6
+//
+// Axes it MOVES: the reference field's holder (a local, a vector element at a variable index, a
+//   fresh appended element, a record whose own inline field it named), the literal's reads of the
+//   formerly named record, a write to that record afterwards.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_ELEMENT_IN_PLACE=1, LOFT_NO_NESTED_IN_PLACE=1,
+//   LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints both records.
+// HOLDS: `a-literal-reading-its-places-own-collection-keeps-it` beside it.
+
+struct P { x: integer, t: text }
+struct H { r: reference<P>, k: integer }
+struct HV { hs: vector<H> }
+struct Nest { inner: P, r: reference<P>? }
+
+fn test_a_local_reference_field_is_repointed() {
+  p1 = P { x: 1, t: "one" };
+  h = H { r: p1, k: 0 };
+  h.r = P { x: h.r.x + 10, t: "{h.r.t}!" };
+  assert(p1.x == 1 && p1.t == "one" && h.r.x == 11 && h.r.t == "one!", "a: {p1.x} {p1.t} {h.r.x} {h.r.t}");
+  p1.x = 5;
+  assert(h.r.x == 11, "b: {h.r.x}");
+}
+
+fn test_an_element_reference_field_is_repointed() {
+  p2 = P { x: 2, t: "two" };
+  v = HV { hs: [H { r: p2, k: 1 }, H { r: p2, k: 2 }] };
+  v.hs[0].r = P { x: 20, t: "new" };
+  assert(p2.x == 2 && p2.t == "two" && v.hs[0].r.x == 20 && v.hs[1].r.x == 2 && v.hs[1].r.t == "two", "c");
+  i = 1;
+  v.hs[i] = H { r: P { x: 30, t: "lit" }, k: 9 };
+  assert(p2.x == 2 && v.hs[1].r.x == 30 && v.hs[1].k == 9 && v.hs[1].r.t == "lit", "d: {p2.x} {v.hs[1].r.x}");
+  v.hs += [H { r: P { x: 40, t: "app" }, k: 4 }];
+  assert(len(v.hs) == 3 && v.hs[2].r.x == 40 && v.hs[2].r.t == "app" && p2.x == 2, "append: {len(v.hs)}");
+}
+
+fn test_a_reference_to_its_holders_own_field_is_repointed() {
+  n = Nest { inner: P { x: 3, t: "in" }, r: null };
+  n.r = n.inner;
+  n.r = P { x: n.r.x * 2, t: "re" };
+  assert(n.inner.x == 3 && n.inner.t == "in" && (n.r.x ?? -1) == 6, "e: {n.inner.x} {n.inner.t}");
+}
+
+fn main() {
+  test_a_local_reference_field_is_repointed();
+  test_an_element_reference_field_is_repointed();
+  test_a_reference_to_its_holders_own_field_is_repointed();
+}

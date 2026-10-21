@@ -1,0 +1,124 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TWIN TAKES THE HEADER ITS CALLER HOLDS FOR AN INDEXED OR VIEWED PATH (`@FR-R-Inputs`
+// crossed with `@FR-R-Header` and with `@FR-R-View`, and `@FR-R-State`).  R-Inputs names the
+// callee's invariant inputs: the scalar fields of a plain-struct parameter its write set does
+// not reach, and the vector paths `p.g` it INDEXES (R-Header's candidate) or VIEWS (`d =
+// &p.g`, R-View's candidate).  A caller loop that holds every input — the scalars by
+// R-Scalar, the header of `a.g` by R-Header — calls the callee's `__inv` twin and hands its
+// own holders in (R-State: the holder of the path, never a second derivation; a pushed path
+// hands in its PUSH header, current at the call).  The cells move what the callee does with
+// the path (an index, a view, a length through the view), what the caller does beside the
+// call (nothing, an in-place element write, a push to the very path), and a view taken in
+// the caller's loop next to the twin call.
+//
+// Axes it MOVES: the callee's access (index / view / view length), the caller's write (none,
+// in-place set of an element the callee reads, a push to the path), the caller's path (a
+// local, a field path two deep).  Values hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit`: `px__inv` / `row_sum__inv` / `tail__inv` called from the
+// loops with the caller's `__vh_` / `__ph_` header handed in.  Cross-backend;
+// `LOFT_HOIST_VERIFY=1` (inside a twin every input is re-read against the record) and
+// `LOFT_NO_CALLEE_INPUTS=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a twin handed a header the caller derived once at
+//   entry while it pushes would answer the entry length in i3 (`tail` reads null past it).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum the loop built.
+// HOLDS: the interpreter (no twins) is the oracle.
+
+struct Img { w: integer, h: integer, data: vector<integer> }
+struct Frame { pad: integer, img: Img }
+
+/// Indexes `im.data` and reads the scalar `im.w`: a header input and a scalar input.
+fn px(im: const Img, x: integer, y: integer) -> integer {
+  im.data[y * im.w + x] ?? -1
+}
+
+/// VIEWS `im.data` (R-View inside the callee) and walks a row through the view.
+fn row_sum(im: const Img, y: integer) -> integer {
+  d = &im.data;
+  s = 0;
+  for x in 0..im.w { s += d[y * im.w + x] ?? 0; }
+  s
+}
+
+/// The last element and the length of `im.data`, through a view.
+fn tail(im: const Img) -> integer {
+  d = &im.data;
+  (d[len(d) - 1] ?? -1) * 100 + len(d)
+}
+
+// i1 — 3x2 image [1..6]: Σ px(x,y)·(x+1) = (1+4+9) + (4+10+18) = 46.
+fn test_an_indexed_path_is_a_header_input() {
+  im = Img { w: 3, h: 2, data: [1, 2, 3, 4, 5, 6] };
+  t = 0;
+  for y in 0..im.h {
+    for x in 0..im.w { t += px(im, x, y) * (x + 1); }
+  }
+  assert(t == 46, "i1 {t}");
+}
+
+// i2 — a viewed path, and an in-place write of the element the NEXT call reads: pass y
+// first adds row_sum(y), then sets data[0] += 10 (an R-InPlace set: the header stays valid,
+// the value moves).  Rows of [1..6] w=3: k=0 row0 = 6, data[0] = 11; k=1 row1 = 15,
+// data[0] = 21; k=2 row0 = 21+2+3 = 26, data[0] = 31; k=3 row1 = 15 → 6+15+26+15 = 62.
+fn test_a_viewed_path_sees_an_in_place_write_beside_the_call() {
+  im = Img { w: 3, h: 2, data: [1, 2, 3, 4, 5, 6] };
+  t = 0;
+  for k in 0..4 {
+    t += row_sum(im, k % 2);
+    if k < 3 { im.data[0] += 10; }
+  }
+  assert(t == 62 && im.data[0] == 31, "i2 {t} {im.data[0]}");
+}
+
+// i3 — the caller PUSHES the path the twin reads: the twin must see each push (its push
+// header handed in, current at the call).  data starts [7]; pass k pushes k+1 then calls
+// tail: last = k+1, len = k+2 → (k+1)·100 + k + 2.  Σ over k in 0..4 = 1000 + 14 = 1014.
+fn test_a_pushed_path_hands_the_twin_its_current_header() {
+  im = Img { w: 1, h: 1, data: [7] };
+  t = 0;
+  for k in 0..4 {
+    im.data += [k + 1];
+    t += tail(im);
+  }
+  assert(t == 1014 && len(im.data) == 5, "i3 {t} {len(im.data)}");
+}
+
+// i4 — the same path reached two fields deep, and a view of it taken in the caller's loop
+// beside the twin call (R-State: the caller's view copies the holder the twin is handed).
+// 2x2 [3,5,7,11]: per y, row_sum + vv[y] where vv = &f.img.data: row0 = 3+5 = 8,
+// row1 = 7+11 = 18; vv[0] = 3, vv[1] = 5 → 8+3 + 18+5 = 34.
+fn test_a_field_path_two_deep_and_a_view_in_the_callers_loop() {
+  f = Frame { pad: 1, img: Img { w: 2, h: 2, data: [3, 5, 7, 11] } };
+  t = 0;
+  for y in 0..f.img.h {
+    vv = &f.img.data;
+    t += row_sum(f.img, y) + (vv[y] ?? 0);
+  }
+  assert(t == 34, "i4 {t}");
+}
+
+// i5 — the scalar input written mid-loop: `im.w` from 3 to 2 after the first call, so the
+// second call reads data[1·2 + 1] = 4 where a stale w = 3 reads data[4] = 5.
+// px(1,1) with w=3 → data[4] = 5; then w = 2 → data[3] = 4.  t = 9.
+fn test_a_scalar_input_written_in_the_loop_is_not_handed_stale() {
+  im = Img { w: 3, h: 2, data: [1, 2, 3, 4, 5, 6] };
+  t = 0;
+  for _ in 0..2 {
+    t += px(im, 1, 1);
+    im.w = 2;
+  }
+  assert(t == 9, "i5 {t}");
+}
+
+fn main() {
+  test_an_indexed_path_is_a_header_input();
+  test_a_viewed_path_sees_an_in_place_write_beside_the_call();
+  test_a_pushed_path_hands_the_twin_its_current_header();
+  test_a_field_path_two_deep_and_a_view_in_the_callers_loop();
+  test_a_scalar_input_written_in_the_loop_is_not_handed_stale();
+}

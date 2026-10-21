@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY USER TYPE OF THIS SOURCE MAY BE AN OPERATOR'S SELF (`@FR-Op-Def` crossed with `@FR-Op-Home`).
+// Op-Def checks a definition where it is written: its first parameter must be `self` "of a user
+// type (Op-Home)", Op-Home's type declared in the same source; and "a definition that compiles
+// backs its form".  The user types a source declares are more than structs: the nullable of its
+// struct, a struct-enum, one of its VARIANTS, and a plain enum — each compiles as `self`, and each
+// then answers its operator.  A type this source did not declare — a tuple of its records, a vector
+// of them, a stdlib enum — is the refusal cells beside this one.
+//
+// Values hand-computed: v: V? = null, w: V? = V{1}:
+//   v + V{4} → the null arm, V{4} → 4;  w + V{4} → V{5} → 5
+//   Ci{2} + 3 → 5;  (s: Sh = Sq{1}) + "!" → "sh!";  -Col.Green → Red;  -Col.Red → Green
+//
+// Axes it MOVES: the `self` type (struct?, struct-enum, its variant, plain enum), the operator
+//   (binary `+` with three right types, unary `-`), a null left operand.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts (and the compile: a refused definition fails the file).
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `an-operator-on-a-tuple-of-this-sources-records-is-refused` beside it.
+
+struct V { x: integer }
+enum Sh { Ci { r: integer }, Sq { s: integer } }
+enum Col { Red, Green }
+
+operator plus(self: V?, o: V) -> V { if self == null { V { x: o.x } } else { V { x: self.x + o.x } } }
+operator plus(self: Ci, o: integer) -> integer { self.r + o }
+operator plus(self: Sh, o: text) -> text { "sh{o}" }
+operator negate(self: Col) -> Col { if self == Col.Red { Col.Green } else { Col.Red } }
+
+fn test_a_nullable_struct_self_takes_a_null_left_operand() {
+  v: V? = null;
+  w: V? = V { x: 1 };
+  a = v + V { x: 4 };
+  b = w + V { x: 4 };
+  assert(a.x == 4 && b.x == 5, "V? self: {a.x} {b.x}");
+}
+
+fn test_an_enum_a_variant_and_a_plain_enum_self() {
+  c = Ci { r: 2 };
+  s: Sh = Sq { s: 1 };
+  t = "{c + 3} {s + "!"} {-Col.Green} {-Col.Red}";
+  assert(t == "5 sh! Red Green", "enum selves: {t}");
+}
+
+fn main() {
+  test_a_nullable_struct_self_takes_a_null_left_operand();
+  test_an_enum_a_variant_and_a_plain_enum_self();
+}

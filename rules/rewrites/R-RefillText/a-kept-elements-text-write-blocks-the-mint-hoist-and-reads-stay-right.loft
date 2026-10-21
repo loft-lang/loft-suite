@@ -1,0 +1,117 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEPT ELEMENT'S TEXT WRITE BLOCKS THE MINT HOIST, AND THE READS STAY RIGHT (`@FR-R-RefillText`
+// crossed with `@FR-R-Mint`).  R-Mint's TEXT clause admits the first text written into a FRESH
+// element as a claim in the store the mint itself claims in — "a text written into any other
+// record stays blocking, and so does one written into an element (R-RefillText)'s collection
+// clause builds into a KEPT slot (the slot still owns its previous text, which the write
+// releases)".  R-RefillText's collection clause keeps a refilled return buffer's elements:
+// "a text set into an element the build appended refills the block its slot owns when the
+// slot is under K and claims past it".  So the same mint group is fresh past K and kept under
+// K, and a loop that READS another vector while it builds must not hold a header across the
+// kept slots' releases.  The cells build vectors of text-bearing records in a callee that
+// reads a parameter vector per element, call it with lengths that shrink and grow against the
+// kept length, and check every element and the live-record census.
+//
+// Axes it MOVES: the result length against the kept one (shorter, equal, longer), the text's
+// size against the kept slot's block, what the loop reads beside the build (a parameter
+// vector of texts, of integers), the trip count of the caller.  Values hand-computed in each
+// cell's comment.
+//
+// Firing read under `LOFT_TRACE_REFILL_TEXT=1` ("n_runs_of keeps its elements") and
+// `LOFT_TRACE_HOIST_DECLINE=1` / `--native-emit` (the build loop's holders around the kept
+// text set).  Native only;
+// the interpreter is the oracle.  `LOFT_NO_REFILL_ELEMENTS=1`, `LOFT_NO_FRESH_TEXT_SET=1`,
+// `LOFT_HOIST_VERIFY=1`, `LOFT_POISON=1` and `LOFT_STRICT_STORES=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a header held across a kept slot's text write would
+//   be safe here only by luck of the store's layout; a refill past K reads a capacity slot's
+//   bytes as a block (the rule's own receipt: a panic in `store.rs`).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1, LOFT_POISON=1, LOFT_STRICT_STORES=1.
+// WITNESS: each message prints the element texts.
+// HOLDS: the interpreter is the oracle.
+
+struct Run { str: text, style: integer }
+
+fn word(j: integer) -> text {
+  if j % 4 == 0 { return "a" }
+  if j % 4 == 1 { return "a longer word than two" }
+  if j % 4 == 2 { return "" }
+  "mid"
+}
+
+fn pick(src: const vector<text>, j: integer) -> text { src[(j % len(src))?] ?? "?" }
+
+/// k runs, each text read off the parameter vector `src` (rotated by `shift`), each style off
+/// the integer vector `w`, read in the loop that builds.  (A `?? d` written in the literal's
+/// own field makes the element's mint prefill, and the collection clause then keeps nothing:
+/// the discharges stand before the literal.)
+fn runs_of(src: const vector<text>, w: const vector<integer>, shift: integer, k: integer) -> vector<Run> {
+  runs: vector<Run> = [];
+  if k <= 0 { return runs; }
+  for i in 0..k {
+    st = w[(i % len(w))?] ?? -1;
+    runs += [Run { str: pick(src, i + shift), style: st }];
+  }
+  return runs;
+}
+
+fn live_records() -> integer {
+  t = store_memory();
+  i = t.find("records ") ?? -1;
+  if i < 0 { return -1; }
+  rest = t[i + 8..];
+  e = rest.find(" ") ?? len(rest);
+  (rest[0..e] as integer?) ?? -1
+}
+
+fn ks(c: integer) -> integer {
+  if c % 5 == 0 { return 3 }
+  if c % 5 == 1 { return 1 }
+  if c % 5 == 2 { return 6 }
+  if c % 5 == 3 { return 0 }
+  4
+}
+
+/// One pass of calls, each result checked element by element: returns Σ size(str) + style.
+fn sweep(n: integer) -> integer {
+  src = [word(0), word(1), word(2), word(3)];
+  w = [10, 20, 30];
+  t = 0;
+  for c in 0..n {
+    k = ks(c);
+    r = runs_of(src, w, c, k);
+    assert(len(r) == k, "length at call {c}: {len(r)} for {k}");
+    for i in 0..k {
+      assert(r[i].str == word(i + c) && r[i].style == (i % 3 + 1) * 10, "call {c} element {i}: '{r[i].str}' {r[i].style}");
+      t += size(r[i].str) + r[i].style;
+    }
+  }
+  t
+}
+
+// k1 — calls 0..5 with k = 3, 1, 6, 0, 4: every element its own text and style.
+// sizes: c0 i0..2 word(0..2) 1+22+0 = 23; c1 word(1) 22; c2 word(2..7) 0+3+1+22+0+3 = 29;
+// c3 none; c4 word(4..7) 1+22+0+3 = 26 → 100; styles: 10+20+30 + 10 + (10+20+30)·2 + 0 +
+// 10+20+30+10 = 60 + 10 + 120 + 70 = 260 → 360.
+fn test_lengths_that_shrink_and_grow() {
+  t = sweep(5);
+  assert(t == 360, "k1 {t}");
+}
+
+// k2 — a long sweep keeps the census flat: the live records after 10 calls and after 400 more
+// are the same (every kept slot the call did not reuse released at its exit).
+fn test_the_census_after_many_calls() {
+  a = sweep(10);
+  before = live_records();
+  b = sweep(400);
+  after = live_records();
+  assert(a > 0 && b > 0 && before == after, "k2 census {before} -> {after}");
+}
+
+fn main() {
+  test_lengths_that_shrink_and_grow();
+  test_the_census_after_many_calls();
+}

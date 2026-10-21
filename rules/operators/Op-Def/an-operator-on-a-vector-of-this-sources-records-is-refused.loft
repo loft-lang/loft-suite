@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR ON A VECTOR OF THIS SOURCE'S RECORDS IS REFUSED (`@FR-Op-Def` crossed with
+// `@FR-Op-Home`).  `vector<V>` is the built-in collection over this source's `V`; the collection is
+// not declared here, so `self: vector<V>` is refused at the definition, though nothing uses it.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the vector type.
+// HOLDS: `every-user-type-of-this-source-may-be-an-operators-self` beside it.
+// @EXPECT_ERROR: `operator plus` defines `+` for a type of its own package, and `vector<V>` is not one
+
+struct V { x: integer }
+
+operator plus(self: vector<V>, o: V) -> V { o }
+
+fn main() {
+  println("x");
+}

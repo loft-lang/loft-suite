@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PUSH WRITES ITS LENGTH BACK FOR A READER INSIDE THE LOOP (`@FR-R-Refresh` crossed with
+// `@FR-R-Push`).  R-Push keeps a push header current itself; R-Refresh says what "current"
+// covers: "a push bumps its header's length and re-derives the whole header after a growth",
+// and "the length is written back per push so a runtime reader inside the loop (an admitted
+// callee's `len(v)`) sees every push".  The cells put that reader in the loop — a callee
+// reading the length, the last element, an element a growth moved — and push past the first
+// claim, so a header bumped without the record's length, or kept across a growth, answers a
+// short length or the record the growth left.
+//
+// Axes it MOVES: the reader (a callee's `len`, a callee's element read, both), growth (none,
+// several), the element kind (integer, float, character).  Values hand-computed in each
+// cell's comment.
+//
+// Firing read off `--native-emit` (`__ph_` push header and `push_hoisted` with the callee's
+// call in the same loop).  Cross-backend; `LOFT_HOIST_VERIFY=1` (each push re-derives its
+// header) and `LOFT_NO_PUSH_HOIST=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a push that bumps only the held length makes
+//   `count(w)` answer 0 every pass in u1 (t 1305 for 1770).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum.
+// HOLDS: the interpreter is the oracle.
+
+fn count(v: const vector<integer>) -> integer { len(v) }
+fn last(v: const vector<integer>) -> integer { v[len(v) - 1] ?? -1000 }
+fn mid(v: const vector<float>) -> float { v[len(v) / 2] ?? -1.0 }
+fn chars(v: const vector<character>) -> integer { len(v) }
+
+// u1 — thirty pushes of 3i, each followed by the callee's length and last element:
+// Σ (i + 1) = 465, Σ 3i = 1305 → 1770.
+fn test_a_callee_reads_the_length_and_last_element_after_each_push() {
+  w: vector<integer> = [];
+  t = 0;
+  for i in 0..30 { w += [i * 3]; t += count(w) + last(w); }
+  assert(t == 1770 && len(w) == 30, "u1 {t}");
+}
+
+// u2 — a float vector read at its middle after each push of i: mid = w[(i+1)/2] = (i+1)/2
+// as pushed; Σ over i in 0..25 of ⌊(i+1)/2⌋ = 0+1+1+2+2+…+12+12 = 2·(1+…+12) = 156.
+fn test_a_callee_reads_an_element_the_growth_moved() {
+  w: vector<float> = [];
+  t = 0.0;
+  for i in 0..25 { w += [i as float]; t += mid(w); }
+  assert(t == 156.0 && len(w) == 25, "u2 {t}");
+}
+
+// u3 — a character vector: the callee's length after each push, 1..15 → 120.
+fn test_a_character_vector_length_read_by_a_callee() {
+  w: vector<character> = [];
+  t = 0;
+  for _ in 0..15 { w += ['a']; t += chars(w); }
+  assert(t == 120 && len(w) == 15 && w[14] == 'a', "u3 {t}");
+}
+
+// u4 — two pushes a pass to one vector and the callee between them: after the first push
+// len = 2i + 1, after the second 2i + 2; Σ over i in 0..10 = Σ (4i + 3) = 180 + 30 = 210.
+fn test_two_pushes_with_a_reader_between() {
+  w: vector<integer> = [];
+  t = 0;
+  for i in 0..10 {
+    w += [i];
+    t += count(w);
+    w += [-i];
+    t += count(w);
+  }
+  assert(t == 210 && len(w) == 20 && last(w) == -9, "u4 {t}");
+}
+
+fn main() {
+  test_a_callee_reads_the_length_and_last_element_after_each_push();
+  test_a_callee_reads_an_element_the_growth_moved();
+  test_a_character_vector_length_read_by_a_callee();
+  test_two_pushes_with_a_reader_between();
+}

@@ -1,0 +1,125 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPUTED START STEPS ONE COUNTER AND ITERATES EVERY INTEGER ONCE (`@FR-R-StartStep` crossed with
+// `@FR-I-Range`).  I-Range: `for x in a..b` iterates a, a+1, …, b−1, empty if a ≥ b.  R-StartStep is
+// the interpreter's lowering of a range whose start is not a literal (bound once to `_range_start`):
+// one counter seeded from the start, the first round entering past the step, `continue` jumping to
+// the step.  The interpreter applies it and native does not, so native is the oracle — and the
+// hand-computed values are the judge: start and end each evaluated ONCE (even when the body changes
+// what they were computed from), an empty range for a ≥ b, negative starts, a `continue` and a
+// `break`, and the extremes of the integer range (the step after the last round must not be read
+// as a further round).  An inclusive range keeps the two-counter form and is the control.
+//
+// Values hand-computed:
+//   st(2)..en(5) with logging calls → "234", two calls, log "se"
+//   walk(3,6) "3,4,5,"  walk(4,4) ""  walk(5,2) ""  walk(-3,1) "-3,-2,-1,0,"
+//   skip(1,8) (odd only, `continue`) "1,3,5,7,"   brk(10,20) (break past a+2) "10,11,12,"
+//   incl(-2,1) "-2,-1,0,1,"  incl(3,2) ""
+//   k = 7; for i in k..k+3 { k += 10 } → i 7,8,9 (s = 70809), k ends 37
+//   walk(MAX−2, MAX) "MAX−2,MAX−1,"  walk(MAX−1, MAX) "MAX−1,"  walk(−MAX, −MAX+2) "−MAX,−MAX+1,"
+//   (MAX = 9223372036854775807)
+//
+// Axes it MOVES: the start's form (a call with an effect, a parameter, a local the body writes),
+//   the range's extent (several, one, none, reversed), the body's jump (none, continue, break), the
+//   start's sign and magnitude, exclusive against inclusive.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_START_STEP=1.  Fires: LOFT_TRACE_START_STEP=1 says `n_walk i
+//   steps one counter` (and for `n_skip`, `n_brk`, `n_effects`).
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switch above, by hand).
+// WITNESS: each message prints the integers iterated.
+// HOLDS: the iteration chapter's I-Range cells.
+
+struct C { n: integer, log: text }
+
+fn st(c: C, v: integer) -> integer {
+  c.n += 1;
+  c.log += "s";
+  v
+}
+
+fn en(c: C, v: integer) -> integer {
+  c.n += 1;
+  c.log += "e";
+  v
+}
+
+fn walk(a: integer, b: integer) -> text {
+  t = "";
+  n = 0;
+  for i in a..b {
+    t += "{i},";
+    n += 1;
+    if n > 5 { break; }
+  }
+  t
+}
+
+fn skip(a: integer, b: integer) -> text {
+  t = "";
+  for i in a..b {
+    if i % 2 == 0 { continue; }
+    t += "{i},";
+  }
+  t
+}
+
+fn brk(a: integer, b: integer) -> text {
+  t = "";
+  for i in a..b {
+    if i > a + 2 { break; }
+    t += "{i},";
+  }
+  t
+}
+
+fn incl(a: integer, b: integer) -> text {
+  t = "";
+  for i in a..=b { t += "{i},"; }
+  t
+}
+
+fn effects() -> text {
+  c = C { n: 0, log: "" };
+  t = "";
+  for i in st(c, 2)..en(c, 5) { t += "{i}"; }
+  s = 0;
+  k = 7;
+  for i in k..k + 3 {
+    k += 10;
+    s = s * 100 + i;
+  }
+  "{t} {c.n} {c.log} {s} {k}"
+}
+
+fn extremes() -> text {
+  big = 9223372036854775807;
+  "[{walk(big - 2, big)}] [{walk(big - 1, big)}] [{walk(-9223372036854775807, -9223372036854775805)}]"
+}
+
+fn test_start_and_end_are_evaluated_once() {
+  s = effects();
+  assert(s == "234 2 se 70809 37", "effects: {s}");
+}
+
+fn test_every_extent_iterates_its_integers() {
+  s = "[{walk(3, 6)}] [{walk(4, 4)}] [{walk(5, 2)}] [{walk(-3, 1)}]";
+  assert(s == "[3,4,5,] [] [] [-3,-2,-1,0,]", "walk: {s}");
+  t = "[{skip(1, 8)}] [{brk(10, 20)}] [{incl(-2, 1)}] [{incl(3, 2)}]";
+  assert(t == "[1,3,5,7,] [10,11,12,] [-2,-1,0,1,] []", "jumps: {t}");
+}
+
+fn test_the_extremes_of_the_range() {
+  s = extremes();
+  assert(s == "[9223372036854775805,9223372036854775806,] [9223372036854775806,] [-9223372036854775807,-9223372036854775806,]", "extremes: {s}");
+}
+
+fn main() {
+  test_start_and_end_are_evaluated_once();
+  test_every_extent_iterates_its_integers();
+  test_the_extremes_of_the_range();
+}

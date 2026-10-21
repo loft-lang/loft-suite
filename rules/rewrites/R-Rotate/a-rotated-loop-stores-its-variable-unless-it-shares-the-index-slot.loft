@@ -1,0 +1,115 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A ROTATED LOOP STORES ITS VARIABLE UNLESS IT SHARES THE INDEX SLOT (`@FR-R-Rotate` crossed with
+// `@FR-R-LoopSlot`).  R-Rotate lays a loop out with its test after the body; "the statements after
+// the test (a two-counter iterator's steps, the loop variable's store unless (R-LoopSlot)
+// holds) open the body", and "a `continue` jumps FORWARD to the test".  R-LoopSlot gives `i` the
+// index's own slot where nothing but the iterator's copy writes `i` and nothing takes its
+// address, and drops the copy.  So each rotated round either copies the index into `i` at the
+// top of the body or reads it in place — and a `continue`, a `break`, a nested loop and a body
+// that hands `i` to a `&integer` parameter (LoopSlot declines: the copy returns) must each see
+// the round's value and run the right number of rounds.
+//
+// Axes it MOVES: the slot (shared; declined by a `&` hand-off that writes `i`; declined by a `&`
+// hand-off that does not), the exit (the test, `continue`, `break`, `return`), the range (literal
+// start, literal end, inclusive, empty, backward), nesting (one, two loops sharing nothing).
+// Every cell counts its rounds beside its value; values hand-computed in each comment.
+//
+// Firing read under `LOFT_TRACE_LOOP_VAR_ALIAS=1` (each loop variable "shares i#index" or the
+// decline) and `loft introspect` (one `GotoWord` into the test after the body, the test's
+// `CmpIntVVJump` back to it, `i` at `i#index`'s own slot where the alias holds).  Interpreter generator rules — `--native` never sees the layout
+// and is the oracle; `LOFT_NO_LOOP_ROTATE=1` and `LOFT_NO_LOOP_VAR_ALIAS=1` on `--interpret`
+// answer the same.
+//
+// @falsified-at: none — a conformance guard; a rotated body that read `i` from a slot the
+//   iterator no longer copies into (LoopSlot declined, the copy dropped) reads the previous
+//   round's `i + 100` in r3.
+// CHANNEL: the asserts.
+// ARMED: the switches above, on --interpret.
+// WITNESS: each message prints the sum and the rounds.
+// HOLDS: --native is the oracle.
+
+fn grow(n: &integer) { n += 100; }
+fn touch(n: &integer) { n += 0; }
+
+// r1 — shared slot, a `continue` on even values: 0..10 → odd values 1+3+5+7+9 = 25, 10 rounds.
+fn test_a_continue_in_a_shared_slot_loop() {
+  t = 0;
+  rounds = 0;
+  for i in 0..10 { rounds += 1; if i % 2 == 0 { continue; } t += i; }
+  assert(t == 25 && rounds == 10, "r1 {t} {rounds}");
+}
+
+// r2 — shared slot, a `break` at 6 of 0..=20: Σ 0..5 = 15, 7 rounds (the breaking one counted).
+fn test_a_break_in_an_inclusive_range() {
+  t = 0;
+  rounds = 0;
+  for i in 0..=20 { rounds += 1; if i == 6 { break; } t += i; }
+  assert(t == 15 && rounds == 7, "r2 {t} {rounds}");
+}
+
+// r3 — the slot declined (`grow(i)` writes i): each round's i is the index copied anew, then
+// + 100: Σ over 0..5 of (i + 100) = 10 + 500 = 510; the index is untouched, 5 rounds.
+fn test_a_written_loop_variable_is_copied_each_round() {
+  t = 0;
+  rounds = 0;
+  for i in 0..5 { grow(i); t += i; rounds += 1; }
+  assert(t == 510 && rounds == 5, "r3 {t} {rounds}");
+}
+
+// r4 — the slot declined by a `&` hand-off that writes nothing, with a `continue` before it:
+// values 0..8 skipping multiples of 3 (0, 3, 6): 1+2+4+5+7 = 19, 8 rounds.
+fn test_a_reference_hand_off_and_a_continue() {
+  t = 0;
+  rounds = 0;
+  for i in 0..8 { rounds += 1; if i % 3 == 0 { continue; } touch(i); t += i; }
+  assert(t == 19 && rounds == 8, "r4 {t} {rounds}");
+}
+
+// r5 — loops that must not run: empty, backward, an inclusive end below its start, nested
+// inside a loop that runs: 0 rounds of each inner loop; the outer runs 3.
+fn test_zero_round_loops_inside_a_running_one() {
+  rounds = 0;
+  outer = 0;
+  for k in 0..3 {
+    outer += 1;
+    for _ in 5..5 { rounds += 1; }
+    for _ in 7..2 { rounds += 1; }
+    for i in 4..=3 { rounds += 1 + i; }
+    for i in k..k { rounds += i; }
+  }
+  assert(rounds == 0 && outer == 3, "r5 {rounds} {outer}");
+}
+
+// r6 — two nested loops, the inner one's variable handed to `grow` (declined), the outer's
+// shared: Σ over k in 0..3, j in 0..k of (j + 100) + k: k=0: 0; k=1: 100 + 1; k=2: 201 + 2
+// → 304; inner rounds 0 + 1 + 2 = 3.
+fn test_nested_loops_one_shared_one_declined() {
+  t = 0;
+  inner = 0;
+  for k in 0..3 {
+    for j in 0..k { grow(j); t += j; inner += 1; }
+    t += k;
+  }
+  assert(t == 304 && inner == 3, "r6 {t} {inner}");
+}
+
+// r7 — a `return` from inside the rotated body: the first i ≥ 4 whose square passes 20 is 5.
+fn first_big(lo: integer) -> integer {
+  for i in lo..100 { if i * i > 20 { return i; } }
+  -1
+}
+fn test_a_return_from_the_body() {
+  assert(first_big(4) == 5 && first_big(6) == 6 && first_big(100) == -1, "r7");
+}
+
+fn main() {
+  test_a_continue_in_a_shared_slot_loop();
+  test_a_break_in_an_inclusive_range();
+  test_a_written_loop_variable_is_copied_each_round();
+  test_a_reference_hand_off_and_a_continue();
+  test_zero_round_loops_inside_a_running_one();
+  test_nested_loops_one_shared_one_declined();
+  test_a_return_from_the_body();
+}

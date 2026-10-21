@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INTEGER WIDENS ONLY INTO A RANGE THAT HOLDS ALL OF IT (`@FR-Disp-Specific` crossed with
+// `@FR-C-Int`).  Disp-Specific ranks "an integer into a range that holds it (C-Int)" as WIDENED,
+// and C-Int's condition is the range SUBSET `[a,b] ⊆ [c,d]` — not the width, not the sign.  So
+// a narrow argument reaches the member whose range contains its whole range, and a member whose
+// range does not is no widening, however wide its slot: an `i8` does not widen into `u16`
+// (its negatives do not fit) but does into `i16`; a `u16` does not widen into `i16` and does
+// into `u16` itself (EXACT); an `i8` skips a `u8` member for `integer`; an `i16` reaches `i32`
+// and not `u32`.  The value arrives unchanged.
+//
+// Ranks hand-computed (i8 = [-128,127], u8 = [0,255], i16 = [-32768,32767], u16 = [0,65535],
+// i32 = [-(2^31-1), 2^31-1], u32 = [0, 2^32-2]):
+//   i8 -5      → (u16 | i16)      : i16 WIDENED, u16 none            → "i16 -5"
+//   u16 60000  → (u16 | i16)      : u16 EXACT                        → "u16 60000"
+//   i16 -300   → (u16 | i16)      : i16 EXACT                        → "i16 -300"
+//   i8 -5      → (u8 | integer)   : integer WIDENED, u8 none         → "integer -5"
+//   i16 -7     → (i32 | u32)      : i32 WIDENED, u32 none            → "i32 -7"
+//   u16 9      → (u16 | integer)  : u16 EXACT                        → "u16 9"
+//   (i8, u16) → (i16,u16 | u16,i16): [WIDENED, EXACT] vs [none, none]→ "i16,u16 -1 2"
+//
+// Axes it MOVES: the argument's width and sign against the member's (subset / superset / overlap),
+//   the argument's value (negative, above the signed half), one against two positions.  The
+//   plain `integer` and `u32` members are the IGNOREd cell beside this one
+//   (`a-u32-widens-into-integer-and-integer-does-not-widen-into-i32`).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `two-widenings-at-one-position-are-refused` (Disp-Ambiguous) — two members that both
+//   hold the range are refused, so each answer here is the one subset member.
+
+fn ws1(x: u16) -> text { "u16 {x}" }
+fn ws1(x: i16) -> text { "i16 {x}" }
+
+fn ws2(x: u8) -> text { "u8 {x}" }
+fn ws2(x: integer) -> text { "integer {x}" }
+
+fn ws3(x: i32) -> text { "i32 {x}" }
+fn ws3(x: u32) -> text { "u32 {x}" }
+
+fn ws4(x: integer) -> text { "integer {x}" }
+fn ws4(x: u16) -> text { "u16 {x}" }
+
+fn ws5(a: i16, b: u16) -> text { "i16,u16 {a} {b}" }
+fn ws5(a: u16, b: i16) -> text { "u16,i16 {a} {b}" }
+
+fn test_a_signed_byte_widens_into_the_signed_half_only() {
+  a: i8 = -5;
+  b: u16 = 60000;
+  c: i16 = -300;
+  s = "{ws1(a)}|{ws1(b)}|{ws1(c)}";
+  assert(s == "i16 -5|u16 60000|i16 -300", "i8/u16/i16 into (u16 | i16): {s}");
+}
+
+fn test_a_negative_byte_skips_an_unsigned_member() {
+  a: i8 = -5;
+  s = ws2(a);
+  assert(s == "integer -5", "i8 into (u8 | integer): {s}");
+}
+
+fn test_a_signed_short_reaches_the_signed_word() {
+  a: i16 = -7;
+  s = ws3(a);
+  assert(s == "i32 -7", "i16 into (i32 | u32): {s}");
+}
+
+fn test_the_exact_width_beats_the_widening_in_either_order() {
+  a: u16 = 9;
+  s = ws4(a);
+  assert(s == "u16 9", "u16 into (integer | u16): {s}");
+}
+
+fn test_the_subset_decides_each_position() {
+  a: i8 = -1;
+  b: u16 = 2;
+  s = ws5(a, b);
+  assert(s == "i16,u16 -1 2", "(i8, u16) into crossed members: {s}");
+}
+
+fn main() {
+  test_a_signed_byte_widens_into_the_signed_half_only();
+  test_a_negative_byte_skips_an_unsigned_member();
+  test_a_signed_short_reaches_the_signed_word();
+  test_the_exact_width_beats_the_widening_in_either_order();
+  test_the_subset_decides_each_position();
+}

@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE ARGUMENT REACHES A DENSE MEMBER ONLY AS THE LOSSY RANK (`@FR-Disp-Specific` crossed
+// with `@FR-N-Store`).  Disp-Specific ranks `τ? → τ` LOSSY: below EXACT and WIDENED, above
+// CONVERTED.  N-Store says what that selection costs: storing a `τ?` into a `τ` slot — a call
+// argument is a slot — WARNS, the call compiles and runs, and the slot holds the null, which the
+// member reads back as null (the spreadsheet model).  So a declared `τ?` member wins outright
+// (EXACT, no warning); without one, the dense member wins over a CONVERTED rival, and both a
+// present and an absent argument arrive as they are.  A narrow width, where N-Store is an ERROR,
+// is the refusal cell beside this one.
+//
+// Ranks and values hand-computed (a: integer? = 23, z = null, u: u8? = 4, p: NP? = NP{6}, q = null):
+//   (integer | text)     a → LOSSY "integer 23";  z → LOSSY, the null arrives "integer null"
+//   (integer | integer?) a → EXACT "integer? 23"; z → "integer? -1"  (no warning)
+//   (integer | float)    u → WIDENED+LOSSY beats CONVERTED+LOSSY "integer 4"
+//   (NP | integer)       p → LOSSY "NP 6";  q → "NP null"
+//
+// Axes it MOVES: the argument's presence, its kind (integer, narrow integer, record), the rival
+//   member (EXACT `τ?`, CONVERTED, none).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: a nullable
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts and the warning.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `a-nullable-narrow-argument-into-a-dense-member-is-refused` beside it.
+
+struct NP { x: integer }
+
+fn s1(x: integer) -> text { if x == null { "integer null" } else { "integer {x}" } }
+fn s1(t: text) -> text { "text {t}" }
+
+fn s2(x: integer) -> text { "integer {x}" }
+fn s2(x: integer?) -> text { "integer? {x ?? -1}" }
+
+fn s3(x: integer) -> text { "integer {x}" }
+fn s3(x: float) -> text { "float {x}" }
+
+fn s4(p: NP) -> text { if p == null { "NP null" } else { "NP {p.x}" } }
+fn s4(k: integer) -> text { "int {k}" }
+
+fn test_the_dense_member_takes_a_nullable_as_lossy() {
+  a: integer? = 23;
+  z: integer? = null;
+  u: u8? = 4;
+  s = "{s1(a)}|{s1(z)}|{s3(u)}";
+  assert(s == "integer 23|integer null|integer 4", "lossy scalars: {s}");
+}
+
+fn test_a_declared_nullable_member_is_exact() {
+  a: integer? = 23;
+  z: integer? = null;
+  s = "{s2(a)}|{s2(z)}";
+  assert(s == "integer? 23|integer? -1", "exact nullable: {s}");
+}
+
+fn test_a_record_arrives_present_or_null() {
+  p: NP? = NP { x: 6 };
+  q: NP? = null;
+  s = "{s4(p)}|{s4(q)}";
+  assert(s == "NP 6|NP null", "lossy record: {s}");
+}
+
+fn main() {
+  test_the_dense_member_takes_a_nullable_as_lossy();
+  test_a_declared_nullable_member_is_exact();
+  test_a_record_arrives_present_or_null();
+}

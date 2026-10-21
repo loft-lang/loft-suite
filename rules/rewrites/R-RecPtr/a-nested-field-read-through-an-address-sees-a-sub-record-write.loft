@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NESTED FIELD READ THROUGH AN ADDRESS SEES A SUB-RECORD WRITE (`@FR-R-RecPtr` crossed with
+// `@FR-R-Scalar`).  R-RecPtr's PATH CLAUSE folds `r.pos.x` into r's field at the summed offset
+// for the ADDRESS — a load of the bytes where they are, every time — and says the fold "serves
+// the ADDRESS only; (R-Scalar)'s hoisted scalars keep their bare-variable key".  The reason is
+// the composition this cell builds: a write through a sub-record view (`p = r.pos; p.x = …`)
+// is typed (V3, 0), which never evicts a hoisted key typed (Vertex, 8); a fold done for the
+// scalar tier would hold a stale value silently.  So every cell reads a nested field through
+// a record view that holds an address, writes it through a sub-record view, and reads it
+// again — in a loop over the elements (the base clause), through a view bound before a loop
+// (the scalar tier's candidate), and through an index binding (the index clause).
+//
+// Axes it MOVES: how r is bound (loop variable, a view before the loop, `v[i]?` in the
+// loop), the write's route (sub-record view, a direct nested write), depth (one, two inline
+// levels).  Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_RECPTR=1` (each view's address admitted) and
+// `--native-emit` (`rec_ptr` loads at summed offsets).  Cross-backend; `LOFT_HOIST_VERIFY=1`
+// (`path_read_verify` walks the path the unrewritten way at every nested read),
+// `LOFT_NO_NESTED_FIELD=1`, `LOFT_NO_RECORD_PTR=1` and `LOFT_NO_SCALAR_HOIST=1` answer the
+// same.
+//
+// @falsified-at: none — a conformance guard of the path clause's emitter-local design; n2 is
+//   the shape the clause's note names (`n4`).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum.
+// HOLDS: the interpreter is the oracle.
+
+struct V3 { x: integer, y: integer }
+struct Box { lo: V3, hi: V3 }
+struct Vertex { id: integer, pos: V3 }
+struct Cell { tag: integer, b: Box }
+
+// n1 — the loop variable's address: read pos.x·10 + pos.y, write through p = v.pos, read
+// pos.x again.  v1: 23 + 102 = 125; v2: 45 + 104 = 149 → 274; the writes stay.
+fn test_a_loop_variables_nested_field_after_a_sub_record_write() {
+  verts = [Vertex { id: 1, pos: V3 { x: 2, y: 3 } }, Vertex { id: 2, pos: V3 { x: 4, y: 5 } }];
+  t = 0;
+  for v in verts {
+    t += v.pos.x * 10 + v.pos.y;
+    p = v.pos;
+    p.x += 100;
+    t += v.pos.x;
+  }
+  assert(t == 274 && verts[0].pos.x == 102 && verts[1].pos.x == 104, "n1 {t}");
+}
+
+// n2 — a view bound BEFORE the loop (the scalar tier's candidate) read at a nested field,
+// written through a sub-record view inside the loop: x reads 2, 3, 4, id 1 → 3 + 4 + 5 = 12.
+fn test_a_view_before_the_loop_written_through_its_sub_record() {
+  verts = [Vertex { id: 1, pos: V3 { x: 2, y: 3 } }];
+  r = verts[0]?;
+  p = r.pos;
+  t = 0;
+  for _ in 0..3 { t += r.pos.x + r.id; p.x += 1; }
+  assert(t == 12 && r.pos.x == 5, "n2 {t}");
+}
+
+// n3 — two inline levels and the index clause: r = cells[i]? each pass, reads r.b.hi.y and
+// writes r.b.lo.x directly, then through q = r.b.lo.  cells hi.y = 10, 20, 30; lo.x 0 → per
+// pass t += hi.y + lo.x after `r.b.lo.x = i` and `q.x += 5`: (10 + 5) + (20 + 6) + (30 + 7) = 78.
+fn test_two_inline_levels_through_an_index_binding() {
+  cells = [Cell { tag: 0, b: Box { lo: V3 { x: 0, y: 0 }, hi: V3 { x: 0, y: 10 } } },
+           Cell { tag: 1, b: Box { lo: V3 { x: 0, y: 0 }, hi: V3 { x: 0, y: 20 } } },
+           Cell { tag: 2, b: Box { lo: V3 { x: 0, y: 0 }, hi: V3 { x: 0, y: 30 } } }];
+  t = 0;
+  for i in 0..3 {
+    r = cells[i]?;
+    r.b.lo.x = i;
+    q = r.b.lo;
+    q.x += 5;
+    t += r.b.hi.y + r.b.lo.x;
+  }
+  assert(t == 78 && cells[2].b.lo.x == 7 && cells[0].b.lo.x == 5, "n3 {t}");
+}
+
+// n4 — the hoist candidate is a sub-record field of a view while the loop writes the OTHER
+// sub-record's same offset (lo.x vs hi.x, both (V3, 0) by the sub-record's type): r.b.hi.x
+// reads 1, 2, 3 (it is the one written, through h = r.b.hi) → 6; r.b.lo.x stays 9 → 3·9 =
+// 27; t = 33.
+fn test_the_same_sub_record_offset_in_two_places() {
+  cells = [Cell { tag: 0, b: Box { lo: V3 { x: 9, y: 0 }, hi: V3 { x: 1, y: 0 } } }];
+  r = cells[0]?;
+  h = r.b.hi;
+  t = 0;
+  for _ in 0..3 { t += r.b.hi.x + r.b.lo.x; h.x += 1; }
+  assert(t == 33 && r.b.hi.x == 4 && r.b.lo.x == 9, "n4 {t}");
+}
+
+fn main() {
+  test_a_loop_variables_nested_field_after_a_sub_record_write();
+  test_a_view_before_the_loop_written_through_its_sub_record();
+  test_two_inline_levels_through_an_index_binding();
+  test_the_same_sub_record_offset_in_two_places();
+}

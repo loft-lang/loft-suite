@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ABSENT RECORD IN REGISTERS READS NULL, AND A WRITE TO IT RUNS ITS ARM (`@FR-R-ValueRecord`
+// crossed with `@FR-E-Report`).  R-ValueRecord's NULLABLE CLAUSE returns a `-> S?` of a small
+// record as its fields plus a presence word; an ABSENT tuple "answers what a read off the null
+// record answers", and "a field write through an absent tuple is dropped and reported
+// (`@FR-E-Report`), as the setter's `rec == 0` arm does".  E-Report says what that is: a DROPPED
+// WRITE with no `else` is reported once (`write_dropped`, to the log), and with an `else` reports
+// nothing and runs the arm.  A site that writes a field keeps the RECORD road (its record is
+// consumed), one that only reads takes the tuple road — so the cell holds one callee per road and
+// asks both for the same answers: reads of an absent result are null, the presence test is false,
+// a guarded write to an absent result runs its arm and leaves it absent, and to a present one
+// lands and skips the arm.
+//
+// Values hand-computed (mk(b, x) = b ? P{x, 2x} : null):
+//   writes: present (k 3) → arms "", x = 50, y = 6 + 7 = 13, present;
+//           absent → arms "ab", x and y read null (−1 by `??`), absent
+//   reads (the tuple road): present (k 4) → 4|8|false|1; absent → -1|-1|true|0
+//   a loop over k in 0..4, b = k is odd: Σ (y of the present ones) = 2 + 6 = 8, absent count 2
+//
+// Axes it MOVES: the road (record: a writing site; tuple: a reading site), presence, the write
+//   (assignment, compound), guarded with `else`, the read (field, presence test, condition), a loop.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_NULLABLE_VALUE_RECORD=1 and LOFT_NO_IR_VALUE_RECORD=1.
+//   Fires: LOFT_TRACE_VALUEREC=1 says `n_vr_read -> (i64, i64, bool)` and `n_vr_write: a site
+//   consumes its record`.  By hand, outside the asserts: the same writes WITHOUT `else` leave one
+//   `[write_dropped]` line each in `.loft/log.txt` on both backends.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the arms and the fields.
+// HOLDS: `a-small-record-returned-to-a-reader-is-a-tuple` beside it (the dense road).
+
+struct P { x: integer, y: integer }
+
+fn vr_write(b: boolean, x: integer) -> P? {
+  if b { P { x: x, y: x * 2 } } else { null }
+}
+
+fn vr_read(b: boolean, x: integer) -> P? {
+  if b { P { x: x, y: x * 2 } } else { null }
+}
+
+fn writes(b: boolean, k: integer) -> text {
+  t = "";
+  r = vr_write(b, k);
+  r.x = 50 else { t += "a"; };
+  r.y += 7 else { t += "b"; };
+  "{t}|{r.x ?? -1}|{r.y ?? -1}|{r == null}"
+}
+
+fn reads(b: boolean, k: integer) -> text {
+  r = vr_read(b, k);
+  "{r.x ?? -1}|{r.y ?? -1}|{r == null}|{if r { 1 } else { 0 }}"
+}
+
+fn summed(n: integer) -> integer {
+  s = 0;
+  absent = 0;
+  for k in 0..n {
+    r = vr_read(k % 2 == 1, k);
+    if r { s += r.y ?? 0; } else { absent += 1; }
+  }
+  s * 100 + absent
+}
+
+fn test_a_write_to_an_absent_result_runs_its_arm() {
+  p = writes(true, 3);
+  a = writes(false, 3);
+  assert(p == "|50|13|false", "present: {p}");
+  assert(a == "ab|-1|-1|true", "absent: {a}");
+}
+
+fn test_an_absent_tuple_reads_as_the_null_record() {
+  p = reads(true, 4);
+  a = reads(false, 4);
+  assert(p == "4|8|false|1" && a == "-1|-1|true|0", "reads: {p} {a}");
+}
+
+fn test_a_loop_of_present_and_absent_results() {
+  s = summed(4);
+  assert(s == 802, "summed: {s}");
+}
+
+fn main() {
+  test_a_write_to_an_absent_result_runs_its_arm();
+  test_an_absent_tuple_reads_as_the_null_record();
+  test_a_loop_of_present_and_absent_results();
+}

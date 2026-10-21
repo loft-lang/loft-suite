@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFILLED VECTOR FILLED WITH ONE SCALAR IS OVERWRITTEN ONLY AT ITS OWN LENGTH
+// (`@FR-R-RefillBuffer` crossed with `@FR-R-PushFill`).  R-RefillBuffer's IN-PLACE clause: "an
+// empty followed by a repeat literal of the same field (n copies of one scalar, (R-PushFill)'s
+// form) is one overwrite when the kept vector holds exactly n elements of that width ...; any
+// other length, a foreign or locked vector, empties and fills."  R-PushFill's form is the one
+// fill of a vector's tail by a simple invariant, spelled as a literal of copies or as the
+// comprehension `[for _ in 0..n { c }]`.  So the refilled buffer's kept vector meets a fill:
+// at the kept length the fill may overwrite in place, at any other length it must empty and
+// fill, and every element but the one the builder writes after the fill must read the fill's
+// value, never the kept store's (the value two calls back, when a rebind alternates stores).
+//
+// Axes it MOVES: the spelling of the fill (a literal of copies, a comprehension of a literal
+// count, a comprehension of a parameter count), the kept length against n (equal, longer,
+// shorter), the element (integer, float).  Values hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit`: `lit` and `flit` emit `fill_exact` after
+// `OpDatabaseRefill`; the comprehension builders refill and fill without the overwrite (a
+// comprehension count is no repeat literal to the in-place clause — the overwrite's
+// admission is narrower than the R-PushFill form it names).  Native only, the interpreter
+// the oracle; `LOFT_NO_REFILL_IN_PLACE=1`, `LOFT_NO_REFILL_BUFFER=1` and `LOFT_NO_PUSH_FILL=1`
+// answer the same, as do `LOFT_POISON=1` and `LOFT_STRICT_STORES=1`.
+//
+// @falsified-at: none — a conformance guard; an overwrite admitted at a kept length other than
+//   n leaves q3's kept tail or truncates its growth (len 3 where 4 is due).
+// CHANNEL: the asserts.
+// ARMED: LOFT_POISON=1, LOFT_STRICT_STORES=1.
+// WITNESS: each message prints the vector.
+// HOLDS: the interpreter is the oracle.
+
+struct M { m: vector<integer> }
+struct F { m: vector<float> }
+
+fn lit(a: const M, k: integer) -> M { r = M { m: [0, 0, 0, 0] }; r.m[k] = (a.m[k] ?? 0) + 10; r }
+fn comp(a: const M, k: integer) -> M { r = M { m: [for _ in 0..4 { 0 }] }; r.m[k] = (a.m[k] ?? 0) + 10; r }
+fn compn(a: const M, k: integer, n: integer) -> M {
+  r = M { m: [for _ in 0..n { 0 }] };
+  r.m[k] = (a.m[k] ?? 0) + 10;
+  r
+}
+fn flit(a: const F, k: integer) -> F { r = F { m: [0.5, 0.5, 0.5, 0.5] }; r.m[k] = (a.m[k] ?? 0.0) + 1.0; r }
+
+// q1 — the literal at the kept length: k = 0..6 % 4 from [1,2,3,4]: [11,0,0,0] [0,10,0,0]
+// [0,0,10,0] [0,0,0,10] [10,0,0,0] [0,10,0,0].
+fn test_a_literal_of_copies_at_the_kept_length() {
+  c = M { m: [1, 2, 3, 4] };
+  for i in 0..6 { c = lit(c, i % 4); }
+  assert(len(c.m) == 4 && c.m[0] == 0 && c.m[1] == 10 && c.m[2] == 0 && c.m[3] == 0, "q1 {c.m}");
+}
+
+// q2 — the comprehension of a literal count: the same answers as q1.
+fn test_a_comprehension_of_a_literal_count() {
+  c = M { m: [1, 2, 3, 4] };
+  for i in 0..6 { c = comp(c, i % 4); }
+  assert(len(c.m) == 4 && c.m[0] == 0 && c.m[1] == 10 && c.m[3] == 0, "q2 {c.m}");
+}
+
+// q3 — the count alternates 3, 4: i=0 n3 k0 [11,0,0]; i=1 n4 k1 [0,10,0,0]; i=2 n3 k2
+// [0,0,10]; i=3 n4 k0 [10,0,0,0]; i=4 n3 k1 [0,10,0]; i=5 n4 k2 [0,0,10,0].
+fn test_a_count_that_alternates_against_the_kept_length() {
+  c = M { m: [1, 2, 3, 4] };
+  shape = 0;
+  for i in 0..6 { c = compn(c, i % 3, 3 + i % 2); shape = shape * 10 + len(c.m); }
+  assert(shape == 343434 && c.m[2] == 10 && c.m[3] == 0 && c.m[0] == 0, "q3 {shape} {c.m}");
+}
+
+// q4 — a float literal of four copies: k = i % 4 from [1,2,3,4]: [2,.5,.5,.5] [.5,1.5,.5,.5]
+// [.5,.5,1.5,.5] [.5,.5,.5,1.5] [1.5,.5,.5,.5] → the last has 1.5 at 0 and 0.5 elsewhere.
+fn test_a_float_literal_of_copies() {
+  f = F { m: [1.0, 2.0, 3.0, 4.0] };
+  for i in 0..5 { f = flit(f, i % 4); }
+  s = 0.0;
+  for x in f.m { s += x; }
+  assert(len(f.m) == 4 && f.m[0] == 1.5 && f.m[3] == 0.5 && s == 3.0, "q4 {f.m}");
+}
+
+// q5 — the literal builder called from two loops in turn on ONE local: the second loop's
+// first call finds the store the first loop left, at the same length.  6 calls then 3:
+// k = 0, 1, 2 after [0,10,0,0] → [10,0,0,0] [0,10,0,0] [0,0,10,0].
+fn test_two_loops_one_local() {
+  c = M { m: [1, 2, 3, 4] };
+  for i in 0..6 { c = lit(c, i % 4); }
+  for i in 0..3 { c = lit(c, i); }
+  assert(c.m[2] == 10 && c.m[0] == 0 && c.m[1] == 0 && len(c.m) == 4, "q5 {c.m}");
+}
+
+fn main() {
+  test_a_literal_of_copies_at_the_kept_length();
+  test_a_comprehension_of_a_literal_count();
+  test_a_count_that_alternates_against_the_kept_length();
+  test_a_float_literal_of_copies();
+  test_two_loops_one_local();
+}

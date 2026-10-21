@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN EXPORTED RESULT KEEPS ITS OWN COPY OF THE FIELD (`@FR-O-ViewField` crossed with `@FR-R-Escape`).
+// O-ViewField may deliver a heap field of a result as a VIEW of the place its value already lives
+// in, decided "over EVERY call site of the function at once … every site the compiler sees whole
+// (R-Escape): a result that escapes the unit — a library's exported function — never carries a
+// view".  R-Escape: a construction that escapes keeps the representation the API promises.  So an
+// exported builder answers a field that is the CALLER's copy: a write into the container's element
+// after the call is not seen through the result, though the value had been appended there; the
+// same body kept private and called inside the library may take the view, and answers the length
+// the copy would.  A `pub` function of the program itself is an exported API in the same sense.
+//
+// Values hand-computed (v_pts(n) = (0,0) … (n−1, 2n−2), sum 3·n(n−1)/2):
+//   m = v_add(sc, 3): 3 points, sum 9;  k = local_pub(sc, 4): 4, sum 18;  p = local_priv(sc, 2): 2, 3
+//   v_count(sc, 5) = 5 (the private twin inside the library);  sc.ops: 4 elements
+//   sc.ops[0].pts[0].px = 100 → m.mpts still sums 9, sc.ops[0].pts sums 109;
+//   sc.ops[1].pts[1].py = 50 → k.mpts still sums 18
+//
+// Axes it MOVES: where the builder is declared (an exported library function, a private one called
+//   inside the library, a `pub` and a private function of the program), a write into the
+//   container's element after the call.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_VIEW_FIELD=1 and LOFT_POISON=1.  Fires: LOFT_TRACE_VALUEREC=1
+//   says `n_v_add: a view leaf would cross a library API (R-Escape)`, the same for `n_local_pub`,
+//   and `n_v_add_own -> (bool, DbRef)` (the view inside the library).
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the lengths and sums.
+// HOLDS: `every-path-to-an-exit-names-the-element-it-appended` beside it (the in-unit view).
+
+use o_view_field_fixture_lib::*;
+
+fn vsum(v: const vector<VPt>) -> integer {
+  t = 0;
+  for p in v { t += p.px + p.py; }
+  t
+}
+
+pub fn local_pub(sc: VSc, n: integer) -> VMark {
+  a = v_pts(n);
+  sc.ops += [VOp { pts: a, ow: n }];
+  VMark { matched: true, mpts: a }
+}
+
+fn local_priv(sc: VSc, n: integer) -> VMark {
+  a = v_pts(n);
+  sc.ops += [VOp { pts: a, ow: n }];
+  VMark { matched: true, mpts: a }
+}
+
+fn test_every_builder_answers_the_appended_value() {
+  sc = VSc { ops: [] };
+  m = v_add(sc, 3);
+  k = local_pub(sc, 4);
+  p = local_priv(sc, 2);
+  c = v_count(sc, 5);
+  s = "{len(m.mpts)} {vsum(m.mpts)} {len(k.mpts)} {vsum(k.mpts)} {len(p.mpts)} {vsum(p.mpts)} {c} {len(sc.ops)}";
+  assert(s == "3 9 4 18 2 3 5 4", "builders: {s}");
+}
+
+fn test_an_exported_result_does_not_see_a_later_write() {
+  sc = VSc { ops: [] };
+  m = v_add(sc, 3);
+  k = local_pub(sc, 4);
+  sc.ops[0].pts[0].px = 100;
+  sc.ops[1].pts[1].py = 50;
+  s = "{vsum(m.mpts)} {vsum(sc.ops[0].pts)} {vsum(k.mpts)} {vsum(sc.ops[1].pts)}";
+  assert(s == "9 109 18 66", "after the write: {s}");
+}
+
+fn main() {
+  test_every_builder_answers_the_appended_value();
+  test_an_exported_result_does_not_see_a_later_write();
+}

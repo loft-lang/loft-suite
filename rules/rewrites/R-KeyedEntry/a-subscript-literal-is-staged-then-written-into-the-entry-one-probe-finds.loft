@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SUBSCRIPT LITERAL IS STAGED, THEN WRITTEN INTO THE ENTRY ONE PROBE FINDS (`@FR-R-KeyedEntry`
+// crossed with `@FR-R-InPlaceLiteral`).  R-InPlaceLiteral's KEYED clause writes `h[k] = R { … }`
+// into the record the collection claims for it — "the literal's values and the statements
+// computing them run first, in program order (a value may read the record under k)", then the
+// old record is removed, a fresh one claimed, and "the SUBSCRIPT's key is written".
+// R-KeyedEntry's SUBSCRIPT clause replaces that with "the values evaluated in source order into
+// temps (that clause's staging), then ONE probe for (e₁, …, eₘ) that answers the entry already
+// under that key or a fresh one ... then the temps of the fields that are not key parts written
+// into it".  So the composition is the staging: every field value is read BEFORE the probe
+// writes anything, the key fields of the literal are the subscript's whatever the literal says,
+// and the entry the probe answers is the one a lookup by the key finds.  Each cell writes a
+// literal whose fields read the entry it replaces, another entry, or a view held from before.
+//
+// Axes it MOVES: the key's parts (one, two, four), present against absent, what the literal
+// reads (its own old entry, another entry, a view taken before the write, nothing), whether
+// the literal's key fields agree with the subscript, a loop of writes.  Values hand-computed
+// in each cell's comment.
+//
+// Firing read off `--native-emit` (`keyed_entry_ints` at each subscript write).  Native only;
+// the interpreter keeps the plain keyed clause and is the oracle.  `LOFT_NO_KEYED_ENTRY=1`,
+// `LOFT_NO_KEYED_IN_PLACE=1` and `LOFT_KEYED_VERIFY=1` (every answered entry looked up again
+// through the general path) answer the same.
+//
+// @falsified-at: none — a conformance guard; a probe that wrote the key before staging the
+//   values would read k2's swapped entry as the one just written (v 7 where 20 is due).
+// CHANNEL: the asserts.
+// ARMED: LOFT_KEYED_VERIFY=1.
+// WITNESS: each message prints the entries read.
+// HOLDS: the interpreter is the oracle.
+
+struct E1 { k: integer, v: integer, w: integer }
+struct E2 { q: integer, r: integer, v: integer }
+struct E4 { a: integer, b: integer, c: integer, d: integer, v: integer }
+
+// k1 — one key: a literal reading its OWN old entry: h[3] = (3, old.v + 1, old.w · 2) twice
+// from (3, 10, 1) → (3, 11, 2) → (3, 12, 4); an absent key 5 written reading h[5]?.v → 0 + 1.
+fn test_one_key_reading_its_own_old_entry() {
+  h: hash<E1[k]> = [E1 { k: 3, v: 10, w: 1 }];
+  for _ in 0..2 { h[3] = E1 { k: 3, v: (h[3]?.v) + 1, w: (h[3]?.w) * 2 }; }
+  h[5] = E1 { k: 5, v: (h[5]?.v) + 1, w: 0 };
+  assert(len(h) == 2 && h[3]?.v == 12 && h[3]?.w == 4 && h[5]?.v == 1, "k1 {h[3]?.v} {h[3]?.w} {h[5]?.v}");
+}
+
+// k2 — two parts, a swap through the literal: h[1, 2] takes h[2, 1]'s v and h[2, 1] takes
+// h[1, 2]'s — the second write reads the FIRST's new value: (1,2) v 7, (2,1) v 20 → h[1,2] =
+// 20, then h[2,1] = h[1,2].v = 20.  A literal whose key fields disagree (q 9, r 9) lands
+// under the subscript (4, 4); (9, 9) stays absent.
+fn test_two_parts_a_swap_and_a_mislabelled_literal() {
+  h: hash<E2[q, r]> = [E2 { q: 1, r: 2, v: 7 }, E2 { q: 2, r: 1, v: 20 }];
+  h[1, 2] = E2 { q: 1, r: 2, v: h[2, 1]?.v };
+  h[2, 1] = E2 { q: 2, r: 1, v: h[1, 2]?.v };
+  h[4, 4] = E2 { q: 9, r: 9, v: 44 };
+  e = h[4, 4]?;
+  assert(h[1, 2]?.v == 20 && h[2, 1]?.v == 20, "k2 swap {h[1, 2]?.v} {h[2, 1]?.v}");
+  assert(len(h) == 3 && e.q == 4 && e.r == 4 && e.v == 44 && h[9, 9] == null, "k2 key {e.q} {e.r} {len(h)}");
+}
+
+// k3 — four parts in a loop, the parts bound to locals first: 60 writes over 20 distinct keys
+// (j = i % 20 → (j%2, j%5, j/5, 1), distinct for every j); each write adds i to the old v.  Keys repeat at i, i+20, i+40: v =
+// i + (i+20) + (i+40) = 3i + 60 → Σ over 0..20 = 570 + 1200 = 1770; 20 entries.
+fn test_four_parts_in_a_loop() {
+  h: hash<E4[a, b, c, d]> = [];
+  for i in 0..60 {
+    j = i % 20;
+    a = j % 2;
+    b = j % 5;
+    c = j / 5;
+    h[a, b, c, 1] = E4 { a: a, b: b, c: c, d: 1, v: (h[a, b, c, 1]?.v) + i };
+  }
+  s = 0;
+  for e in h { s += e.v; }
+  assert(len(h) == 20 && s == 1770, "k3 {len(h)} {s}");
+}
+
+// k4 — a view of the entry held from BEFORE the write: the staged literal reads it (13) and
+// the probe overwrites the entry: old v 13 → new v 26; the lookup answers 26.
+fn test_a_view_held_from_before_the_write() {
+  h: hash<E1[k]> = [E1 { k: 1, v: 13, w: 0 }];
+  old = h[1]?;
+  ov = old.v;
+  h[1] = E1 { k: 1, v: ov * 2, w: 1 };
+  assert(ov == 13 && h[1]?.v == 26 && h[1]?.w == 1 && len(h) == 1, "k4 {ov} {h[1]?.v}");
+}
+
+fn main() {
+  test_one_key_reading_its_own_old_entry();
+  test_two_parts_a_swap_and_a_mislabelled_literal();
+  test_four_parts_in_a_loop();
+  test_a_view_held_from_before_the_write();
+}

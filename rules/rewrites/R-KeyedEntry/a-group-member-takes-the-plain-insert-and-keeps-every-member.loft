@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GROUP MEMBER TAKES THE PLAIN INSERT AND KEEPS EVERY MEMBER (`@FR-R-KeyedEntry` crossed with
+// `@FR-Col-Group`).  R-KeyedEntry writes `c += [T{k: …}]` into the entry the key names — a repeated
+// key overwrites that entry in place — only where "no linked group holds T's records (Col-Group)":
+// in a group, a record entering through the hash enters every member, and a repeated key displaces
+// the older record from every KEYED member while the vector keeps it (Col-Group-Dup), which an
+// in-place overwrite of the hash entry would not do.  The same inserts into a hash whose element
+// type is in no group take the rewrite.  Each pair of cells runs one sequence both ways: an integer
+// key in a loop, a text key, a two-part key.
+//
+// Values hand-computed (inserts i = 0..6 with k = i % 3, v = i):
+//   group: vector keeps all 7 in order → walk 0123456 = 123456; hash keeps the latest per key,
+//          k0 → 6, k1 → 4, k2 → 5, walked in key order → 645
+//   plain: 3 entries, walk 645
+//   text group ("a"1, "b"4, "a"3): vector 3 (walk 143), hash 2, "a" → 3
+//   text plain: 2 entries, "a" → 3, "b" → 4
+//   two-part group ((1,2)5, (1,3)6, (1,2)7): vector 3, hash 2, [1,2] → 7, [1,3] → 6
+//
+// Axes it MOVES: group or not, the key (integer in a loop through a parameter, text, two integer
+//   parts), repeated against fresh keys, the member walked (vector, hash).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_KEYED_ENTRY=1, LOFT_KEYED_VERIFY=1 and LOFT_STRICT_STORES=1.
+//   Fires: LOFT_REWRITE_CENSUS_FN counts R-KeyedEntry in `n_fill_p` and for the plain text inserts
+//   in `n_test_a_text_key…`, and none in the group functions.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the counts and walks.
+// HOLDS: `a-keyed-insert-writes-the-entry-its-key-names` beside it (its c10: a group fed through
+//   the vector member).
+
+struct G { k: integer, v: integer }
+struct HG { all: vector<G>, by_k: hash<G[k]> }
+struct P { k: integer, v: integer }
+struct HP { by_k: hash<P[k]> }
+struct T { name: text, v: integer }
+struct TG { all: vector<T>, by_n: hash<T[name]> }
+struct Tp { name: text, v: integer }
+struct TP { by_n: hash<Tp[name]> }
+struct Q { a: integer, b: integer, v: integer }
+struct QG { all: vector<Q>, by_ab: hash<Q[a, b]> }
+
+fn fill_g(g: HG, n: integer) {
+  for i in 0..n { g.by_k += [G { k: i % 3, v: i }]; }
+}
+
+fn fill_p(h: HP, n: integer) {
+  for i in 0..n { h.by_k += [P { k: i % 3, v: i }]; }
+}
+
+fn test_an_integer_key_in_a_group_and_out_of_one() {
+  g = HG { all: [], by_k: [] };
+  fill_g(g, 7);
+  s = 0;
+  for e in g.all { s = s * 10 + e.v; }
+  t = 0;
+  for e in g.by_k { t = t * 10 + e.v; }
+  assert(len(g.all) == 7 && len(g.by_k) == 3 && s == 123456 && t == 645, "group: {len(g.all)} {len(g.by_k)} {s} {t}");
+  assert(g.by_k[0].v == 6 && g.by_k[1].v == 4 && g.by_k[2].v == 5, "group lookups");
+  h = HP { by_k: [] };
+  fill_p(h, 7);
+  u = 0;
+  for e in h.by_k { u = u * 10 + e.v; }
+  assert(len(h.by_k) == 3 && u == 645, "plain: {len(h.by_k)} {u}");
+}
+
+fn test_a_text_key_in_a_group_and_out_of_one() {
+  tg = TG { all: [], by_n: [] };
+  tg.by_n += [T { name: "a", v: 1 }];
+  tg.by_n += [T { name: "b", v: 4 }];
+  tg.by_n += [T { name: "a", v: 3 }];
+  w = 0;
+  for e in tg.all { w = w * 10 + e.v; }
+  assert(len(tg.all) == 3 && len(tg.by_n) == 2 && tg.by_n["a"].v == 3 && w == 143, "text group: {len(tg.all)} {len(tg.by_n)} {w}");
+  tp = TP { by_n: [] };
+  tp.by_n += [Tp { name: "a", v: 1 }];
+  tp.by_n += [Tp { name: "b", v: 4 }];
+  tp.by_n += [Tp { name: "a", v: 3 }];
+  assert(len(tp.by_n) == 2 && tp.by_n["a"].v == 3 && tp.by_n["b"].v == 4, "text plain: {len(tp.by_n)}");
+}
+
+fn test_a_two_part_key_in_a_group() {
+  q = QG { all: [], by_ab: [] };
+  q.by_ab += [Q { a: 1, b: 2, v: 5 }];
+  q.by_ab += [Q { a: 1, b: 3, v: 6 }];
+  q.by_ab += [Q { a: 1, b: 2, v: 7 }];
+  assert(len(q.all) == 3 && len(q.by_ab) == 2 && q.by_ab[1, 2].v == 7 && q.by_ab[1, 3].v == 6, "two-part group: {len(q.all)} {len(q.by_ab)}");
+}
+
+fn main() {
+  test_an_integer_key_in_a_group_and_out_of_one();
+  test_a_text_key_in_a_group_and_out_of_one();
+  test_a_two_part_key_in_a_group();
+}

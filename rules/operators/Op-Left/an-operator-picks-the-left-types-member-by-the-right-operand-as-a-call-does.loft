@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR PICKS THE LEFT TYPE'S MEMBER BY THE RIGHT OPERAND AS A CALL DOES (`@FR-Op-Left`
+// crossed with `@FR-Disp-Select`).  `a ⊕ b` calls the method of the LEFT operand's type, "chosen
+// among that name's members by the right operand's type as the call `a.m(b)` chooses
+// (Disp-Select)" — so the right operand ranks EXACT / WIDENED / CONVERTED against each member and
+// the unique most specific one answers: a `V` member for a `V`, an `integer` member for an
+// integer, a `float` member for a float, a `W` member for a `W`, and a `u8` operand WIDENS into
+// the `integer` member ahead of CONVERTING into the `float` one, while an EXACT `u8` member beats
+// the widening.  Each operand is evaluated once, left to right; `a ⊕= b` is `a = a ⊕ b` through
+// the same selection.
+//
+// Values hand-computed (plus: V → x+o.x, integer → x+10o, float → x+1000, W → x+100y;
+// times: u8 → 2x, integer → 3x), a = V{1}, b: u8 = 2:
+//   a+a 2 · a+2 21 · a+2.5 1001 · a+W{3} 301 · a+b 21 (WIDENED over CONVERTED)
+//   a*b 2 (EXACT u8) · a*5 3 (the literal is an `integer`)
+//   mk(c,1) + mk(c,2): r.x 3, two calls, log "12"
+//   a += 4 → 41; a += V{7} → 48
+//
+// Axes it MOVES: the right operand's type (the left type, a scalar of each rank, another user
+//   type), the rank between two applicable members, an effect in each operand, the compound form.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `an-operator-is-not-commuted-onto-the-right-operands-type` beside it.
+
+struct V { x: integer }
+struct W { y: integer }
+struct Ctr { n: integer, log: text }
+
+operator plus(self: V, o: V) -> V { V { x: self.x + o.x } }
+operator plus(self: V, o: integer) -> V { V { x: self.x + o * 10 } }
+operator plus(self: V, o: float) -> V { V { x: self.x + 1000 } }
+operator plus(self: V, o: W) -> V { V { x: self.x + o.y * 100 } }
+
+operator times(self: V, o: u8) -> V { V { x: self.x * 2 } }
+operator times(self: V, o: integer) -> V { V { x: self.x * 3 } }
+
+fn mk(c: Ctr, k: integer) -> V {
+  c.n += 1;
+  c.log += "{k}";
+  V { x: k }
+}
+
+fn test_the_right_operand_ranks_the_members() {
+  a = V { x: 1 };
+  b: u8 = 2;
+  s = "{(a + a).x} {(a + 2).x} {(a + 2.5).x} {(a + W { y: 3 }).x} {(a + b).x}";
+  assert(s == "2 21 1001 301 21", "plus members: {s}");
+  t = "{(a * b).x} {(a * 5).x}";
+  assert(t == "2 3", "times members: {t}");
+}
+
+fn test_each_operand_is_evaluated_once_left_to_right() {
+  c = Ctr { n: 0, log: "" };
+  r = mk(c, 1) + mk(c, 2);
+  assert(r.x == 3 && c.n == 2 && c.log == "12", "evaluation: {r.x} {c.n} {c.log}");
+}
+
+fn test_the_compound_form_selects_alike() {
+  a = V { x: 1 };
+  a += 4;
+  assert(a.x == 41, "a += integer: {a.x}");
+  a += V { x: 7 };
+  assert(a.x == 48, "a += V: {a.x}");
+}
+
+fn main() {
+  test_the_right_operand_ranks_the_members();
+  test_each_operand_is_evaluated_once_left_to_right();
+  test_the_compound_form_selects_alike();
+}

@@ -1,0 +1,124 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LITERAL HOST KEEPS THE COPY WHERE A REFERENCE NAMES INTO THE VECTOR (`@FR-R-MoveLast` crossed
+// with `@FR-H-RefHome`).  R-MoveLast's HOST CLAUSE claims a record literal in the store of the
+// vector local its field takes at its last use and moves the vector's handle in — "and a reference
+// homed in either store (H-RefHome) keep[s] the copy".  H-RefHome says a stored reference names a
+// record that lives as long as its holder's store.  The answer owed is B-Copy's either way: the
+// literal's field is a COPY of the vector, so a write through the literal's field does not reach a
+// reference taken into the vector before it, nor the other way round.  A reference taken AFTER, into
+// the literal's own field, names that field's element.  A reference field naming a record of a
+// third store is untouched by the move.
+//
+// Values hand-computed (mk(n) = [T{1}, …, T{n}]):
+//   plain(3): [1,2,3] + [99] → "4 99 7"
+//   withref(3): r names t0, t0.v = 41 after; items[0].v = 5 → "3 41 5"
+//   later(3): q = h.items[1] after the move, items[1].v = 60 → "3 60"
+//   intoitems(2): r: v[0] in the literal itself (the move declines), items[0].v = 50 → "2 1 50"
+//   held(3): w.r = v[1] BEFORE the literal; h.items[1].v = 70 → "3 70 2"
+//   ref_local(3): r = v[2] before; h.items[2].v = 90 → "90 3"
+//   back(3): w.r = v[1] before; w.r.v = 55 → h.items[1].v stays 2 → "2 55"
+//
+// DEFECT (the IGNOREd function): the host clause is ADMITTED (LOFT_TRACE_PLACE=1, `[literal-host]
+// … ADMITTED — built in `__ref_1`'s store, `v` moved`) although a stored reference homed in the
+// vector's store is live, and the reference then names the literal's element: held "3 70 70",
+// ref_local "90 90", back "55 55", on both backends; LOFT_NO_LITERAL_HOST=1 answers the
+// hand-computed values.  Repro: agentA/repro/d7-… (rule walk batch 4).
+//
+// Axes it MOVES: where a reference sits (a field of the literal into a third store, into the
+//   literal's own field after the move, in the literal naming the source, in a holder local before
+//   the move, a reference local before the move), which side writes after the move.
+//
+// Cross-backend; `main` runs every passing cell so the leak gate reads the file.
+//
+// @falsified-at: none for the passing half — a conformance guard, the same under
+//   LOFT_NO_LITERAL_HOST=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1; the IGNOREd half fails on the
+//   current tree, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the literal's field and the reference.
+// HOLDS: tests/scripts/a-literal-takes-a-dead-vector-into-its-store.loft in loft (the clause's own
+//   guard).
+
+struct T { v: integer }
+struct Host { items: vector<T>, k: integer }
+struct HostR { items: vector<T>, r: reference<T> }
+struct HostQ { items: vector<T>, q: reference<T>? }
+struct Hold { r: reference<T> }
+
+fn mk(n: integer) -> vector<T> {
+  r: vector<T> = [];
+  for i in 0..n { r += [T { v: i + 1 }]; }
+  r
+}
+
+fn plain(n: integer) -> text {
+  v = mk(n);
+  h = Host { items: v, k: 7 };
+  h.items += [T { v: 99 }];
+  "{len(h.items)} {h.items[n].v} {h.k}"
+}
+
+fn withref(n: integer) -> text {
+  t0 = T { v: 40 };
+  v = mk(n);
+  h = HostR { items: v, r: t0 };
+  t0.v = 41;
+  h.items[0].v = 5;
+  "{len(h.items)} {h.r.v} {h.items[0].v}"
+}
+
+fn later(n: integer) -> text {
+  v = mk(n);
+  h = HostQ { items: v, q: null };
+  h.q = h.items[1];
+  h.items[1].v = 60;
+  "{len(h.items)} {h.q.v ?? -1}"
+}
+
+fn intoitems(n: integer) -> text {
+  v = mk(n);
+  h = HostR { items: v, r: v[0] };
+  h.items[0].v = 50;
+  "{len(h.items)} {h.r.v} {h.items[0].v}"
+}
+
+fn held(n: integer) -> text {
+  v = mk(n);
+  w = Hold { r: v[1] };
+  h = Host { items: v, k: 7 };
+  h.items[1].v = 70;
+  "{len(h.items)} {h.items[1].v} {w.r.v}"
+}
+
+fn ref_local(n: integer) -> text {
+  v = mk(n);
+  r: reference<T> = v[2];
+  h = Host { items: v, k: 7 };
+  h.items[2].v = 90;
+  "{h.items[2].v} {r.v}"
+}
+
+fn back(n: integer) -> text {
+  v = mk(n);
+  w = Hold { r: v[1] };
+  h = Host { items: v, k: 7 };
+  w.r.v = 55;
+  "{h.items[1].v} {w.r.v}"
+}
+
+fn test_the_host_move_where_no_reference_names_the_vector() {
+  s = "{plain(3)} | {withref(3)} | {later(3)} | {intoitems(2)}";
+  assert(s == "4 99 7 | 3 41 5 | 3 60 | 2 1 50", "host: {s}");
+}
+
+// @IGNORE
+fn test_a_reference_into_the_vector_keeps_the_copy() {
+  s = "{held(3)} | {ref_local(3)} | {back(3)}";
+  assert(s == "3 70 2 | 90 3 | 2 55", "a reference homed in the vector's store: {s}");
+}
+
+fn main() {
+  test_the_host_move_where_no_reference_names_the_vector();
+}

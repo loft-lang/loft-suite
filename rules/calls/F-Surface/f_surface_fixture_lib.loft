@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for this directory's cells (`@FR-F-Surface`): a pub record type, a pub
+// function, and three items declared WITHOUT `pub` — a plain function, a method on `text` and a
+// method on the library's own record.  The cells beside it reach it with `use` or a qualifier
+// (the flat file in the script's own directory is where `use` resolves it).  Run on its own it is
+// a cell too: the library reaches all of its own items (F-Surface: "L's own code reaches all of
+// its items").
+//
+// @falsified-at: none — a conformance guard; the library's own calls answered as hand-computed,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the answers.
+// HOLDS: nothing outside the library is reached when it runs alone.
+
+pub struct FsP { pub x: integer }
+
+pub fn fs_pub(x: integer) -> integer { x + 1 }
+
+fn fs_priv(x: integer) -> integer { x + 2 }
+
+fn fs_tm(self: text) -> text { "{self}." }
+
+fn fs_rm(self: FsP) -> integer { self.x + 3 }
+
+fn test_the_library_reaches_its_own_items() {
+  p = FsP { x: 4 };
+  s = "{fs_pub(1)} {fs_priv(1)} {"a".fs_tm()} {p.fs_rm()} {fs_rm(p)}";
+  assert(s == "2 3 a. 7 7", "own items: {s}");
+}

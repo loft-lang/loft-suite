@@ -1,0 +1,121 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSTRUCTOR OF SCALARS TRAVELS AS A VALUE RECORD, AND ONE WITH A VECTOR IS ITS LITERAL
+// (`@FR-R-CtorLiteral` crossed with `@FR-R-ValueRecord`).  R-CtorLiteral replaces `x =
+// ctor(args)` by the constructor's literal over `x` only "where the record holds a vector
+// field (a record of scalars travels as a value record, (R-ValueRecord), with no store to
+// remove)".  The two rules split the constructors between them by the record's shape, and
+// this cell builds both shapes side by side, and the shape between them — a record with an
+// INLINE sub-record of scalars and a vector field, whose sub-record is then handed to a
+// value-record function as a range of fields — in a loop and at the top level.  Every
+// constructor's result is read field by field, so a literal written over the wrong local or
+// a tuple read from the wrong offset answers a wrong field.
+//
+// Axes it MOVES: the record shape (scalars only, inline sub-record + vector, vectors), the
+// site (top level, a loop record rebound every pass), the argument (literal vector, vector
+// variable, operator expression), the hand-off of a sub-record to a value-record function.
+// Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_CTOR_LITERAL=1` on `loft --interpret <cell>` (`main`): `v2`
+// keeps its call as a record of scalars, `bag_new` is written in place in c4 and c5.  The IR
+// phase runs on the interpreter and `--native-release`; plain `--native` compiles open-world,
+// and `--tests` arms entry observation (`observes_entries`) — so the suite's own lanes run the
+// cell with the calls kept, and only the values are theirs to check.
+// `LOFT_TRACE_VALUEREC=1` names the scalar constructor's tuple on native.
+// `LOFT_NO_CTOR_LITERAL=1` and `LOFT_NO_VALUE_RECORD=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a constructor literal written for a scalar-only
+//   record would mint a store per call where the tuple has none (a store count, not a
+//   value), and a nested literal written at the wrong offset fails c3's field reads.
+// CHANNEL: the asserts.
+// ARMED: LOFT_STRICT_STORES=1, LOFT_POISON=1.
+// WITNESS: each message prints the fields read.
+// HOLDS: the interpreter is the oracle.
+
+struct V2 { x: integer, y: integer }
+struct Seg { a: V2, pts: vector<integer> }
+struct Bag { n: integer, xs: vector<integer>, ys: vector<integer> }
+
+/// Scalars only: R-ValueRecord's.
+fn v2(x: integer, y: integer) -> V2 { V2 { x: x * 2, y: y + 1 } }
+
+/// An inline sub-record of scalars and a vector field: R-CtorLiteral's.
+fn seg_new(ax: integer, ay: integer, pts: vector<integer>) -> Seg {
+  Seg { a: V2 { x: ax, y: ay }, pts: pts }
+}
+
+/// Vectors: R-CtorLiteral's.
+fn bag_new(n: integer, xs: vector<integer>, ys: vector<integer>) -> Bag {
+  Bag { n: n * 10, xs: xs, ys: ys }
+}
+
+fn v2_sum(p: V2) -> integer { p.x * 100 + p.y }
+fn isum(v: const vector<integer>) -> integer { s = 0; for e in v { s += e; } s }
+
+// c1 — the scalar constructor at the top level and rebound in a loop:
+// v2(3, 4) = (6, 5) → 605; in the loop p = v2(i, i) = (2i, i+1): Σ (2i·100 + i + 1) over
+// 0..4 = 1200 + 10 = 1210.
+fn test_a_scalar_constructor_is_a_value_record() {
+  p = v2(3, 4);
+  t = 0;
+  for i in 0..4 { q = v2(i, i); t += q.x * 100 + q.y; }
+  assert(p.x == 6 && p.y == 5 && v2_sum(p) == 605 && t == 1210, "c1 {p.x} {p.y} {t}");
+}
+
+// c2 — the shape BETWEEN the two rules: an inline sub-record of scalars beside a vector field.
+// R-ValueRecord cannot carry it (it owns a vector) and R-CtorLiteral declines the nested
+// literal ("a write of a kind the literal does not hold"), so it stays a call; its sub-record
+// handed to the value-record function is a range of fields: a = (7, 8), pts [1, 2, 3],
+// v2_sum(s.a) = 708.
+fn test_an_inline_sub_record_beside_a_vector_field() {
+  s = seg_new(7, 8, [1, 2, 3]);
+  assert(s.a.x == 7 && s.a.y == 8 && len(s.pts) == 3 && isum(s.pts) == 6, "c2 {s.a.x} {s.a.y}");
+  assert(v2_sum(s.a) == 708, "c2 sum {v2_sum(s.a)}");
+}
+
+// c3 — in a loop, a loop record per pass, its sub-record read and handed on, its vector
+// pushed after the build: pass i: a = (i, -i), pts [i, i·i] + [100] → v2_sum 100i - i,
+// Σ pts i + i² + 100.  Over 0..4: Σ 99i = 594, Σ (i + i² + 100) = 6 + 14 + 400 = 420 → 1014.
+fn test_a_loop_record_built_by_its_literal() {
+  t = 0;
+  for i in 0..4 {
+    s = seg_new(i, -i, [i, i * i]);
+    s.pts += [100];
+    t += v2_sum(s.a) + isum(s.pts);
+  }
+  assert(t == 1014, "c3 {t}");
+}
+
+// c4 — two vector fields, a vector VARIABLE argument (copied whole, as the callee did) and an
+// operator-expression scalar: bag_new(2 + 1, w, [5]) → n 30, xs [4, 4] (w unchanged after
+// xs is written), ys [5].
+fn test_a_vector_variable_argument_is_copied_into_its_field() {
+  w = [4, 4];
+  b = bag_new(2 + 1, w, [5]);
+  b.xs[0] = 40;
+  assert(b.n == 30 && isum(b.xs) == 44 && isum(b.ys) == 5 && w[0] == 4, "c4 {b.n} {b.xs} {w}");
+}
+
+// c5 — both shapes in one loop: the scalar constructor's result read beside the vector
+// constructor's, which is a loop record (every mention a field read or a native op on a
+// field; a `len(b.ys)` here, a call of the stdlib `len`, makes the build keep the call).
+// Pass i: v2(i, 1) = (2i, 2), bag_new(i, [i], [i, i]) → n 10i, xs[0] i, ys[1] i: per pass
+// 2i + 2 + 10i + i + i = 14i + 2 → over 0..3 = 42 + 6 = 48.
+fn test_both_shapes_in_one_loop() {
+  t = 0;
+  for i in 0..3 {
+    p = v2(i, 1);
+    b = bag_new(i, [i], [i, i]);
+    t += p.x + p.y + b.n + (b.xs[0] ?? -100) + (b.ys[1] ?? -100);
+  }
+  assert(t == 48, "c5 {t}");
+}
+
+fn main() {
+  test_a_scalar_constructor_is_a_value_record();
+  test_an_inline_sub_record_beside_a_vector_field();
+  test_a_loop_record_built_by_its_literal();
+  test_a_vector_variable_argument_is_copied_into_its_field();
+  test_both_shapes_in_one_loop();
+}

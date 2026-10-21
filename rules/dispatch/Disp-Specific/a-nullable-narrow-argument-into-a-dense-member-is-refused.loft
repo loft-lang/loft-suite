@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE NARROW ARGUMENT INTO A DENSE MEMBER IS REFUSED (`@FR-Disp-Specific` crossed with
+// `@FR-N-Store`).  `u8? → u8` ranks LOSSY and is the only applicable member of `(u8 | text)`, but
+// N-Store makes storing a `u8?` into a `u8` slot a hard ERROR — a narrow width's null sentinel is a
+// valid `u8` — so the selection does not license the store: the call is refused at compile time,
+// naming the discharge.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the parameter and the cure.
+// HOLDS: `a-nullable-argument-reaches-a-dense-member-only-as-the-lossy-rank` (the wide widths warn).
+// @EXPECT_ERROR: a nullable `u8?` cannot be stored into parameter 1 of `s5`
+
+fn s5(x: u8) -> text { "u8 {x}" }
+fn s5(t: text) -> text { "text {t}" }
+
+fn main() {
+  u: u8? = 4;
+  println(s5(u));
+}

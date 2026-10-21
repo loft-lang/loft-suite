@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT WIDENS INTO ITS ENUM BEFORE THE NULLABLE OF IT (`@FR-Disp-Specific` crossed with
+// `@FR-C-Var`).  C-Var's `Reference(S) ⤳ Enum(E)` for `S ∈ variants(E)` is Disp-Specific's
+// WIDENED; a nullability step (N-Intro) ADDS to it, so `CFire → CEnt?` is WIDENED+WIDENED and
+// loses to `CFire → CEnt`, and wins over a member the variant cannot reach at all.  The enum a
+// variant widens into is ITS OWN: a second enum carrying a same-named variant (`DFire`) is not
+// applicable.  C-Var's other half, `plain Enum ⤳ Integer tag`, is a conversion an `integer`
+// member takes where a `text` one cannot.  A value HELD at the enum is selected on its runtime
+// variant (Disp-Dynamic), each leaf what this ranking picks for that variant.
+//
+// Ranks hand-computed:
+//   CFire → (CFire | CEnt?)        : CFire EXACT                          → "fire 3"
+//   CFire → (CEnt? | CEnt)         : CEnt WIDENED, CEnt? WIDENED+step     → "ent 3"
+//   CFire → (CEnt? | text)         : CEnt? (text is no conversion)        → "ent? 3"
+//   CFire → (DEnt | CEnt)          : CEnt (DEnt holds no CFire)           → "cent 3"
+//   CIce  → (CFire | CEnt?)        : CEnt? (CFire does not take a CIce)   → "ent? 4"
+//   e: CEnt = CIce{5} → (CFire | CEnt?) at run time: the CIce leaf        → "ent? 5"
+//   e: CEnt = CFire{6} → (CFire | CEnt?) at run time: the CFire leaf      → "fire 6"
+//   Col.Green → (integer | text)   : the tag, Green = 2 (numbered from 1) → "int 2"
+//
+// Axes it MOVES: the member's type (variant, enum, enum?, another enum, text, integer), the
+//   argument's static type (variant, enum-held), declaration order, plain vs struct enum.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `each-rank-beats-the-next-at-one-position` beside it (EXACT over WIDENED for a variant).
+
+enum CEnt { CFire { n: integer }, CIce { n: integer } }
+enum DEnt { DRock { n: integer }, DFire { m: integer } }
+enum Col { Red, Green, Blue }
+
+fn cv1(e: CFire) -> text { "fire {e.n}" }
+fn cv1(e: CEnt?) -> text { "ent? {e.n}" }
+
+fn cv2(e: CEnt?) -> text { "ent? {e.n}" }
+fn cv2(e: CEnt) -> text { "ent {e.n}" }
+
+fn cv3(e: CEnt?) -> text { "ent? {e.n}" }
+fn cv3(e: text) -> text { "text {e}" }
+
+fn cv4(e: DEnt) -> text { if e is DRock { n } { "dent {n}" } else { "dent" } }
+fn cv4(e: CEnt) -> text { "cent {e.n}" }
+
+fn cv5(c: integer) -> text { "int {c}" }
+fn cv5(t: text) -> text { "text {t}" }
+
+fn test_a_variant_ranks_its_own_enum_before_the_nullable_one() {
+  f = CFire { n: 3 };
+  s = "{cv1(f)}|{cv2(f)}|{cv3(f)}|{cv4(f)}";
+  assert(s == "fire 3|ent 3|ent? 3|cent 3", "a CFire into the sets: {s}");
+}
+
+fn test_a_sibling_variant_skips_the_variant_member() {
+  i = CIce { n: 4 };
+  s = cv1(i);
+  assert(s == "ent? 4", "a CIce into (CFire | CEnt?): {s}");
+}
+
+fn test_a_value_held_at_the_enum_picks_per_variant() {
+  e: CEnt = CIce { n: 5 };
+  g: CEnt = CFire { n: 6 };
+  s = "{cv1(e)}|{cv1(g)}|{cv2(e)}";
+  assert(s == "ent? 5|fire 6|ent 5", "enum-held arguments: {s}");
+}
+
+fn test_a_plain_enum_reaches_an_integer_member_by_its_tag() {
+  c = Col.Green;
+  s = cv5(c);
+  assert(s == "int 2", "Col.Green into (integer | text): {s}");
+}
+
+fn main() {
+  test_a_variant_ranks_its_own_enum_before_the_nullable_one();
+  test_a_sibling_variant_skips_the_variant_member();
+  test_a_value_held_at_the_enum_picks_per_variant();
+  test_a_plain_enum_reaches_an_integer_member_by_its_tag();
+}

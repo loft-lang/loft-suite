@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PUB ITEM IS REACHED BY EITHER SPELLING (`@FR-F-Surface`).  A library's surface is the items it
+// declares `pub`; a program reaches it by `use L::*` or by the qualifier `L::name`.  Here both
+// spellings reach the pub function and the pub record type.  The non-pub items are the refusal
+// cells beside this one.
+//
+// Values hand-computed: fs_pub(1) = 2; FsP{5}.x = 5.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; answered as hand-computed, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the answers.
+// HOLDS: `a-non-pub-function-is-refused-through-the-qualifier` beside it.
+
+use f_surface_fixture_lib::*;
+
+fn test_both_spellings_reach_the_surface() {
+  p = f_surface_fixture_lib::FsP { x: 5 };
+  s = "{fs_pub(1)} {f_surface_fixture_lib::fs_pub(1)} {p.x}";
+  assert(s == "2 2 5", "pub items: {s}");
+}
+
+fn main() {
+  test_both_spellings_reach_the_surface();
+}

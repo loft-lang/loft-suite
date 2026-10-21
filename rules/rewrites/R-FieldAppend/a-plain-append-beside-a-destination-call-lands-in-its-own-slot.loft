@@ -1,0 +1,144 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLAIN APPEND BESIDE A DESTINATION CALL LANDS IN ITS OWN SLOT (`@FR-R-FieldAppend` crossed
+// with `@FR-R-Destination`).  R-FieldAppend's BARE clause emits a mint group over a plain
+// vector that no push header holds — "in a loop whose header hoist declines, beside a
+// destination call (R-Destination), outside a group" — as the vector's own append, and its
+// FIELD clause does the same for a straight-line `r.f += [x]`.  R-Destination mints the
+// element of ITS container BEFORE the call and leaves it unfinished across the call (the twin
+// builds the moved field in it), finishing it only where the plain form moved.  So in one
+// loop two appends interleave: an element of `items` minted ahead and possibly released, and
+// a plain record appended to `trail` around it — the bare append must take its own slot in
+// its own vector whatever the other element's state, and the failing path's release must
+// leave `trail`'s elements alone.
+//
+// Axes it MOVES: the destination call's outcome (ok, fails mid-list), the other append's
+// position (before the call inside the window's block, after the loop), the vectors' store
+// (separate vectors, two fields of one record — the field clause), growth (a list longer than
+// the first claim).  The format, one byte a head: below 100 an integer, 200 + n
+// a list of n values.  Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_DESTINATION=1` ("n_walk builds 1 call(s) of n_dv(…) in one
+// element") and off `--native-emit`: the destination's element minted ahead of the call by the
+// bare clause's `vector_record_append` and finished on the ok path, `trail`'s appends through
+// a group header, d4's field appends as `field_vector_append`.  Native only; the interpreter is the oracle.  `LOFT_NO_DESTINATION=1`,
+// `LOFT_NO_BARE_APPEND=1` and `LOFT_NO_FIELD_APPEND=1` answer the same, and so do
+// `LOFT_POISON=1` and `LOFT_STRICT_STORES=1`.
+//
+// @falsified-at: none — a conformance guard; a bare append that took the destination's minted
+//   element as its slot would answer d2's trail with the item's bytes.
+// CHANNEL: the asserts.
+// ARMED: LOFT_POISON=1, LOFT_STRICT_STORES=1.
+// WITNESS: each message prints the item sum and the trail.
+// HOLDS: the interpreter is the oracle.
+
+enum Val { VNone, VInt { value: integer }, VList { items: vector<Val> } }
+struct Dv { const value: Val, const next: integer, const ok: boolean }
+struct Mark { at: integer, ok: boolean }
+struct Log { pad: integer, marks: vector<Mark>, firsts: vector<Mark> }
+
+fn dv(b: vector<u8>, pos: integer) -> Dv {
+  if pos >= len(b) { return Dv { value: VNone, next: pos, ok: false }; }
+  t = b[pos] ?? 0;
+  if t < 100 { return Dv { value: VInt { value: t }, next: pos + 1, ok: true }; }
+  if t < 200 { return Dv { value: VNone, next: pos, ok: false }; }
+  items: vector<Val> = [];
+  p = pos + 1;
+  aok = true;
+  for _ in 0..t - 200 {
+    if aok {
+      sub = dv(b, p);
+      if sub.ok { items += [sub.value]; p = sub.next; } else { aok = false; }
+    }
+  }
+  if !aok { return Dv { value: VNone, next: pos, ok: false }; }
+  return Dv { value: VList { items: items }, next: p, ok: true };
+}
+
+fn ints(v: Val) -> integer {
+  match v {
+    VInt { value } => value,
+    VList { items } => { s = 0; for x in items { s += ints(x); } s },
+    _ => 0
+  }
+}
+
+/// A top-level list walked by hand: each element decoded by the destination twin into `items`,
+/// a Mark appended to `trail` before every call and once after the loop.  The `if aok` block
+/// with nothing after the result's `if` is the shape the destination site admits in this build
+/// (the call at the loop body's own top level, an append inside the `ok` arm or a statement
+/// after the `if` keep the plain move — R-Place's loop clause then places the result).
+fn walk(b: vector<u8>, trail: vector<Mark>) -> integer {
+  items: vector<Val> = [];
+  p = 1;
+  aok = true;
+  n = (b[0] ?? 200) - 200;
+  for _ in 0..n {
+    if aok {
+      trail += [Mark { at: p, ok: false }];
+      sub = dv(b, p);
+      if sub.ok {
+        items += [sub.value];
+        p = sub.next;
+      } else {
+        aok = false;
+      }
+    }
+  }
+  trail += [Mark { at: p, ok: aok }];
+  s = 0;
+  for x in items { s += ints(x); }
+  s * 100 + len(items)
+}
+
+fn trail_sum(t: const vector<Mark>) -> integer { s = 0; for m in t { s += m.at * (if m.ok { 2 } else { 1 }); } s }
+
+// d1 — [5, [7, 8], 9]: three calls, all ok.  items Σ 29, len 3 → 2903.  trail: (1,f) (2,f)
+// (5,f) and after the loop (6,t) → Σ at·(ok ? 2 : 1) = 1 + 2 + 5 + 12 = 20, len 4.
+fn test_every_call_ok() {
+  b: vector<u8> = [203, 5, 202, 7, 8, 9];
+  trail: vector<Mark> = [];
+  r = walk(b, trail);
+  assert(r == 2903 && len(trail) == 4 && trail_sum(trail) == 20, "d1 {r} {trail_sum(trail)}");
+}
+
+// d2 — [4, [6, <end>]]: the second call fails (its inner list runs out): items [4], Σ 4 →
+// 401; trail (1,f) (2,f) and after the loop (2,f) → 5, len 3.
+fn test_a_failing_call_releases_its_element_and_keeps_the_trail() {
+  b: vector<u8> = [202, 4, 202, 6];
+  trail: vector<Mark> = [];
+  r = walk(b, trail);
+  assert(r == 401 && len(trail) == 3 && trail_sum(trail) == 5 && !trail[2].ok, "d2 {r} {trail_sum(trail)}");
+}
+
+// d3 — a list of 15 integers 1..15 (past the first claim of both vectors): items Σ 120 →
+// 12015; trail 16 marks: 1 + … + 15 = 120 before the calls, (16,t) after → 152.
+fn test_both_vectors_past_their_first_claim() {
+  b: vector<u8> = [215];
+  for i in 1..16 { b += [(i & 255) as u8]; }
+  trail: vector<Mark> = [];
+  r = walk(b, trail);
+  assert(r == 12015 && len(trail) == 16 && trail_sum(trail) == 152, "d3 {r} {trail_sum(trail)}");
+}
+
+// d4 — the FIELD clause after the loop: two plain-vector fields of one record appended
+// straight-line, then a destination walk in between: marks [(1,t)], walk of [9] → 901,
+// firsts [(9,f)], marks += [(2,f)] → marks Σ 2 + 2 = 4, firsts Σ 9.
+fn test_field_appends_around_a_walk() {
+  lg = Log { pad: 0, marks: [], firsts: [] };
+  lg.marks += [Mark { at: 1, ok: true }];
+  b: vector<u8> = [201, 9];
+  tr: vector<Mark> = [];
+  r = walk(b, tr);
+  lg.firsts += [Mark { at: r / 100, ok: false }];
+  lg.marks += [Mark { at: 2, ok: false }];
+  assert(r == 901 && len(lg.marks) == 2 && trail_sum(lg.marks) == 4 && trail_sum(lg.firsts) == 9 && len(tr) == 2, "d4 {r}");
+}
+
+fn main() {
+  test_every_call_ok();
+  test_a_failing_call_releases_its_element_and_keeps_the_trail();
+  test_both_vectors_past_their_first_claim();
+  test_field_appends_around_a_walk();
+}

@@ -1,0 +1,126 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LITERAL OF A CONST RECORD'S FIELDS IS BUILT ONCE ONLY WHILE NO NAME WRITES IT (`@FR-R-LitHoist`
+// crossed with `@FR-Const-Value`).  R-LitHoist builds a loop-body vector literal ONCE per activation
+// when its parts are invariant — among them "scalar-getter reads of value-const record parameters".
+// Const-Value makes the value read-only THROUGH THAT NAME, and R-LitHoist says why that is not
+// enough: "(Const-Value) is per-NAME, so const alone cannot carry cross-iteration invariance" — the
+// same record can arrive under a second, writable name.  So: a literal of a `const` parameter's
+// fields hoists and answers the per-iteration value; the same literal over a plain parameter that
+// the loop writes, over a value-const FIELD whose slot the loop rebinds (allowed: Const-Value lets a
+// whole-value rebind re-point it), and over a `const` parameter whose record the caller ALSO hands
+// as a plain parameter that the loop writes (directly or through a callee) must see each write.
+//
+// Values hand-computed with t = (3t + x + i) mod 1000003 over v each iteration (n = 4):
+//   with_const(Cfg{1,2}): v = [1,4,3] every turn                   → 500778
+//   with_plain(Cfg{1,2}): a = 1,2,3,4 over the turns (c.a += 1)      → 507852, caller's a then 5
+//   with_field(Hd{Cfg{1,2}}): the slot rebound to a+1 each turn      → 507852, h.cfg.a then 5
+// and t = 10t + x (n = 3), the caller passing ONE record as both c and d:
+//   alias: v = [c.a, c.b, 3] with d.a += 1 per turn: [1,2,3] [2,2,3] [3,2,3] → 123223323, a = 4
+//   alias_call: v = [c.a, 3], bump(d) per turn: [1,3] [2,3] [3,3]       → 132333, a = 4
+//
+// Axes it MOVES: the part's base (const parameter, plain parameter, value-const field of a plain
+//   parameter), who writes the record (nobody, the loop through the same name, through a second
+//   name, through a callee), the write kind (field compound-set, whole-slot rebind).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_LITERAL_HOIST=1 and LOFT_POISON=1.  Fires: the emitted
+//   Rust (`--native-emit`) carries "invariant literal built once" in `n_with_const` only;
+//   LOFT_TRACE_LITHOIST=1 says `n_with_plain: v push part not invariant`, `n_with_field: …`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the folded answer.
+// HOLDS: `157-literal-hoist` beside it.
+
+struct Cfg { a: integer, b: integer }
+struct Hd { cfg: const Cfg, n: integer }
+
+fn with_const(c: const Cfg, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [c.a, c.b * 2, 3];
+    for x in v { t = t * 3 + x + i; }
+    t = t % 1000003;
+  }
+  t
+}
+
+fn with_plain(c: Cfg, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [c.a, c.b * 2, 3];
+    for x in v { t = t * 3 + x + i; }
+    t = t % 1000003;
+    c.a += 1;
+  }
+  t
+}
+
+fn with_field(h: Hd, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [h.cfg.a, h.cfg.b * 2, 3];
+    for x in v { t = t * 3 + x + i; }
+    t = t % 1000003;
+    h.cfg = Cfg { a: h.cfg.a + 1, b: h.cfg.b };
+  }
+  t
+}
+
+fn alias(c: const Cfg, d: Cfg, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [c.a, c.b, 3];
+    for x in v { t = t * 10 + x; }
+    d.a += 1;
+  }
+  t
+}
+
+fn bump(d: Cfg) {
+  d.a += 1;
+}
+
+fn alias_call(c: const Cfg, d: Cfg, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [c.a, 3];
+    for x in v { t = t * 10 + x; }
+    bump(d);
+  }
+  t
+}
+
+fn test_a_const_parameters_fields_build_once() {
+  c = Cfg { a: 1, b: 2 };
+  r = with_const(c, 4);
+  s = with_const(c, 4);
+  assert(r == 500778 && s == 500778 && c.a == 1, "with_const: {r} {s} {c.a}");
+}
+
+fn test_a_written_name_rebuilds_each_turn() {
+  c = Cfg { a: 1, b: 2 };
+  r = with_plain(c, 4);
+  assert(r == 507852 && c.a == 5, "with_plain: {r} {c.a}");
+  h = Hd { cfg: Cfg { a: 1, b: 2 }, n: 0 };
+  s = with_field(h, 4);
+  assert(s == 507852 && h.cfg.a == 5, "with_field: {s} {h.cfg.a}");
+}
+
+fn test_a_const_name_beside_a_writable_one_rebuilds_each_turn() {
+  c = Cfg { a: 1, b: 2 };
+  r = alias(c, c, 3);
+  assert(r == 123223323 && c.a == 4, "alias: {r} {c.a}");
+  e = Cfg { a: 1, b: 2 };
+  s = alias_call(e, e, 3);
+  assert(s == 132333 && e.a == 4, "alias_call: {s} {e.a}");
+}
+
+fn main() {
+  test_a_const_parameters_fields_build_once();
+  test_a_written_name_rebuilds_each_turn();
+  test_a_const_name_beside_a_writable_one_rebuilds_each_turn();
+}

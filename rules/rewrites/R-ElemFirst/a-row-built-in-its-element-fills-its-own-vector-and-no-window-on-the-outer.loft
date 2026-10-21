@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A ROW BUILT IN ITS ELEMENT FILLS ITS OWN VECTOR, AND NO WINDOW IS HELD ON THE OUTER
+// (`@FR-R-ElemFirst` crossed with `@FR-R-PushFill`).  R-ElemFirst's COMPREHENSION clause builds
+// `[for y { [for x { … }] }]`'s row inside the element it lands in, and gates it on the row's
+// block LOOPING: "a body that loops again holds no push window on `out` (R-PushFill), the one
+// raw address into `out`'s store the row's growth could leave stale".  The row's own pushes are
+// R-PushFill's — a reservation of the trip count, a window, or for a simple invariant ONE fill
+// of the tail — into a vector whose record now lives in the outer vector's store, which every
+// row's growth extends.  The cells fill rows by each of R-PushFill's forms, at trip counts
+// that cross the first claim and that are empty, so a row's window or fill addressing a store
+// that a sibling row's growth moved answers a wrong element, and an outer window frozen
+// across a row's growth answers a short outer length.
+//
+// Axes it MOVES: the row's form (a fill of one invariant, a window of a computed value, a
+// reservation with a nested branch), the row's length (0, 1, 3, 30 — past the first claim,
+// varying per row), the element (integer, float, u8), the outer trip count.  Values
+// hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit` and `LOFT_TRACE_PUSH_FILL=1` (the rows' `push_fill` /
+// `__pw_` window in the element; no `__pw_` on the outer vector).  Cross-backend;
+// `LOFT_HOIST_VERIFY=1`, `LOFT_NO_ELEMENT_FIRST=1`, `LOFT_NO_PUSH_FILL=1` and
+// `LOFT_NO_PUSH_WINDOW=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a row filled through an address taken before a
+//   sibling's growth reads 0s in r2's long rows.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the lengths and sums.
+// HOLDS: the interpreter is the oracle.
+
+fn rsum(v: const vector<integer>) -> integer { s = 0; for x in v { s += x; } s }
+
+// r1 — rows that are ONE fill of an invariant: row y is y + 1 copies of 7 + y.  Over 0..4:
+// lengths 1..4, Σ per row (y + 1)(7 + y) = 7 + 16 + 27 + 40 = 90.
+fn test_rows_filled_with_one_invariant() {
+  g = [for y in 0..4 { [for _x in 0..y + 1 { 7 + y }] }];
+  t = 0;
+  for r in g { t += rsum(r); }
+  assert(len(g) == 4 && len(g[3]) == 4 && g[2][1] == 9 && t == 90, "r1 {t}");
+}
+
+// r2 — rows of 30 computed values (past every first claim), the outer past its own: 15 rows,
+// row y = [x·y for x in 0..30] → Σ = y·435 → Σ over 0..15 = 435·105 = 45675.
+fn test_long_rows_past_their_first_claim() {
+  g = [for y in 0..15 { [for x in 0..30 { x * y }] }];
+  t = 0;
+  for r in g { t += rsum(r); }
+  assert(len(g) == 15 && len(g[14]) == 30 && g[14][29] == 406 && t == 45675, "r2 {t}");
+}
+
+// r3 — empty rows between full ones: row y has length y % 3 (0, 1, 2, 0, 1, 2), values y.
+// Σ = 1·1 + 2·2 + 1·4 + 2·5 = 19; lengths 0,1,2,0,1,2.
+fn test_empty_rows_between_full_ones() {
+  g = [for y in 0..6 { [for _x in 0..y % 3 { y }] }];
+  shape = 0;
+  t = 0;
+  for r in g { shape = shape * 10 + len(r); t += rsum(r); }
+  assert(shape == 12012 && t == 19, "r3 {shape} {t}");
+}
+
+// r4 — float rows of a fill: row y is 3 copies of y · 0.5 → Σ per row 1.5y → over 0..8 =
+// 1.5 · 28 = 42.
+fn test_float_rows() {
+  g = [for y in 0..8 { [for _x in 0..3 { (y as float) * 0.5 }] }];
+  t = 0.0;
+  for r in g { for x in r { t += x; } }
+  assert(len(g) == 8 && t == 42.0 && g[7][2] == 3.5, "r4 {t}");
+}
+
+// r5 — u8 rows (a byte at its bias): row y = [(x + y) as u8 for x in 0..20] → Σ per row
+// 190 + 20y → over 0..5: 950 + 200 = 1150.
+fn test_byte_rows() {
+  g = [for y in 0..5 { [for x in 0..20 { ((x + y) & 255) as u8 }] }];
+  t = 0;
+  for r in g { for b in r { t += b as integer; } }
+  assert(len(g) == 5 && t == 1150 && (g[4][19] as integer) == 23, "r5 {t}");
+}
+
+fn main() {
+  test_rows_filled_with_one_invariant();
+  test_long_rows_past_their_first_claim();
+  test_empty_rows_between_full_ones();
+  test_float_rows();
+  test_byte_rows();
+}

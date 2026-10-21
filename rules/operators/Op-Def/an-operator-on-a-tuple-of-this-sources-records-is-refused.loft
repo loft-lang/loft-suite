@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR ON A TUPLE OF THIS SOURCE'S RECORDS IS REFUSED (`@FR-Op-Def` crossed with
+// `@FR-Op-Home`).  `(V, V)` is built from this source's `V`, but the tuple type itself is not
+// declared here — it is built in — so `self: (V, V)` is not "of a user type" and the definition is
+// refused where it is written, though nothing uses it.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the tuple type.
+// HOLDS: `every-user-type-of-this-source-may-be-an-operators-self` beside it.
+// @EXPECT_ERROR: `operator plus` defines `+` for a type of its own package, and `(V, V)` is not one
+
+struct V { x: integer }
+
+operator plus(self: (V, V), o: V) -> V { o }
+
+fn main() {
+  println("x");
+}

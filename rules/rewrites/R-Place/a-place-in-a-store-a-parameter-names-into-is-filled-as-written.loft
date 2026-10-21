@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLACE IN A STORE A PARAMETER NAMES INTO IS FILLED AS WRITTEN (`@FR-R-Place` crossed with
+// `@FR-H-ShortRef`).  R-Place hands `h.v = f(…)` the destination itself as the return buffer when
+// the place exists and no argument reaches it; H-ShortRef names this as its one exception — the
+// buffer may sit in a store a parameter of the call names into, and the callee may grow it.  R-Place
+// declines where an argument reaches the destination's store, so `c.v = grow(c.w)` keeps a buffer
+// of its own; the place is taken for `d.v = grow(e.w)`, and inside `two(x, y)` for
+// `x.v = grow(y.w)`, where the caller may hand one record as both.  In every case the field
+// receives exactly the vector the call computes from the argument as it was at the call, and the
+// argument is untouched.
+//
+// Values hand-computed: grow(w) = [2w₀, w₀+1, 2w₁, w₁+1, …]; w = [3, 4, 5] → [6, 4, 8, 5, 10, 6].
+//   same local c.v = grow(c.w)       → len 6, v[0] 6, v[3] 5, c.w keeps 3
+//   self c.w = grow(c.w)             → len 6, w[5] 6
+//   two locals d.v = grow(e.w)       → len 6, v[4] 10
+//   two(b, b): b.v = grow(b.w)       → len 6, v[5] 6, b.w keeps 3
+//   in a loop, b.v = grow(b.w) three times → each round the same 6 values
+//
+// Axes it MOVES: the argument's relation to the destination (the same local, a field it then
+//   replaces, another local, a parameter that may be the same record), a loop of placed calls.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_BUFFER_IS_PLACE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: `--native-emit` hands `n_grow` the destination's place for `d.v` and in `n_two`, and a
+//   buffer of its own for `c.v` (LOFT_NO_BUFFER_IS_PLACE=1 mints one everywhere).
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the field.
+// HOLDS: `a-placed-buffer-in-a-parameters-store-runs-the-unversioned-loop` (R-Alias).
+
+struct S { w: vector<integer>, v: vector<integer> }
+
+fn grow(p: vector<integer>) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..len(p) {
+    r += [p[i] * 2];
+    r += [p[i] + 1];
+  }
+  r
+}
+
+fn mk() -> S { S { w: [3, 4, 5], v: [] } }
+
+fn two(x: S, y: S) { x.v = grow(y.w); }
+
+fn rounds(n: integer) -> integer {
+  b = mk();
+  t = 0;
+  for k in 0..n {
+    two(b, b);
+    t = t * 10 + len(b.v) + b.v[5];
+  }
+  t
+}
+
+fn test_an_argument_in_the_destinations_record() {
+  c = mk();
+  c.v = grow(c.w);
+  assert(len(c.v) == 6 && c.v[0] == 6 && c.v[3] == 5 && len(c.w) == 3, "same local: {len(c.v)}");
+  c.w = grow(c.w);
+  assert(len(c.w) == 6 && c.w[5] == 6, "self: {len(c.w)}");
+}
+
+fn test_a_place_another_records_argument_fills() {
+  d = mk();
+  e = mk();
+  d.v = grow(e.w);
+  assert(len(d.v) == 6 && d.v[4] == 10 && len(e.v) == 0, "two locals: {len(d.v)}");
+}
+
+fn test_one_record_through_two_parameters() {
+  b = mk();
+  two(b, b);
+  assert(len(b.v) == 6 && b.v[5] == 6 && len(b.w) == 3 && b.w[2] == 5, "two(b, b): {len(b.v)}");
+  r = rounds(3);
+  assert(r == 1332, "rounds: {r}");
+}
+
+fn main() {
+  test_an_argument_in_the_destinations_record();
+  test_a_place_another_records_argument_fills();
+  test_one_record_through_two_parameters();
+}

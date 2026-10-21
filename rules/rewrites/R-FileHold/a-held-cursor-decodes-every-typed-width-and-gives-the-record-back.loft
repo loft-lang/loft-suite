@@ -1,0 +1,153 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HELD CURSOR DECODES EVERY TYPED WIDTH AND GIVES THE RECORD BACK (`@FR-R-FileHold` crossed
+// with `@FR-R-TypedRead`).  R-FileHold holds a loop's `#index` and `#next` in locals "when every
+// mention of f in L is the file operand of an (R-TypedRead) read", and "each read decodes as
+// (R-TypedRead) does; a short read leaves its local unchanged and `#next` where it was".
+// R-TypedRead fixes width and sign at the site — 8 bytes signed, a byte or short type at the
+// sign its range gives, a 4-byte type signed — and leaves everything else (a `u32`, a float)
+// to the generic read, which R-FileHold then does not admit.  So the hold's advance must be
+// each width's, in every mix of widths, at both byte orders, through a short read at the end,
+// and the record must show the cursor the reads left when the loop is left by its end, a
+// `break` or a `return`; a read the typed form does not take must decline the hold and
+// answer the same.
+//
+// The file: the sixteen bytes FE 01 80 7F  FF FF FF 7F  01 02 03 04  05 06 07 88.
+//
+// Axes it MOVES: the width and sign (i8, u8, i16, u16, i32, integer; u32 — the generic read),
+// the mix (one width, alternating widths), the byte order, the exit (the loop's end, `break`,
+// `return`, a short read at the end of the file), the cursor read after the loop.  Values
+// hand-computed from the bytes in each comment.
+//
+// Firing read off `--native-emit` (`FileCursor` holding the loop, `OpReadFileInt::<W, S>` at
+// each read).  Native only, the interpreter the oracle; `LOFT_NO_FILE_HOLD=1`,
+// `LOFT_NO_TYPED_READ=1` and `LOFT_HOIST_VERIFY=1` (every held read and the drop assert the
+// record still says what it said when the hold began) answer the same.
+//
+// @falsified-at: none — a conformance guard; a hold that advanced a short read's `#next`, or
+//   kept the 4-byte step for a 2-byte read, answers f4's or f2's cursor wrong.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the values and the cursor.
+// HOLDS: the interpreter is the oracle.
+
+fn path(tag: text) -> text { "{temp_dir() ?? "/tmp"}/loft_suite_file_hold_{tag}.bin" }
+
+fn write_sixteen(p: text) {
+  w = file(p);
+  w.set_file_size(0);
+  w#format = LittleEndian;
+  for b in [254, 1, 128, 127, 255, 255, 255, 127, 1, 2, 3, 4, 5, 6, 7, 136] {
+    w += (b as u8?) ?? (0 as u8);
+  }
+}
+
+fn opened(tag: text, little: boolean) -> File {
+  p = path(tag);
+  write_sixteen(p);
+  f = file(p);
+  if little { f#format = LittleEndian; } else { f#format = BigEndian; }
+  f
+}
+
+// f1 — eight i16 reads, little-endian: FE01 → 510, 807F → 32640, FFFF → -1, FF7F → 32767,
+// 0102 → 513, 0304 → 1027, 0506 → 1541, 0788 → -30713; Σ = 38284; #next 16.
+fn test_one_width_to_the_end() {
+  f = opened("f1", true);
+  s = 0;
+  for _ in 0..8 { s += f#read(2) as i16 as integer; }
+  assert(s == 38284 && f#next == 16, "f1 {s} {f#next}");
+}
+
+// f2 — widths alternating 1, 2, 1, 4 per round, two rounds: round 1 at 0: u8 FE 254, i16
+// @1 0x8001 → -32767, i8 @3 7F 127, i32 @4 0x7FFFFFFF 2147483647; round 2 at 8: u8 01 1,
+// i16 @9 0x0302 770, i8 @11 04 4, i32 @12 0x88070605 → -2012805627.  Σ = 254 - 32767 + 127 +
+// 2147483647 + 1 + 770 + 4 - 2012805627 = 134646409; #next 16.
+fn test_alternating_widths() {
+  f = opened("f2", true);
+  s = 0;
+  for _ in 0..2 {
+    s += f#read(1) as u8 as integer;
+    s += f#read(2) as i16 as integer;
+    s += f#read(1) as i8 as integer;
+    s += f#read(4) as i32 as integer;
+  }
+  assert(s == 134646409 && f#next == 16, "f2 {s} {f#next}");
+}
+
+// f3 — big-endian u16 until a `break` at the first value above 60000: FE01 65025 is the first
+// → breaks at once; then the loop resumes reading from @2: 807F 32895, FFFF 65535 breaks →
+// the second loop read 2 values; #next 6.
+fn test_big_endian_with_a_break() {
+  f = opened("f3", false);
+  first = 0;
+  for _ in 0..8 { first = f#read(2) as u16 as integer; if first > 60000 { break; } }
+  n = 0;
+  last = 0;
+  for _ in 0..8 { last = f#read(2) as u16 as integer; n += 1; if last > 60000 { break; } }
+  assert(first == 65025 && n == 2 && last == 65535 && f#next == 6, "f3 {first} {n} {last} {f#next}");
+}
+
+// f4 — 8-byte reads past the end: two full (0x7FFFFFFF7F8001FE, 0x8807060504030201), then a
+// short read, which answers null and leaves #next where it was (STDLIB_FILES § `f#read(n) as
+// T`): Σ of the present ones 9223372034698904062 - 8644934341102468607 = 578437693596435455,
+// two present, one null; #next 16, #index 16 (where the last read — the short one — started).
+fn test_a_short_read_at_the_end() {
+  f = opened("f4", true);
+  s = 0;
+  present = 0;
+  nulls = 0;
+  for _ in 0..3 {
+    x = f#read(8) as integer;
+    if x == null { nulls += 1; } else { s += x; present += 1; }
+  }
+  assert(present == 2 && nulls == 1 && s == 578437693596435455, "f4 {s} {present} {nulls}");
+  assert(f#next == 16 && f#index == 16, "f4 cursor {f#next} {f#index}");
+}
+
+// f5 — a `return` out of the held loop: the first i8 below zero is FE → -2 at once; the
+// caller's record shows #next 1.
+fn first_negative(f: File) -> integer {
+  for _ in 0..16 { b = f#read(1) as i8 as integer; if b < 0 { return b; } }
+  0
+}
+fn test_a_return_out_of_the_loop() {
+  f = opened("f5", true);
+  b = first_negative(f);
+  c = f#read(1) as u8 as integer;
+  assert(b == -2 && c == 1 && f#next == 2, "f5 {b} {c} {f#next}");
+}
+
+// f6 — a u32 read (the generic read: no 4-byte unsigned typed form) beside an i16 one in the
+// loop: the hold declines and the values are the same: u32 @0 0x7F8001FE = 2139095550, i16 @4
+// FFFF -1; @6 u32 0x02017FFF = 33652735, i16 @10 0x0403 1027 → Σ 2172749311; #next 12.
+fn test_a_generic_read_declines_the_hold() {
+  f = opened("f6", true);
+  s = 0;
+  for _ in 0..2 { s += f#read(4) as u32 as integer; s += f#read(2) as i16 as integer; }
+  assert(s == 2172749311 && f#next == 12, "f6 {s} {f#next}");
+}
+
+// f7 — DEFECT (found with this cell, both backends): `f#read(n) as T` with n below T's width
+// answers null — and STDLIB_FILES says "the position does not move then" — but the cursor
+// moves by n.  A held loop of three `f#read(6) as integer` from 0: each null, #next must stay
+// 0; observed 12 on --interpret and --native, every switch (straight line: 6 after one).
+// Expected 0 / observed 12.  Silent: every value is the documented null, only the cursor —
+// and so every later read — is off.
+// @IGNORE
+fn test_a_narrow_count_read_keeps_the_cursor() {
+  f = opened("f7", true);
+  nulls = 0;
+  for _ in 0..3 { v = f#read(6) as integer; if v == null { nulls += 1; } }
+  assert(nulls == 3 && f#next == 0, "f7 {nulls} {f#next}");
+}
+
+fn main() {
+  test_one_width_to_the_end();
+  test_alternating_widths();
+  test_big_endian_with_a_break();
+  test_a_short_read_at_the_end();
+  test_a_return_out_of_the_loop();
+  test_a_generic_read_declines_the_hold();
+}

@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE-RECEIVER SPLIT KEEPS THE HINT OF EACH SPELLING (`@FR-Disp-Hint` crossed with
+// `@FR-F-Recv`).  Disp-Hint keeps the parse hint for "a `self` set whose members take different
+// receivers: in either spelling the receiver is typed before the arguments (F-Recv), and it names
+// one member".  F-Recv makes `m(τ)` and `m(τ?)` two definitions — two RECEIVERS — and routes a
+// call by the receiver's own nullability, an absent one reaching `m(τ?)` with `self == null`.
+// So a set split only by the receiver's `?` hints each spelling's arguments from ITS member: an
+// untyped lambda is typed `fn(integer) -> integer` on a dense receiver and `fn(text) -> text` on a
+// nullable one, and a bare literal takes `u8` or `u16` by the same road — method and free
+// spelling alike, present and absent receivers alike.
+//
+// Values hand-computed: p = HP{3}, q: HP? = HP{4}, z: HP? = null.
+//   p.sl(|x| x*2) = 6;  q.sl(|s| "{s}!") = "p4!";  z.sl(|s| "{s}?") = "none?";
+//   sl(p, |x| x+1) = 4;  sl(z, |s| "[{s}]") = "[none]";
+//   p.sw(250) "HP u8 3 250";  q.sw(60000) "HP? u16 60000" (a u16 literal: 60000 > 255);
+//   sw(z, 7) "HP? u16 7"
+//
+// Axes it MOVES: the receiver's nullability and presence, the call spelling, the hinted argument
+//   (an untyped lambda, a narrow integer literal), the literal's value against the narrower width.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts (and the compile: a lost hint is a refusal).
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `a-lone-definition-and-a-receiver-split-set-keep-their-hint` beside it (two receiver types).
+
+struct HP { x: integer }
+
+fn sl(self: HP, f: fn(integer) -> integer) -> integer { f(self.x) }
+fn sl(self: HP?, f: fn(text) -> text) -> text { if self == null { f("none") } else { f("p{self.x}") } }
+
+fn sw(self: HP, x: u8) -> text { "HP u8 {self.x} {x}" }
+fn sw(self: HP?, x: u16) -> text { if self == null { "HP? u16 {x}" } else { "HP? u16 {x}" } }
+
+fn test_an_untyped_lambda_takes_each_receivers_member() {
+  p = HP { x: 3 };
+  q: HP? = HP { x: 4 };
+  z: HP? = null;
+  a = p.sl(|x| { x * 2 });
+  b = q.sl(|s| { "{s}!" });
+  c = z.sl(|s| { "{s}?" });
+  d = sl(p, |x| { x + 1 });
+  e = sl(z, |s| { "[{s}]" });
+  assert(a == 6 && d == 4, "dense receiver lambdas: {a} {d}");
+  assert(b == "p4!" && c == "none?" && e == "[none]", "nullable receiver lambdas: {b} {c} {e}");
+  t = "{b}{c}{e}";
+  assert(len(t) == 14, "lengths {len(t)}");
+}
+
+fn test_a_narrow_literal_takes_each_receivers_width() {
+  p = HP { x: 3 };
+  q: HP? = HP { x: 4 };
+  z: HP? = null;
+  s = "{p.sw(250)}|{q.sw(60000)}|{sw(z, 7)}";
+  assert(s == "HP u8 3 250|HP? u16 60000|HP? u16 7", "literal widths: {s}");
+}
+
+fn main() {
+  test_an_untyped_lambda_takes_each_receivers_member();
+  test_a_narrow_literal_takes_each_receivers_width();
+}

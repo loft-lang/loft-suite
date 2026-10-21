@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WORK BUFFER KEEPS ITS HEADER BESIDE A WRITING CALL (`@FR-R-Header` crossed with
+// `@FR-R-WorkBuffer`).  R-Header's APART clause keeps a vector's header and element base in a
+// loop the gate declines — a call that may write a store — when the end of its dep chain owns
+// its store alone: "a store this activation minted ... or a work buffer the caller lends
+// (R-WorkBuffer)".  R-WorkBuffer turns a callee's scalar vector local whose every mention is
+// an in-place vector operator into storage of the CALLER, pooled per frame — "the k-th work
+// buffer of element type τ in ONE call is the frame's buffer (τ, k), shared by every site" —
+// and cleared by the callee on entry.  So the store the held header describes is the caller's,
+// reused across calls and across sites, emptied each time; the cells call such callees again
+// and again with lengths that shrink and grow, from two sites that share the pool, through a
+// wrapper (the transitive clause) and through a function value (the lending clause), each
+// reading its buffer in a loop beside a call that grows a store.
+//
+// Axes it MOVES: the length across calls (grow, shrink, zero), the sites sharing the pool (one,
+// two alternating), the route the buffer arrives by (a direct call, a wrapper's forwarded
+// buffer, a function value's lent buffer), the writer in the loop (a callee growing its own
+// result).  Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_WORK_BUFFER=1` (each local promoted to a work buffer) and
+// `LOFT_TRACE_HOIST_DECLINE=1` ("keeps 1 header(s) apart from what declined it").  The work
+// buffer is IR-phase (both backends); the apart header is native's, the interpreter its oracle.
+// `LOFT_NO_WORK_BUFFER=1`, `LOFT_NO_WORK_BUFFER_POOL=1`, `LOFT_NO_APART_HEADERS=1`,
+// `LOFT_WORK_BUFFER_NULL=1` (every promoted callee down its null road) and `LOFT_HOIST_VERIFY=1`
+// answer the same.
+//
+// @falsified-at: none — a conformance guard; a header held over a buffer the call between two
+//   reads could reach answers w2's second site with the first site's elements.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1, LOFT_POISON=1 on --native.
+// WITNESS: each message prints the sums.
+// HOLDS: the interpreter is the oracle.
+
+/// The writer: it grows the vector it answers.
+fn grown(seed: integer, n: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..n { out += [seed + i]; }
+  out
+}
+
+/// A work-buffer local `buf`, filled then read in a loop that calls the writer:
+/// Σ over i < n of (k·i + len(grown(i, 2)) + len(buf)) = k·n(n-1)/2 + 2n + n².
+fn score(n: integer, k: integer) -> integer {
+  buf: vector<integer> = [];
+  for i in 0..n { buf += [i * k]; }
+  t = 0;
+  for i in 0..n {
+    g = grown(i, 2);
+    t += (buf[i] ?? -1000) + len(g) + len(buf);
+  }
+  t
+}
+
+/// A second callee with a work buffer of the same element type: the pool's same slot.
+fn tally(n: integer) -> integer {
+  w: vector<integer> = [];
+  for i in 0..n { w += [100 + i]; }
+  t = 0;
+  for i in 0..n { g = grown(i, 1); t += (w[n - 1 - i] ?? -1000) + len(g); }
+  t
+}
+
+/// A wrapper that calls `score` in a loop: its own work-ref is promoted in turn.
+fn sweep(m: integer) -> integer {
+  t = 0;
+  for n in 0..m { t += score(n, 3); }
+  t
+}
+
+// w1 — one site, lengths that grow and shrink: score(4, 2) = 2·6 + 8 + 16 = 36;
+// score(1, 2) = 0 + 2 + 1 = 3; score(0, 2) = 0; score(6, 1) = 15 + 12 + 36 = 63 → 102.
+fn test_one_site_across_lengths() {
+  t = 0;
+  for n in [4, 1, 0, 6] { t += score(n, if n == 6 { 1 } else { 2 }); }
+  assert(t == 102, "w1 {t}");
+}
+
+// w2 — two callees alternating on the pool's slot: tally(3) = (102 + 101 + 100) + 3 = 306;
+// score(3, 5) = 15 + 6 + 9 = 30; tally(2) = (101 + 100) + 2 = 203; score(5, 0) = 0 + 10 + 25
+// = 35 → 574.
+fn test_two_sites_share_the_pool() {
+  t = tally(3) + score(3, 5) + tally(2) + score(5, 0);
+  assert(t == 574, "w2 {t}");
+}
+
+// w3 — through a wrapper: sweep(4) = score(0..4, 3) = 0 + (0 + 2 + 1) + (3 + 4 + 4) +
+// (9 + 6 + 9) = 3 + 11 + 24 = 38.
+fn test_through_a_wrapper() {
+  assert(sweep(4) == 38, "w3 {sweep(4)}");
+}
+
+// w4 — through a function value: f(3, 2) = 6 + 6 + 9 = 21; f(2, 7) = 7 + 4 + 4 = 15 → 36.
+fn test_through_a_function_value() {
+  f = score;
+  assert(f(3, 2) + f(2, 7) == 36, "w4 {f(3, 2)} {f(2, 7)}");
+}
+
+fn main() {
+  test_one_site_across_lengths();
+  test_two_sites_share_the_pool();
+  test_through_a_wrapper();
+  test_through_a_function_value();
+}

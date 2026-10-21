@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A START-STEPPED LOOP READS ITS INDEX ONLY THROUGH A SHARED SLOT (`@FR-R-StartStep` crossed with
+// `@FR-R-LoopSlot`).  R-StartStep steps ONE counter for a range whose start is not a literal —
+// seeding `i#index = next` before the loop, stepping `i#index` at the test — "where the loop
+// rotates and nothing after the iterator names `next` — nor `i#index`, unless `i` shares its
+// slot (R-LoopSlot)".  So `i#index` read in the body is admitted exactly when R-LoopSlot made
+// `i` and the index one value, and declined when the loop variable is written or its address
+// taken.  The cells read `i#index` (and `#count`, `#first`) in computed-start loops whose `i`
+// shares the slot or is handed to a `&integer` that writes it, and check every round's index,
+// value and count against the range.
+//
+// Axes it MOVES: the slot (shared; declined by a writing `&` hand-off; declined by a read-only
+// one), what the body reads (`i`, `i#index`, `i#count`, `i#first`, none), the start (computed:
+// a parameter, an expression; a negative start), a `continue` before the read.  Values
+// hand-computed in each comment.
+//
+// Firing read under `LOFT_TRACE_START_STEP=1` ("i steps one counter" or "declined — the body
+// names a counter") and `LOFT_TRACE_LOOP_VAR_ALIAS=1` on the interpreter.  Interpreter
+// generator rules; `--native` is the oracle.  `LOFT_NO_START_STEP=1` and
+// `LOFT_NO_LOOP_VAR_ALIAS=1` on `--interpret` answer the same.
+//
+// @falsified-at: none — a conformance guard; a single counter admitted beside a declined slot
+//   would have `i#index` read the counter one step ahead in a2 (Σ +3).
+// CHANNEL: the asserts.
+// ARMED: the switches above, on --interpret.
+// WITNESS: each message prints the sums.
+// HOLDS: --native is the oracle.
+
+fn grow(n: &integer) { n += 100; }
+fn touch(n: &integer) { n += 0; }
+
+// a1 — shared slot, `i#index` read: for i in s..e, i#index is i; s = 3, e = 6: Σ (10i + i) =
+// 11·12 = 132.
+fn shared(s: integer, e: integer) -> integer { t = 0; for i in s..e { t += i * 10 + i#index; } t }
+
+// a2 — declined slot (i written through `&`), `i#index` read after the write: Σ (1000·idx + i +
+// 100) over 3..6 = 12000 + 12 + 300 = 12312.
+fn written(s: integer, e: integer) -> integer { t = 0; for i in s..e { grow(i); t += i#index * 1000 + i; } t }
+
+// a3 — declined slot (a read-only `&` hand-off), `#count` and `#first` read: count 0, 1, 2,
+// first only on the first round → 0 + 1 + 2 + 100 = 103 for any three rounds.
+fn counted(s: integer, e: integer) -> integer {
+  t = 0;
+  for i in s..e { touch(i); t += i#count + (if i#first { 100 } else { 0 }); }
+  t
+}
+
+// a4 — a `continue` before the index read, a negative computed start: s = -4, e = 4, skip odd
+// i: i = -4, -2, 0, 2 → Σ (i + i#index) = 2·(-4) = -8; rounds counted before the continue 8.
+fn skipping(s: integer, e: integer) -> integer {
+  t = 0;
+  rounds = 0;
+  for i in s..e { rounds += 1; if i % 2 != 0 { continue; } t += i + i#index; }
+  t * 100 + rounds
+}
+
+// a5 — the index read beside a write of i through `&` in the same round, the copy taken first:
+// x = i#index, grow(i), t += x·1000 + i over 3..6 → 12000 + 312 = 12312.
+fn copied(s: integer, e: integer) -> integer { t = 0; for i in s..e { x = i#index; grow(i); t += x * 1000 + i; } t }
+
+fn test_the_index_through_a_shared_slot() {
+  assert(shared(3, 6) == 132 && shared(5, 5) == 0 && shared(6, 3) == 0, "a1 {shared(3, 6)}");
+}
+
+fn test_the_index_beside_a_written_loop_variable() {
+  assert(written(3, 6) == 12312 && copied(3, 6) == 12312, "a2 {written(3, 6)} {copied(3, 6)}");
+}
+
+fn test_count_and_first_beside_a_reference_hand_off() {
+  assert(counted(3, 6) == 103 && counted(-2, 1) == 103 && counted(1, 1) == 0, "a3 {counted(3, 6)}");
+}
+
+fn test_a_continue_and_a_negative_start() {
+  assert(skipping(-4, 4) == -800 + 8, "a4 {skipping(-4, 4)}");
+}
+
+fn main() {
+  test_the_index_through_a_shared_slot();
+  test_the_index_beside_a_written_loop_variable();
+  test_count_and_first_beside_a_reference_hand_off();
+  test_a_continue_and_a_negative_start();
+}

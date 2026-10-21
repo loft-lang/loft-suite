@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW'S HEADER HOLDS ONLY WHILE THE REMAINDER WRITES IN PLACE (`@FR-R-View` crossed with
+// `@FR-R-InPlace`).  R-View derives `d = &P`'s header once, after the binding, and serves
+// every `d[i]` and `len(d)` of the rest of the block from it "when the remainder passes
+// (R-InPlace)".  So an in-place element set — through P or through d — leaves the header
+// right and every read must see the written VALUE, while a push to P in the remainder fails
+// the gate and every `len(d)` after it must see the new length.  The cells write through each
+// name, at each position relative to the reads, and once grow the vector between two reads.
+//
+// Axes it MOVES: the writer's name (P, d, a second view), what it does (in-place set, push),
+// the path (a local, a field path), straight line against a loop body.  Values hand-computed
+// in each cell's comment.
+//
+// Firing read off `--native-emit` (the view's header bound after the `Set`, `get_elem_hoisted`
+// at the reads) where the remainder writes in place, none where it pushes.  Cross-backend;
+// `LOFT_HOIST_VERIFY=1` and `LOFT_NO_VIEW_HOIST=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a view header kept across the push in v3 answers
+//   len 4 for 5 and reads null at the new tail.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the values read.
+// HOLDS: the interpreter is the oracle.
+
+struct O { pad: integer, v: vector<integer> }
+
+// v1 — in a loop: d views w; each pass reads d[i] and sets the NEXT element through w.
+// i=0 +1, w[1] = 12; i=1 +12, w[2] = 13; i=2 +13, w[3] = 14; i=3 +14, w[0] = 11 → 40.
+fn test_sets_through_the_viewed_path_in_a_loop() {
+  w = [1, 2, 3, 4];
+  d = &w;
+  s = 0;
+  for i in 0..4 {
+    s += d[i] ?? 0;
+    w[(i + 1) % 4] = (w[(i + 1) % 4] ?? 0) + 10;
+  }
+  assert(s == 40 && w[0] == 11 && len(d) == 4, "v1 {s} {w}");
+}
+
+// v2 — straight line over a field path: reads through d interleaved with sets through
+// o.v and through d.  o.v = [5,6,7]; a = d[0] = 5; o.v[1] = 70; b = d[1] = 70; d[2] = 9;
+// c = o.v[2] = 9; n = len(d) = 3 → 5 + 70 + 9 + 3 = 87.
+fn test_sets_through_either_name_in_straight_line() {
+  o = O { pad: 0, v: [5, 6, 7] };
+  d = &o.v;
+  a = d[0] ?? 0;
+  o.v[1] = 70;
+  b = d[1] ?? 0;
+  d[2] = 9;
+  c = o.v[2] ?? 0;
+  n = len(d);
+  assert(a + b + c + n == 87, "v2 {a} {b} {c} {n}");
+}
+
+// v3 — a push in the remainder fails the gate: len(d) before 4, after 5, the new tail 50.
+fn test_a_push_in_the_remainder_is_seen_by_the_view() {
+  w = [1, 2, 3, 4];
+  d = &w;
+  a = len(d) + (d[3] ?? 0);
+  w += [50];
+  b = len(d);
+  c = d[4] ?? -1;
+  assert(a == 8 && b == 5 && c == 50, "v3 {a} {b} {c}");
+}
+
+// v4 — two views of one path, a set through the second read through the first, in a loop:
+// e[i] = i·100 then s += d[i] → 0 + 100 + 200 = 300; w = [0,100,200].
+fn test_a_second_view_writes_what_the_first_reads() {
+  w = [7, 8, 9];
+  d = &w;
+  e = &w;
+  s = 0;
+  for i in 0..3 { e[i] = i * 100; s += d[i] ?? 0; }
+  assert(s == 300 && w[1] == 100, "v4 {s} {w}");
+}
+
+fn main() {
+  test_sets_through_the_viewed_path_in_a_loop();
+  test_sets_through_either_name_in_straight_line();
+  test_a_push_in_the_remainder_is_seen_by_the_view();
+  test_a_second_view_writes_what_the_first_reads();
+}

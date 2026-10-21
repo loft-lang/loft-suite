@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNCOVERED VARIANT-AND-ARGUMENT PAIR IS REFUSED NAMING THE PAIR (`@FR-Disp-Exhaustive`
+// crossed with `@FR-Disp-Applicable`).  `eb(XFire, integer = 10)` and `eb(XIce, integer = 20)`
+// cover an `XEnt` argument for every variant when the second argument is an integer or omitted;
+// a `text` second argument is taken by neither member (Disp-Applicable: `text` does not satisfy
+// `integer`), so the call is not covered for any variant, and the refusal is at compile time —
+// no run-time "no applicable method" path.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the pair and the declared members.
+// HOLDS: `a-covered-call-is-covered-for-every-variant-and-every-omitted-default` beside it.
+// @EXPECT_ERROR: `eb(XEnt, text)` has no definition for the pair (XFire, text)
+
+enum XEnt { XFire { n: integer }, XIce { n: integer } }
+
+fn eb(e: XFire, k: integer = 10) -> text { "fire {e.n} {k}" }
+fn eb(e: XIce, k: integer = 20) -> text { "ice {e.n} {k}" }
+
+fn main() {
+  x: XEnt = XFire { n: 1 };
+  println(eb(x, "t"));
+}

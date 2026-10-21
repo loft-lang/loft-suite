@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WORK BUFFER REBOUND BY VALUE STAYS THE CALLER'S (`@FR-R-WorkBuffer` crossed with
+// `@FR-F-ParamRebind`).  R-WorkBuffer lets a callee take the buffer by value because "a rebind
+// (F-ParamRebind) is the callee's own store, released at its exit": `p = [..]` in the callee
+// rebinds `p` LOCALLY and does not write back.  So a callee that rebinds the parameter and then
+// grows its own new value leaves the caller's buffer — the pooled store — exactly as it was, and
+// the rebound store is released (the leak gate reads it).  A write BEFORE the rebind is the
+// caller's (F-ParamHeap); one after it is not.
+//
+// Values hand-computed:
+//   a_rebind(x): v = [x, x]; rebind: p = [7, 8] + [9] → 3·10 + 7 = 37; v unchanged
+//     → 37·1000 + 2·100 + 2x → a_rebind(1) 37202, a_rebind(4) 37208
+//   a_mixed(x): v = [x]; mixed: p[0] = 50 (reaches v), p = [1], p += [2], answers len(p)·10 + p[1]
+//     = 22 → 22·1000 + len(v)·100 + v[0] = 22000 + 100 + 50 = 22150 for every x
+//   sites(x) = a_rebind(x) + a_mixed(x) + a_rebind(x + 1): sites(1) = 37202 + 22150 + 37204 = 96556
+//
+// Axes it MOVES: a rebind alone, a write then a rebind, growth of the rebound value, one site and
+//   several of one frame.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_WORK_BUFFER=1, LOFT_NO_WORK_BUFFER_POOL=1,
+//   LOFT_WORK_BUFFER_NULL=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.  LOFT_TRACE_WORK_BUFFER=1
+//   names `n_a_rebind local=v PROMOTED to a caller buffer`.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the answer.
+// HOLDS: `a-work-buffer-handed-by-value-is-written-through` beside it.
+
+fn rebind(p: vector<integer>) -> integer {
+  p = [7, 8];
+  p += [9];
+  len(p) * 10 + p[0]
+}
+
+fn mixed(p: vector<integer>) -> integer {
+  p[0] = 50;
+  p = [1];
+  p += [2];
+  len(p) * 10 + p[1]
+}
+
+fn total(p: vector<integer>) -> integer {
+  s = 0;
+  for e in p { s += e; }
+  s
+}
+
+fn a_rebind(x: integer) -> integer {
+  v: vector<integer> = [];
+  v += [x];
+  v += [x];
+  r = rebind(v);
+  r * 1000 + len(v) * 100 + total(v)
+}
+
+fn a_mixed(x: integer) -> integer {
+  v: vector<integer> = [];
+  v += [x];
+  r = mixed(v);
+  r * 1000 + len(v) * 100 + v[0]
+}
+
+fn sites(x: integer) -> integer {
+  a_rebind(x) + a_mixed(x) + a_rebind(x + 1)
+}
+
+fn test_a_rebind_does_not_reach_the_buffer() {
+  a = a_rebind(1);
+  b = a_rebind(4);
+  assert(a == 37202 && b == 37208, "a_rebind: {a} {b}");
+}
+
+fn test_a_write_before_the_rebind_does() {
+  a = a_mixed(1);
+  b = a_mixed(9);
+  assert(a == 22150 && b == 22150, "a_mixed: {a} {b}");
+}
+
+fn test_several_sites_of_one_frame() {
+  s = sites(1);
+  assert(s == 96556, "sites: {s}");
+}
+
+fn main() {
+  test_a_rebind_does_not_reach_the_buffer();
+  test_a_write_before_the_rebind_does();
+  test_several_sites_of_one_frame();
+}

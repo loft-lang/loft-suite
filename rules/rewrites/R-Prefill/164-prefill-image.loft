@@ -12,6 +12,14 @@
 // (the walk re-run after every image write, a panic where they disagree), `LOFT_POISON=1`,
 // `LOFT_POISON_CLAIM=1`, `LOFT_STRICT_STORES=1` and `LOFT_NATIVE_LEAK_CHECK=1` must answer
 // identically.
+//
+// `@FR-R-Switch` — this file is the prefill image's half of the switch rule: the rewrite ships
+// with a switch that restores the walk (`LOFT_NO_PREFILL_IMAGE=1`) and a
+// checking form that re-derives what it assumed (`LOFT_PREFILL_VERIFY=1`, the walk re-run
+// after every image write), and it is one of the three rewrites the CENSUS clause leaves
+// uncounted because it admits per TYPE at the first mint (`LOFT_TRACE_PREFILL=1` prints one
+// "image captured" per type, then "image used").  Both backends, the switch off and on, the
+// falsifier armed and not, and both together answer every cell the same (2026-10-21, e7619b2c1).
 
 //
 // @falsified-at: hand-measured (2026-09-15) — `Stores::prefill_from_image` sabotaged to capture

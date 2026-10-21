@@ -1,0 +1,116 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FLAT COPY MOVES ITS BYTES BETWEEN THE ADDRESSES ITS BLOCK HOLDS (`@FR-R-FlatCopy` crossed
+// with `@FR-R-RecPtr`, and with `@FR-R-Switch`).  R-FlatCopy's EMITTED clause writes a copy of
+// a no-heap record whose source is a VARIABLE "as its bytes ... from the source's record
+// address to the destination's where the block holds both ((R-RecPtr); a flat copy into or
+// out of a view is a use the address serves, so a minted slot holds its address for its
+// window)", and through `Stores::copy_flat_record` otherwise; a null end or a locked
+// destination takes `OpCopyRecord`.  So the bytes go between two R-RecPtr addresses — a loop
+// variable's (the base clause), an index view's, a minted slot's — and every cell copies
+// between such addresses and then reads both ends: a stale address copies the wrong record's
+// bytes, a copy that aliases makes a later write reach both.  R-Switch is the other half:
+// R-FlatCopy is the runtime's own shape and one of the three rewrites the census does not
+// count; its switch `LOFT_NO_FLAT_COPY=1` restores the full path, and a traced copy
+// (`LOFT_TRACE_COPY=1`) and a checked one (`LOFT_COPY_CHECK=1`) take the full path — every
+// cell must answer the same under each.
+//
+// Axes it MOVES: the source's address (loop variable, `v[i]?`, a parameter), the destination
+// (a minted slot, an existing element, a record field), the type (struct, struct-enum
+// variant, a nested flat record), the source's nullness (present, past the end — the default
+// record of `?`).  Values hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit` (the copy written as `rec_ptr` moves of the type's width,
+// no `OpCopyRecord` call, where the block holds both addresses) and `LOFT_TRACE_RECPTR=1`.
+// Cross-backend; `LOFT_HOIST_VERIFY=1`, `LOFT_NO_FLAT_COPY=1`, `LOFT_NO_RECORD_PTR=1`,
+// `LOFT_TRACE_COPY=1` and `LOFT_COPY_CHECK=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a copy whose width is not the type's (8 for 24)
+//   answers f1's style fields 0.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1, LOFT_COPY_CHECK=1 on --native.
+// WITNESS: each message prints the sums.
+// HOLDS: the interpreter is the oracle.
+
+struct Piece { start: integer, count: integer, style: integer }
+struct Box2 { lo: Piece, hi: Piece }
+struct Holder { inner: Piece, tag: integer }
+enum Shape { Dot { x: integer, y: integer }, Bar { w: integer, h: integer, d: integer } }
+
+fn psum(v: const vector<Piece>) -> integer { s = 0; for p in v { s += p.start + p.count * 10 + p.style * 100; } s }
+fn area(s: Shape) -> integer { match s { Dot { x, y } => x + y, Bar { w, h, d } => w * h * d } }
+
+// f1 — the loop variable copied into a minted slot, every element, past the first claim:
+// src[i] = (i, 1, 2) for i in 0..15 → Σ start 105, count 15·10, style 15·200 → 105 + 150 +
+// 3000 = 3255; then dst[0] written leaves src[0].
+fn test_a_loop_variable_into_a_minted_slot() {
+  src: vector<Piece> = [];
+  for i in 0..15 { src += [Piece { start: i, count: 1, style: 2 }]; }
+  dst: vector<Piece> = [];
+  for p in src { dst += [p]; }
+  dst[0].style = 9;
+  assert(len(dst) == 15 && psum(dst) == 3255 + 700 && psum(src) == 3255 && src[0].style == 2, "f1 {psum(dst)} {psum(src)}");
+}
+
+// f2 — an index view copied over an EXISTING element of another vector, and over an element
+// of its own vector: a = [(1,1,1),(2,2,2)], b = [(0,0,0),(0,0,0)]; b[1] = a[0]; a[1] = a[0]
+// (a self-vector copy); then a[0].start = 50 → b[1] and a[1] keep 1.  psum a = 50+10+100 +
+// 1+10+100 = 271, b = 0 + 111 = 111.
+fn test_an_index_view_over_existing_elements() {
+  a = [Piece { start: 1, count: 1, style: 1 }, Piece { start: 2, count: 2, style: 2 }];
+  b = [Piece { start: 0, count: 0, style: 0 }, Piece { start: 0, count: 0, style: 0 }];
+  for i in 0..1 {
+    r = a[i]?;
+    b[1] = r;
+    a[1] = r;
+  }
+  a[0].start = 50;
+  assert(psum(a) == 271 && psum(b) == 111 && a[1].start == 1, "f2 {psum(a)} {psum(b)}");
+}
+
+// f3 — copies into a record FIELD and between nested flat records: h.inner = v[1]; bx.lo =
+// h.inner; bx.hi = bx.lo; then bx.lo.count = 7 → bx.hi.count stays 3.
+// v[1] = (4, 3, 1): h.inner (4,3,1); bx.lo (4,7,1); bx.hi (4,3,1).
+fn test_into_a_field_and_between_nested_records() {
+  v = [Piece { start: 0, count: 0, style: 0 }, Piece { start: 4, count: 3, style: 1 }];
+  h = Holder { inner: Piece { start: 0, count: 0, style: 0 }, tag: 5 };
+  bx = Box2 { lo: Piece { start: 0, count: 0, style: 0 }, hi: Piece { start: 0, count: 0, style: 0 } };
+  for e in v { if e.start == 4 { h.inner = e; } }
+  bx.lo = h.inner;
+  bx.hi = bx.lo;
+  bx.lo.count = 7;
+  assert(h.inner.start == 4 && h.inner.count == 3 && h.tag == 5, "f3 h");
+  assert(bx.lo.count == 7 && bx.hi.count == 3 && bx.hi.start == 4 && bx.hi.style == 1, "f3 bx");
+}
+
+// f4 — struct-enum variants copied out of a loop variable into minted slots: Dot(1,2) → 3,
+// Bar(2,3,4) → 24, Dot(5,5) → 10 → Σ 37 both sides.
+fn test_struct_enum_variants() {
+  src = [Dot { x: 1, y: 2 }, Bar { w: 2, h: 3, d: 4 }, Dot { x: 5, y: 5 }];
+  dst: vector<Shape> = [];
+  for s in src { dst += [s]; }
+  t = 0;
+  for s in dst { t += area(s); }
+  assert(len(dst) == 3 && t == 37 && area(dst[1]) == 24, "f4 {t}");
+}
+
+// f5 — a source past the end: `v[5]?` is the default record (0, 0, 0), copied over an
+// element that held (9, 9, 9): psum 0 + (1·… ) — v = [(9,9,9),(1,1,1)]; v[0] = v[5]? → v[0] =
+// (0,0,0); psum = 0 + 111 = 111, len 2.
+fn test_a_default_record_from_past_the_end() {
+  v = [Piece { start: 9, count: 9, style: 9 }, Piece { start: 1, count: 1, style: 1 }];
+  for i in 5..6 {
+    d = v[i]?;
+    v[0] = d;
+  }
+  assert(len(v) == 2 && psum(v) == 111 && v[0].style == 0, "f5 {psum(v)}");
+}
+
+fn main() {
+  test_a_loop_variable_into_a_minted_slot();
+  test_an_index_view_over_existing_elements();
+  test_into_a_field_and_between_nested_records();
+  test_struct_enum_variants();
+  test_a_default_record_from_past_the_end();
+}

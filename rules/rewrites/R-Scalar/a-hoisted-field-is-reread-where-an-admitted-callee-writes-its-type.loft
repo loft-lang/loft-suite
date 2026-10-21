@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOISTED FIELD IS RE-READ WHERE AN ADMITTED CALLEE WRITES ITS TYPE (`@FR-R-Scalar` crossed with
+// `@FR-R-Callee`).  R-Scalar holds a scalar field read `v.f` for the whole loop unless the body's
+// WRITE SET reaches (type(v), f) — which includes "what an admitted callee writes (R-Callee) — an
+// in-place-only writer's own set, a return-buffer writer's record type WHOLE" — and "keys carry the
+// TYPE, never the variable, because aliasing is decided by what a write can reach".  R-Callee admits
+// a callee whose writes are in-place scalar sets, transitively.  So a loop that reads `a.f` while an
+// admitted callee bumps `b.f` must re-read `a.f` every turn when the caller made `a` and `b` one
+// record — through two parameters, through two views of one element, through a callee of a callee —
+// while a field the callee never writes (`a.g`) is the same value every turn either way, and a
+// callee that writes only its own return buffer leaves the caller's record alone.
+//
+// Values hand-computed (bump: w.f += 1; bump2 calls bump; mkv(k) = V{k, 2k}):
+//   loop1(x, x, 3), x = V{1,2}: 12 + 22 + 32 = 66, x.f ends 4
+//   loop1(y, z, 3), y = V{1,2}, z = V{7,8}: 12·3 = 36, y.f 1, z.f 10
+//   loop2(w, w, 2), w = V{5,0}: 50 + 60 = 110, w.f 7
+//   loop3(h, 3), a and b both views of h.vs[0] = V{3,4}: 304 + 404 + 504 = 1212, h.vs[0].f 6
+//   loop4(V{0,9}, 3): Σ (90 + i + 2i), i < 3 = 279
+//
+// Axes it MOVES: how the written record relates to the read one (the same through two parameters,
+//   two records, two views of one element), the callee's depth (direct, through another callee),
+//   the field (written by the callee, not written), the callee kind (in-place writer, return-buffer
+//   writer).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_HOIST_VERIFY=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.  Fires:
+//   LOFT_REWRITE_CENSUS_FN counts R-Scalar in `n_loop1` and `n_loop3` and R-Callee in `n_loop2`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the folded reads.
+// HOLDS: the R-RecPtr twin cell `a-callee-twin-holds-its-record-address-like-the-plain-function`.
+
+struct V { f: integer, g: integer }
+struct H { vs: vector<V> }
+
+fn bump(w: V) {
+  w.f += 1;
+}
+
+fn bump2(w: V) {
+  bump(w);
+  w.g += 0;
+}
+
+fn mkv(k: integer) -> V {
+  V { f: k, g: k * 2 }
+}
+
+fn loop1(a: V, b: V, n: integer) -> integer {
+  s = 0;
+  for i in 0..n {
+    s += a.f * 10 + a.g;
+    bump(b);
+  }
+  s
+}
+
+fn loop2(a: V, b: V, n: integer) -> integer {
+  s = 0;
+  for i in 0..n {
+    s += a.f * 10 + a.g;
+    bump2(b);
+  }
+  s
+}
+
+fn loop3(h: H, n: integer) -> integer {
+  a = h.vs[0];
+  b = h.vs[0];
+  s = 0;
+  for i in 0..n {
+    s += a.f * 100 + a.g;
+    bump(b);
+  }
+  s
+}
+
+fn loop4(a: V, n: integer) -> integer {
+  s = 0;
+  for i in 0..n {
+    c = mkv(i);
+    s += a.g * 10 + c.f + c.g;
+  }
+  s
+}
+
+fn test_one_record_through_two_parameters() {
+  x = V { f: 1, g: 2 };
+  r = loop1(x, x, 3);
+  assert(r == 66 && x.f == 4, "loop1 same: {r} {x.f}");
+  w = V { f: 5, g: 0 };
+  q = loop2(w, w, 2);
+  assert(q == 110 && w.f == 7, "loop2 same: {q} {w.f}");
+}
+
+fn test_two_records_apart() {
+  y = V { f: 1, g: 2 };
+  z = V { f: 7, g: 8 };
+  r = loop1(y, z, 3);
+  assert(r == 36 && y.f == 1 && z.f == 10, "loop1 apart: {r} {y.f} {z.f}");
+}
+
+fn test_two_views_of_one_element() {
+  h = H { vs: [V { f: 3, g: 4 }] };
+  r = loop3(h, 3);
+  assert(r == 1212 && h.vs[0].f == 6 && len(h.vs) == 1, "loop3: {r} {h.vs[0].f}");
+}
+
+fn test_a_return_buffer_writer_leaves_the_record() {
+  r = loop4(V { f: 0, g: 9 }, 3);
+  assert(r == 279, "loop4: {r}");
+}
+
+fn main() {
+  test_one_record_through_two_parameters();
+  test_two_records_apart();
+  test_two_views_of_one_element();
+  test_a_return_buffer_writer_leaves_the_record();
+}

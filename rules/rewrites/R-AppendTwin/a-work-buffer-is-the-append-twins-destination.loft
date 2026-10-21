@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WORK BUFFER IS THE APPEND TWIN'S DESTINATION (`@FR-R-AppendTwin` crossed with
+// `@FR-R-WorkBuffer`).  R-AppendTwin builds `X += f(args)` by calling f's twin with X as f's buffer;
+// "a WORK BUFFER the caller lends (R-WorkBuffer) is admitted as X like a local: each call site lends
+// its own, so no other argument can be a view of it".  So the vector local `v` of `a_twin` — a
+// pooled buffer of its caller's frame — is grown in place by `build`'s twin and by `chain`'s (a twin
+// handing its buffer on to `build`'s twin), in a straight line and in a loop, after a push of its
+// own; the twin must neither clear what `v` already holds nor leave anything behind for the next
+// call, which the same frame makes from a second site.
+//
+// Values: build(k) = [k, 10+k, …, 10(k−1)+k]; v = [5] ++ build(k) ++ chain(2) ++ build(1) ++
+//   build(2); a_twin = len(v)·10^6 + fold, fold = (7·fold + e) mod 1000003 over v.
+//   a_twin(0): v = [5, 2, 12, 1, 2, 12]                       → 6·10^6 + 93028 = 6093028
+//   a_twin(2): v = [5, 2, 12, 2, 12, 1, 2, 12]                → 8·10^6 + 563678 = 8563678
+//   sites(1) = a_twin(1) + a_twin(2), a_twin(1): v = [5, 1, 2, 12, 1, 2, 12] → 7614045;
+//     7614045 + 8563678 = 16177723
+//
+// Axes it MOVES: the destination (a work buffer holding data, empty before), the callee (a plain
+//   builder, a chain), straight-line against a loop of appends, one site against two of one frame.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_APPEND_TWIN=1, LOFT_NO_WORK_BUFFER=1, LOFT_POISON=1 and
+//   LOFT_STRICT_STORES=1.  Fires: LOFT_TRACE_APPEND_TWIN=1 says `n_build has a twin`, `n_chain has
+//   a twin`; LOFT_TRACE_WORK_BUFFER=1 says `n_a_twin local=v PROMOTED to a caller buffer`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the answer.
+// HOLDS: `a-call-result-appended-is-built-in-the-destination` beside it (local destinations).
+
+fn build(k: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..k { out += [i * 10 + k]; }
+  out
+}
+
+fn chain(k: integer) -> vector<integer> {
+  r = build(k);
+  r
+}
+
+fn a_twin(k: integer) -> integer {
+  v: vector<integer> = [];
+  v += [5];
+  v += build(k);
+  v += chain(2);
+  for j in 0..2 { v += build(j + 1); }
+  s = 0;
+  for e in v {
+    s = s * 7 + e;
+    s = s % 1000003;
+  }
+  len(v) * 1000000 + s
+}
+
+fn sites(k: integer) -> integer {
+  a_twin(k) + a_twin(k + 1)
+}
+
+fn test_the_twin_grows_the_lent_buffer() {
+  a = a_twin(0);
+  b = a_twin(2);
+  assert(a == 6093028 && b == 8563678, "a_twin: {a} {b}");
+}
+
+fn test_two_sites_of_one_frame_lend_one_buffer_in_turn() {
+  s = sites(1);
+  assert(s == 16177723, "sites: {s}");
+}
+
+fn main() {
+  test_the_twin_grows_the_lent_buffer();
+  test_two_sites_of_one_frame_lend_one_buffer_in_turn();
+}

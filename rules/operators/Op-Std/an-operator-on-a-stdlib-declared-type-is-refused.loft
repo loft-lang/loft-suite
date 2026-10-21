@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR ON A STDLIB-DECLARED TYPE IS REFUSED (`@FR-Op-Std` crossed with `@FR-Op-Home`).
+// Op-Std: "a type declared in `default/` keeps the stdlib's operator definitions … (Op-Home) binds
+// the programs".  `Ordering` is an enum the stdlib declares in `default/01_code.loft`, not a type
+// of this source, so a program's `operator plus(self: Ordering, …)` is refused at the definition —
+// the stdlib type's operator table is the stdlib's alone.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the stdlib type.
+// HOLDS: `a-fn-named-for-an-operator-is-an-ordinary-function` beside it.
+// @EXPECT_ERROR: `operator plus` defines `+` for a type of its own package, and `Ordering` is not one
+
+operator plus(self: Ordering, o: integer) -> integer { o }
+
+fn main() {
+  println("x");
+}

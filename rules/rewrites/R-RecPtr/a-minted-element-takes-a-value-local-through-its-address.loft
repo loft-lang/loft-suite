@@ -1,0 +1,102 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MINTED ELEMENT TAKES A VALUE LOCAL THROUGH ITS ADDRESS (`@FR-R-RecPtr` crossed with
+// `@FR-R-ValueLocal`).  R-RecPtr's MINT CLAUSE holds a minted element's address over its
+// window, and "a copy INTO e from a value local (R-ValueLocal) is a fusable write of e, since
+// it lowers to one typed setter per field, and grows nothing"; R-ValueLocal adds the other
+// direction — "a (R-RecPtr) view handed to a tuple parameter keeps its address for the
+// hand-off, and the site reads the fields through it" — and the TUPLE clause reads a value
+// record out of a store record through one address.  So the tuple's fields are written
+// through the slot's address on the way in, and read through a view's address on the way
+// out; a field landing at the wrong offset, or a slot address taken before a growth moved
+// the vector, is a wrong field.
+//
+// Axes it MOVES: the direction (tuple into a minted slot, a view into a tuple parameter, a
+// store record returned as a tuple), growth (the appends cross the first claim), the shape
+// (flat, an inline sub-record), the view (loop variable, `v[i]?`).  Values hand-computed in
+// each cell's comment.
+//
+// Firing read under `LOFT_TRACE_VALUEREC=1` (the value locals and tuple parameters) and
+// `LOFT_TRACE_RECPTR=1` / `--native-emit` (`rec_set` through the minted slot's `__pa_`
+// address, `rec_get` at the tuple hand-off).  Cross-backend; `LOFT_HOIST_VERIFY=1`
+// (`rec_get`/`rec_set` compare each address with a fresh derivation), `LOFT_NO_VALUE_LOCAL=1`
+// and `LOFT_NO_MINT_WINDOW=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; an address bound before a growth step writes
+//   v3's twelfth element into the record the growth left (it reads 0).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sums.
+// HOLDS: the interpreter is the oracle.
+
+struct P { x: integer, y: integer }
+struct Q { id: integer, lo: P, hi: P }
+
+fn mk(a: integer, b: integer) -> P { P { x: a, y: b } }
+fn mq(i: integer) -> Q { Q { id: i, lo: P { x: i, y: -i }, hi: P { x: 10 * i, y: 1 } } }
+fn dot(p: P, q: P) -> integer { p.x * q.x + p.y * q.y }
+fn qsum(q: Q) -> integer { q.id + q.lo.x + q.lo.y + q.hi.x * q.hi.y }
+fn at(v: const vector<P>, i: integer) -> P { v[i]? }
+
+// v1 — value locals appended into minted slots, past the first claim: v = mk(i, 2i) for
+// i in 0..20 → Σx 190, Σy 380, the last (19, 38).
+fn test_value_locals_appended_through_the_slot_address() {
+  out: vector<P> = [];
+  for i in 0..20 {
+    v = mk(i, 2 * i);
+    out += [v];
+  }
+  sx = 0;
+  sy = 0;
+  for e in out { sx += e.x; sy += e.y; }
+  assert(len(out) == 20 && sx == 190 && sy == 380 && out[19].y == 38, "v1 {sx} {sy}");
+}
+
+// v2 — a loop-variable view handed to a tuple parameter twice per pass: dot(e, e) = x² + y²
+// and dot(e, w) with w = mk(1, -1) → x - y.  Elements (1,2), (3,4), (5,6): Σ x²+y² = 5 + 25
+// + 61 = 91; Σ (x - y) = -3 → 88.
+fn test_a_view_handed_to_a_tuple_parameter_reads_through_its_address() {
+  pts = [P { x: 1, y: 2 }, P { x: 3, y: 4 }, P { x: 5, y: 6 }];
+  w = mk(1, -1);
+  t = 0;
+  for e in pts { t += dot(e, e) + dot(e, w); }
+  assert(t == 88, "v2 {t}");
+}
+
+// v3 — an inline sub-record value local appended past the first claim and then read back
+// field by field through `at`, a store record answered as a tuple: mq(i) for i in 0..12 →
+// qsum = i + i - i + 10i·1 = 11i; Σ 11·66 = 726; out[11] reads (11, 11, -11, 110, 1).
+fn test_a_nested_value_local_past_a_growth_and_read_back_as_a_tuple() {
+  out: vector<Q> = [];
+  for i in 0..12 { q = mq(i); out += [q]; }
+  t = 0;
+  for e in out { t += qsum(e); }
+  last = out[11]?;
+  assert(len(out) == 12 && t == 726, "v3 {t}");
+  assert(last.id == 11 && last.lo.y == -11 && last.hi.x == 110 && last.hi.y == 1, "v3 last");
+  p = at([mk(4, 5), mk(6, 7)], 1);
+  assert(p.x == 6 && p.y == 7, "v3 at ({p.x}, {p.y})");
+}
+
+// v4 — an index view `r = v[i]?` handed to the tuple parameter, then written through its
+// address, then handed again: r = (i, i), dot(r, r) = 2i², r.x += 1 → dot(r, r) =
+// (i+1)² + i².  Over 0..3: Σ (2i² + (i+1)² + i²) = 3·5 + 14 = 29.
+fn test_an_index_view_written_between_two_tuple_hand_offs() {
+  v = [P { x: 0, y: 0 }, P { x: 1, y: 1 }, P { x: 2, y: 2 }];
+  t = 0;
+  for i in 0..3 {
+    r = v[i]?;
+    t += dot(r, r);
+    r.x += 1;
+    t += dot(r, r);
+  }
+  assert(t == 29 && v[2].x == 3, "v4 {t}");
+}
+
+fn main() {
+  test_value_locals_appended_through_the_slot_address();
+  test_a_view_handed_to_a_tuple_parameter_reads_through_its_address();
+  test_a_nested_value_local_past_a_growth_and_read_back_as_a_tuple();
+  test_an_index_view_written_between_two_tuple_hand_offs();
+}

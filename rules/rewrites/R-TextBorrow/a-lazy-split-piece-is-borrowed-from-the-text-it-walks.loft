@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LAZY SPLIT'S PIECE IS BORROWED FROM THE TEXT IT WALKS (`@FR-R-TextBorrow` crossed with
+// `@FR-R-LazySplit`).  R-LazySplit iterates `for p in T.split(c)` over the pieces of T without
+// building the vector — borrowing a plain text PARAMETER the function never writes, iterating
+// every other T as a COPY taken where the call stood, "so no write in the body can reach what
+// is being walked".  R-TextBorrow makes `p` a BORROW of the piece when the body reads it only as
+// a text value: "a lazy split's piece borrows the iterator's source — a borrowed parameter or a
+// loop-long copy — and needs no store condition at all".  So the borrow is as good as the
+// source: each cell writes the text being split inside the loop, or keeps a piece past its
+// iteration, or reads a piece every value way, and the pieces must be what `split` answers for
+// T as it was at the call.
+//
+// Axes it MOVES: T (a parameter — borrowed, a local the body appends to — copied, a field the
+// body rewrites — copied), the piece's use (value reads, a format into another local, stored
+// into a vector — no borrow), the text's shape (empty, a leading / trailing / doubled separator,
+// a multi-byte character beside the separator).  Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_LAZY_SPLIT=1` (each loop admitted, the source borrowed or
+// copied) and `LOFT_TRACE_TEXT_BORROW=1` (each walk's `p` borrowed or declined).  Native only;
+// the interpreter builds the vector and copies each piece and is the oracle.
+// `LOFT_NO_LAZY_SPLIT=1`, `LOFT_NO_TEXT_BORROW=1` and `LOFT_HOIST_VERIFY=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a split borrowing a local the body appends to would
+//   walk the appended pieces in l2 (count 5 for 3).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the joined pieces.
+// HOLDS: the interpreter is the oracle.
+
+struct Doc { body: text, n: integer }
+
+/// A parameter never written: borrowed for the loop.
+fn joined(t: text) -> text {
+  out = "";
+  for p in t.split(',') { out += "[{p}]"; }
+  out
+}
+
+fn lengths(t: text) -> integer {
+  s = 0;
+  for p in t.split(',') { s = s * 10 + size(p); }
+  s
+}
+
+// l1 — a parameter split, every piece read as a value: "ab,,c,é" → [ab][][c][é];
+// sizes 2, 0, 1, 2 → 2012; a trailing separator answers a last empty piece; the empty text
+// answers no piece.
+fn test_a_parameter_split_is_borrowed() {
+  assert(joined("ab,,c,é") == "[ab][][c][é]", "l1 {joined(\"ab,,c,é\")}");
+  assert(lengths("ab,,c,é") == 2012, "l1 sizes {lengths(\"ab,,c,é\")}");
+  assert(joined(",x,") == "[][x][]", "l1 edges {joined(\",x,\")}");
+  assert(joined("") == "", "l1 empty");
+}
+
+// l2 — a LOCAL the body appends to: the walk is of the text as it was — "a,b,c" walks a, b, c
+// (3 pieces) while the body appends ",z" three times; t ends "a,b,c,z,z,z".
+fn test_a_local_written_in_the_loop_is_walked_as_it_was() {
+  t = "a,b,c";
+  n = 0;
+  seen = "";
+  for p in t.split(',') { n += 1; seen += p; t += ",z"; }
+  assert(n == 3 && seen == "abc" && t == "a,b,c,z,z,z", "l2 {n} {seen} {t}");
+}
+
+// l3 — a FIELD rewritten in the loop: d.body = "x;y".replace each pass — the walk keeps the
+// original "1,22,333": Σ sizes 1 + 2 + 3 = 6; d.body ends "333" (the last piece).
+fn test_a_field_rewritten_in_the_loop() {
+  d = Doc { body: "1,22,333", n: 0 };
+  s = 0;
+  for p in d.body.split(',') { s += size(p); d.body = p; d.n += 1; }
+  assert(s == 6 && d.n == 3 && d.body == "333", "l3 {s} {d.body}");
+}
+
+// l4 — a piece kept past its iteration (stored into a vector, formatted into a local): the
+// stored copies are the pieces "red", "", "blue"; the format keeps the last "<blue>".
+fn test_a_piece_kept_past_its_iteration() {
+  t = "red,,blue";
+  kept: vector<text> = [];
+  last = "";
+  for p in t.split(',') { kept += [p]; last = "<{p}>"; }
+  t = "gone";
+  assert(len(kept) == 3 && kept[0] == "red" && kept[1] == "" && kept[2] == "blue" && last == "<blue>", "l4 {kept} {last}");
+}
+
+// l5 — comparisons and searches on the borrowed piece: count pieces equal to "go", starting
+// with "g", containing "o": "go,gone,no,go" → equal 2, prefix 3, contains 4 → 234.
+fn test_value_tests_on_the_piece() {
+  t = "go,gone,no,go";
+  eq = 0;
+  pre = 0;
+  has = 0;
+  for p in t.split(',') {
+    if p == "go" { eq += 1; }
+    if p.starts_with("g") { pre += 1; }
+    if p.contains("o") { has += 1; }
+  }
+  assert(eq * 100 + pre * 10 + has == 234, "l5 {eq} {pre} {has}");
+}
+
+fn main() {
+  test_a_parameter_split_is_borrowed();
+  test_a_local_written_in_the_loop_is_walked_as_it_was();
+  test_a_field_rewritten_in_the_loop();
+  test_a_piece_kept_past_its_iteration();
+  test_value_tests_on_the_piece();
+}

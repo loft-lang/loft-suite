@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE
+//
+// A u32 WIDENS INTO integer, AND integer DOES NOT WIDEN INTO i32 (`@FR-Disp-Specific` crossed
+// with `@FR-C-Int`, and `@FR-Disp-Applicable`'s lone-twin parity).  `integer` holds every `u32`
+// value (`[0, 2^32-2] ⊆ i64`), so a `u32` argument ranks WIDENED against an `integer` member —
+// the lone `fn f(x: integer)` takes it — and beats a `float` member (CONVERTED).  And `i32`
+// does NOT hold every `integer`, so an `integer` argument is no widening into `i32`: the lone
+// `fn f(x: i32)` refuses it ("cannot implicitly narrow"), so in a set the `i32` member is not
+// applicable at all and the `float` member (CONVERTED) is the selection.
+//
+// DEFECT (ignored until fixed): the rank compares against a plain `integer` whose range is the
+// 32-bit one.  Observed on both lanes' parser (interpret shown; native is the same front end):
+//   wu1(integer | float) with u32 7     → "float 7"   (expected "integer 7") — SILENT WRONG
+//   wu2(integer | text)  with u32 7     → refused "no definition of `wu2` takes (u32)"
+//   wu3(i32 | integer)   with u32 7     → refused "no definition of `wu3` takes (u32)"
+//   wu4(i32 | float)     with integer 7 → refused "cannot implicitly narrow integer to i32"
+//                                          (expected "float 7": the i32 member is not applicable)
+// Correct beside it: wu1 with u16 → "integer", wu4 with i32 → "i32", a lone f(integer) with u32.
+//
+// @falsified-at: none yet — the cell is the defect's record; it fails on the current tree.
+// CHANNEL: the compile (a refusal), then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: `an-integer-widens-only-into-a-range-that-holds-all-of-it` beside it (the narrow widths).
+
+fn wu1(x: integer) -> text { "integer {x}" }
+fn wu1(x: float) -> text { "float {x}" }
+
+fn wu2(x: integer) -> text { "integer {x}" }
+fn wu2(x: text) -> text { "text {x}" }
+
+fn wu3(x: i32) -> text { "i32 {x}" }
+fn wu3(x: integer) -> text { "integer {x}" }
+
+fn wu4(x: i32) -> text { "i32 {x}" }
+fn wu4(x: float) -> text { "float {x}" }
+
+fn test_a_u32_widens_into_integer() {
+  a: u32 = 7;
+  s = "{wu1(a)}|{wu2(a)}|{wu3(a)}";
+  assert(s == "integer 7|integer 7|integer 7", "u32 into integer members: {s}");
+}
+
+fn test_an_integer_is_no_widening_into_i32() {
+  a: integer = 7;
+  b: i32 = 8;
+  s = "{wu4(a)}|{wu4(b)}";
+  assert(s == "float 7|i32 8", "integer / i32 into (i32 | float): {s}");
+}
+
+fn main() {
+  test_a_u32_widens_into_integer();
+  test_an_integer_is_no_widening_into_i32();
+}

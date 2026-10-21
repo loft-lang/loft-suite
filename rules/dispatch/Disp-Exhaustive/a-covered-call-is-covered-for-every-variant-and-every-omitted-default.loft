@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COVERED CALL IS COVERED FOR EVERY VARIANT AND EVERY OMITTED DEFAULT (`@FR-Disp-Exhaustive`
+// crossed with `@FR-Disp-Applicable`).  Disp-Exhaustive's guarantee rests on Disp-Applicable being
+// MONOTONE under the variant-into-enum subtyping: a call the static types cover is covered for
+// every runtime value, so no "no applicable method" path exists at run time.  Disp-Applicable
+// also lets a trailing parameter with a default be omitted — so applicability is per MEMBER, and
+// a member's own default is what its leaf receives.  The cells hold an argument at the enum and
+// walk every variant through sets that cover it three ways: an enum-level member beside a
+// variant one; one member per variant, each with its OWN default; and members of different
+// arities, where the argument count decides which members take the call before the variant does.
+//
+// Values hand-computed (pick(i): 0 → XFire{0}, 1 → XIce{1}, 2 → XRock{2}):
+//   ea(x)      : XFire → "fire 0" (its variant member), XIce → "ent 1", XRock → "ent 2"
+//   eb(x)      : each variant's member with its own default → "fire 0 10", "ice 1 20", "rock 2 30"
+//   eb(x, 7)   : "fire 0 7", "ice 1 7", "rock 2 7"
+//   ec(x) on XFire{1} / XIce{2}: "fire 1 10" / "ice 2" (the XIce member has no `k`)
+//   ed: (XEnt, k = 5, t = "d") beside (XIce, k = 6):
+//       ed(XFire{1}) "ent 1 5 d", ed(XIce{2}) "ice 2 6", ed(XIce{2}, 3) "ice 2 3",
+//       ed(XIce{2}, 3, "z") "ent 2 3 z" (three arguments: only the enum member takes them)
+//
+// Axes it MOVES: the runtime variant (all three), the coverage shape (enum member, one member
+//   per variant, mixed arity), the argument count (omitted default, given, one more than a member
+//   takes), a static variant beside the held one.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `an-uncovered-variant-and-argument-pair-is-refused-naming-the-pair` beside it — the same
+//   set with an argument no member takes for one variant is refused.
+
+enum XEnt { XFire { n: integer }, XIce { n: integer }, XRock { n: integer } }
+
+fn ea(e: XFire) -> text { "fire {e.n}" }
+fn ea(e: XEnt) -> text { "ent {e.n}" }
+
+fn eb(e: XFire, k: integer = 10) -> text { "fire {e.n} {k}" }
+fn eb(e: XIce, k: integer = 20) -> text { "ice {e.n} {k}" }
+fn eb(e: XRock, k: integer = 30) -> text { "rock {e.n} {k}" }
+
+fn ec(e: XFire, k: integer = 10) -> text { "fire {e.n} {k}" }
+fn ec(e: XIce) -> text { "ice {e.n}" }
+fn ec(e: XRock) -> text { "rock {e.n}" }
+
+fn ed(e: XEnt, k: integer = 5, t: text = "d") -> text { "ent {e.n} {k} {t}" }
+fn ed(e: XIce, k: integer = 6) -> text { "ice {e.n} {k}" }
+
+fn pick(i: integer) -> XEnt {
+  if i == 0 { XFire { n: i } } else if i == 1 { XIce { n: i } } else { XRock { n: i } }
+}
+
+fn test_every_variant_reaches_a_member() {
+  s = "";
+  for i in 0..3 {
+    x = pick(i);
+    s += "{ea(x)};{eb(x)};{eb(x, 7)}|";
+  }
+  assert(s == "fire 0;fire 0 10;fire 0 7|ent 1;ice 1 20;ice 1 7|ent 2;rock 2 30;rock 2 7|",
+         "per-variant sets: {s}");
+  assert(len(s) == 74, "length {len(s)}");
+}
+
+fn test_the_variant_member_beats_the_enum_member_at_run_time() {
+  x = pick(0);
+  f = XFire { n: 9 };
+  s = "{ea(x)}|{ea(f)}|{eb(f)}";
+  assert(s == "fire 0|fire 9|fire 9 10", "XFire leaf: {s}");
+}
+
+fn test_members_of_different_arities() {
+  x: XEnt = XFire { n: 1 };
+  y: XEnt = XIce { n: 2 };
+  s = "{ec(x)}|{ec(y)}|{ed(x)}|{ed(y)}|{ed(y, 3)}|{ed(y, 3, "z")}";
+  assert(s == "fire 1 10|ice 2|ent 1 5 d|ice 2 6|ice 2 3|ent 2 3 z", "arities: {s}");
+}
+
+fn main() {
+  test_every_variant_reaches_a_member();
+  test_the_variant_member_beats_the_enum_member_at_run_time();
+  test_members_of_different_arities();
+}

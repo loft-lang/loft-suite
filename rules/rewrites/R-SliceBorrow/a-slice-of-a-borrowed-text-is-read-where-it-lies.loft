@@ -1,0 +1,102 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE OF A BORROWED TEXT IS READ WHERE IT LIES (`@FR-R-SliceBorrow` crossed with
+// `@FR-R-TextBorrow`).  R-SliceBorrow makes a text local whose every binding is a value slice
+// `s[a..b]` the `&str` the slice answers, where `s` is a plain text PARAMETER "or a local that
+// itself borrows under this rule or (R-TextBorrow)'s store-read clause" — and asks of every
+// mention the reading R-TextBorrow's clause already decides.  So the two compose in a chain: a
+// text read out of a parameter's vector (`w = words[i]?`, borrowed from the caller's store), a
+// slice of it, a slice of that slice, each a view of the same bytes; and the chain must decline
+// where a link is OWNED (its buffer can grow under the borrow) or rebound.  Each cell reads the
+// chain's ends by value and checks the bytes, counted by byte offset as `s[a..b]` counts them.
+//
+// Axes it MOVES: the chain's root (a parameter's text, a parameter's vector element under `?`
+// and under `??`, an owned local — declines), its depth (one slice, a slice of a slice), the
+// bounds (literal, from `find`, negative from the end, open-ended), what the
+// chain ends in (a comparison, `size`, a character walk, an append into another text).  Values
+// hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_TEXT_BORROW=1` ("a slice of a parameter's text", a store-read
+// borrow, or the decline with its mention).  Native only; the interpreter copies each slice and
+// is the oracle.  `LOFT_NO_SLICE_BORROW=1` and `LOFT_NO_TEXT_BORROW=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; rustc refuses a wrong admission of the owned root
+//   (the borrow outlives the append), so s4 is the compile channel and the rest the value one.
+// CHANNEL: the asserts (and the native compile for s4).
+// ARMED: no instrument.
+// WITNESS: each message prints the pieces.
+// HOLDS: the interpreter is the oracle.
+
+/// s1 — a parameter's vector element borrowed (store-read clause), sliced, sliced again.
+fn tails(words: const vector<text>) -> text {
+  out = "";
+  for i in 0..len(words) {
+    w = words[i]?;
+    u = w[1..];
+    v = u[1..];
+    out += "{size(u)}{v}|";
+  }
+  out
+}
+
+/// s2 — a parameter sliced by `find`, then the slice sliced from the end.
+fn field(line: text) -> text {
+  at = line.find("=") ?? -1;
+  if at < 0 { return "-"; }
+  key = line[0..at];
+  val = line[at + 1..];
+  short = val[0..-1];
+  "{key}:{val}:{short}:{size(key) + size(val)}"
+}
+
+/// s3 — the `??` discharge as the chain's root, and a character walk of the slice.
+fn vowels(words: const vector<text>, i: integer) -> integer {
+  w = words[i] ?? "none";
+  part = w[0..4];
+  n = 0;
+  for c in part { if c == 'a' || c == 'e' || c == 'o' { n += 1; } }
+  n * 10 + size(part)
+}
+
+/// s4 — an OWNED root: the slice keeps its copy, so an append to the root after it leaves the
+/// slice as cut.
+fn owned_root(x: text) -> text {
+  o = x + "-tail";
+  t = o[0..3];
+  o += "!";
+  "{t}/{o}"
+}
+
+// s1 — ["xyz", "ab", "hallo"]: u = "yz" (2), v = "z"; u = "b" (1), v = ""; u = "allo" (4),
+// v = "llo" → "2z|1|4llo|".
+fn test_a_vector_element_sliced_twice() {
+  r = tails(["xyz", "ab", "hallo"]);
+  assert(r == "2z|1|4llo|", "s1 {r}");
+}
+
+// s2 — "key=value" → key "key", val "value", short "valu", sizes 3 + 5 = 8; no "=" → "-".
+fn test_a_parameter_sliced_by_find_and_from_the_end() {
+  assert(field("key=value") == "key:value:valu:8", "s2 {field(\"key=value\")}");
+  assert(field("bare") == "-", "s2 bare");
+  assert(field("=x") == ":x::1", "s2 empty key {field(\"=x\")}");
+}
+
+// s3 — words[0] = "aeroplane"[0..4] = "aero" → 3 vowels, 4 bytes → 34; words[5] is past the
+// end → "none"[0..4] = "none" → 2 vowels (o, e) → 24.
+fn test_a_discharged_root_and_a_character_walk() {
+  ws = ["aeroplane", "x"];
+  assert(vowels(ws, 0) == 34 && vowels(ws, 5) == 24, "s3 {vowels(ws, 0)} {vowels(ws, 5)}");
+}
+
+// s4 — "ab" + "-tail" = "ab-tail"; t = "ab-"; o becomes "ab-tail!" → "ab-/ab-tail!".
+fn test_an_owned_root_keeps_its_copy() {
+  assert(owned_root("ab") == "ab-/ab-tail!", "s4 {owned_root(\"ab\")}");
+}
+
+fn main() {
+  test_a_vector_element_sliced_twice();
+  test_a_parameter_sliced_by_find_and_from_the_end();
+  test_a_discharged_root_and_a_character_walk();
+  test_an_owned_root_keeps_its_copy();
+}

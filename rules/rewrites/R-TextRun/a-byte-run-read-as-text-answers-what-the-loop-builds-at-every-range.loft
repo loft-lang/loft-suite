@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BYTE RUN READ AS TEXT ANSWERS WHAT THE LOOP BUILDS AT EVERY RANGE (`@FR-R-TextRun` crossed with
+// `@FR-R-ByteCopy`).  R-ByteCopy's vector clause turns `for i in lo..hi { t += [v[off + i] ?? d] }`
+// into one slice append behind the guard `0 <= off && 0 <= lo && lo <= hi && hi <= len(v) - off`,
+// the loop as written running for every range the guard refuses; R-TextRun then never builds `t`
+// when its only read is `x = text_from_bytes(t)`: on the guard it reads the text straight off `v`,
+// off it it runs the declaration, the loop and the conversion as written.  So every range must
+// answer what the loop as written builds: an in-range span, an empty one, one that runs past the
+// end (the default byte pushed for each missing index), a negative start (an element read counts
+// from the end), a negative offset, a reversed range — and invalid UTF-8, which `text_from_bytes`
+// answers as the empty text on both roads.
+//
+// Values hand-computed over v = bytes of "hello world" (h0 e1 l2 l3 o4 _5 w6 o7 r8 l9 d10) and of
+// "héllo" (h, C3, A9, l, l, o — 6 bytes), d = '?' (63):
+//   (0,0,5) "hello"  (6,0,5) "world"  (2,1,3) "lo"  (0,3,3) ""  (8,0,5) "rld??"
+//   (0,−2,1) v[−2] v[−1] v[0] = "ldh"   (−3,0,2) v[−3] v[−2] = "rl"   (0,5,2) ""
+//   "héllo": (0,0,3) "hé" (3 bytes, 2 characters); (0,0,2) h + C3 is invalid → "";
+//            (2,0,4) A9 l l o is invalid → "";  (0,−12,−10) both below −len → "??"
+//
+// Axes it MOVES: the range against the guard (inside, empty, past the end, negative start, negative
+//   offset, reversed), the bytes (ASCII, a two-byte character whole, a cut character).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_BYTE_COPY=1 and LOFT_POISON=1.  Fires: LOFT_TRACE_BYTE_COPY=1
+//   says `[byte-copy] fn=n_run ADMITTED: `t` takes the bytes of vector `v` as one append` and
+//   `[text-run] fn=n_run ADMITTED: `t` is read as text off `v` in place`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the texts.
+// HOLDS: `n_bytes_of` above — R-ByteCopy alone (the text clause), answered by the same bytes.
+
+fn bytes_of(t: text) -> vector<u8> {
+  b: vector<u8> = [];
+  for i in 0..size(t) { b += [(t.byte_at(i) & 255) as u8]; }
+  b
+}
+
+fn run(v: vector<u8>, off: integer, lo: integer, hi: integer) -> text {
+  t: vector<u8> = [];
+  for i in lo..hi { t += [v[off + i] ?? 63]; }
+  x = text_from_bytes(t);
+  x
+}
+
+fn test_every_range_of_an_ascii_buffer() {
+  v = bytes_of("hello world");
+  s = "[{run(v, 0, 0, 5)}] [{run(v, 6, 0, 5)}] [{run(v, 2, 1, 3)}] [{run(v, 0, 3, 3)}] [{run(v, 8, 0, 5)}]";
+  assert(s == "[hello] [world] [lo] [] [rld??]", "in and past range: {s}");
+  t = "[{run(v, 0, -2, 1)}] [{run(v, -3, 0, 2)}] [{run(v, 0, 5, 2)}]";
+  assert(t == "[ldh] [rl] []", "negative and reversed: {t}");
+}
+
+fn test_a_multi_byte_character_whole_or_cut() {
+  v = bytes_of("héllo");
+  a = run(v, 0, 0, 3);
+  b = run(v, 0, 0, 2);
+  c = run(v, 2, 0, 4);
+  d = run(v, 0, -12, -10);
+  assert(a == "hé" && size(a) == 3 && len(a) == 2, "whole: [{a}] {size(a)}");
+  assert(b == "" && c == "" && d == "??", "cut and below: [{b}] [{c}] [{d}]");
+}
+
+fn main() {
+  test_every_range_of_an_ascii_buffer();
+  test_a_multi_byte_character_whole_or_cut();
+}

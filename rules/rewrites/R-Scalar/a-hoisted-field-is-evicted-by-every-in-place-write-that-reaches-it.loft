@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOISTED FIELD IS EVICTED BY EVERY IN-PLACE WRITE THAT REACHES IT (`@FR-R-Scalar` crossed
+// with `@FR-R-InPlace`).  R-Scalar hoists `v.f` "under the (R-InPlace) gate": the loop's
+// writes are all in-place sets, and the hoist holds unless the WRITE SET reaches (type(v),
+// f).  R-InPlace's clauses each put a write into that set in its own shape — a field set
+// through an alias, the COPY clause's whole-record `OpCopyRecord` (read as a write of the
+// type WHOLE), the LINK clause's `&` callee writing in place — and a write of the same type
+// at another offset, or of another type at the same offset, must evict nothing.  Each cell
+// reads a field once per pass and writes it by one of those routes; a stale hoist answers
+// the entry value every pass.
+//
+// Axes it MOVES: the write's route (alias field set, whole-record copy as the ONLY
+// whole-type write, `&` callee, same type other offset, other type same offset), what the
+// write reaches (the read field, a sibling field).  Values hand-computed in each comment.
+//
+// Firing read off `--native-emit` (the hoisted read in the prelude where nothing reaches the
+// field) and `LOFT_HOIST_VERIFY=1` (`hoisted_scalar_verify` re-reads every hoisted scalar).
+// Cross-backend; `LOFT_NO_SCALAR_HOIST=1`, `LOFT_NO_COPY_IN_PLACE=1` and
+// `LOFT_NO_WRITE_HOIST=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; the copy cell s2 is the shape the copy clause's
+//   own receipt names (`c3b`: the copy the loop's only whole-type write; a hoist that misses
+//   it answers 300 where 103 is due).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum.
+// HOLDS: the interpreter is the oracle.
+
+struct E { energy: integer, speed: integer }
+struct F { energy: integer, speed: integer }
+
+fn grow(e: &E) { e.energy += 1; }
+
+// s1 — r and q view one element; the loop reads r.energy and r.speed and writes q.speed
+// (same type, same offset → r.speed evicted; r.energy never written, may stay hoisted).
+// i=0: 10·10 + 2 = 102, q.speed 3; i=1: 103; i=2: 104 → 309.
+fn test_a_field_set_through_an_alias() {
+  ents = [E { energy: 10, speed: 2 }];
+  r = ents[0]?;
+  q = ents[0]?;
+  t = 0;
+  for _ in 0..3 { t += r.energy * 10 + r.speed; q.speed += 1; }
+  assert(t == 309 && r.speed == 5, "s1 {t} {r.speed}");
+}
+
+// s2 — the COPY is the loop's only whole-type write: r views ents[0], each pass copies
+// src[i] over ents[0].  i=0 reads 100, then ents[0] = src[0] (1); i=1 reads 1; i=2 reads 2
+// → 103; r.energy ends 3.
+fn test_a_whole_record_copy_is_a_write_of_the_type() {
+  src = [E { energy: 1, speed: 0 }, E { energy: 2, speed: 0 }, E { energy: 3, speed: 0 }];
+  ents = [E { energy: 100, speed: 0 }];
+  r = ents[0]?;
+  t = 0;
+  for i in 0..3 {
+    t += r.energy;
+    ents[0] = src[i]?;
+  }
+  assert(t == 103 && r.energy == 3, "s2 {t} {r.energy}");
+}
+
+// s3 — a `&E` callee writes the field in place (the link clause): 7, 8, 9, 10 → 34.
+fn test_a_reference_callee_writes_the_field() {
+  ents = [E { energy: 7, speed: 0 }];
+  r = ents[0]?;
+  t = 0;
+  for _ in 0..4 { t += r.energy; grow(ents[0]); }
+  assert(t == 34 && ents[0].energy == 11, "s3 {t}");
+}
+
+// s4 — writes that reach NOTHING the loop reads: the sibling field of the same type and the
+// same field of ANOTHER type.  r.energy stays 5: t = 4·5 = 20; r.speed 0 → 4, f.energy 9 → 13.
+fn test_writes_that_reach_another_offset_or_another_type() {
+  ents = [E { energy: 5, speed: 0 }];
+  r = ents[0]?;
+  f = F { energy: 9, speed: 0 };
+  t = 0;
+  for _ in 0..4 { t += r.energy; r.speed += 1; f.energy += 1; }
+  assert(t == 20 && r.speed == 4 && f.energy == 13, "s4 {t} {r.speed} {f.energy}");
+}
+
+// s5 — the copy runs the other way: the VIEWED element copied out over another element is a
+// read of r, not a write; ents[1] = ents[0] each pass while ents[0].energy is bumped through
+// q: r.energy reads 1, 2, 3 → 6; ents[1].energy ends 3.
+fn test_a_copy_out_of_the_viewed_element() {
+  ents = [E { energy: 1, speed: 0 }, E { energy: 0, speed: 0 }];
+  r = ents[0]?;
+  q = ents[0]?;
+  t = 0;
+  for _ in 0..3 { t += r.energy; ents[1] = ents[0]; q.energy += 1; }
+  assert(t == 6 && ents[1].energy == 3 && r.energy == 4, "s5 {t} {ents[1].energy}");
+}
+
+fn main() {
+  test_a_field_set_through_an_alias();
+  test_a_whole_record_copy_is_a_write_of_the_type();
+  test_a_reference_callee_writes_the_field();
+  test_writes_that_reach_another_offset_or_another_type();
+  test_a_copy_out_of_the_viewed_element();
+}

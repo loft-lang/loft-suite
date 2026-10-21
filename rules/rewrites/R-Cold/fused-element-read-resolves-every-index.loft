@@ -13,6 +13,14 @@
 // vector, where every index addresses nothing (e7).  The sort keeps the bench's spelling,
 // whose element-to-element store warns.
 //
+// It is also `@FR-R-Switch`'s cell for this rewrite: R-Switch has every rewrite ship a falsifier,
+// "a checking form that re-derives what the rewrite assumed and panics when it is stale
+// (LOFT_HOIST_VERIFY=1)", and exempts R-Cold from the census as "the runtime's own shape", so its
+// fold has no switch to A/B and the checking form is its only falsifier — `verify_folded_read`
+// compares every folded answer with a fresh `get_vector`.  The receipt below is that falsifier
+// firing on a sabotaged fold; on the current tree every cell agrees under LOFT_HOIST_VERIFY=1 on
+// both backends (rule walk batch 4).
+//
 // @EXPECT_WARNING: a nullable `integer?` is stored into the assignment target of the non-null type `integer`
 // @falsified-at: hand-measured (2026-10-04) — with `get_elem_at` sabotaged to answer
 // `absent` for every negative index (the fold without its from-the-end clause),

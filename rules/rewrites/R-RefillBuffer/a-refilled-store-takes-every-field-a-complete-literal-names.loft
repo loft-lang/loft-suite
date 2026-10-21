@@ -1,0 +1,109 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFILLED STORE TAKES EVERY FIELD A COMPLETE LITERAL NAMES (`@FR-R-RefillBuffer` crossed with
+// `@FR-R-CompleteWrite`).  R-RefillBuffer mints a return buffer from the store a rebind released —
+// "a null buffer takes the kept store of the same type as it stands" — only where each mint heads a
+// literal group that writes every field, "(R-CompleteWrite)'s coverage"; R-CompleteWrite's coverage
+// counts what the parser's lowering writes for EVERY field: a named value, the declared default of
+// an omitted one, the null sentinel of a nullable, `false`, an enum's value.  So a refilled store
+// that held a value with DIFFERENT field values — the store two calls back — must read, after the
+// literal, exactly the new value: each scalar, a nullable now null, a float, a boolean, an enum and
+// the vector emptied and refilled to its new length; and the same when the literal omits the
+// defaulted fields and the body sets them afterwards on one path only.
+//
+// Values hand-computed: c₀ = M{n 0, xs []}; step(c) with k = c.n % 3 writes n + 1 and, for k = 0,
+// d 50, o 9, f 0.25, b true, md On and 4 elements c.n·10 + i + len(c.xs); otherwise d 7, o null,
+// f 1.5, b false, md Auto and 1 element c.n·10 + len(c.xs).
+//   run(7) = 1,50,9,0.25,true,On,4:0:3 | 2,7,-1,1.5,false,Auto,1:14:14 | 3,…,1:21:21 |
+//            4,50,9,0.25,true,On,4:31:34 | 5,…,1:44:44 | 6,…,1:51:51 | 7,50,9,0.25,true,On,4:61:64
+//   (call 6 refills the store call 4 filled: every field of the full value is overwritten);
+//   run2 (the literal names n, b and xs only; the rest set after it when k = 0) answers the same.
+//
+// Axes it MOVES: the field kind (integer, nullable integer, float, boolean, plain enum, vector),
+//   which value the kept store held (the same shape, the other shape), the literal's spelling (every
+//   field named, defaults omitted and set afterwards), the vector's length against the kept one.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_REFILL_BUFFER=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: `--native-emit` mints `n_step` and `n_step2` with `OpDatabaseRefill` and empties the
+//   vector field with `clear_vector`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints every field.
+// HOLDS: `a-store-a-rebind-hands-back-is-refilled-by-the-next-call` beside it.
+
+enum Mode { Off, On, Auto }
+struct M { n: integer, d: integer = 7, o: integer?, f: float = 1.5, b: boolean, md: Mode = Auto, xs: vector<integer> }
+
+fn pick(k: integer) -> Mode {
+  if k == 0 { Mode.On } else { Mode.Auto }
+}
+
+fn odd(k: integer) -> integer? {
+  if k == 0 { 9 } else { null }
+}
+
+fn step(c: const M) -> M {
+  k = c.n % 3;
+  r = M { n: c.n + 1, d: if k == 0 { 50 } else { 7 }, o: odd(k), f: if k == 0 { 0.25 } else { 1.5 }, b: k == 0, md: pick(k), xs: [] };
+  cnt = if k == 0 { 4 } else { 1 };
+  for i in 0..cnt { r.xs += [c.n * 10 + i + len(c.xs)]; }
+  r
+}
+
+fn step2(c: const M) -> M {
+  k = c.n % 3;
+  r = M { n: c.n + 1, b: k == 0, xs: [] };
+  if k == 0 {
+    r.d = 50;
+    r.o = 9;
+    r.f = 0.25;
+    r.md = Mode.On;
+  }
+  cnt = if k == 0 { 4 } else { 1 };
+  for i in 0..cnt { r.xs += [c.n * 10 + i + len(c.xs)]; }
+  r
+}
+
+fn show(m: M) -> text {
+  "{m.n},{m.d},{m.o ?? -1},{m.f},{m.b},{m.md},{len(m.xs)}:{m.xs[0] ?? -99}:{m.xs[len(m.xs) - 1] ?? -99}"
+}
+
+fn run(k: integer) -> text {
+  c = M { n: 0, b: false, xs: [] };
+  s = "";
+  for _ in 0..k {
+    c = step(c);
+    s += "{show(c)}|";
+  }
+  s
+}
+
+fn run2(k: integer) -> text {
+  c = M { n: 0, b: false, xs: [] };
+  s = "";
+  for _ in 0..k {
+    c = step2(c);
+    s += "{show(c)}|";
+  }
+  s
+}
+
+fn test_a_complete_literal_overwrites_the_kept_store() {
+  s = run(7);
+  assert(s == "1,50,9,0.25,true,On,4:0:3|2,7,-1,1.5,false,Auto,1:14:14|3,7,-1,1.5,false,Auto,1:21:21|4,50,9,0.25,true,On,4:31:34|5,7,-1,1.5,false,Auto,1:44:44|6,7,-1,1.5,false,Auto,1:51:51|7,50,9,0.25,true,On,4:61:64|", "run: {s}");
+}
+
+fn test_omitted_defaults_are_written_too() {
+  s = run2(7);
+  assert(s == "1,50,9,0.25,true,On,4:0:3|2,7,-1,1.5,false,Auto,1:14:14|3,7,-1,1.5,false,Auto,1:21:21|4,50,9,0.25,true,On,4:31:34|5,7,-1,1.5,false,Auto,1:44:44|6,7,-1,1.5,false,Auto,1:51:51|7,50,9,0.25,true,On,4:61:64|", "run2: {s}");
+  assert(len(s) == 202, "length {len(s)}");
+}
+
+fn main() {
+  test_a_complete_literal_overwrites_the_kept_store();
+  test_omitted_defaults_are_written_too();
+}

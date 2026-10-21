@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SWITCH A/B COMPARES WHAT A PROGRAM COMPUTES, NEVER ITS REPRESENTATION (`@FR-R-Escape` crossed
+// with `@FR-R-Switch`).  R-Escape: "the contract is SEMANTICS — what a program computes and can
+// observe — never a representation: how many stores or copies a value takes, or where it
+// lives, is the compiler's to change"; R-Switch's both-backend clause makes the switch A/B the
+// falsifier of the rewrites the interpreter shares, and "the A/B compares SEMANTICS, per
+// (R-Escape): an advice[avoidable-copy] and a store dump's `bc:` offset report a
+// representation and are not compared".  The language does carry reports of representation
+// — `size(h)` of a hash answers its TABLE (@C150), which `(R-Header)`'s hash clause reserves
+// ahead (measured: 1024 slots on `--native`, 512 on the interpreter and under
+// `LOFT_NO_HASH_RESERVE=1`, for 37 keys), and `store_memory()` names stores — so this cell
+// draws the line the A/B draws: it asserts every value, length, order and fault a program
+// computes, exactly, under every setting, and asks of a representation report only what
+// the representation must satisfy whatever it is.
+//
+// Axes it MOVES: the representation the rewrite changes (a hash's reserved table, a vector's
+// reserved capacity, a call's buffer store), the report (none, `size(h)`), the program's
+// semantics around it (iteration in key order, overwrite of a repeated key, a length, a sum).
+// Values hand-computed in each cell's comment.
+//
+// Run as the A/B: `LOFT_NO_HASH_RESERVE=1`, `LOFT_NO_PUSH_FILL=1`, `LOFT_NO_RETBUF_REUSE=1`,
+// both backends — every assert holds under each, while `size(h)` reads 1024 or 512.
+//
+// @falsified-at: none — the cell is the line itself: asserting `size(h) == 512` would turn the
+//   native lane red on a correct build, which is the comparison R-Switch forbids.
+// CHANNEL: the asserts.
+// ARMED: the switches above.
+// WITNESS: each message prints the computed value and the report.
+// HOLDS: the interpreter is the oracle of every semantic value.
+
+struct E { k: integer, v: integer }
+
+fn build(n: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..n { out += [i * 2]; }
+  out
+}
+
+// a1 — a hash filled by a counted loop with repeated keys: 100 inserts of k = i % 37, the last
+// one per key wins: k ≤ 25 holds 74 + k, k ≥ 26 holds 37 + k → Σ 26·74 + 325 + 11·37 + 341 =
+// 2997; 37 entries, walked in key order (0, 1, …, 36); size(h) — the table — is at least 37.
+fn test_a_reserved_hash_answers_the_same_entries() {
+  h: hash<E[k]> = [];
+  for i in 0..100 { h += [E { k: i % 37, v: i }]; }
+  s = 0;
+  last = -1;
+  ordered = true;
+  for e in h { s += e.v; if e.k <= last { ordered = false; } last = e.k; }
+  assert(len(h) == 37 && s == 2997 && ordered && last == 36, "a1 len {len(h)} s {s}");
+  assert((h[5]?.v) == 79 && (h[30]?.v) == 67, "a1 lookups");
+  assert(size(h) >= len(h), "a1 the table holds the entries: size {size(h)}");
+}
+
+// a2 — a vector built by a reserving loop: capacity is no observable; size(v) is the element
+// bytes, len · 8 = 400, and the values are 0, 2, …, 98 → Σ 2450.
+fn test_a_reserved_vector_answers_its_length_not_its_capacity() {
+  v = build(50);
+  s = 0;
+  for x in v { s += x; }
+  assert(len(v) == 50 && size(v) == 400 && s == 2450 && v[49] == 98, "a2 {len(v)} {size(v)} {s}");
+}
+
+// a3 — a call whose buffer store is reused per call site (R-Reuse): the results are
+// independent values whatever store they were built in.  build(3) = [0,2,4], build(2) =
+// [0,2]; writing the first leaves the second.
+fn test_a_reused_buffer_answers_independent_values() {
+  a = build(3);
+  b = build(2);
+  a[0] = 7;
+  t = 0;
+  for i in 0..3 { r = build(i + 1); t += len(r) * 10 + (r[len(r) - 1] ?? -1); }
+  assert(a[0] == 7 && b[0] == 0 && len(b) == 2, "a3 {a} {b}");
+  assert(t == 10 + 0 + 20 + 2 + 30 + 4, "a3 t {t}");
+}
+
+fn main() {
+  test_a_reserved_hash_answers_the_same_entries();
+  test_a_reserved_vector_answers_its_length_not_its_capacity();
+  test_a_reused_buffer_answers_independent_values();
+}

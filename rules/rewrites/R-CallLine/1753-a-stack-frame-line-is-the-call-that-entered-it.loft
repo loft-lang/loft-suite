@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#1753 — `stack_trace()`: a frame's `line` is the line of the CALL that entered it, and the
+// loft#1753 (`@FR-R-CallLine`) — `stack_trace()`: a frame's `line` is the line of the CALL that entered it, and the
 // entry frame, which no loft call entered, answers 0 (STACKTRACE.md, the TR1.4 guard).  The
 // interpreter named the NEXT statement's line for a call that ended its statement — and gave the
 // entry frame that line too — while `--native` answered every function's declaration line.

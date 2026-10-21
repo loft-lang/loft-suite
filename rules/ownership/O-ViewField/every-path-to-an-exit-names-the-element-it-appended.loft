@@ -13,6 +13,15 @@
 // Every site reads the result only as a length and a `const` argument, the shape the view
 // admits; the answer must be the value a copy holds, whichever path ran.
 //
+// It also verifies `@FR-R-ElemFirst`'s clause that "an admitted function's own EXIT copies are not
+// mentions (the value form drops them, `(O-ViewField)`)": in `pc_match` and `pc_exit_in_loop` the
+// local `pc_pts(n)` result is consumed once as the appended element's field AND named again at the
+// exit literal; on `--native` LOFT_TRACE_ELEMFIRST=1 says `a built in its element (a record's
+// collection)` (and `b`, `d`, `p`) while LOFT_TRACE_VALUEREC=1 says `n_pc_match -> (bool, DbRef)`
+// — the local is built inside the element AND the exit answers a view of that element's field, so
+// every assert reads a field built where it lives.  The same answers under LOFT_NO_ELEMENT_PLACE=1
+// and LOFT_NO_VIEW_FIELD=1 (rule walk batch 4).
+//
 // Axes it MOVES: the path shape (`match` arms, loop passes, an exit inside a loop, an arm with
 // no append), the path taken (each).  Values hand-computed: `pc_pts(n)` is (0,0) … (n-1, 2n-2),
 // whose sum is 3·n(n-1)/2.

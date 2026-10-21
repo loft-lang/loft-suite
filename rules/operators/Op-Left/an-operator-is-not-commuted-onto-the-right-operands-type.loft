@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR IS NOT COMMUTED ONTO THE RIGHT OPERAND'S TYPE (`@FR-Op-Left` crossed with
+// `@FR-Disp-Select`).  `2 + a` asks the LEFT operand's type — `integer` — for a `plus` taking a `V`;
+// the selection is among `integer`'s members only ("the right operand's type is never asked and
+// no form is commuted"), so `V`'s `plus(self: V, o: integer)` does not answer it, and with no
+// applicable member the expression is refused at compile time.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both operand types in source order.
+// HOLDS: `an-operator-picks-the-left-types-member-by-the-right-operand-as-a-call-does` beside it
+//   (`a + 2` answers).
+// @EXPECT_ERROR: No matching operator '+' on 'integer' and 'V'
+
+struct V { x: integer }
+
+operator plus(self: V, o: integer) -> V { V { x: self.x + o * 10 } }
+
+fn main() {
+  a = V { x: 1 };
+  r = 2 + a;
+  println("{r.x}");
+}

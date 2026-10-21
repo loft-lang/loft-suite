@@ -1,0 +1,159 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DECODED TEXT SPAN READS WHAT THE COPY WOULD, AT EVERY BYTE RUN (`@FR-R-DecodeView` crossed
+// with `@FR-R-TextRun`).  R-DecodeView holds a decoded record's `text` field as a SPAN of the
+// frame B when the field's value at construction "is a span B[a..b] of a byte vector B — read
+// by (R-TextRun), copied by (R-ByteCopy)'s vector clause, or a slice", and condition (5): "the
+// span's bytes ARE the text the owned form holds: text_from_bytes leaves them unchanged (valid
+// UTF-8, tested once at construction).  A span that would be converted builds the owned text".
+// R-TextRun turns `t: vector<u8> = []; for i in lo..hi { t += [v[off + i] ?? d] }; x =
+// text_from_bytes(t)` into a range read guarded by the copy's guard.  So the decoder's text
+// leaf is a text run of the frame, and the span must answer, byte for byte, the text the
+// built copy answers — for valid ASCII, valid multi-byte UTF-8, a run that is not UTF-8 (the
+// copy answers ""), an empty run, a run ending exactly at the frame's end, and one that would
+// run past it (the decode fails).
+//
+// The frame: a tag byte, 2 a text of the next `arg` bytes, 4 a map of `arg` key / value pairs,
+// 1 an integer (arg - 100).  Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_DECODE_VIEW=1` on `loft --native-release <cell>` (`main`): the
+// roots `shout`, `measure` and `lookup` admitted.  The view clause is planned only for a build
+// without the live tier — `--native-release` — so plain `--native` and the suite's `--tests`
+// lanes keep every field owned and check the values only; `LOFT_NO_DECODE_VIEW=1` and
+// `LOFT_NO_BYTE_COPY=1` (no text run, hence no span) answer the same.
+//
+// @falsified-at: none — a conformance guard; the rule's own receipt (a span one byte late)
+//   answers d1's lookups `-`.
+// CHANNEL: the asserts, on --native-release.
+// ARMED: no instrument.
+// WITNESS: each message prints the decoded text.
+// HOLDS: the interpreter keeps every field owned and is the oracle.
+
+enum Val {
+  VNull,
+  VInt { value: integer },
+  VText { value: text },
+  VMap { entries: vector<Entry> },
+}
+
+struct Entry {
+  key: Val,
+  value: Val,
+}
+
+struct Dec {
+  value: Val,
+  next: integer,
+  ok: boolean,
+}
+
+fn read_v(bytes: vector<u8>, pos: integer, depth: integer) -> Dec {
+  n = len(bytes);
+  if pos + 1 >= n || depth > 8 { return Dec { value: VNull, next: pos, ok: false }; }
+  tag = bytes[pos] ?? 0;
+  arg = bytes[pos + 1] ?? 0;
+  at = pos + 2;
+  if tag == 1 { return Dec { value: VInt { value: arg - 100 }, next: at, ok: true }; }
+  if tag == 2 {
+    if at + arg > n { return Dec { value: VNull, next: pos, ok: false }; }
+    tb: vector<u8> = [];
+    for k in 0..arg { tb += [bytes[at + k] ?? 0]; }
+    return Dec { value: VText { value: text_from_bytes(tb) }, next: at + arg, ok: true };
+  }
+  if tag == 4 {
+    entries: vector<Entry> = [];
+    p = at;
+    mok = true;
+    for _ in 0..arg {
+      if mok {
+        kd = read_v(bytes, p, depth + 1);
+        if kd.ok {
+          vd = read_v(bytes, kd.next, depth + 1);
+          if vd.ok {
+            kv = kd.value;
+            vv = vd.value;
+            entries += [Entry { key: kv, value: vv }];
+            p = vd.next;
+          } else { mok = false; }
+        } else { mok = false; }
+      }
+    }
+    if !mok { return Dec { value: VNull, next: pos, ok: false }; }
+    return Dec { value: VMap { entries: entries }, next: p, ok: true };
+  }
+  return Dec { value: VNull, next: pos, ok: false };
+}
+
+fn dec(bytes: vector<u8>) -> Dec { read_v(bytes, 0, 0) }
+
+fn text_of(v: Val) -> text {
+  match v { VText { value } => { return "{value}"; }, _ => {} }
+  return "-";
+}
+
+fn get(m: Val, key: text) -> Val {
+  match m {
+    VMap { entries } => {
+      for e in entries {
+        match e.key { VText { value } => { if value == key { return e.value; } }, _ => {} }
+      }
+    },
+    _ => {}
+  }
+  return VNull;
+}
+
+/// The decoded text formatted into another (a root: the frame is its parameter).
+fn shout(frame: vector<u8>) -> text {
+  d = dec(frame);
+  if !d.ok { return "bad"; }
+  match d.value { VText { value } => { return "<{value}>"; }, _ => {} }
+  return "?";
+}
+
+/// Bytes, characters and a character walk of the decoded text.
+fn measure(frame: vector<u8>) -> text {
+  d = dec(frame);
+  match d.value {
+    VText { value } => {
+      upper = 0;
+      for c in value { if c >= 'A' && c <= 'Z' { upper += 1; } }
+      return "{size(value)}/{len(value)}/{upper}";
+    },
+    _ => {}
+  }
+  return "?";
+}
+
+fn lookup(frame: vector<u8>, key: text) -> text {
+  d = dec(frame);
+  if !d.ok { return "bad"; }
+  text_of(get(d.value, key))
+}
+
+// d1 — ASCII and multi-byte texts as map keys and values: {"k": "Zeta", "é": "Ωmega"}.
+fn test_ascii_and_multi_byte_runs() {
+  f: vector<u8> = [4, 2, 2, 1, 107, 2, 4, 90, 101, 116, 97, 2, 2, 195, 169, 2, 6, 206, 169, 109, 101, 103, 97];
+  assert(lookup(f, "k") == "Zeta" && lookup(f, "é") == "Ωmega" && lookup(f, "x") == "-", "d1 {lookup(f, \"k\")} {lookup(f, \"é\")}");
+}
+
+// d2 — a run that is not UTF-8 decodes to "" (the copy's conversion), and one that is:
+// [0x41, 0xFF, 0x42] → ""; "AbCé" → 5 bytes, 4 characters, 2 upper-case.
+fn test_invalid_and_valid_runs() {
+  bad: vector<u8> = [2, 3, 65, 255, 66];
+  good: vector<u8> = [2, 5, 65, 98, 67, 195, 169];
+  assert(shout(bad) == "<>" && measure(good) == "5/4/2" && measure(bad) == "0/0/0", "d2 {shout(bad)} {measure(good)}");
+}
+
+// d3 — an empty run, a run ending exactly at the frame's end, a run one byte past it:
+// [2, 0] → "<>"; [2, 3, 120, 121, 122] → "<xyz>"; [2, 4, 120, 121, 122] → "bad".
+fn test_empty_exact_and_overlong_runs() {
+  assert(shout([2, 0]) == "<>" && shout([2, 3, 120, 121, 122]) == "<xyz>" && shout([2, 4, 120, 121, 122]) == "bad", "d3");
+}
+
+fn main() {
+  test_ascii_and_multi_byte_runs();
+  test_invalid_and_valid_runs();
+  test_empty_exact_and_overlong_runs();
+}

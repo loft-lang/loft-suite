@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD APPEND TAKES ITS GROWTH BEFORE ITS FIELD WRITES (`@FR-R-PushRec` crossed with
+// `@FR-R-Refresh`).  R-PushRec's record push through a push header: "a growth step is the
+// runtime's own append followed by a fresh header (R-Refresh), taken BEFORE the element's
+// writes so they land in the moved record", and the finish is "the length bump written to
+// the header AND the record".  The cells append records across several growths while each
+// literal's fields READ the vector being built (staged before the append), with heap-owning
+// elements whose slot must be zeroed after the move, and with struct-enum elements of
+// variants of different widths.  Writes into a pre-growth slot leave the moved record's
+// element at its zero; a stale header reads the old record's elements.
+//
+// Axes it MOVES: the element (plain struct, a struct with a text and a vector — the heap
+// clause, a struct-enum — the enum clause), the number of growths (0 to 3), what the field
+// expressions read (nothing, an earlier element of the vector, its length).  Values
+// hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit` (`push_record_hoisted` / `push_record_hoisted_zero` through a
+// `__ph_` header in the loop).  Cross-backend; `LOFT_HOIST_VERIFY=1` (the header re-derived and
+// compared at the slot and at the finish), `LOFT_NO_RECORD_PUSH=1`, `LOFT_NO_HEAP_RECORD_PUSH=1`
+// and `LOFT_NO_ENUM_RECORD=1` answer the same; `LOFT_POISON_CLAIM=1` poisons a fresh claim, so
+// a slot whose zero was skipped reads poison.
+//
+// @falsified-at: none — a conformance guard; the rule's own falsifier (writes before the
+//   growth) answers every element past the first claim as 0 in e1.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1, LOFT_POISON_CLAIM=1 on --native.
+// WITNESS: each message prints the sums.
+// HOLDS: the interpreter is the oracle.
+
+struct P { a: integer, b: integer }
+struct T { n: integer, s: text, xs: vector<integer> }
+enum Sh { Dot { x: integer }, Box { x: integer, y: integer, z: integer } }
+
+fn sh_sum(v: const vector<Sh>) -> integer {
+  t = 0;
+  for e in v { match e { Dot { x } => { t += x; }, Box { x, y, z } => { t += x + y * 10 + z * 100; } } }
+  t
+}
+
+// e1 — forty plain records, each reading the previous element's `a` (v[i-1] is the default
+// record at i = 0: a = 0): a = i → Σ 780; b = i - 1 from i = 1 → Σ 0..38 = 741; b[0] = 0.
+fn test_plain_records_read_the_vector_they_grow() {
+  v: vector<P> = [];
+  for i in 0..40 { v += [P { a: i, b: v[i - 1]?.a }]; }
+  sa = 0;
+  sb = 0;
+  for e in v { sa += e.a; sb += e.b; }
+  assert(len(v) == 40 && sa == 780 && sb == 741 && v[39].b == 38, "e1 {sa} {sb}");
+}
+
+// e2 — heap-owning records past the first claim: s = "x{i}" (2 bytes for i < 10, 3 after),
+// xs = [i, len(v)]: Σ size(s) over 0..30 = 20 + 60 = 80; Σ xs[1] = Σ i = 435.
+fn test_heap_owning_records_across_growths() {
+  v: vector<T> = [];
+  for i in 0..30 { v += [T { n: i, s: "x{i}", xs: [i, len(v)] }]; }
+  bytes = 0;
+  l = 0;
+  for e in v { bytes += size(e.s); l += e.xs[1] ?? -1000; }
+  assert(len(v) == 30 && bytes == 80 && l == 435 && v[29].s == "x29" && len(v[29].xs) == 2, "e2 {bytes} {l}");
+}
+
+// e3 — struct-enum elements, a narrow variant beside a wide one, past the first claim:
+// i % 3 == 0 → Box { x: i, y: 1, z: 2 } (i + 210), else Dot { x: i }.  Over 0..24: Σ i =
+// 276, plus 210 for each of the 8 boxes → 276 + 1680 = 1956.
+fn test_struct_enum_elements_of_two_widths() {
+  v: vector<Sh> = [];
+  for i in 0..24 {
+    if i % 3 == 0 { v += [Box { x: i, y: 1, z: 2 }]; } else { v += [Dot { x: i }]; }
+  }
+  assert(len(v) == 24 && sh_sum(v) == 1956, "e3 {sh_sum(v)}");
+}
+
+// e4 — two record vectors appended in one loop, each reading the other's last element:
+// p gets (i, last q.a), q gets (2i, last p.b) — staged before each append.  i=0: p (0,0),
+// q (0, p[-1].b = 0); i=1: p (1, q[0].a = 0), q (2, p[1].b = 0) …: p.b = q.a of the
+// previous pass = 2(i-1), q.b = p.b of this pass = 2(i-1) — Σ p.b over 0..15 = 2·91 = 182.
+fn test_two_record_vectors_read_each_other() {
+  p: vector<P> = [];
+  q: vector<P> = [];
+  for i in 0..15 {
+    p += [P { a: i, b: q[len(q) - 1]?.a }];
+    q += [P { a: 2 * i, b: p[len(p) - 1]?.b }];
+  }
+  sp = 0;
+  sq = 0;
+  for e in p { sp += e.b; }
+  for e in q { sq += e.b; }
+  assert(sp == 182 && sq == 182 && len(p) == 15 && q[14].a == 28, "e4 {sp} {sq}");
+}
+
+fn main() {
+  test_plain_records_read_the_vector_they_grow();
+  test_heap_owning_records_across_growths();
+  test_struct_enum_elements_of_two_widths();
+  test_two_record_vectors_read_each_other();
+}

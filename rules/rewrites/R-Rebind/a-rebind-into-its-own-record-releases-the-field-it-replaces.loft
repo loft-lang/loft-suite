@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REBIND INTO ITS OWN RECORD RELEASES THE FIELD IT REPLACES (`@FR-R-Rebind` crossed with
+// `@FR-H-ClearRelease`).  R-Rebind hands `d = step(d, …)` the local's OWN record as `step`'s return
+// buffer; the exit literal is staged, then written field by field, a field whose value is an owned
+// dead local (`pieces: np`) delivered "after the old field's owned heap is released
+// (H-ClearRelease)", and a field that views the same field (`buf: d.buf`) costs nothing.  So each
+// round must leave exactly the new pieces — nothing of the old texts stranded (the leak gate reads
+// it), nothing of them read back — the kept field unchanged, and a staged value computed from the
+// OLD record even when the literal writes the field it reads first.  An exit that answers `d`
+// itself (`return d`) moves nothing.
+//
+// Values hand-computed:
+//   run(3): pieces ["a"] → [a0, n0] → [a01, n01, n1] → [a012, n012, n12, n2]; n 3; buf [1, 2]
+//           → "3 4 a012 n2 2";  run(0) → "0 1 a a 2"
+//   run2(n): d = {n 1, [a, b], [7]}; k ≠ 1 rebinds; k % 3 == 2 answers d; else pieces ["s{k}"]
+//            and n = 10·len(old pieces) + old n:
+//            run2(1) "21 1 s0 1 7";  run2(4) "31 1 s3 1 7";  run2(6) "41 1 s4 1 7"
+//
+// Axes it MOVES: the field delivered (an owned vector of texts, a view of the same field, a scalar
+//   computed from the old record), the exit (a literal, `return d`), the number of rounds (0, 1,
+//   several, with skipped rounds).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_REBIND_PLACE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: LOFT_TRACE_REBIND=1 says `fn=n_run x=d callee=n_step ADMITTED: the local's record is
+//   the buffer` and the same for `n_run2` / `n_step2`.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the record.
+// HOLDS: `a-rebind-whose-call-is-not-made-mints-nothing` beside it.
+
+struct Doc { n: integer, pieces: vector<text>, buf: vector<integer> }
+
+fn step(d: Doc, k: integer) -> Doc {
+  np: vector<text> = [];
+  for p in d.pieces { np += ["{p}{k}"]; }
+  np += ["n{k}"];
+  Doc { n: d.n + 1, pieces: np, buf: d.buf }
+}
+
+fn step2(d: Doc, k: integer) -> Doc {
+  if k % 3 == 2 { return d; }
+  np: vector<text> = ["s{k}"];
+  Doc { pieces: np, n: len(d.pieces) * 10 + d.n, buf: d.buf }
+}
+
+fn run(n: integer) -> text {
+  d = Doc { n: 0, pieces: ["a"], buf: [1, 2] };
+  for k in 0..n { d = step(d, k); }
+  "{d.n} {len(d.pieces)} {d.pieces[0]} {d.pieces[len(d.pieces) - 1]} {len(d.buf)}"
+}
+
+fn run2(n: integer) -> text {
+  d = Doc { n: 1, pieces: ["a", "b"], buf: [7] };
+  for k in 0..n {
+    if k != 1 { d = step2(d, k); }
+  }
+  "{d.n} {len(d.pieces)} {d.pieces[0]} {len(d.buf)} {d.buf[0]}"
+}
+
+fn test_each_round_leaves_exactly_the_new_pieces() {
+  a = run(3);
+  b = run(0);
+  assert(a == "3 4 a012 n2 2" && b == "0 1 a a 2", "run: {a} / {b}");
+}
+
+fn test_a_staged_value_reads_the_old_record_and_a_return_moves_nothing() {
+  s = "{run2(1)} | {run2(4)} | {run2(6)}";
+  assert(s == "21 1 s0 1 7 | 31 1 s3 1 7 | 41 1 s4 1 7", "run2: {s}");
+}
+
+fn main() {
+  test_each_round_leaves_exactly_the_new_pieces();
+  test_a_staged_value_reads_the_old_record_and_a_return_moves_nothing();
+}

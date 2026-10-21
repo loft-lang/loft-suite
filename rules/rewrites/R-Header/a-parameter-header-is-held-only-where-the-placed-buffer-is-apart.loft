@@ -1,0 +1,119 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARAMETER'S HEADER IS HELD ONLY WHERE THE PLACED BUFFER IS APART (`@FR-R-Header` crossed with
+// `@FR-R-Place`).  R-Header's apart clause, PARAMETER half: a loop the gate declines keeps the
+// header of a vector a by-value parameter reaches when every variable it names outside a read
+// is proven apart from the parameter's store — and "the return buffer is an argument a caller
+// may claim in the parameter's own store ((R-Place)), so a loop that grows it gains the header
+// only in R-Alias's versioned copy".  R-Place hands a call a buffer claimed in its
+// destination's store — the buffer IS the place `s.out` when no argument reaches it — and
+// declines when an argument does.  So a callee that reads a parameter's vector while it grows
+// its result must answer the same whether its buffer is a store of its own, the very field of
+// a record its argument sits beside, or a place the caller declined to hand over because the
+// argument reaches it.  Each cell builds `out` from `src` in a loop that also calls a writer.
+//
+// Axes it MOVES: the destination (a local, a field of a record unrelated to the argument, a
+// field of the argument's own record, an element appended to a host), the arguments (one
+// parameter, the same record twice), the result's length against the source's.  Values
+// hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_HOIST_DECLINE=1` ("n_expand loop 3 keeps 1 header(s) apart
+// from what declined it: ["src"]") and off `--native-emit`: the header is bound inside the
+// R-Alias copy versioned on `out.store_nr != src.store_nr`, and p2's call is handed `t.out`
+// itself as its buffer (R-Place) while p3's and p4's take a buffer of their own (the argument
+// reaches the destination — no road here hands the callee a buffer in its parameter's store,
+// so the versioned copy's other arm is the run-time answer this cell cannot force).  `LOFT_NO_BUFFER_IS_PLACE=1`,
+// `LOFT_NO_APART_PARAM=1`, `LOFT_NO_DISTINCT_VERSION=1` and `LOFT_HOIST_VERIFY=1` answer the
+// same.
+//
+// @falsified-at: none — a conformance guard; a header held for `src` while the buffer it shares
+//   a store with grows would read p3's source past a reallocation.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1, LOFT_POISON=1 on --native.
+// WITNESS: each message prints the vectors' sums.
+// HOLDS: the interpreter is the oracle.
+
+struct S { inp: vector<integer>, out: vector<integer>, k: integer }
+struct Row { id: integer, data: vector<integer> }
+
+fn note(n: integer) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..n { r += [i]; }
+  r
+}
+
+/// Reads `src` in a loop that also calls a writer, and grows its own result.
+fn expand(src: vector<integer>, rep: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..len(src) {
+    g = note(i % 3);
+    for _ in 0..rep { out += [(src[i] ?? -100) * 10 + len(g)]; }
+  }
+  out
+}
+
+/// Two vector parameters, possibly one record's fields.
+fn merge(a: vector<integer>, b: vector<integer>) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..len(a) { g = note(1); out += [(a[i] ?? 0) + (b[i] ?? 0) + len(g)]; }
+  out
+}
+
+fn total(v: const vector<integer>) -> integer { s = 0; for x in v { s += x; } s }
+
+// p1 — into a local: [1, 2, 3] rep 2 → each 10x + (i % 3): (10, 10, 21, 21, 32, 32) → Σ 126.
+fn test_into_a_local() {
+  r = expand([1, 2, 3], 2);
+  assert(len(r) == 6 && total(r) == 126 && r[5] == 32, "p1 {r}");
+}
+
+// p2 — into a field of a record the argument is NOT in: t.out = expand(u, 1) — the buffer
+// IS the place t.out.  u = [4, 5, 6, 7] → 40, 51, 62, 70 → Σ 223; t.inp untouched.
+fn test_into_an_unrelated_records_field() {
+  u = [4, 5, 6, 7];
+  t = S { inp: [9], out: [1, 1], k: 0 };
+  t.out = expand(u, 1);
+  assert(len(t.out) == 4 && total(t.out) == 223 && t.inp[0] == 9, "p2 {t.out}");
+}
+
+// p3 — into a field of the ARGUMENT's own record: s.out = expand(s.inp, 3) — the argument
+// reaches the destination's store, R-Place declines; the result grows past the source (12
+// for 4).  s.inp = [1, 2, 3, 4] → per i: 10x + i%3 three times: 10·3 + 21·3 + 32·3 + 40·3 =
+// 309; s.inp unchanged, Σ 10.
+fn test_into_the_arguments_own_record() {
+  s = S { inp: [1, 2, 3, 4], out: [], k: 1 };
+  s.out = expand(s.inp, 3);
+  assert(len(s.out) == 12 && total(s.out) == 309 && total(s.inp) == 10, "p3 {s.out}");
+}
+
+// p4 — the same record's two fields as both arguments, the result placed into a third place:
+// merge(s.inp, s.inp) over [5, 6] → (5+5+1, 6+6+1) = (11, 13); then into s.out.
+fn test_one_record_as_both_arguments() {
+  s = S { inp: [5, 6], out: [0], k: 2 };
+  s.out = merge(s.inp, s.inp);
+  assert(len(s.out) == 2 && s.out[0] == 11 && s.out[1] == 13, "p4 {s.out}");
+}
+
+// p5 — appended into an element of a host vector: rows += [Row { id: i, data: expand(…) }]
+// in a loop, each result built from the previous row's data: rows[0].data = [1];
+// rows[1] = expand([1], 1) = [10]; rows[2] = expand([10], 2) = [100, 100] → Σ data 211.
+fn test_appended_into_a_host_element() {
+  rows: vector<Row> = [Row { id: 0, data: [1] }];
+  for i in 1..3 {
+    prev = rows[i - 1]?;
+    d = expand(prev.data, i);
+    rows += [Row { id: i, data: d }];
+  }
+  s = 0;
+  for r in rows { s += total(r.data); }
+  assert(len(rows) == 3 && s == 211 && len(rows[2].data) == 2, "p5 {s}");
+}
+
+fn main() {
+  test_into_a_local();
+  test_into_an_unrelated_records_field();
+  test_into_the_arguments_own_record();
+  test_one_record_as_both_arguments();
+  test_appended_into_a_host_element();
+}

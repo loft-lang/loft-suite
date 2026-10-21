@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REBIND WHOSE CALL IS NOT MADE MINTS NOTHING (`@FR-R-Rebind` crossed with `@FR-O-LazyBuffer`).
+// R-Rebind's call site "binds nothing and frees nothing: … the call's own hidden buffer is never
+// minted (O-LazyBuffer)"; O-LazyBuffer mints a hidden buffer only in front of a statement that
+// hands it to a callee, on a path that makes the call, and an exit's free of the never-minted
+// sentinel is a no-op.  So a rebind under a condition, in a loop that makes it on some turns, or
+// never, leaves the record exactly as the turns that ran made it, and no store behind (the leak
+// gate reads it) — whichever path the run takes.
+//
+// Values hand-computed (step(d, k): pieces → each + "{k}" then "n{k}", n + 1):
+//   maybe(true)  → step(d, 9): "1 2 a9";  maybe(false) → "0 1 a"
+//   odd_turns(5): rebinds at k = 1, 3: pieces [a] → [a1, n1] → [a13, n13, n3]; n 2 → "2 3 a13 n3"
+//   odd_turns(1): no rebind → "0 1 a a"
+//
+// Axes it MOVES: the path (the call made, not made), the number of calls in a loop (0, 1, 2), the
+//   condition's place (a branch, a loop body).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_REBIND_PLACE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: LOFT_TRACE_REBIND=1 says `fn=n_maybe x=d callee=n_step ADMITTED` and the same for
+//   `n_odd_turns`.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the record.
+// HOLDS: `a-rebind-into-its-own-record-releases-the-field-it-replaces` beside it.
+
+struct Doc { n: integer, pieces: vector<text> }
+
+fn step(d: Doc, k: integer) -> Doc {
+  np: vector<text> = [];
+  for p in d.pieces { np += ["{p}{k}"]; }
+  np += ["n{k}"];
+  Doc { n: d.n + 1, pieces: np }
+}
+
+fn maybe(c: boolean) -> text {
+  d = Doc { n: 0, pieces: ["a"] };
+  if c { d = step(d, 9); }
+  "{d.n} {len(d.pieces)} {d.pieces[0]}"
+}
+
+fn odd_turns(n: integer) -> text {
+  d = Doc { n: 0, pieces: ["a"] };
+  for k in 0..n {
+    if k % 2 == 1 { d = step(d, k); }
+  }
+  "{d.n} {len(d.pieces)} {d.pieces[0]} {d.pieces[len(d.pieces) - 1]}"
+}
+
+fn test_a_branch_that_does_or_does_not_rebind() {
+  a = maybe(true);
+  b = maybe(false);
+  assert(a == "1 2 a9" && b == "0 1 a", "maybe: {a} / {b}");
+}
+
+fn test_a_loop_that_rebinds_on_some_turns() {
+  a = odd_turns(5);
+  b = odd_turns(1);
+  assert(a == "2 3 a13 n3" && b == "0 1 a a", "odd_turns: {a} / {b}");
+}
+
+fn main() {
+  test_a_branch_that_does_or_does_not_rebind();
+  test_a_loop_that_rebinds_on_some_turns();
+}

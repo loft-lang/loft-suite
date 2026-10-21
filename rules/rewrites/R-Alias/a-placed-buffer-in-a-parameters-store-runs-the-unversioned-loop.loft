@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLACED BUFFER IN A PARAMETER'S STORE RUNS THE UNVERSIONED LOOP (`@FR-R-Alias` crossed with
+// `@FR-H-ShortRef`).  H-ShortRef: while a parameter names vector content, its store takes no
+// addition — except "a call's return buffer, which (R-Place) may claim in a store a parameter names
+// into and the callee may grow: a rewrite relies on this rule for a parameter's store only where it
+// tested that store apart from the buffer's at run time ((R-Alias)'s versioned clause)".  The road
+// that makes it happen: `two(x, y)` assigns `x.out = twice(y.items)` — the destination exists and
+// no argument names `x`, so the buffer IS `x.out` — and a caller hands ONE record as both `x` and
+// `y` (two parameters are never proven apart).  Inside `twice` the loop reads its parameter's
+// elements through views while pushing into the buffer, which now lives in the parameter's store:
+// the run-time test must send it to the plain loop, and every element must still be read as it
+// was before the call.  The same through a `&` link to the destination's own record, and with the
+// stores apart, answers the same.  Each case at 3 and at 300 elements (300 forces the growth to
+// move the store's buffer several times).
+//
+// Values: items[i] = P{x_i, y_i}; twice → for each element (x, y) then (x + 1000, y);
+//   fold = (7·fold + x + y) mod 1000003; grow(w) → [2w₀, w₀+1, 2w₁, w₁+1, …].
+//   small (items (1,10) (2,20) (3,30), w [3,4,5]): out 6 / fold 671170; v [6,4,8,5,10,6]
+//   large (items (i, 3i), w 7i, i < 300): out 600 / fold 852153; v 600, v[599] = 7·299 + 1 = 2094
+//   (folds computed by a three-line model, the arithmetic as stated)
+//
+// Axes it MOVES: the relation of buffer and parameter (one record through two parameters, a `&`
+//   link to the destination's own record, two records), the size (no growth past the first block,
+//   many growths), the callee's read (views in a `for`, indexed reads).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_DISTINCT_VERSION=1, LOFT_NO_BUFFER_IS_PLACE=1,
+//   LOFT_POISON=1 and LOFT_HOIST_VERIFY=1.  Fires: the census counts R-AliasVersion in `n_twice`;
+//   `--native-emit` shows `n_twice(…, var___ref_1)` handed `x.out`'s place in `n_two` (with
+//   LOFT_NO_BUFFER_IS_PLACE=1 it mints a buffer of its own).
+// CHANNEL: the asserts.
+// ARMED: LOFT_POISON=1 by hand.
+// WITNESS: each message prints the lengths and the fold.
+// HOLDS: `a-versioned-loop-sees-its-adopted-buffer` beside it.
+
+struct P { x: integer, y: integer }
+struct S { items: vector<P>, out: vector<P>, w: vector<integer>, v: vector<integer> }
+
+fn twice(v: vector<P>) -> vector<P> {
+  out: vector<P> = [];
+  for e in v {
+    if e != null {
+      out += [P { x: e.x, y: e.y }];
+      out += [P { x: e.x + 1000, y: e.y }];
+    }
+  }
+  out
+}
+
+fn grow(p: vector<integer>) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..len(p) {
+    r += [p[i] * 2];
+    r += [p[i] + 1];
+  }
+  r
+}
+
+fn small() -> S {
+  S { items: [P { x: 1, y: 10 }, P { x: 2, y: 20 }, P { x: 3, y: 30 }], out: [], w: [3, 4, 5], v: [] }
+}
+
+fn large() -> S {
+  s = S { items: [], out: [], w: [], v: [] };
+  for i in 0..300 {
+    s.items += [P { x: i, y: i * 3 }];
+    s.w += [i * 7];
+  }
+  s
+}
+
+fn fold(v: vector<P>) -> integer {
+  s = 0;
+  for e in v {
+    s = s * 7 + e.x + e.y;
+    s = s % 1000003;
+  }
+  s
+}
+
+fn two(x: S, y: S) {
+  x.out = twice(y.items);
+  x.v = grow(y.w);
+}
+
+fn test_one_record_through_two_parameters() {
+  b = small();
+  two(b, b);
+  assert(len(b.out) == 6 && fold(b.out) == 671170 && len(b.items) == 3, "small: {len(b.out)} {fold(b.out)}");
+  assert(len(b.v) == 6 && b.v[0] == 6 && b.v[5] == 6 && b.v[3] == 5, "small v: {len(b.v)}");
+  c = large();
+  two(c, c);
+  assert(len(c.out) == 600 && fold(c.out) == 852153 && len(c.items) == 300, "large: {len(c.out)} {fold(c.out)}");
+  assert(len(c.v) == 600 && c.v[599] == 2094, "large v: {len(c.v)} {c.v[599]}");
+}
+
+fn test_a_link_to_the_destinations_own_record() {
+  a = large();
+  r = &a;
+  a.out = twice(r.items);
+  a.v = grow(r.w);
+  assert(len(a.out) == 600 && fold(a.out) == 852153 && len(a.v) == 600 && a.v[599] == 2094, "link: {len(a.out)} {fold(a.out)}");
+}
+
+fn test_two_records_apart() {
+  c = large();
+  d = large();
+  two(c, d);
+  assert(len(c.out) == 600 && fold(c.out) == 852153 && len(c.v) == 600 && len(d.out) == 0, "apart: {len(c.out)}");
+}
+
+fn main() {
+  test_one_record_through_two_parameters();
+  test_a_link_to_the_destinations_own_record();
+  test_two_records_apart();
+}

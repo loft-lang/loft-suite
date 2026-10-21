@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FILL IS THE IN-PLACE SET AT EVERY ELEMENT WIDTH (`@FR-R-Fill` crossed with
+// `@FR-R-InPlace`).  R-Fill's body is ONE R-InPlace set — a fixed-width scalar written
+// through an existing address — at field 0 of a plain scalar vector, and the slice fill must
+// write exactly what that set writes: the same bytes at the element's own width and encoding
+// (a byte at its bias, a narrow integer, a single, a boolean, a character), and nothing where
+// the set writes nothing.  "An element width not the value's" is one of the fill's declines,
+// so a width the fill gets wrong is a wrong answer and a width it declines is the loop.  The
+// guarded clause (`t = base + i; if t < N { v[t] = c }`) is the same set under a condition:
+// it writes the indexes below N, as many as the span holds, and the counter still ends
+// where the whole range leaves it.  And an in-place set that is NOT at field 0 of a scalar
+// vector — a field of a record element — keeps the loop.
+//
+// Axes it MOVES: the element kind (integer, float, single, u8, i32, boolean, character), the
+// guarded span (below and above the floor of eight), a record element's field.  Values
+// hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_FILL=1` (admitted / declined with the check).  Cross-backend;
+// `LOFT_HOIST_VERIFY=1`, `LOFT_NO_FILL_HOIST=1` and `LOFT_NO_GUARDED_FILL=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a fill writing a byte vector unencoded, or a
+//   narrow element at 8 bytes, would answer wrong elements or overwrite neighbours in w1–w5.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the vector.
+// HOLDS: the interpreter (no fill) is the oracle.
+
+struct P { x: integer, y: integer }
+
+// w1 — float: [0,0,0,0,0] with 1..4 = 2.5 → Σ 7.5, ends 0.
+fn test_a_float_vector() {
+  v: vector<float> = [0.0, 0.0, 0.0, 0.0, 0.0];
+  for i in 1..4 { v[i] = 2.5; }
+  s = 0.0;
+  for x in v { s += x; }
+  assert(s == 7.5 && v[0] == 0.0 && v[4] == 0.0, "w1 {v}");
+}
+
+// w2 — single and i32: 0..3 of each, the fourth element untouched: Σ single 3·0.75 + 9 =
+// 11.25, Σ i32 3·(-70000) + 5 = -209995.
+fn test_single_and_i32_vectors() {
+  s: vector<single> = [0.0f, 0.0f, 0.0f, 9.0f];
+  for i in 0..3 { s[i] = 0.75f; }
+  w: vector<i32> = [1 as i32, 1 as i32, 1 as i32, 5 as i32];
+  for i in 0..3 { w[i] = -70000 as i32; }
+  ss = 0.0f;
+  for x in s { ss += x; }
+  sw = 0;
+  for x in w { sw += x as integer; }
+  assert(ss == 11.25f && sw == -209995, "w2 single {ss} i32 {sw}");
+}
+
+// w3 — u8 (a byte at its bias): 200 written to 2..6 of eight zeros; Σ 800; the neighbours 0.
+fn test_a_byte_vector() {
+  b: vector<u8> = [0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8, 0 as u8];
+  for i in 2..6 { b[i] = 200 as u8; }
+  t = 0;
+  for x in b { t += x as integer; }
+  assert(t == 800 && (b[1] as integer) == 0 && (b[6] as integer) == 0 && (b[5] as integer) == 200, "w3 {t}");
+}
+
+// w4 — boolean and character: true over 1..=2 of four false; 'é' over 0..2 of "abcd".
+fn test_boolean_and_character_vectors() {
+  f: vector<boolean> = [false, false, false, false];
+  for i in 1..=2 { f[i] = true; }
+  c: vector<character> = ['a', 'b', 'c', 'd'];
+  for i in 0..2 { c[i] = 'é'; }
+  assert(!f[0] && f[1] && f[2] && !f[3], "w4 booleans {f}");
+  assert(c[0] == 'é' && c[1] == 'é' && c[2] == 'c' && c[3] == 'd', "w4 characters {c}");
+}
+
+// w5 — the guarded clause over 20 zeros: t = 3 + i for i in 0..20, written while t < N.
+// N = 15 → indexes 3..14 (12 elements ≥ the span floor) = 4, Σ 48, counter ended at 19;
+// N = 6 → indexes 3..5 (3 elements, below the floor: the loop) = 4, Σ 12.
+fn test_the_guarded_clause_on_both_sides_of_the_span_floor() {
+  a = [for _i in 0..20 { 0 }];
+  last = -1;
+  for i in 0..20 { t = 3 + i; if t < 15 { a[t] = 4; } last = i; }
+  sa = 0;
+  for x in a { sa += x; }
+  b = [for _i in 0..20 { 0 }];
+  for i in 0..20 { t = 3 + i; if t < 6 { b[t] = 4; } }
+  sb = 0;
+  for x in b { sb += x; }
+  assert(sa == 48 && a[2] == 0 && a[14] == 4 && a[15] == 0 && last == 19, "w5 a {sa} last {last}");
+  assert(sb == 12 && b[5] == 4 && b[6] == 0, "w5 b {sb}");
+}
+
+// w5b — the guarded clause alone in its body (no second statement): N = 11, base 2 over
+// 0..12 → indexes 2..10 = 9 elements of 7 → Σ 63.
+fn test_the_guarded_clause_alone() {
+  a = [for _i in 0..12 { 0 }];
+  for i in 0..12 { t = 2 + i; if t < 11 { a[t] = 7; } }
+  s = 0;
+  for x in a { s += x; }
+  assert(s == 63 && a[1] == 0 && a[10] == 7 && a[11] == 0, "w5b {s}");
+}
+
+// w6 — an in-place set of a record element's FIELD is no fill of a scalar vector: x = 9 on
+// 0..3 of four points (x 1..4, y 10..40) → Σ x = 27 + 4 = 31, y untouched Σ 100.
+fn test_a_record_elements_field_keeps_the_loop() {
+  ps = [P { x: 1, y: 10 }, P { x: 2, y: 20 }, P { x: 3, y: 30 }, P { x: 4, y: 40 }];
+  for i in 0..3 { ps[i].x = 9; }
+  sx = 0;
+  sy = 0;
+  for p in ps { sx += p.x; sy += p.y; }
+  assert(sx == 31 && sy == 100, "w6 {sx} {sy}");
+}
+
+fn main() {
+  test_a_float_vector();
+  test_single_and_i32_vectors();
+  test_a_byte_vector();
+  test_boolean_and_character_vectors();
+  test_the_guarded_clause_on_both_sides_of_the_span_floor();
+  test_the_guarded_clause_alone();
+  test_a_record_elements_field_keeps_the_loop();
+}

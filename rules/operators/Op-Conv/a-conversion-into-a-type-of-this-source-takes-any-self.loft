@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONVERSION INTO A TYPE OF THIS SOURCE TAKES ANY SELF (`@FR-Op-Conv` crossed with
+// `@FR-Op-Home`).  Op-Home binds an `operator`'s `self` to a type declared in the same source; Op-Conv
+// is its one exception: "a conversion INTO a type of this source may take a foreign `self`".  So
+// `Dist`'s source defines `as Dist` from ANOTHER LIBRARY's record (`OcPt`), from `integer` and from
+// `text` — three members of one `to_dist` set, selected by the operand — and, with its own `self`,
+// conversions OUT of `Dist` into the foreign record and into `integer`.  What neither end makes
+// "of this source" is the refusal cells beside this one.
+//
+// Values hand-computed: oc_pt(3,4) as Dist = 7; 21 as Dist = 42; "hello" as Dist = 5;
+//   Dist{5} as OcPt = (5, -5); Dist{2} as integer = 200.
+//
+// Axes it MOVES: the conversion's `self` (another library's record, a built-in scalar, `text`,
+//   this source's type), its target (this source's type, another library's record, a built-in),
+//   one `to_<t>` with three members.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the converted fields.
+// HOLDS: `a-conversion-between-two-foreign-types-is-refused` beside it.
+
+use op_conv_fixture_lib::*;
+
+struct Dist { d: integer }
+
+operator to_dist(self: OcPt) -> Dist { Dist { d: self.x + self.y } }
+operator to_dist(self: integer) -> Dist { Dist { d: self * 2 } }
+operator to_dist(self: text) -> Dist { Dist { d: len(self) } }
+operator to_oc_pt(self: Dist) -> OcPt { OcPt { x: self.d, y: -self.d } }
+operator to_integer(self: Dist) -> integer { self.d * 100 }
+
+fn test_a_foreign_self_converts_into_this_sources_type() {
+  p = oc_pt(3, 4);
+  a = p as Dist;
+  b = 21 as Dist;
+  c = "hello" as Dist;
+  assert(a.d == 7 && b.d == 42 && c.d == 5, "into Dist: {a.d} {b.d} {c.d}");
+}
+
+fn test_this_sources_type_converts_into_a_foreign_one() {
+  q = Dist { d: 5 } as OcPt;
+  n = Dist { d: 2 } as integer;
+  assert(q.x == 5 && q.y == -5 && n == 200, "out of Dist: {q.x} {q.y} {n}");
+}
+
+fn main() {
+  test_a_foreign_self_converts_into_this_sources_type();
+  test_this_sources_type_converts_into_a_foreign_one();
+}

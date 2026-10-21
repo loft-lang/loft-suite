@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PRESENT VALUE WIDENS INTO A NULLABLE MEMBER BEFORE A CONVERSION (`@FR-Disp-Specific` crossed
+// with `@FR-N-Intro`).  N-Intro `τ ⤳ τ?` is the only null-direction conversion, and Disp-Specific
+// ranks it WIDENED — as a step it ADDS to the base rank.  So `τ → τ?` beats any CONVERTED member,
+// loses to `τ → τ` (EXACT), and `u8 → integer?` (WIDENED + WIDENED) loses to `u8 → integer`
+// (WIDENED) in either declaration order.  It holds for a scalar, a record and a `text`, at the
+// first and at a later position, and the PRESENT value is what the member receives — never null.
+//
+// Ranks hand-computed:
+//   integer 5 → (integer? | float)     : integer? WIDENED, float CONVERTED  → "integer? 5"
+//   integer 5 → (integer | integer?)   : integer EXACT                      → "integer 5"
+//   u8 9      → (integer? | integer)   : integer WIDENED, integer? W+W      → "integer 9"
+//   NP{2}     → (NP? | NQ)             : NP? WIDENED                        → "NP? 2"
+//   NQ{3}     → (NP? | NQ)             : NQ EXACT                           → "NQ 3"
+//   (1, "a")  → ((integer, text?) | (integer, float)) : text? WIDENED       → "int,text? 1 a"
+//   (1, 2.5)  → same set               : (integer, float) EXACT             → "int,float 1 2.5"
+//   "t"       → (text? | character)    : text? WIDENED                      → "text? t"
+//   'c'       → (text? | character)    : character EXACT                    → "char c"
+//
+// Axes it MOVES: the argument kind (integer, narrow integer, record, text, character), the rival
+//   member's rank (EXACT, WIDENED, CONVERTED, none), declaration order, the position.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `each-rank-beats-the-next-at-one-position` beside it.
+
+struct NP { x: integer }
+struct NQ { y: integer }
+
+fn n1(x: integer?) -> text { "integer? {x ?? -1}" }
+fn n1(x: float) -> text { "float {x}" }
+
+fn n2(x: integer) -> text { "integer {x}" }
+fn n2(x: integer?) -> text { "integer? {x ?? -1}" }
+
+fn n3(x: integer?) -> text { "integer? {x ?? -1}" }
+fn n3(x: integer) -> text { "integer {x}" }
+
+fn n4(p: NP?) -> text { if p == null { "NP? null" } else { "NP? {p.x}" } }
+fn n4(q: NQ) -> text { "NQ {q.y}" }
+
+fn n5(k: integer, t: text?) -> text { "int,text? {k} {t ?? "-"}" }
+fn n5(k: integer, f: float) -> text { "int,float {k} {f}" }
+
+fn n6(t: text?) -> text { "text? {t ?? "-"}" }
+fn n6(c: character) -> text { "char {c}" }
+
+fn test_a_scalar_widens_into_its_nullable_before_converting() {
+  i = 5;
+  b: u8 = 9;
+  s = "{n1(i)}|{n2(i)}|{n3(b)}";
+  assert(s == "integer? 5|integer 5|integer 9", "scalars: {s}");
+}
+
+fn test_a_record_widens_into_its_nullable() {
+  s = "{n4(NP { x: 2 })}|{n4(NQ { y: 3 })}";
+  assert(s == "NP? 2|NQ 3", "records: {s}");
+}
+
+fn test_a_later_position_and_a_text() {
+  s = "{n5(1, "a")}|{n5(1, 2.5)}|{n6("t")}|{n6('c')}";
+  assert(s == "int,text? 1 a|int,float 1 2.5|text? t|char c", "later position, text: {s}");
+  assert(len(s) == 44, "length {len(s)}");
+}
+
+fn main() {
+  test_a_scalar_widens_into_its_nullable_before_converting();
+  test_a_record_widens_into_its_nullable();
+  test_a_later_position_and_a_text();
+}

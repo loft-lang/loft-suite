@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LITERAL READING ITS PLACE'S OWN COLLECTION KEEPS IT (`@FR-R-InPlaceLiteral` crossed with
+// `@FR-B-View-Base`).  R-InPlaceLiteral writes `v[i] = R { … }` / `o.f = R { … }` into the place,
+// staging every field expression first and releasing the old value's owned heap per field —
+// "so the place holds exactly what the copy would have left".  It names the hazard of the pair:
+// "staging a field read of the slot's own collection binds a VIEW (B-View-Base), and the write
+// releases what that view names before the value is stored back" — and declines the ELEMENT form
+// for such a type.  The answer owed is the copy's: a literal whose collection field is the place's
+// own collection (read directly, or through a local that views it) leaves that collection in the
+// place, whole.  Scalars and texts read from the place are staged values and swap freely.
+//
+// Values hand-computed:
+//   vs = [S{1,2}, S{3,4}]; vs[1] = S{ a: vs[1].b, b: vs[1].a + vs[0].a } → S{4, 4}, vs[0].a 1
+//   vc[0] = C{ n: vc[0].n + 1, items: vc[0].items, t: vc[0].t + "!" } → n 2, items [10,20], "p!"
+//   vc[1] = C{ n: len(vc[1].items), items: vc[0].items, t: vc[1].t }, then vc[1].items += [99]
+//     → n 1, items [10,20,99]; vc[0].items keeps 2
+//   x = vd[0].items (a view, B-View-Depth); vd[0] = C{ n: 0, items: x, t: "" } → items [10,20]
+//   h.s = S{ b: h.s.a, a: h.s.b } on S{5,6} → S{6,5}
+//   h.c = C{ items: h.c.items, n: h.c.n * 2 } on C{7,[1,2,3],"h"} → n 14, items [1,2,3], t ""
+//     (the omitted text takes its default)
+//
+// DEFECT (the IGNOREd function): the FIELD form `o.f = C { items: o.f.items, … }` empties the
+// collection — observed n 14, len(items) 0, both backends, every LOFT_NO_* switch of the rule; the
+// same through a local view (`x = o.f.items; o.f = C { items: x }`) and one level deeper
+// (`g.h.c = …`).  The element form, a whole-local rebind (`l = C { items: l.items }`) and a
+// field copy `o.f = o.f` keep it.  Repro: agentA/repro/d6-… (rule walk batch 4).
+//
+// Axes it MOVES: the destination (an element at a variable index, a field, a field of a field),
+//   the field read from the place (scalar, text, the place's own collection, another element's
+//   collection, a local view of the place's collection), a write after the assignment.
+//
+// Cross-backend; `main` runs every passing cell so the leak gate reads the file.
+//
+// @falsified-at: none for the passing half — a conformance guard, the same under
+//   LOFT_NO_ELEMENT_IN_PLACE=1, LOFT_NO_NESTED_IN_PLACE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1;
+//   the IGNOREd half fails on the current tree, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the place's fields.
+// HOLDS: `1571-a-literal-written-in-place-reads-the-old-record-through-any-view` beside it.
+
+struct S { a: integer, b: integer }
+struct C { n: integer, items: vector<integer>, t: text }
+struct H { s: S, c: C }
+
+fn test_a_scalar_element_swaps_through_its_place() {
+  vs = [S { a: 1, b: 2 }, S { a: 3, b: 4 }];
+  i = 1;
+  vs[i] = S { a: vs[i].b, b: vs[i].a + vs[0].a };
+  assert(vs[1].a == 4 && vs[1].b == 4 && vs[0].a == 1 && len(vs) == 2, "vs: {vs[1].a} {vs[1].b} {vs[0].a}");
+}
+
+fn test_an_element_keeps_its_own_collection() {
+  vc = [C { n: 1, items: [10, 20], t: "p" }, C { n: 2, items: [30], t: "q" }];
+  vc[0] = C { n: vc[0].n + 1, items: vc[0].items, t: vc[0].t + "!" };
+  assert(vc[0].n == 2 && len(vc[0].items) == 2 && vc[0].items[1] == 20 && vc[0].t == "p!", "vc[0]: {vc[0].n} {len(vc[0].items)} {vc[0].t}");
+  vc[1] = C { n: len(vc[1].items), items: vc[0].items, t: vc[1].t };
+  vc[1].items += [99];
+  assert(vc[1].n == 1 && len(vc[1].items) == 3 && vc[1].items[2] == 99 && len(vc[0].items) == 2 && vc[1].t == "q", "vc[1]: {vc[1].n} {len(vc[1].items)} {len(vc[0].items)}");
+}
+
+fn test_an_element_keeps_a_collection_read_through_a_view() {
+  vd = [C { n: 1, items: [10, 20], t: "p" }];
+  x = vd[0].items;
+  vd[0] = C { n: 0, items: x, t: "" };
+  assert(len(vd[0].items) == 2 && vd[0].items[0] == 10 && vd[0].items[1] == 20, "vd[0]: {len(vd[0].items)}");
+}
+
+fn test_a_field_swaps_its_scalars() {
+  h = H { s: S { a: 5, b: 6 }, c: C { n: 7, items: [1, 2, 3], t: "h" } };
+  h.s = S { b: h.s.a, a: h.s.b };
+  assert(h.s.a == 6 && h.s.b == 5 && len(h.c.items) == 3, "h.s: {h.s.a} {h.s.b}");
+}
+
+// @IGNORE
+fn test_a_field_keeps_its_own_collection() {
+  h = H { s: S { a: 5, b: 6 }, c: C { n: 7, items: [1, 2, 3], t: "h" } };
+  h.c = C { items: h.c.items, n: h.c.n * 2 };
+  assert(h.c.n == 14 && h.c.t == "", "h.c scalars: {h.c.n} [{h.c.t}]");
+  assert(len(h.c.items) == 3 && h.c.items[0] == 1 && h.c.items[2] == 3, "h.c.items lost: len {len(h.c.items)}");
+  k = H { s: S { a: 0, b: 0 }, c: C { n: 1, items: [4, 5], t: "k" } };
+  y = k.c.items;
+  k.c = C { items: y, n: 2, t: "" };
+  assert(len(k.c.items) == 2 && k.c.items[1] == 5, "k.c.items through a view lost: len {len(k.c.items)}");
+}
+
+fn main() {
+  test_a_scalar_element_swaps_through_its_place();
+  test_an_element_keeps_its_own_collection();
+  test_an_element_keeps_a_collection_read_through_a_view();
+  test_a_field_swaps_its_scalars();
+}

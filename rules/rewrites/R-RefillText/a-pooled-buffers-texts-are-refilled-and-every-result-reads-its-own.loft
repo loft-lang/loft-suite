@@ -1,0 +1,135 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A POOLED BUFFER'S TEXTS ARE REFILLED, AND EVERY RESULT READS ITS OWN (`@FR-R-RefillText`
+// crossed with `@FR-R-Reuse`).  R-Reuse allocates a witnessed call site's hidden return buffer
+// ONCE, so a callee builds into one record per site, and "a reused record is REFILLED, so each
+// reuse releases what the record held first (H-ClearRelease)"; R-RefillText drops that release
+// at a pooled site whose type's heap is text only and calls the callee's REFILL TWIN, which
+// writes each text over the block its slot already owns.  The site keeps the pool's contract
+// and the twin keeps the release's: a text slot read by the refill holds 0 or a block that
+// slot owns.  So the cells cycle texts through the one record — shorter, longer than the block,
+// empty, back — read every result in full on its own turn, keep a COPY of an earlier result
+// across later calls, write a result (which keeps the release: condition (c)), and count the
+// live records after 10 and after 500 calls (a text leaked per call is 500 records more).
+//
+// Axes it MOVES: the text's size against its block (shrink, grow past the claim, empty, back),
+// the record's shape (two texts and a scalar; a text in an inline sub-record), the result's use
+// (read only; copied and kept; written — the release kept), the trip count.  Values
+// hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_REFILL_TEXT=1` (each pooled site's verdict: admitted, or the
+// condition that declined) and `LOFT_TRACE_POOL=1` (the reused buffers).  Native only; the
+// interpreter releases and claims fresh and is the oracle.  `LOFT_NO_REFILL_TEXT=1`,
+// `LOFT_NO_RETBUF_REUSE=1`, `LOFT_POISON=1`, `LOFT_POISON_CLAIM=1` and `LOFT_STRICT_STORES=1`
+// answer the same.
+//
+// @falsified-at: none — a conformance guard; a refill that wrote a grown text into its old
+//   block, or kept the previous text in a skipped slot, answers t1's texts wrong; one that
+//   neither refills nor releases grows t4's census.
+// CHANNEL: the asserts.
+// ARMED: LOFT_POISON=1, LOFT_POISON_CLAIM=1, LOFT_STRICT_STORES=1.
+// WITNESS: each message prints the texts read.
+// HOLDS: the interpreter is the oracle.
+
+struct Tag { k: text, n: integer }
+struct Pair { a: text, n: integer, b: text }
+struct Wrap { id: integer, tag: Tag }
+
+fn word(j: integer) -> text {
+  if j % 4 == 0 { return "ab" }
+  if j % 4 == 1 { return "a text longer than its old block" }
+  if j % 4 == 2 { return "" }
+  "w{j}"
+}
+
+fn mk_pair(i: integer) -> Pair { Pair { a: word(i), n: i, b: word(i + 1) } }
+fn mk_wrap(i: integer) -> Wrap { Wrap { id: i * 2, tag: Tag { k: word(i + 2), n: -i } } }
+
+fn live_records() -> integer {
+  t = store_memory();
+  i = t.find("records ") ?? -1;
+  if i < 0 { return -1; }
+  rest = t[i + 8..];
+  e = rest.find(" ") ?? len(rest);
+  (rest[0..e] as integer?) ?? -1
+}
+
+// t1 — read only, every turn checked against its own texts: i in 0..12, a = word(i),
+// b = word(i + 1): Σ size(a) over 0..12 = 3·(2 + 32 + 0) + (2 + 2 + 3) = 109 ("w3", "w7",
+// "w11"); Σ size(b) = word(1..13) = 3·32 + (2 + 2 + 3) + 3·2 = 109; Σ n 66.
+fn test_texts_cycle_through_one_record() {
+  sa = 0;
+  sb = 0;
+  sn = 0;
+  for i in 0..12 {
+    e = mk_pair(i);
+    assert(e.a == word(i) && e.b == word(i + 1), "t1 at {i}: '{e.a}' '{e.b}'");
+    sa += size(e.a);
+    sb += size(e.b);
+    sn += e.n;
+  }
+  assert(sa == 109 && sb == 109 && sn == 66, "t1 {sa} {sb} {sn}");
+}
+
+// t2 — a text in an inline sub-record: k = word(i + 2) over 0..8: word(2) "" 0, word(3) "w3" 2,
+// word(4) "ab" 2, word(5) 32, word(6) 0, word(7) "w7" 2, word(8) 2, word(9) 32 → 72;
+// id Σ 2·28 = 56; n Σ -28.
+fn test_a_text_in_an_inline_sub_record() {
+  s = 0;
+  ids = 0;
+  ns = 0;
+  for i in 0..8 {
+    w = mk_wrap(i);
+    assert(w.tag.k == word(i + 2), "t2 at {i}: '{w.tag.k}'");
+    s += size(w.tag.k);
+    ids += w.id;
+    ns += w.tag.n;
+  }
+  assert(s == 72 && ids == 56 && ns == -28, "t2 {s} {ids} {ns}");
+}
+
+// t3 — an earlier result COPIED and kept across later calls: keep = the turn-1 pair (a 32-byte
+// text, b ""), five more calls refill the buffer; keep still reads its own texts.
+fn test_a_copy_kept_across_later_calls() {
+  keep = mk_pair(0);
+  kept_a = "";
+  for i in 0..6 {
+    e = mk_pair(i);
+    if i == 1 { keep = e; kept_a = "{e.a}"; }
+  }
+  assert(keep.a == "a text longer than its old block" && keep.b == "" && keep.n == 1, "t3 '{keep.a}' '{keep.b}'");
+  assert(kept_a == "a text longer than its old block", "t3 copy '{kept_a}'");
+}
+
+// t4 — a result WRITTEN each turn (condition (c) fails: the release stays) beside a read-only
+// site, and the live-record census of both sites after 10 and after 500 calls: equal.
+fn churn(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    e = mk_pair(i);
+    t += size(e.a);
+    f = mk_pair(i + 1);
+    f.a = "x";
+    t += size(f.a) + size(f.b);
+  }
+  t
+}
+fn test_a_written_result_and_the_census() {
+  a = churn(10);
+  before = live_records();
+  b = churn(500);
+  after = live_records();
+  // churn(10): Σ size(word(i)) over 0..10 = 2+32+0+2 + 2+32+0+2 + 2+32 = 106; Σ 1 + size(word(i+2))
+  // over 0..10 = 10 + (0+2+2+32 + 0+2+2+32 + 0+3) = 10 + 75 = 85 → 191.
+  assert(a == 191, "t4 churn(10) {a}");
+  assert(before == after, "t4 census {before} -> {after}");
+  assert(b > 0, "t4 {b}");
+}
+
+fn main() {
+  test_texts_cycle_through_one_record();
+  test_a_text_in_an_inline_sub_record();
+  test_a_copy_kept_across_later_calls();
+  test_a_written_result_and_the_census();
+}

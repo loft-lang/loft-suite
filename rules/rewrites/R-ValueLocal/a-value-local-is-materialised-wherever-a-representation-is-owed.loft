@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VALUE LOCAL IS MATERIALISED WHEREVER A REPRESENTATION IS OWED (`@FR-R-ValueLocal` crossed
+// with `@FR-R-Escape`).  R-ValueLocal carries a small record bound from an admitted call as
+// its TUPLE, and "the record is materialised at the one place a representation is owed — a
+// store into a field or an element, a return from a function R-ValueRecord declines, a
+// library's exported API (R-Escape) — and nowhere else".  R-Escape is the line: inside the
+// unit the tuple is the compiler's business; where the value ESCAPES into a record the
+// program keeps, the record the type promises must be built, and it must be B-Copy's copy —
+// independent of the tuple it came from.  Each cell takes a value local across one such
+// boundary and then writes the tuple and the materialised record in turn: neither write may
+// reach the other.
+//
+// Axes it MOVES: the boundary (a field store, an element append, a whole-element store, a
+// literal's field, a return through a fn-ref — a tuple under R-FnRefValue, a record owed by
+// a declined function under `LOFT_NO_FNREF_VALUE=1`), the write direction (tuple after the
+// store, store after the store), the shape (flat, an inline sub-record).  Values hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_VALUEREC=1` on `--native` (each value local admitted, each
+// declined function).  `LOFT_NO_VALUE_LOCAL=1`, `LOFT_NO_VALUE_RECORD=1` and
+// `LOFT_NO_IR_VALUE_RECORD=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a materialisation that aliased the tuple's
+//   source, or skipped a field, fails x1–x4's independence asserts.
+// CHANNEL: the asserts.
+// ARMED: LOFT_STRICT_STORES=1, LOFT_POISON=1.
+// WITNESS: each message prints both sides.
+// HOLDS: the interpreter is the oracle.
+
+struct P { x: integer, y: integer }
+struct Q { lo: P, hi: P }
+struct H { tag: integer, p: P }
+
+fn mk(a: integer, b: integer) -> P { P { x: a, y: b } }
+fn mq(a: integer, b: integer) -> Q { Q { lo: P { x: a, y: a }, hi: P { x: b, y: b } } }
+
+/// Reached through a fn-ref: every function of that type answers a tuple, so the call
+/// answers one too (R-FnRefValue).
+fn via(a: integer, b: integer) -> P {
+  v = mk(a, b);
+  v.x += 10;
+  v
+}
+
+/// Called as a literal's FIELD VALUE and bound to a local: the tuple is materialised into
+/// the field at the site, and the local takes the tuple.
+fn held(a: integer, b: integer) -> P {
+  v = mk(a, b);
+  v.y += 20;
+  v
+}
+
+fn psum(p: P) -> integer { p.x * 10 + p.y }
+
+// x1 — stored into a field, then the tuple written, then the field written:
+// h.p = (1, 2); v.x = 9 → h.p.x stays 1; h.p.y = 5 → v.y stays 2.
+fn test_a_store_into_a_field_is_a_copy() {
+  v = mk(1, 2);
+  h = H { tag: 0, p: P { x: 0, y: 0 } };
+  h.p = v;
+  v.x = 9;
+  h.p.y = 5;
+  assert(h.p.x == 1 && h.p.y == 5 && v.x == 9 && v.y == 2, "x1 h.p ({h.p.x}, {h.p.y}) v ({v.x}, {v.y})");
+}
+
+// x2 — appended into a vector and stored over an element, each then written:
+// list = [(3, 4)]; v.y = 7 → list[0].y 4; list += [v] → (3, 7); list[1].x = 30 → v.x 3;
+// list[0] = v → (3, 7); v.x = -1 → list[0].x 3.  psum Σ = 37 + 307 = 344.
+fn test_an_element_append_and_store_are_copies() {
+  v = mk(3, 4);
+  list: vector<P> = [];
+  list += [v];
+  v.y = 7;
+  list += [v];
+  list[1].x = 30;
+  list[0] = v;
+  v.x = -1;
+  s = 0;
+  for e in list { s += psum(e); }
+  assert(list[0].x == 3 && list[0].y == 7 && list[1].x == 30 && v.x == -1 && s == 344, "x2 {s}");
+}
+
+// x3 — through a fn-ref the caller gets (11, 2) and writes it; the next call answers afresh
+// (12, 3).  Under `LOFT_NO_FNREF_VALUE=1` R-ValueRecord declines `via` (a fn-ref reaches it)
+// and its return of the value local `v` owes the record: the same answers.
+fn test_a_value_local_returned_through_a_fn_ref() {
+  f = via;
+  r = f(1, 2);
+  r.y = 100;
+  s = f(2, 3);
+  assert(r.x == 11 && r.y == 100 && s.x == 12 && s.y == 3, "x3 r ({r.x}, {r.y}) s ({s.x}, {s.y})");
+}
+
+// x3b — a returned tuple materialised into a literal's FIELD at the site: held(1, 2) =
+// (1, 22) lands in h.p; a second call bound to a local answers (3, 24); writing either
+// leaves the other.
+fn test_a_returned_tuple_materialised_into_a_literal_field() {
+  h = H { tag: 0, p: held(1, 2) };
+  r = held(3, 4);
+  r.x = 30;
+  h.p.y = -1;
+  assert(h.p.x == 1 && h.p.y == -1 && r.x == 30 && r.y == 24, "x3b h.p ({h.p.x}, {h.p.y}) r ({r.x}, {r.y})");
+}
+
+// x4 — an inline sub-record of a value local stored into a field: h.p = q.hi (5, 5), then
+// q.hi.x = 50 → h.p.x stays 5; h.p.y = 6 → q.hi.y stays 5; q.lo untouched (4, 4).
+fn test_a_sub_record_of_a_value_local_stored_into_a_field() {
+  q = mq(4, 5);
+  h = H { tag: 1, p: P { x: 0, y: 0 } };
+  h.p = q.hi;
+  q.hi.x = 50;
+  h.p.y = 6;
+  assert(h.p.x == 5 && h.p.y == 6 && q.hi.x == 50 && q.hi.y == 5 && q.lo.x == 4, "x4");
+}
+
+// x5 — a loop rebinding the value local from admitted calls, each pass's value appended:
+// p = mk(p.y, p.x + p.y) from (0, 1): (1, 1), (1, 2), (2, 3), (3, 5) — the elements keep
+// each pass's value: Σ psum = 11 + 12 + 23 + 35 = 81.
+fn test_a_rebound_value_local_appended_each_pass() {
+  p = mk(0, 1);
+  out: vector<P> = [];
+  for _ in 0..4 { p = mk(p.y, p.x + p.y); out += [p]; }
+  s = 0;
+  for e in out { s += psum(e); }
+  assert(s == 81 && p.x == 3 && p.y == 5 && out[0].x == 1, "x5 {s}");
+}
+
+fn main() {
+  test_a_store_into_a_field_is_a_copy();
+  test_an_element_append_and_store_are_copies();
+  test_a_value_local_returned_through_a_fn_ref();
+  test_a_returned_tuple_materialised_into_a_literal_field();
+  test_a_sub_record_of_a_value_local_stored_into_a_field();
+  test_a_rebound_value_local_appended_each_pass();
+}

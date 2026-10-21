@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @IGNORE
+//
+// A NON-PUB METHOD IS REFUSED ON THE LIBRARY'S OWN RECORD (`@FR-F-Surface`).  `fn fs_rm(self: FsP)`
+// is declared without `pub`; a program holding a pub `FsP` reaches only the surface, so
+// `p.fs_rm()` must be refused — the method spelling is a reach of the item like the qualifier.
+//
+// DEFECT (ignored until fixed): accepted, prints 7 on both backends (FsP{4}.x + 3).  A non-pub
+// method on `text` IS refused in this spelling ("Unknown field text.fs_tm").
+//
+// @falsified-at: none yet — the cell is the defect's record; it fails on the current tree.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the item and the library.
+// HOLDS: `a-non-pub-function-is-refused-through-the-qualifier` beside it.
+// @EXPECT_ERROR: fs_rm
+
+use f_surface_fixture_lib::*;
+
+fn main() {
+  p = FsP { x: 4 };
+  println("{p.fs_rm()}");
+}

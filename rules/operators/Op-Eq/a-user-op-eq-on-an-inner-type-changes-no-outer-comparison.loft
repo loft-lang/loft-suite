@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A USER `OpEq` ON AN INNER TYPE CHANGES NO OUTER COMPARISON (`@FR-Op-Eq` crossed with `@FR-E-Eq`).
+// E-Eq compares a struct "field by field … with each field's own `==`", a vector element by
+// element, a struct-enum by variant then fields, a tuple element by element — RECURSIVELY.  Op-Eq
+// says `==`/`!=` are E-Eq "on every type at every depth, and no type defines them": a program's
+// `fn OpEq` / `fn OpNe` are ordinary functions (each warns where it is written), and a plain
+// `fn equals` is an ordinary method.  So an INNER type carrying an always-true `OpEq`, an
+// always-true `OpNe` and a laxer `equals` changes nothing at any outer level: a field, a vector
+// element, a variant payload and a tuple member all compare the inner record structurally, and
+// `!=` is the exact complement of that at every level.
+//
+// Values hand-computed: a = Sec{1,"a"}, b = Sec{1,"b"}, c = Sec{1,"a"} — a and c equal, a and b
+// differ only in `label` (which `equals` ignores and `OpEq` would call equal).
+//   direct     : a==b false, a!=b true, a==c true, a.equals(b) true, OpEq(a,b) true, OpNe(a,c) true
+//   field+vector: Box{a,[a,b]} == Box{c,[c,b]} true; == Box{b,[a,b]} false; != that true
+//   vector     : [a]==[c] true, [a]==[b] false, [a,b] != [c,b] false
+//   variant    : Tick{a}==Tick{b} false, Tick{a}==Tick{c} true, Tick{a}==Tock{1} false
+//   tuple      : (1,a)==(1,b) false, (1,a)==(1,c) true, (1,a)!=(2,c) true
+//   identity   : &a == &a true, &a == &c false (two records, equal content)
+//
+// Axes it MOVES: the depth the inner type sits at (direct, struct field, vector element, enum
+//   payload, tuple member), the operator (`==`, `!=`, identity), what the user functions answer
+//   (always true, laxer than the fields).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: `fn OpEq` is an ordinary function and is not called by `==` or `!=`
+// @EXPECT_WARNING: `fn OpNe` is an ordinary function and is not called by `==` or `!=`
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native.
+// CHANNEL: the asserts and the two warnings.
+// ARMED: no instrument.
+// WITNESS: each message prints the booleans.
+// HOLDS: `equality-is-structural-at-every-depth-and-no-type-defines-it` beside it (no user OpEq).
+
+struct Sec { s: integer, label: text }
+struct Box { inner: Sec, tags: vector<Sec> }
+enum Ev { Tick { at: Sec }, Tock { n: integer } }
+
+fn equals(self: Sec, o: Sec) -> boolean { self.s == o.s }
+fn OpEq(self: Sec, o: Sec) -> boolean { self.s == self.s || o.s == o.s }
+fn OpNe(self: Sec, o: Sec) -> boolean { self.s == self.s || o.s == o.s }
+
+fn test_the_user_functions_answer_only_by_name() {
+  a = Sec { s: 1, label: "a" };
+  b = Sec { s: 1, label: "b" };
+  c = Sec { s: 1, label: "a" };
+  s = "{a == b} {a != b} {a == c} {a.equals(b)} {OpEq(a, b)} {OpNe(a, c)}";
+  assert(s == "false true true true true true", "direct: {s}");
+}
+
+fn test_a_field_and_a_vector_field_compare_structurally() {
+  a = Sec { s: 1, label: "a" };
+  b = Sec { s: 1, label: "b" };
+  c = Sec { s: 1, label: "a" };
+  x = Box { inner: a, tags: [a, b] };
+  y = Box { inner: c, tags: [c, b] };
+  z = Box { inner: b, tags: [a, b] };
+  s = "{x == y} {x == z} {x != z}";
+  assert(s == "true false true", "field and vector field: {s}");
+  t = "{[a] == [c]} {[a] == [b]} {[a, b] != [c, b]}";
+  assert(t == "true false false", "vector: {t}");
+}
+
+fn test_a_variant_payload_and_a_tuple_member_compare_structurally() {
+  a = Sec { s: 1, label: "a" };
+  b = Sec { s: 1, label: "b" };
+  c = Sec { s: 1, label: "a" };
+  e1: Ev = Tick { at: a };
+  e2: Ev = Tick { at: b };
+  e3: Ev = Tick { at: c };
+  e4: Ev = Tock { n: 1 };
+  s = "{e1 == e2} {e1 == e3} {e1 == e4}";
+  assert(s == "false true false", "variant payload: {s}");
+  t = "{(1, a) == (1, b)} {(1, a) == (1, c)} {(1, a) != (2, c)}";
+  assert(t == "false true true", "tuple member: {t}");
+}
+
+fn test_identity_is_asked_apart() {
+  a = Sec { s: 1, label: "a" };
+  c = Sec { s: 1, label: "a" };
+  s = "{&a == &a} {&a == &c} {a == c}";
+  assert(s == "true false true", "identity: {s}");
+}
+
+fn main() {
+  test_the_user_functions_answer_only_by_name();
+  test_a_field_and_a_vector_field_compare_structurally();
+  test_a_variant_payload_and_a_tuple_member_compare_structurally();
+  test_identity_is_asked_apart();
+}

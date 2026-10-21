@@ -1,0 +1,115 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW'S ADDRESS IS THE PLACE'S FOR AS LONG AS THE PLACE LIVES (`@FR-R-RecPtr` crossed with
+// `@FR-B-View`).  R-RecPtr derives a plain-record view's address once — "its DbRef FIXED at the bind
+// (B-View)" — and serves every scalar field read and write of it from that address while nothing
+// grows the store.  B-View says what the view IS: an alias of the element (`e = v[i]?`, a loop
+// variable), so a write through one view of a place is read by another view of the same place;
+// a `?` on an ABSENT element is the type's default record in a buffer of the frame; and where the
+// container is DISTURBED while the view is live, the view materialises — it is a copy taken at the
+// bind, writes through it stop reaching the container.  The cells hold two views of one element
+// (both take addresses), a loop variable, an absent element, and a disturbance (the rewrite must
+// decline it).
+//
+// Values hand-computed (mk() = items [E{1,2}, E{3,4}]):
+//   two(bx, 1, 10): e = items[1] → a 13, b 26; f = items[0], f.b += 1000 → 1002;
+//                   13 + 26 + 1002 = 1041; items[0].b 1002, items[1].b 26
+//   two(bx, 0, 10): e and f are items[0]: a 11, b 22, then f.b = 1022 is e.b too:
+//                   11 + 1022 + 1022 = 2055; items[0] = {11, 1022}
+//   walk: b += a → {1,3}, {3,7}; Σ b = 10
+//   absent: items[99]? is E{0,0,""}, a += 3 → 3·10 + len 2 = 32; the container keeps 2 items
+//   disturb: e copied at the bind (a = 1), e.a = 5, push, e.a = 9 → 9·1000 + items[0].a 1 = 9001;
+//            3 items
+//
+// Axes it MOVES: how many views name the place (one, two of one element, two of two elements),
+//   the view's kind (`?`-discharged element, loop variable), presence (present, absent), the
+//   container disturbed or not, which view writes and which reads.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_RECORD_PTR=1, LOFT_NO_INDEX_RECPTR=1, LOFT_POISON=1 and
+//   LOFT_STRICT_STORES=1.  Fires: LOFT_TRACE_RECPTR=1 says `n_two binds __pa_… for e` and `… for f`,
+//   `n_walk binds … for e`, `n_absent binds … for e`; `n_disturb declines e: the remainder may grow
+//   a store`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the answer and the container's fields.
+// HOLDS: `a-record-parameter-holds-its-address-only-while-nothing-moves-it` beside it.
+
+struct E { a: integer, b: integer, t: text }
+struct Box { items: vector<E>, other: vector<integer> }
+
+fn mk() -> Box {
+  Box { items: [E { a: 1, b: 2, t: "x" }, E { a: 3, b: 4, t: "y" }], other: [] }
+}
+
+fn two(bx: Box, i: integer, n: integer) -> integer {
+  e = bx.items[i]?;
+  e.a += n;
+  e.b = e.a * 2;
+  f = bx.items[0]?;
+  f.b += 1000;
+  e.a + e.b + f.b
+}
+
+fn walk(bx: Box) -> integer {
+  for e in bx.items { e.b += e.a; }
+  s = 0;
+  for e in bx.items { s += e.b; }
+  s
+}
+
+fn absent(bx: Box) -> integer {
+  e = bx.items[99]?;
+  e.a += 3;
+  e.a * 10 + len(bx.items)
+}
+
+fn disturb(bx: Box) -> integer {
+  e = bx.items[0]?;
+  e.a = 5;
+  bx.items += [E { a: 100, b: 100, t: "n" }];
+  e.a = 9;
+  e.a * 1000 + bx.items[0].a
+}
+
+fn test_two_views_of_two_elements() {
+  b = mk();
+  r = two(b, 1, 10);
+  assert(r == 1041 && b.items[0].b == 1002 && b.items[1].b == 26 && b.items[1].a == 13, "two(1): {r} {b.items[0].b} {b.items[1].b}");
+}
+
+fn test_two_views_of_one_element_see_each_others_writes() {
+  b = mk();
+  r = two(b, 0, 10);
+  assert(r == 2055 && b.items[0].a == 11 && b.items[0].b == 1022, "two(0): {r} {b.items[0].a} {b.items[0].b}");
+  assert(len(b.items) == 2 && b.items[1].b == 4, "the other element: {len(b.items)} {b.items[1].b}");
+}
+
+fn test_a_loop_variable_writes_its_element() {
+  b = mk();
+  r = walk(b);
+  assert(r == 10 && b.items[0].b == 3 && b.items[1].b == 7, "walk: {r}");
+}
+
+fn test_an_absent_element_is_a_default_of_the_frame() {
+  b = mk();
+  r = absent(b);
+  assert(r == 32 && len(b.items) == 2, "absent: {r} {len(b.items)}");
+}
+
+fn test_a_disturbed_container_materialises_the_view() {
+  b = mk();
+  r = disturb(b);
+  assert(r == 9001 && b.items[0].a == 1 && len(b.items) == 3 && b.items[2].a == 100, "disturb: {r} {b.items[0].a} {len(b.items)}");
+}
+
+fn main() {
+  test_two_views_of_two_elements();
+  test_two_views_of_one_element_see_each_others_writes();
+  test_a_loop_variable_writes_its_element();
+  test_an_absent_element_is_a_default_of_the_frame();
+  test_a_disturbed_container_materialises_the_view();
+}

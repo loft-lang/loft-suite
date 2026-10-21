@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONVERSION FROM A FOREIGN RECORD INTO A BUILT-IN IS REFUSED (`@FR-Op-Conv` crossed with
+// `@FR-Op-Home`).  `OcPt → integer`: the `self` is another library's record and the target is built
+// in — the conversion belongs to `OcPt`'s own source, so here it is refused at the definition.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both types.
+// HOLDS: `a-conversion-into-a-type-of-this-source-takes-any-self` beside it.
+// @EXPECT_ERROR: `operator to_integer` converts `OcPt` to `integer`, and neither is a type of this package
+
+use op_conv_fixture_lib::*;
+
+operator to_integer(self: OcPt) -> integer { self.x }
+
+fn main() {
+  println("x");
+}

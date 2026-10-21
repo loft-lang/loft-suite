@@ -1,0 +1,156 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REBIND HANDS ITS OWN RECORD ONLY WHERE THE PLACE RULE WOULD (`@FR-R-Rebind` crossed with
+// `@FR-R-Place`).  R-Rebind hands `x = f(x, …)`'s callee x's own record as its return buffer
+// "where no OTHER argument reaches x's store (R-Place's alias condition)", declines "a callee
+// that on some exit answers a store other than the buffer (R-Place)", and takes the FIELD
+// form `o.f = f(o.f, …)` "exactly as R-Place admits or declines the place".  So R-Place's
+// conditions are R-Rebind's, and every cell here stands on one of them: the field form over
+// an existing field and over an element, a second argument that is a field of x (it reaches
+// x's store), a callee one of whose exits answers ANOTHER parameter, and a plain place
+// destination `o.d = f(y, …)` beside a rebind in the same body.  A buffer handed where an
+// argument shares its store would overwrite the argument before the callee read it.
+//
+// Axes it MOVES: the destination (a local, a field, an element, a field from another local),
+// the second argument (none, a field of x, an unrelated record), the callee's exits (literal
+// only, an early return of the parameter, an early return of ANOTHER parameter), the result
+// (a record, a vector).  Values hand-computed in each cell's comment.  This build takes the
+// record field form as a copy (the place rule's own admission is narrower: an element
+// appended to a parameter's collection); r2 and r5 pin its values for the day it widens.
+//
+// Firing read under `LOFT_TRACE_REBIND=1` and `LOFT_TRACE_PLACE=1`: r1 ADMITTED ("the
+// local's record is the buffer"), r3 DECLINED ("another argument reaches the local's store"),
+// r4 declined; and off `--native-emit`: r6's first call is handed `t.w` itself as its buffer.  BOTH backends apply both (scope pass); `LOFT_NO_REBIND_PLACE=1`
+// and `LOFT_NO_PLACE_RESULT=1` / `LOFT_NO_BUFFER_IS_PLACE=1` must answer the same (the switch
+// A/B, `(R-Switch)`'s both-backend clause).
+//
+// @falsified-at: none — a conformance guard; a rebind admitted beside an argument that is a
+//   field of x (r3) fills x's record before `extra` is read, and the appended pieces read the
+//   new count.
+// CHANNEL: the asserts.
+// ARMED: LOFT_STRICT_STORES=1, LOFT_POISON=1.
+// WITNESS: each message prints the pieces' sum.
+// HOLDS: the interpreter is the oracle.
+
+struct Piece { start: integer, count: integer }
+struct Doc { buf: vector<integer>, pieces: vector<Piece> }
+struct Ed { tag: integer, d: Doc }
+struct Shelf { docs: vector<Doc> }
+struct Two { v: vector<integer>, w: vector<integer> }
+
+/// A vector built from its argument, every element doubled and one appended.
+fn twice_v(a: vector<integer>) -> vector<integer> {
+  r: vector<integer> = [];
+  for x in a { r += [x * 2]; }
+  r += [len(a)];
+  r
+}
+
+fn mk(n: integer) -> Doc {
+  Doc { buf: [10, 20, 30, 40, 50, 60], pieces: [Piece { start: 0, count: n }, Piece { start: n, count: 6 - n }] }
+}
+
+/// Every piece's count shrunk by `k` (dropped at zero); exits on a literal only.
+fn shrink(d: Doc, k: integer) -> Doc {
+  np: vector<Piece> = [];
+  for p in d.pieces { if p.count > k { np += [Piece { start: p.start + k, count: p.count - k }]; } }
+  Doc { buf: d.buf, pieces: np }
+}
+
+/// Appends `extra` pieces, read from its second argument.
+fn add(d: Doc, extra: vector<Piece>) -> Doc {
+  np: vector<Piece> = [];
+  for p in d.pieces { np += [p]; }
+  for e in extra { np += [Piece { start: e.start + 100, count: e.count }]; }
+  Doc { buf: d.buf, pieces: np }
+}
+
+/// An exit that answers ANOTHER parameter: R-Place's foreign exit, a rebind's decline.
+fn pick(d: Doc, o: Doc, c: boolean) -> Doc {
+  if c { return o; }
+  shrink(d, 1)
+}
+
+fn psum(d: const Doc) -> integer { t = 0; for p in d.pieces { t = t * 10 + p.start * 3 + p.count; } t }
+
+// r1 — the local form, in a loop: mk(2) = [(0,2),(2,4)]; shrink 1 → [(1,1),(3,3)]; shrink 1
+// → [(4,2)]; shrink 1 → [(5,1)] → psum 16, buf intact.
+fn test_a_local_rebound_from_a_call_taking_it() {
+  d = mk(2);
+  for _ in 0..3 { d = shrink(d, 1); }
+  assert(len(d.pieces) == 1 && psum(d) == 16 && len(d.buf) == 6 && d.buf[5] == 60, "r1 {psum(d)}");
+}
+
+// r2 — the FIELD form over an existing field, and over an element: e.d = shrink(e.d, 2):
+// mk(3) = [(0,3),(3,3)] → [(2,1),(5,1)] → psum 7·10 + 16 = 86; shelf.docs[1] = shrink(…, 1)
+// on mk(1) = [(0,1),(1,5)] → [(2,4)] → psum 10; the untouched docs[0] = mk(2) = [(0,2),
+// (2,4)] → psum 2·10 + 6 + 4 = 30.
+fn test_the_field_form_over_a_field_and_an_element() {
+  e = Ed { tag: 7, d: mk(3) };
+  e.d = shrink(e.d, 2);
+  s = Shelf { docs: [mk(2), mk(1)] };
+  s.docs[1] = shrink(s.docs[1], 1);
+  assert(psum(e.d) == 86 && e.tag == 7 && len(e.d.buf) == 6, "r2 field {psum(e.d)}");
+  assert(psum(s.docs[1]) == 10 && psum(s.docs[0]) == 30, "r2 element {psum(s.docs[1])} {psum(s.docs[0])}");
+}
+
+// r3 — a second argument that is a FIELD of x (it reaches x's store): d = add(d, d.pieces)
+// on mk(2) = [(0,2),(2,4)] → [(0,2),(2,4),(100,2),(102,4)]: len 4, Σ starts 204.
+fn test_a_second_argument_in_xs_store() {
+  d = mk(2);
+  d = add(d, d.pieces);
+  st = 0;
+  for p in d.pieces { st += p.start; }
+  assert(len(d.pieces) == 4 && st == 204 && d.pieces[3].count == 4, "r3 {len(d.pieces)} {st}");
+}
+
+// r4 — a callee one of whose exits answers ANOTHER parameter: c = true answers o = mk(5)
+// = [(0,5),(5,1)] → psum 5·10 + 16 = 66, and d's first count set to 9 afterwards reaches d
+// alone (9·10 + 16 = 106; o stays 66); c = false shrinks mk(2) → [(1,1),(3,3)] → psum
+// 4·10 + 12 = 52.
+fn test_a_callee_whose_exit_answers_another_parameter() {
+  o = mk(5);
+  d = mk(2);
+  d = pick(d, o, true);
+  d2 = mk(2);
+  d2 = pick(d2, o, false);
+  d.pieces[0].count = 9;
+  assert(psum(d) == 106 && psum(o) == 66 && psum(d2) == 52, "r4 {psum(d)} {psum(o)} {psum(d2)}");
+}
+
+// r5 — a place destination from ANOTHER local beside a rebind: e.d = shrink(y, 1) builds in
+// e's field (R-Place); then e.d = shrink(e.d, 1) rebinds it (R-Rebind's field form).
+// y = mk(4) = [(0,4),(4,2)] → [(1,3),(5,1)] → [(2,2)] → psum 8; y unchanged, psum 4·10 + 14
+// = 54.
+fn test_a_place_and_a_rebind_on_one_field() {
+  y = mk(4);
+  e = Ed { tag: 1, d: mk(1) };
+  e.d = shrink(y, 1);
+  e.d = shrink(e.d, 1);
+  assert(psum(e.d) == 8 && len(e.d.pieces) == 1 && psum(y) == 54, "r5 {psum(e.d)} {psum(y)}");
+}
+
+// r6 — a VECTOR result into a field: t.w = twice_v(u), u a local of its own, has its buffer
+// BE the place t.w (R-Place's "the buffer IS the place": no argument reaches t's store),
+// while t.v = twice_v(t.v) — the field form — and t.w = twice_v(t.v) hand an argument in t's
+// store, so the place declines and the call builds in its own buffer.  u = [1, 2]: t.w =
+// [2, 4, 2]; t.v = [1, 2] → [2, 4, 2]; t.w = twice_v(t.v) = [4, 8, 4, 3].
+fn test_a_vector_result_into_its_own_field_and_a_sibling() {
+  u = [1, 2];
+  t = Two { v: [1, 2], w: [9] };
+  t.w = twice_v(u);
+  a = len(t.w) * 100 + (t.w[1] ?? -1) * 10 + (t.w[2] ?? -1);
+  t.v = twice_v(t.v);
+  t.w = twice_v(t.v);
+  assert(a == 342 && len(t.v) == 3 && t.v[2] == 2 && len(t.w) == 4 && t.w[1] == 8 && t.w[3] == 3, "r6 {a} {t.v} {t.w}");
+}
+
+fn main() {
+  test_a_local_rebound_from_a_call_taking_it();
+  test_the_field_form_over_a_field_and_an_element();
+  test_a_second_argument_in_xs_store();
+  test_a_callee_whose_exit_answers_another_parameter();
+  test_a_place_and_a_rebind_on_one_field();
+  test_a_vector_result_into_its_own_field_and_a_sibling();
+}

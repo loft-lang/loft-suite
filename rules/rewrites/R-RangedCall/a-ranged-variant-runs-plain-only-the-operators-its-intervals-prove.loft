@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RANGED VARIANT RUNS PLAIN ONLY THE OPERATORS ITS INTERVALS PROVE (`@FR-R-RangedCall` crossed
+// with `@FR-R-Range`).  R-RangedCall tests each hoisted integer record field `|x| <= 2^20` at a
+// loop's entry and, in the guarded copy, calls the callee's RANGED VARIANT — "the same body with
+// its integer parameters ... ranged [-L, L] (L = 2^30), where (R-Range) then decides every
+// operator by interval arithmetic".  So the guard hands R-Range a bound, and R-Range must still
+// keep CHECKED every operator the bound does not prove: a product of three ranged parameters
+// (2^90 does not fit), a division whose ranged divisor includes zero, a mask over a value that
+// may be the sentinel.  The cells put the fields at the guard's edge and push each helper's
+// arithmetic past what fits, so an operator run plain on a proof it does not have answers a
+// wrapped number where the program answers null.
+//
+// Axes it MOVES: the field against the guard (0, the bound 2^20, one past it — the plain copy),
+// the operator (+, *, a three-way *, /, %, a mask, an `if` merge), the result's fit (fits, one
+// that overflows only for the larger fields, a division by a zero field).  Values hand-computed
+// in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_RANGED_CALL=1` ("emits n_run__rg", "emits n_mul3__rg") and off
+// `--native-emit`: `run`'s loop is guarded `unsigned_abs() <= 1048576` on all three fields, and
+// inside `n_mul3__rg` the first product is `wrapping_mul` (2^30 · 2^30 fits) while the second
+// stays the checked `op_mul_int_nullable` (2^60 · 2^30 does not) — R-Range's verdict per
+// operator over the variant's parameter ranges.  Native only, the interpreter the oracle; `LOFT_NO_RANGED_CALLS=1`,
+// `LOFT_NO_RANGE_ARITH=1` and `LOFT_HOIST_VERIFY=1` (every plain operator compared with the
+// checked one) answer the same.
+//
+// @falsified-at: none — a conformance guard; a three-way product run plain in the ranged
+//   variant answers r2's (2^20)·(2^20)·(2^25) as a wrapped number where null (-1) is due.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum.
+// HOLDS: the interpreter is the oracle.
+
+struct G { a: integer, b: integer, c: integer }
+
+fn add2(x: integer, y: integer) -> integer { x + y }
+fn mul2(x: integer, y: integer) -> integer { x * y }
+fn mul3(x: integer, y: integer, z: integer) -> integer { (x * y * z) ?? -1 }
+fn quot(x: integer, y: integer) -> integer { (x / y) ?? -7 }
+fn rem(x: integer, y: integer) -> integer { (x % y) ?? -9 }
+fn low(x: integer) -> integer { x & 255 }
+fn pick(c: boolean, x: integer) -> integer { if c { x * 2 } else { x - 1 } }
+
+/// The loop hoists g.a, g.b and g.c and calls every helper with them and the counter.
+fn run(g: G, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    t += add2(g.a, i) + mul2(g.b, i) + low(g.a + i) + pick(i % 2 == 0, g.c);
+    t += (mul3(g.a, g.b, g.c) ?? -1000) + quot(g.a, g.c) + rem(g.b, g.c);
+  }
+  t
+}
+
+// r1 — small fields (a 5, b 3, c 2) over 0..3: per i: (5+i) + 3i + (5+i) + (i even: 4, odd:
+// 1) + 30 + 2 + 1.  i=0: 5+0+5+4+33 = 47; i=1: 6+3+6+1+33 = 49; i=2: 7+6+7+4+33 = 57 → 153.
+fn test_small_fields_inside_the_guard() {
+  assert(run(G { a: 5, b: 3, c: 2 }, 3) == 153, "r1 {run(G { a: 5, b: 3, c: 2 }, 3)}");
+}
+
+// r2 — two fields AT the guard's bound and one past it (c = 2^25 fails the guard, so the plain
+// copy runs, with the checked helpers): a·b·c = 2^65 overflows → null → -1.
+// Per i: (2^20 + i) + 2^20·i + ((2^20 + i) & 255 = i) + (i even: 2^26, odd: 2^25 - 1) - 1
+// + quot 2^20 / 2^25 = 0 + rem 2^20 % 2^25 = 2^20.  Over 0..2: i=0: 2^20 + 0 + 0 + 2^26 - 1
+// + 0 + 2^20 = 2^21 + 2^26 - 1; i=1: 2^20 + 1 + 2^20 + 1 + 2^25 - 1 - 1 + 0 + 2^20 =
+// 3·2^20 + 2^25.  Σ = 5·2^20 + 2^26 + 2^25 - 1 = 5242880 + 67108864 + 33554432 - 1 = 105906175.
+fn test_a_three_way_product_past_what_fits() {
+  m = 1048576;
+  r = run(G { a: m, b: m, c: 33554432 }, 2);
+  assert(r == 105906175, "r2 {r}");
+}
+
+// r3 — every field exactly 2^20 (all guarded): a·b·c = 2^60 fits; quot 1, rem 0.
+// Per i: (2^20 + i) + 2^20·i + i + (even: 2^21, odd: 2^20 - 1) + 2^60 + 1 + 0.  Over 0..2:
+// i=0: 2^20 + 2^21 + 2^60 + 1; i=1: 2^20 + 1 + 2^20 + 1 + 2^20 - 1 + 2^60 + 1 →
+// Σ = 2^20·4 + 2^21 + 2·2^60 + 3 = 4194304 + 2097152 + 2305843009213693952 + 3.
+fn test_every_field_at_the_bound() {
+  m = 1048576;
+  r = run(G { a: m, b: m, c: m }, 2);
+  assert(r == 2305843009219985411, "r3 {r}");
+}
+
+// r4 — a ZERO divisor field: quot and rem by c = 0 answer null → -7 and -9; a = 4, b = 6:
+// mul3 = 0.  Per i: (4+i) + 6i + (4+i) + (even: 0, odd: -1) + 0 - 7 - 9.  Over 0..2: i=0:
+// 4 + 4 - 16 = -8; i=1: 5 + 6 + 5 - 1 - 16 = -1 → -9.
+fn test_a_zero_divisor_field() {
+  r = run(G { a: 4, b: 6, c: 0 }, 2);
+  assert(r == -9, "r4 {r}");
+}
+
+// r5 — a field one past the bound everywhere (the plain loop with the checked helpers): a = b
+// = c = 2^20 + 1 over 1 round: (2^20 + 1) + 0 + 1 + 2·(2^20 + 1) + (2^20 + 1)³ + 1 + 0.
+// (2^20 + 1)³ = 2^60 + 3·2^40 + 3·2^20 + 1.
+fn test_fields_one_past_the_bound() {
+  m = 1048577;
+  r = run(G { a: m, b: m, c: m }, 1);
+  want = m + 1 + 2 * m + m * m * m + 1;
+  assert(r == want && want == 1152924803148021766, "r5 {r} {want}");
+}
+
+fn main() {
+  test_small_fields_inside_the_guard();
+  test_a_three_way_product_past_what_fits();
+  test_every_field_at_the_bound();
+  test_a_zero_divisor_field();
+  test_fields_one_past_the_bound();
+}

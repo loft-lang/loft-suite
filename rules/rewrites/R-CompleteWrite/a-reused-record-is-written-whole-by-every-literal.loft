@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REUSED RECORD IS WRITTEN WHOLE BY EVERY LITERAL (`@FR-R-CompleteWrite` crossed with
+// `@FR-R-Reuse`).  R-Reuse allocates a witnessed call site's hidden return buffer ONCE, so "a callee
+// that builds into it reuses one record per call SITE" and "a reused record is REFILLED, so each
+// reuse releases what the record held first (H-ClearRelease, its record clause)".  R-CompleteWrite
+// lets the literal skip the default prefill because "the parser's lowering writes EVERY field
+// explicitly — a named value, the declared default, the interned empty text, the null sentinel of
+// a nullable, `false`, the variant TAG".  Together: in a loop that binds `q = mk(i)` once per turn,
+// the same record holds every turn's result, and a literal that OMITS fields must leave each of
+// them at its declared default — never the previous turn's value — for scalars, a nullable, a
+// float, a boolean, an enum and texts (whose previous blocks are released, the leak gate reads it).
+//
+// Values hand-computed: mk(i) for even i = M{i, 50+i, i, 0.25, true, On, "full{i}", "n{i}"}; for odd
+// i = M{n: i, b: false, note: "p{i}"} with every other field its default (d 7, o null, f 1.5,
+// md Auto, tag "dflt").
+//   run(4) = 0,50,0,0.25,true,On,full0,n0 | 1,7,-1,1.5,false,Auto,dflt,p1 |
+//            2,52,2,0.25,true,On,full2,n2 | 3,7,-1,1.5,false,Auto,dflt,p3
+//   run3(5): the omitted-field turns only (i = 1, 3) count d + f + len(tag): 2·(7 + 1.5 + 4) = 25
+//
+// Axes it MOVES: the literal (every field named, defaults omitted), the field kind (integer,
+//   nullable, float, boolean, enum, text with and without a default), the turn order (full → partial
+//   → full …), a reader that keeps nothing past the turn.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_REFILL_TEXT=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: LOFT_REWRITE_CENSUS_FN counts R-Reuse in `n_run` (the scope pass) and R-CompleteWrite
+//   in `n_mk`.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints every field.
+// HOLDS: `157-complete-write` beside it.
+
+enum Mode { Off, On, Auto }
+struct M { n: integer, d: integer = 7, o: integer?, f: float = 1.5, b: boolean, md: Mode = Auto, tag: text = "dflt", note: text }
+
+fn mk(i: integer) -> M {
+  if i % 2 == 0 {
+    M { n: i, d: 50 + i, o: i, f: 0.25, b: true, md: On, tag: "full{i}", note: "n{i}" }
+  } else {
+    M { n: i, b: false, note: "p{i}" }
+  }
+}
+
+fn show(m: M) -> text {
+  "{m.n},{m.d},{m.o ?? -1},{m.f},{m.b},{m.md},{m.tag},{m.note}"
+}
+
+fn run(k: integer) -> text {
+  s = "";
+  for i in 0..k {
+    q = mk(i);
+    s += "{show(q)}|";
+  }
+  s
+}
+
+fn run3(k: integer) -> float {
+  t = 0.0;
+  for i in 0..k {
+    q = mk(i);
+    if !q.b { t += (q.d as float) + q.f + (len(q.tag) as float); }
+  }
+  t
+}
+
+fn test_every_turn_reads_its_own_literal() {
+  s = run(4);
+  assert(s == "0,50,0,0.25,true,On,full0,n0|1,7,-1,1.5,false,Auto,dflt,p1|2,52,2,0.25,true,On,full2,n2|3,7,-1,1.5,false,Auto,dflt,p3|", "run: {s}");
+}
+
+fn test_omitted_fields_read_their_defaults() {
+  t = run3(5);
+  assert(t == 25.0, "run3: {t}");
+}
+
+fn main() {
+  test_every_turn_reads_its_own_literal();
+  test_omitted_fields_read_their_defaults();
+}

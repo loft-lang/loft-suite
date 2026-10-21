@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONVERSION BETWEEN TWO FOREIGN TYPES IS REFUSED (`@FR-Op-Conv` crossed with `@FR-Op-Home`).
+// `text → OcPt`: the `self` is built in and the target is another library's, so neither end is a
+// type of this source — Op-Conv's exception (a conversion INTO this source's type) does not apply
+// and Op-Home refuses the definition where it is written, whatever uses it.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both types.
+// HOLDS: `a-conversion-into-a-type-of-this-source-takes-any-self` beside it.
+// @EXPECT_ERROR: `operator to_oc_pt` converts `text` to `OcPt`, and neither is a type of this package
+
+use op_conv_fixture_lib::*;
+
+operator to_oc_pt(self: text) -> OcPt { OcPt { x: len(self), y: 0 } }
+
+fn main() {
+  println("x");
+}

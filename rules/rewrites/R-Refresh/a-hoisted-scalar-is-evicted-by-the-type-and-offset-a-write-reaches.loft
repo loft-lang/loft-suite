@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOISTED SCALAR IS EVICTED BY THE TYPE AND OFFSET A WRITE REACHES (`@FR-R-Refresh` crossed
+// with `@FR-R-Scalar`).  R-Refresh's scalar half: "a scalar hoist is evicted at analysis time
+// by the (type, offset) its writes reach (R-Scalar)" — the one held fact the loop does not
+// refresh at run time, so the analysis must drop it wherever ANY write could reach it.  The
+// key carries the TYPE, never the variable, because aliasing is decided by what a write can
+// reach: a write through a callee's parameter, a second view, a nested inline sub-record (a
+// write into every enclosing record), or a record freed and re-minted.  Each cell writes the
+// field by one route and reads it once per pass; a fact that survives the write answers the
+// entry value every pass.
+//
+// Axes it MOVES: the write's route (a callee's by-value record parameter, a view bound from
+// another path, a sub-record view's field — a nested key, a whole-record rebind of the
+// local), what is NOT reached (a sibling offset).  Values hand-computed in each comment.
+//
+// Firing read off `--native-emit` (the hoisted read in the loop prelude of s4's unreached
+// field) and `LOFT_HOIST_VERIFY=1` (every hoisted scalar re-read and compared).
+// Cross-backend; `LOFT_NO_SCALAR_HOIST=1` answers the same.
+//
+// @falsified-at: none — a conformance guard; the nested cell r3 is the shape the path clause
+//   records (`n4`: a write through a sub-record view typed (V3, 0) never evicting
+//   (Vertex, 8)) — a fact keyed only by the bare variable answers 4·1 for 1+2+3+4.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum.
+// HOLDS: the interpreter is the oracle.
+
+struct V3 { x: integer, y: integer }
+struct Vertex { id: integer, pos: V3 }
+struct A { x: integer, y: integer }
+
+fn add_x(a: A, k: integer) { a.x += k; }
+
+// r1 — a callee's by-value record parameter writes the field the loop reads (the parameter
+// is a view of the argument's place): r.x reads 1, 3, 6, 10 → 20.
+fn test_a_callee_parameter_reaches_the_field() {
+  rs = [A { x: 1, y: 0 }];
+  r = rs[0]?;
+  t = 0;
+  for i in 0..4 { t += r.x; add_x(rs[0], i + 2); }
+  assert(t == 20 && r.x == 15, "r1 {t} {r.x}");
+}
+
+// r2 — a second view bound from ANOTHER spelling of the same element (a loop-variable view):
+// writes through it reach r.y.  for e in rs runs once per pass over one element: e.y += 5;
+// r.y reads 0, 5, 10 → 15.
+fn test_a_loop_variable_view_reaches_the_field() {
+  rs = [A { x: 0, y: 0 }];
+  r = rs[0]?;
+  t = 0;
+  for _ in 0..3 {
+    t += r.y;
+    for e in rs { e.y += 5; }
+  }
+  assert(t == 15 && r.y == 15, "r2 {t}");
+}
+
+// r3 — a nested inline sub-record: the loop reads v.pos.x and writes through p = v.pos —
+// a write keyed (V3, 0) that reaches (Vertex, pos + 0).  1, 2, 3, 4 → 10.
+fn test_a_write_through_a_sub_record_view_reaches_the_parent() {
+  vs = [Vertex { id: 9, pos: V3 { x: 1, y: 0 } }];
+  v = vs[0]?;
+  p = v.pos;
+  t = 0;
+  for _ in 0..4 { t += v.pos.x; p.x += 1; }
+  assert(t == 10 && v.pos.x == 5 && v.id == 9, "r3 {t} {v.pos.x}");
+}
+
+// r4 — the sibling offset is not reached: r.x read four times while r.y counts; r.x stays 7
+// → 28 (this field may be held for the whole loop).
+fn test_a_sibling_offset_is_not_reached() {
+  rs = [A { x: 7, y: 0 }];
+  r = rs[0]?;
+  q = rs[0]?;
+  t = 0;
+  for _ in 0..4 { t += r.x; q.y += 2; }
+  assert(t == 28 && r.y == 8, "r4 {t} {r.y}");
+}
+
+// r5 — the element the view names is replaced whole by a literal each pass (an in-place
+// literal write of the type): r.x reads 1, 10, 20 → 31.
+fn test_a_literal_written_over_the_element() {
+  rs = [A { x: 1, y: 1 }];
+  r = rs[0]?;
+  t = 0;
+  for i in 0..3 { t += r.x; rs[0] = A { x: (i + 1) * 10, y: 0 }; }
+  assert(t == 31 && r.x == 30, "r5 {t} {r.x}");
+}
+
+fn main() {
+  test_a_callee_parameter_reaches_the_field();
+  test_a_loop_variable_view_reaches_the_field();
+  test_a_write_through_a_sub_record_view_reaches_the_parent();
+  test_a_sibling_offset_is_not_reached();
+  test_a_literal_written_over_the_element();
+}

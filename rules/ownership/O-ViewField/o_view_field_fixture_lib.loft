@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for `an-exported-result-keeps-its-own-copy-of-the-field.loft`
+// (`@FR-O-ViewField`, `@FR-R-Escape`): an exported builder `v_add` of O-ViewField's shape (a local
+// appended into a parameter's collection and returned as a field of the result), its private
+// twin `v_add_own`, and an exported `v_count` that calls the twin inside the unit and reads only
+// the field's length.  The cell beside it `use`s it — the flat file in the script's own directory
+// is where `use` resolves it.  Run on its own it is a cell too.
+//
+// @falsified-at: none — a conformance guard; the library's own calls answered as hand-computed,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the lengths.
+// HOLDS: nothing outside the library is reached when it runs alone.
+
+pub struct VPt { pub px: integer, pub py: integer }
+pub struct VOp { pub pts: vector<VPt>, pub ow: integer }
+pub struct VSc { pub ops: vector<VOp> }
+pub struct VMark { pub matched: boolean, pub mpts: vector<VPt> }
+
+pub fn v_pts(n: integer) -> vector<VPt> {
+  o: vector<VPt> = [];
+  for i in 0..n { o += [VPt { px: i, py: i * 2 }]; }
+  o
+}
+
+pub fn v_add(sc: VSc, n: integer) -> VMark {
+  a = v_pts(n);
+  sc.ops += [VOp { pts: a, ow: n }];
+  VMark { matched: true, mpts: a }
+}
+
+fn v_add_own(sc: VSc, n: integer) -> VMark {
+  a = v_pts(n);
+  sc.ops += [VOp { pts: a, ow: n }];
+  VMark { matched: true, mpts: a }
+}
+
+pub fn v_count(sc: VSc, n: integer) -> integer {
+  m = v_add_own(sc, n);
+  len(m.mpts)
+}
+
+fn test_the_library_answers_its_own_calls() {
+  sc = VSc { ops: [] };
+  m = v_add(sc, 3);
+  c = v_count(sc, 5);
+  assert(len(m.mpts) == 3 && c == 5 && len(sc.ops) == 2, "library: {len(m.mpts)} {c} {len(sc.ops)}");
+}

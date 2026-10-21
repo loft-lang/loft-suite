@@ -1,0 +1,186 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DECODED VALUE THAT ESCAPES ITS FRAME IS BUILT OWNED (`@FR-R-DecodeView` crossed with
+// `@FR-R-Escape`).  R-DecodeView holds decoded text fields as spans of the frame B only where
+// R holds no further than frames B outlives: "(2) R is CONFINED to frames that hold B ... A
+// return hands R to a caller only where that call passed B ... and the condition is decided
+// over EVERY call site in the unit (R-Escape); one site that cannot be shown confined declines
+// the function", "(3) no holder lets R cross a boundary: a return out of the frame that owns
+// B, a store into a collection or field that outlives B, ... a closure capture".  R-Escape is
+// the licence and its limit: a construction that ESCAPES keeps the representation the program
+// promised.  So each cell decodes a frame and lets the value — or a part of it — out by one
+// road, then rewrites or drops the frame, and reads the escaped value: it must be the text the
+// frame held at the decode, never what the frame's bytes are now.
+//
+// Axes it MOVES: the road out (a text copied into an owned slot — admitted, the value
+// returned from the root, an entry appended to a caller's collection, the frame written after
+// the decode, a capture), what happens to the frame after (rewritten, its owner returns).
+// The frame: tag 2 a text of `arg` bytes, 4 a map of `arg` pairs, 1 an integer.  Values
+// hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_DECODE_VIEW=1` on `loft --native-release <cell>` (`main`): `held`
+// a root; `keep` declined ("a decoded value returned out of its frame"), `scribble` declined
+// ("an element address of the frame outside a read"); `stash` never a candidate (its second
+// parameter is a collection) and e5's frame a local, which instance 1 does not admit.  The
+// view clause is planned only without the live tier, so the suite's lanes check the values;
+// `LOFT_NO_DECODE_VIEW=1` answers the same.
+//
+// @falsified-at: none — a conformance guard; a span kept for a returned value would read the
+//   rewritten frame in e2 (`zzzz` for `ping`).
+// CHANNEL: the asserts, on --native-release.
+// ARMED: no instrument.
+// WITNESS: each message prints the text read.
+// HOLDS: the interpreter is the oracle.
+
+enum Val {
+  VNull,
+  VInt { value: integer },
+  VText { value: text },
+  VMap { entries: vector<Entry> },
+}
+
+struct Entry {
+  key: Val,
+  value: Val,
+}
+
+struct Dec {
+  value: Val,
+  next: integer,
+  ok: boolean,
+}
+
+fn read_v(bytes: vector<u8>, pos: integer, depth: integer) -> Dec {
+  n = len(bytes);
+  if pos + 1 >= n || depth > 8 { return Dec { value: VNull, next: pos, ok: false }; }
+  tag = bytes[pos] ?? 0;
+  arg = bytes[pos + 1] ?? 0;
+  at = pos + 2;
+  if tag == 1 { return Dec { value: VInt { value: arg - 100 }, next: at, ok: true }; }
+  if tag == 2 {
+    if at + arg > n { return Dec { value: VNull, next: pos, ok: false }; }
+    tb: vector<u8> = [];
+    for k in 0..arg { tb += [bytes[at + k] ?? 0]; }
+    return Dec { value: VText { value: text_from_bytes(tb) }, next: at + arg, ok: true };
+  }
+  if tag == 4 {
+    entries: vector<Entry> = [];
+    p = at;
+    mok = true;
+    for _ in 0..arg {
+      if mok {
+        kd = read_v(bytes, p, depth + 1);
+        if kd.ok {
+          vd = read_v(bytes, kd.next, depth + 1);
+          if vd.ok {
+            kv = kd.value;
+            vv = vd.value;
+            entries += [Entry { key: kv, value: vv }];
+            p = vd.next;
+          } else { mok = false; }
+        } else { mok = false; }
+      }
+    }
+    if !mok { return Dec { value: VNull, next: pos, ok: false }; }
+    return Dec { value: VMap { entries: entries }, next: p, ok: true };
+  }
+  return Dec { value: VNull, next: pos, ok: false };
+}
+
+fn dec(bytes: vector<u8>) -> Dec { read_v(bytes, 0, 0) }
+
+fn text_of(v: Val) -> text {
+  match v { VText { value } => { return "{value}"; }, _ => {} }
+  return "-";
+}
+
+fn get(m: Val, key: text) -> Val {
+  match m {
+    VMap { entries } => {
+      for e in entries {
+        match e.key { VText { value } => { if value == key { return e.value; } }, _ => {} }
+      }
+    },
+    _ => {}
+  }
+  return VNull;
+}
+
+/// e1 — admitted: the text copied into an owned slot inside the root.
+fn held(frame: vector<u8>) -> text {
+  d = dec(frame);
+  t = text_of(d.value);
+  "{t}!"
+}
+
+/// e2 — the decoded value RETURNED out of the frame's function: declines (3).
+fn keep(frame: vector<u8>) -> Val {
+  d = dec(frame);
+  return d.value;
+}
+
+/// e3 — a decoded entry appended to the CALLER's collection, which outlives the frame.
+fn stash(frame: vector<u8>, into: vector<Val>) {
+  d = dec(frame);
+  into += [d.value];
+}
+
+/// e4 — the frame written after the decode: (1) fails, the text is what the decode read.
+fn scribble(frame: vector<u8>) -> text {
+  d = dec(frame);
+  frame[2] = 122;
+  frame[3] = 122;
+  text_of(d.value)
+}
+
+fn ping() -> vector<u8> { [2, 4, 112, 105, 110, 103] }
+
+// e1 — "ping" → "ping!".
+fn test_a_text_copied_into_an_owned_slot() {
+  assert(held(ping()) == "ping!", "e1 {held(ping())}");
+}
+
+// e2 — returned, then the frame rewritten to "zzzz": the value keeps "ping".
+fn test_a_value_returned_out_of_its_frame() {
+  f = ping();
+  v = keep(f);
+  for i in 2..6 { f[i] = 122; }
+  assert(text_of(v) == "ping" && text_of(keep(f)) == "zzzz", "e2 {text_of(v)}");
+}
+
+// e3 — two frames stashed into one caller vector, the first frame then rewritten and the
+// second dropped: the stash reads "ping" and "ok".
+fn test_a_value_stored_into_a_callers_collection() {
+  box: vector<Val> = [];
+  f = ping();
+  stash(f, box);
+  for i in 2..6 { f[i] = 120; }
+  stash([2, 2, 111, 107], box);
+  assert(len(box) == 2 && text_of(box[0]) == "ping" && text_of(box[1]) == "ok", "e3 {text_of(box[0])} {text_of(box[1])}");
+}
+
+// e4 — the frame written after the decode: "ping" stays; the caller's frame now reads "zzng".
+fn test_the_frame_written_after_the_decode() {
+  f = ping();
+  t = scribble(f);
+  assert(t == "ping" && f[2] == 122 && f[4] == 110, "e4 {t}");
+}
+
+// e5 — a capture: a closure built over a decoded text reads it after the frame changed.
+fn test_a_captured_text() {
+  f = ping();
+  d = dec(f);
+  s = text_of(d.value);
+  g = fn(x: text) -> text { "{s}-{x}" };
+  for i in 2..6 { f[i] = 113; }
+  assert(g("a") == "ping-a", "e5 {g(\"a\")}");
+}
+
+fn main() {
+  test_a_text_copied_into_an_owned_slot();
+  test_a_value_returned_out_of_its_frame();
+  test_a_value_stored_into_a_callers_collection();
+  test_the_frame_written_after_the_decode();
+  test_a_captured_text();
+}

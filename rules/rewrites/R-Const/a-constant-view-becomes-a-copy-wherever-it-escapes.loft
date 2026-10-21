@@ -1,0 +1,134 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSTANT VIEW BECOMES A COPY WHEREVER IT ESCAPES (`@FR-R-Const` crossed with
+// `@FR-R-Escape`).  R-Const answers a literal-bodied function's call with a VIEW of a constant
+// built once in the write-locked const store, and keeps the plain bind `c = codes()` a view
+// "where c is only READ in its frame"; it is B-Copy's copy "the moment c is written, rebound
+// to a non-constant, returned, stored into a field or element, captured, or handed to a
+// parameter the callee writes ... and the program cannot tell the two forms apart
+// (R-Escape)".  R-Escape is the licence and the limit: a representation is the compiler's to
+// change only where the value does not ESCAPE.  So each cell takes the view somewhere it
+// escapes — out of the frame by `return`, into a record's field, into a vector's element,
+// into a closure, through a writing parameter — writes the escaped copy, and asks two things:
+// the copy holds what was written, and the NEXT call still answers the literal.  A wrong
+// admission is loud (a write into the const store halts: "write to a constant"); a wrong
+// copy is the value channel.
+//
+// Axes it MOVES: the escape (return, field store, element store, capture, writing parameter,
+// a write after a read-only stretch), the element kind (integer, text), the read-only
+// partner (indexed, iterated, `const` argument).  Values hand-computed in each comment:
+// `codes()` is [3, 1, 4], `words()` ["ab", "c"].
+//
+// Firing read under `LOFT_TRACE_CONST=1` (which calls read the constant, which keep the
+// call).  BOTH backends apply it (scope pass); `LOFT_NO_CONST_VIEW=1` keeps every call and
+// must answer the same (the switch A/B, `(R-Switch)`'s both-backend clause).
+//
+// @falsified-at: none — a conformance guard; an escaping use admitted as a view halts at its
+//   write ("write to a constant") on both backends.
+// CHANNEL: the exit and the asserts.
+// ARMED: LOFT_NO_CONST_VIEW=1 for the A/B.
+// WITNESS: each message prints the copy and the next call's answer.
+// HOLDS: every read-only cell reads 3 1 4 under both settings.
+
+struct Holder { v: vector<integer>, k: integer }
+
+fn codes() -> vector<integer> { [3, 1, 4] }
+fn words() -> vector<text> { ["ab", "c"] }
+
+fn isum(v: const vector<integer>) -> integer { s = 0; for x in v { s += x; } s }
+fn first_set(v: vector<integer>) -> integer { v[0] = 50; v[0] ?? -1 }
+
+/// The view returned out of the frame: an escape.
+fn handed_up() -> vector<integer> {
+  c = codes();
+  c
+}
+
+// e1 — read-only: indexed, iterated and its length read — the view; Σ 8, c[2] = 4.  (A
+// format of the whole vector, `"{c}"`, is a read the build does not admit: it keeps the call.)
+fn test_a_read_only_bind_is_the_view() {
+  c = codes();
+  t = 0;
+  for x in c { t += x; }
+  assert(t == 8 && c[2] == 4 && len(c) == 3, "e1 {t} {len(c)}");
+}
+
+// e1b — handed to a `const` parameter: the rule keeps it a view, the build keeps the call
+// (any user-call hand-off declines, a narrower admission); either way Σ 8.
+fn test_a_bind_handed_to_a_const_parameter() {
+  c = codes();
+  assert(isum(c) == 8 && c[0] == 3, "e1b {c}");
+}
+
+// e2 — returned (an escape): the caller writes its copy; the next call answers the literal.
+fn test_a_returned_view_is_the_callers_copy() {
+  r = handed_up();
+  r[1] = 99;
+  r += [7];
+  n = codes();
+  assert(len(r) == 4 && r[1] == 99 && r[3] == 7, "e2 copy {r}");
+  assert(len(n) == 3 && n[1] == 1, "e2 next {n}");
+}
+
+// e3 — stored into a field and an element, then each written.
+fn test_a_view_stored_into_a_field_or_an_element_is_a_copy() {
+  h = Holder { v: codes(), k: 0 };
+  h.v[0] = 30;
+  rows: vector<vector<integer>> = [];
+  rows += [codes()];
+  rows[0][2] = 40;
+  n = codes();
+  assert(h.v[0] == 30 && h.v[1] == 1 && len(h.v) == 3, "e3 field {h.v}");
+  assert(rows[0][2] == 40 && rows[0][0] == 3, "e3 element {rows[0]}");
+  assert(n[0] == 3 && n[2] == 4, "e3 next {n}");
+}
+
+// e4 — written after a read-only stretch in the same frame: the bind is the copy from the
+// start; s reads 3 + 1 + 4 = 8 before the write.
+fn test_a_bind_written_later_is_a_copy() {
+  c = codes();
+  s = isum(c);
+  c[0] = -3;
+  c += [10];
+  n = codes();
+  assert(s == 8 && c[0] == -3 && len(c) == 4 && isum(c) == 12, "e4 {c}");
+  assert(n[0] == 3 && len(n) == 3, "e4 next {n}");
+}
+
+// e5 — handed to a parameter the callee writes: the callee's copy reads 50, the constant 3.
+fn test_a_writing_parameter_takes_a_copy() {
+  a = first_set(codes());
+  c = codes();
+  b = first_set(c);
+  assert(a == 50 && b == 50 && c[0] == 50 && codes()[0] == 3, "e5 {a} {b} {c}");
+}
+
+// e6 — captured by a closure that reads it: the closure keeps what it captured.
+fn test_a_captured_view() {
+  c = codes();
+  f = fn(i: integer) -> integer { c[i] ?? -1 };
+  assert(f(0) + f(1) + f(2) == 8 && f(3) == -1, "e6");
+}
+
+// e7 — text elements: read-only bind, then an escaping copy written.
+fn test_text_elements() {
+  w = words();
+  t = "";
+  for x in w { t += x; }
+  h = words();
+  h[0] = "zz";
+  h += ["d"];
+  assert(t == "abc" && h[0] == "zz" && len(h) == 3 && words()[0] == "ab", "e7 {t} {h}");
+}
+
+fn main() {
+  test_a_read_only_bind_is_the_view();
+  test_a_bind_handed_to_a_const_parameter();
+  test_a_returned_view_is_the_callers_copy();
+  test_a_view_stored_into_a_field_or_an_element_is_a_copy();
+  test_a_bind_written_later_is_a_copy();
+  test_a_writing_parameter_takes_a_copy();
+  test_a_captured_view();
+  test_text_elements();
+}

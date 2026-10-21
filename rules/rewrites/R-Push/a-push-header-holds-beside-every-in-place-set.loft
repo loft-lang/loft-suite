@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PUSH HEADER HOLDS BESIDE EVERY IN-PLACE SET (`@FR-R-Push` crossed with `@FR-R-InPlace`).
+// R-Push admits "a loop whose store writes are (R-InPlace) sets and pushes of a fusable
+// scalar kind to pure paths", and R-InPlace is why: a fixed-width set through an existing
+// address moves no record and changes no length, so it cannot stale the push header.  The
+// cells pair the push with each kind of in-place set R-InPlace lists — an element of another
+// vector, an element of the PUSHED vector itself (through the push header), a record field,
+// a scalar a `&` callee writes (the link clause), a set landing on an element a growth just
+// moved — and read every set back after the loop.
+//
+// Axes it MOVES: the in-place target (other vector's element, the pushed vector's element,
+// a record field, a `&integer` callee), growth (inside the first claim, past it).  Values
+// hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit` (`__ph_` push header and `push_hoisted` in each loop).
+// Cross-backend; `LOFT_HOIST_VERIFY=1` (each push re-derives its header before its store),
+// `LOFT_NO_PUSH_HOIST=1` and `LOFT_NO_WRITE_HOIST=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; a set through a push header frozen before a
+//   growth lands in the record the growth left behind, and p4's early elements read their
+//   pushed values instead of -1.
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the vector.
+// HOLDS: the interpreter is the oracle.
+
+struct Cnt { n: integer, m: integer }
+
+fn bump(k: &integer) { k += 2; }
+
+// p1 — v scaled in place, w pushed v[i] + i, and the previous element of w bumped in place:
+// v → [10,20,30,40]; w pushes 10, 21, 32, 43, then w[0..2] each + 1 → [11,22,33,43], Σ 109.
+fn test_sets_of_another_vector_and_of_the_pushed_one() {
+  v = [1, 2, 3, 4];
+  w: vector<integer> = [];
+  for i in 0..4 {
+    v[i] = (v[i] ?? 0) * 10;
+    w += [(v[i] ?? 0) + i];
+    if i > 0 { w[i - 1] += 1; }
+  }
+  s = 0;
+  for x in w { s += x; }
+  assert(len(w) == 4 && s == 109 && w[3] == 43 && v[3] == 40, "p1 w {w} v {v}");
+}
+
+// p2 — a record field set in place beside the push: c.n runs 0,1,3,6,10, pushed each pass;
+// c.m counts down 5 → 0.  w = [0,1,3,6,10], Σ 20.
+fn test_a_record_field_set_beside_the_push() {
+  c = Cnt { n: 0, m: 5 };
+  w: vector<integer> = [];
+  for i in 0..5 { c.n += i; c.m -= 1; w += [c.n]; }
+  s = 0;
+  for x in w { s += x; }
+  assert(s == 20 && c.n == 10 && c.m == 0 && len(w) == 5, "p2 {w} {c.n} {c.m}");
+}
+
+// p3 — a `&integer` callee writes the scalar the push reads: k = 2, 4, 6 → w = [2,4,6].
+fn test_a_reference_callee_writes_the_pushed_value() {
+  k = 0;
+  w: vector<integer> = [];
+  for _ in 0..3 { bump(k); w += [k]; }
+  assert(len(w) == 3 && w[0] == 2 && w[2] == 6 && k == 6, "p3 {w}");
+}
+
+// p4 — thirty pushes with a set of an EARLIER element after each: w[i / 2] = -1 reaches
+// indexes 0..14; 15..29 keep i.  Σ = -15 + (15 + … + 29) = -15 + 330 = 315.
+fn test_a_set_lands_in_the_record_a_growth_moved() {
+  w: vector<integer> = [];
+  for i in 0..30 {
+    w += [i];
+    w[i / 2] = -1;
+  }
+  s = 0;
+  for x in w { s += x; }
+  assert(len(w) == 30 && s == 315 && w[14] == -1 && w[15] == 15, "p4 {s} {w}");
+}
+
+fn main() {
+  test_sets_of_another_vector_and_of_the_pushed_one();
+  test_a_record_field_set_beside_the_push();
+  test_a_reference_callee_writes_the_pushed_value();
+  test_a_set_lands_in_the_record_a_growth_moved();
+}

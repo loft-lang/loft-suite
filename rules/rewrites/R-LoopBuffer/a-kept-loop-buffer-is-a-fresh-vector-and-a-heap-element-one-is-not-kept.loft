@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEPT LOOP BUFFER IS A FRESH VECTOR, AND A HEAP-ELEMENT ONE IS NOT KEPT (`@FR-R-LoopBuffer`
+// crossed with `@FR-H-ClearRelease`).  R-LoopBuffer keeps a loop-local `v: vector<τ> = []`'s store
+// across passes and resets its length to 0 — "observably the same vector as a fresh one — a read
+// is bounded by the length, a push writes from 0" — and admits it "only where … elements OWN NO
+// HEAP (a length reset releases nothing; the clear is what releases what an element owns,
+// `@FR-H-ClearRelease`)".  So a scalar buffer whose passes shrink, skip their push or read past
+// their end answers what a fresh vector answers each pass — the stale elements of the longer pass
+// before are never read — and a text or record buffer keeps the per-pass store, so nothing an
+// element owned is stranded across passes (the leak gate reads it).
+//
+// Values hand-computed:
+//   ints(3): per pass i, v = [i, …, n−1]; t = 100t + 10·len + last, then + (v[n] ?? 7) (always 7):
+//            i0 → 32 + 7 = 39; i1 → 3900 + 22 + 7 = 3929; i2 → 392900 + 12 + 7 = 392919
+//   texts(3) / recs(3): len 3, 2, 1 and an element of length 2 each pass → 32, 3222, 322212
+//   skips(5): v = [i, i] on even passes, nothing on odd → lengths 2,0,2,0,2 → 20202
+//
+// Axes it MOVES: the element (integer, text, record owning a text), the pass length (shrinking,
+//   skipped), a read past the length, nested loops.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_NO_LOOP_BUFFER_REUSE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
+//   Fires: LOFT_TRACE_LOOP_BUFFER=1 says `n_ints: __vdb_1 keeps its vector across iterations` and
+//   the same for `n_skips`; `n_texts` and `n_recs` are not named.
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument (the switches above, by hand).
+// WITNESS: each message prints the folded answer.
+// HOLDS: `157-loop-buffer` beside it.
+
+struct R { n: integer, tag: text }
+
+fn ints(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [];
+    for j in 0..(n - i) { v += [j + i]; }
+    t = t * 100 + len(v) * 10 + (v[len(v) - 1] ?? 0);
+    t += v[n] ?? 7;
+  }
+  t
+}
+
+fn texts(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<text> = [];
+    for j in 0..(n - i) { v += ["{j}{i}"]; }
+    t = t * 100 + len(v) * 10 + len(v[0] ?? "");
+  }
+  t
+}
+
+fn recs(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<R> = [];
+    for j in 0..(n - i) { v += [R { n: j, tag: "t{i}" }]; }
+    t = t * 100 + len(v) * 10 + len(v[0].tag);
+  }
+  t
+}
+
+fn skips(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [];
+    if i % 2 == 0 { v += [i, i]; }
+    t = t * 10 + len(v);
+  }
+  t
+}
+
+fn test_a_kept_scalar_buffer_reads_as_fresh() {
+  a = ints(3);
+  b = skips(5);
+  assert(a == 392919 && b == 20202, "kept: {a} {b}");
+}
+
+fn test_a_heap_element_buffer_is_fresh_each_pass() {
+  a = texts(3);
+  b = recs(3);
+  assert(a == 322212 && b == 322212, "fresh: {a} {b}");
+}
+
+fn main() {
+  test_a_kept_scalar_buffer_reads_as_fresh();
+  test_a_heap_element_buffer_is_fresh_each_pass();
+}

@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LITERAL GROUP THAT OUTGROWS ITS RESERVATION REFRESHES ITS HEADER (`@FR-R-GroupPush` crossed
+// with `@FR-R-Refresh`).  R-GroupPush binds a push header right after a group's reservation
+// and emits every mint and finish of the group through it; "the reservation STAYS — it is
+// what gives the header its capacity — and a growth inside the group is (R-Refresh)'s": the
+// runtime's append and a fresh header, before the element's writes.  A reservation sized for
+// the group can still be outgrown when the vector was not empty — the reservation of n claims
+// n elements only for an absent vector — so the cells start the vector at every distance
+// from its capacity and append a group across the edge, with plain and heap-owning elements,
+// two groups back to back, and a group in a function whose returned buffer the caller reuses.
+//
+// Axes it MOVES: the prior length (0, 9, 10, 11, a loop's worth), the group's size (1 to 13),
+// the element (plain, heap-owning — its slot zeroed), the vector (a local, a reused return
+// buffer).  Values hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit` (`//@FR-R-GroupPush group push header` and the group's close
+// marker).  Cross-backend; `LOFT_HOIST_VERIFY=1` (the header re-derived at the slot and at the
+// finish), `LOFT_NO_GROUP_PUSH=1` and `LOFT_NO_HEAP_RECORD_PUSH=1` answer the same, as does
+// `LOFT_POISON_CLAIM=1`.
+//
+// @falsified-at: none — a conformance guard; a group header not refreshed after the growth
+//   writes g2's later elements into the record the growth left (they read 0).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1, LOFT_POISON_CLAIM=1 on --native.
+// WITNESS: each message prints the length and the sum.
+// HOLDS: the interpreter is the oracle.
+
+struct Pt { x: integer, y: integer }
+struct Lab { s: text, n: integer }
+
+fn pt(a: integer, b: integer) -> Pt { Pt { x: a, y: b } }
+fn xs(v: const vector<Pt>) -> integer { s = 0; for p in v { s += p.x; } s }
+
+fn prefilled(n: integer) -> vector<Pt> {
+  v: vector<Pt> = [];
+  for i in 0..n { v += [pt(i, 0)]; }
+  v
+}
+
+// g1 — at every prior length around the first claim, a group of five: Σ x of the prior run
+// 0..n-1 plus 100..104 (510).  n = 0: 510; 9: 36 + 510 = 546; 10: 45 + 510 = 555;
+// 11: 55 + 510 = 565; 20: 190 + 510 = 700.
+fn test_a_group_at_every_distance_from_the_capacity() {
+  t = 0;
+  for n in [0, 9, 10, 11, 20] {
+    v = prefilled(n);
+    v += [pt(100, 1), pt(101, 1), pt(102, 1), pt(103, 1), pt(104, 1)];
+    assert(len(v) == n + 5 && v[n + 4].x == 104 && v[n].y == 1, "g1 n={n} len {len(v)}");
+    t += xs(v);
+  }
+  assert(t == 510 + 546 + 555 + 565 + 700, "g1 {t}");
+}
+
+// g2 — two groups back to back, the second crossing the edge mid-group: 7 then 6 → 13;
+// x = 0..12 → Σ 78; the 12th and 13th land past the growth.
+fn test_two_groups_back_to_back() {
+  v: vector<Pt> = [];
+  v += [pt(0, 0), pt(1, 0), pt(2, 0), pt(3, 0), pt(4, 0), pt(5, 0), pt(6, 0)];
+  v += [pt(7, 0), pt(8, 0), pt(9, 0), pt(10, 0), pt(11, 0), pt(12, 0)];
+  assert(len(v) == 13 && xs(v) == 78 && v[12].x == 12 && v[11].x == 11, "g2 {len(v)} {xs(v)}");
+}
+
+// g3 — heap-owning elements across the edge, after a prior run of 9: texts "a".."e" and n
+// 1..5; Σ size = 9 (prior "p") + 5, Σ n = 9·0 + 15.
+fn test_a_heap_owning_group_across_the_edge() {
+  v: vector<Lab> = [];
+  for _ in 0..9 { v += [Lab { s: "p", n: 0 }]; }
+  v += [Lab { s: "a", n: 1 }, Lab { s: "b", n: 2 }, Lab { s: "c", n: 3 }, Lab { s: "d", n: 4 }, Lab { s: "e", n: 5 }];
+  b = 0;
+  n = 0;
+  for e in v { b += size(e.s); n += e.n; }
+  assert(len(v) == 14 && b == 14 && n == 15 && v[13].s == "e", "g3 {b} {n}");
+}
+
+// g4 — a group in a builder whose returned buffer the caller reuses: k-th call answers
+// [k, k+1, k+2] — three calls, each read back: Σ 3 + 6 + 9 + … for k = 0, 10, 20 → 3 + 33 + 63.
+fn three(k: integer) -> vector<Pt> {
+  v: vector<Pt> = [];
+  v += [pt(k, 0), pt(k + 1, 0), pt(k + 2, 0)];
+  v
+}
+fn test_a_group_in_a_reused_return_buffer() {
+  t = 0;
+  for k in [0, 10, 20] { r = three(k); t += xs(r) * 10 + len(r); }
+  assert(t == 30 + 3 + 330 + 3 + 630 + 3, "g4 {t}");
+}
+
+fn main() {
+  test_a_group_at_every_distance_from_the_capacity();
+  test_two_groups_back_to_back();
+  test_a_heap_owning_group_across_the_edge();
+  test_a_group_in_a_reused_return_buffer();
+}

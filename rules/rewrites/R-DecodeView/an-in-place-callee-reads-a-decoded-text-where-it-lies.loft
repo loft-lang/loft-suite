@@ -1,0 +1,190 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN IN-PLACE CALLEE READS A DECODED TEXT WHERE IT LIES (`@FR-R-DecodeView` crossed with
+// `@FR-R-Callee`).  R-DecodeView emits "every function of the confined region that touches T … as a
+// twin over that layout — the way (R-Callee) emits a twin over its inputs", so a decoded text field
+// is read as a span of the frame by every helper the root hands it to.  R-Callee admits a callee
+// whose store writes are all in-place scalar sets under the caller's loop hoist.  The two meet in
+// `tally`: a helper in the decode region that READS a decoded text (its length, an equality) and
+// WRITES only scalar fields of an accumulator in place, called per entry inside a loop that also
+// reads the accumulator the callee writes.  Every count must be the owned road's: the bytes of each
+// text, the equality against "op", and the accumulator's running fields after every call.
+//
+// The decoder is loft's `tests/scripts/a-decoded-text-is-read-where-it-lies.loft` `read_v`.
+//
+// Values hand-computed over frame3() = { "op": "apply", "raw": b"hi", "k": b"xyz" }:
+//   tally_all: texts op(2) apply(5) raw(3) k(1) → n 4, bytes 11, hits 1 → "4 11 1"
+//   tally_loop(3): keys only, per round n += 3, bytes += 6, hits += 1 (op), then hits += n:
+//     round 1 → 3 6 4; round 2 → 6 12 11; round 3 → 9 18 21 → "9 18 21"
+//
+// Axes it MOVES: the callee's reads (a text's size, an equality), its writes (three scalar fields
+//   in place), the caller (a single pass, a loop that also reads what the callee writes).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret,
+//   native and (by hand) --native-release, and the same under LOFT_NO_DECODE_VIEW=1.  Fires on
+//   --native-release only: LOFT_TRACE_DECODE_VIEW=1 says `n_tally_all: a root over `frame`, region
+//   4` and the same for `n_tally_loop`; LOFT_REWRITE_CENSUS_FN counts R-Callee in `n_tally_loop`.
+// CHANNEL: the asserts.
+// ARMED: no instrument (the switch above, by hand).
+// WITNESS: each message prints the accumulator.
+// HOLDS: `a-byte-string-copied-out-of-a-frame-is-the-frames-bytes-at-the-decode` beside it.
+
+enum Val {
+  VNull,
+  VInt { value: integer },
+  VText { value: text },
+  VBytes { value: vector<u8> },
+  VMap { entries: vector<Entry> },
+}
+
+struct Entry {
+  key: Val,
+  value: Val,
+}
+
+struct Dec {
+  value: Val,
+  next: integer,
+  ok: boolean,
+}
+
+fn read_v(bytes: vector<u8>, pos: integer, depth: integer) -> Dec {
+  n = len(bytes);
+  if pos + 1 >= n || depth > 8 { return Dec { value: VNull, next: pos, ok: false }; }
+  tag = bytes[pos] ?? 0;
+  arg = bytes[pos + 1] ?? 0;
+  at = pos + 2;
+  if tag == 1 { return Dec { value: VInt { value: arg - 100 }, next: at, ok: true }; }
+  if tag == 3 {
+    if at + arg > n { return Dec { value: VNull, next: pos, ok: false }; }
+    bs: vector<u8> = [];
+    for k in 0..arg { bs += [bytes[at + k] ?? 0]; }
+    return Dec { value: VBytes { value: bs }, next: at + arg, ok: true };
+  }
+  if tag == 2 {
+    if at + arg > n { return Dec { value: VNull, next: pos, ok: false }; }
+    tb: vector<u8> = [];
+    for k in 0..arg { tb += [bytes[at + k] ?? 0]; }
+    return Dec { value: VText { value: text_from_bytes(tb) }, next: at + arg, ok: true };
+  }
+  if tag == 4 {
+    entries: vector<Entry> = [];
+    p = at;
+    mok = true;
+    for _ in 0..arg {
+      if mok {
+        kd = read_v(bytes, p, depth + 1);
+        if kd.ok {
+          vd = read_v(bytes, kd.next, depth + 1);
+          if vd.ok {
+            kv = kd.value;
+            vv = vd.value;
+            entries += [Entry { key: kv, value: vv }];
+            p = vd.next;
+          } else { mok = false; }
+        } else { mok = false; }
+      }
+    }
+    if !mok { return Dec { value: VNull, next: pos, ok: false }; }
+    return Dec { value: VMap { entries: entries }, next: p, ok: true };
+  }
+  return Dec { value: VNull, next: pos, ok: false };
+}
+
+fn dec(bytes: vector<u8>) -> Dec { read_v(bytes, 0, 0) }
+
+/// The entry of map `m` under text key `key`, or null.
+fn get(m: Val, key: text) -> Val {
+  match m {
+    VMap { entries } => {
+      for e in entries {
+        match e.key { VText { value } => { if value == key { return e.value; } }, _ => {} }
+      }
+    },
+    _ => {}
+  }
+  return VNull;
+}
+
+fn tb(t: text) -> vector<u8> {
+  b: vector<u8> = [];
+  for i in 0..size(t) { b += [(t.byte_at(i) & 255) as u8]; }
+  b
+}
+
+/// map of 3: "op" -> text "apply", "raw" -> bytes "hi", "k" -> bytes "xyz"
+fn frame3() -> vector<u8> {
+  f: vector<u8> = [4, 3];
+  f += [2, 2];
+  f += tb("op");
+  f += [2, 5];
+  f += tb("apply");
+  f += [2, 3];
+  f += tb("raw");
+  f += [3, 2];
+  f += tb("hi");
+  f += [2, 1];
+  f += tb("k");
+  f += [3, 3];
+  f += tb("xyz");
+  f
+}
+
+struct Acc { n: integer, bytes: integer, hits: integer }
+
+fn tally(a: Acc, v: Val) {
+  match v {
+    VText { value } => {
+      a.n += 1;
+      a.bytes += size(value);
+      if value == "op" { a.hits += 1; }
+    },
+    _ => {}
+  }
+}
+
+fn tally_all(frame: vector<u8>) -> text {
+  d = dec(frame);
+  a = Acc { n: 0, bytes: 0, hits: 0 };
+  match d.value {
+    VMap { entries } => {
+      for e in entries {
+        tally(a, e.key);
+        tally(a, e.value);
+      }
+    },
+    _ => {}
+  }
+  "{a.n} {a.bytes} {a.hits}"
+}
+
+fn tally_loop(frame: vector<u8>, n: integer) -> text {
+  d = dec(frame);
+  a = Acc { n: 0, bytes: 0, hits: 0 };
+  for r in 0..n {
+    match d.value {
+      VMap { entries } => { for e in entries { tally(a, e.key); } },
+      _ => {}
+    }
+    a.hits += a.n;
+  }
+  "{a.n} {a.bytes} {a.hits}"
+}
+
+fn test_a_callee_reads_every_decoded_text() {
+  s = tally_all(frame3());
+  assert(s == "4 11 1", "tally_all: {s}");
+}
+
+fn test_a_loop_reads_what_the_callee_wrote() {
+  s = tally_loop(frame3(), 3);
+  assert(s == "9 18 21", "tally_loop: {s}");
+}
+
+fn main() {
+  test_a_callee_reads_every_decoded_text();
+  test_a_loop_reads_what_the_callee_wrote();
+}

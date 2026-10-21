@@ -1,0 +1,117 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PUSH WINDOW OPENS ONLY WHERE NO READER NEEDS THE LENGTH WRITTEN BACK (`@FR-R-PushFill`
+// crossed with `@FR-R-Refresh`).  R-Refresh asks "that a push's refresh reach the RECORD so
+// that a runtime reader inside the loop sees every push"; R-PushFill's WINDOW clause freezes
+// the record's length until the window closes, and "the window is admitted exactly where
+// there is no such reader".  The cells put each reader the window clause names on the other
+// side of that line — a callee handed the pushed vector, a view of it taken before the loop,
+// a read of its length in the body — beside the same loop with no reader (which opens the
+// window) and a callee that reads ANOTHER vector (which may).  A window opened beside a
+// reader answers the length the loop started with; a window never closed leaves the record
+// at its entry length after the loop.
+//
+// Axes it MOVES: the reader (none, a callee on the pushed vector, a callee on another vector,
+// a view taken before the loop, `len` in the body), the push placement (top level, under an
+// `if`, in a nested loop — the DEEP clause), the element (integer, float).  Values
+// hand-computed in each cell's comment.
+//
+// Firing read under `LOFT_TRACE_PUSH_FILL=1` (the clause that declined a window) and off
+// `--native-emit` (`__pw_` windows where nothing reads, `__ph_` pushes where something does).
+// Cross-backend; `LOFT_HOIST_VERIFY=1`, `LOFT_NO_PUSH_WINDOW=1` and `LOFT_NO_PUSH_FILL=1` answer
+// the same.  (R-PushFill's own note: the verifier cannot see a lagging length a reader meets —
+// the interpreter is the falsifier, through these cells.)
+//
+// @falsified-at: none — a conformance guard; a window opened beside `count(w)` answers q1's
+//   t as 0 + 1 + … for the entry length (t 20 for 210).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sum and the length.
+// HOLDS: the interpreter is the oracle.
+
+fn count(v: const vector<integer>) -> integer { len(v) }
+
+// q1 — a callee reads the pushed vector each pass: t = Σ (i + 1) over 0..20 = 210.
+fn test_a_callee_reading_the_pushed_vector() {
+  w: vector<integer> = [];
+  t = 0;
+  for i in 0..20 { w += [i]; t += count(w); }
+  assert(t == 210 && len(w) == 20 && w[19] == 19, "q1 {t} {len(w)}");
+}
+
+// q2 — no reader: the window; Σ i² over 0..20 = 2470.
+fn test_no_reader_takes_the_window() {
+  w: vector<integer> = [];
+  for i in 0..20 { w += [i * i]; }
+  s = 0;
+  for x in w { s += x; }
+  assert(s == 2470 && len(w) == 20, "q2 {s} {len(w)}");
+}
+
+// q3 — a callee reading ANOTHER vector: w gets i + 3 → Σ 190 + 60 = 250.
+fn test_a_callee_reading_another_vector() {
+  other = [1, 2, 3];
+  w: vector<integer> = [];
+  for i in 0..20 { w += [i + count(other)]; }
+  s = 0;
+  for x in w { s += x; }
+  assert(s == 250 && len(w) == 20, "q3 {s}");
+}
+
+// q4 — a view of the pushed vector taken before the loop, read every pass: w = [5] and pass i
+// pushes i, len(d) after = i + 2 → Σ over 0..10 = 65.
+fn test_a_view_taken_before_the_loop() {
+  w: vector<integer> = [5];
+  d = &w;
+  t = 0;
+  for i in 0..10 { w += [i]; t += len(d); }
+  assert(t == 65 && len(w) == 11, "q4 {t}");
+}
+
+// q5 — the DEEP clause with its reader after the loop: evens pushed at the top, odds push
+// [0, 1] in a nested loop: 5 + 2·5 = 15 elements, Σ (0+2+4+6+8) + 5·1 = 25.
+fn test_pushes_under_a_branch_and_a_nested_loop() {
+  w: vector<integer> = [];
+  for i in 0..10 {
+    if i % 2 == 0 { w += [i]; } else { for k in 0..2 { w += [k]; } }
+  }
+  s = 0;
+  for x in w { s += x; }
+  assert(len(w) == 15 && s == 25 && w[14] == 1, "q5 {len(w)} {s}");
+}
+
+// q6 — the same deep loop with `len(w)` read in the body (a reader of the length the window
+// would hold back): each pass adds the length after its pushes: lengths 1, 3, 4, 6, 7, 9, 10,
+// 12, 13, 15 → Σ 80.
+fn test_a_length_read_in_a_deep_loop() {
+  w: vector<integer> = [];
+  t = 0;
+  for i in 0..10 {
+    if i % 2 == 0 { w += [i]; } else { for k in 0..2 { w += [k]; } }
+    t += len(w);
+  }
+  assert(t == 80 && len(w) == 15, "q6 {t}");
+}
+
+// q7 — a float vector with a reader callee on another float vector, past the first claim:
+// w gets 0.5·i + 1.0 (len(fs) = 1) for i in 0..30 → Σ 0.5·435 + 30 = 247.5.
+fn flen(v: const vector<float>) -> integer { len(v) }
+fn test_a_float_window_beside_a_reader_of_another_vector() {
+  fs = [9.0];
+  w: vector<float> = [];
+  for i in 0..30 { w += [(i as float) * 0.5 + (flen(fs) as float)]; }
+  s = 0.0;
+  for x in w { s += x; }
+  assert(s == 247.5 && len(w) == 30, "q7 {s}");
+}
+
+fn main() {
+  test_a_callee_reading_the_pushed_vector();
+  test_no_reader_takes_the_window();
+  test_a_callee_reading_another_vector();
+  test_a_view_taken_before_the_loop();
+  test_pushes_under_a_branch_and_a_nested_loop();
+  test_a_length_read_in_a_deep_loop();
+  test_a_float_window_beside_a_reader_of_another_vector();
+}

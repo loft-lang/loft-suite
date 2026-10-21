@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MINTED ELEMENT EVICTS NO HOISTED SCALAR, AND AN ALIAS WRITE DOES (`@FR-R-Mint` crossed
+// with `@FR-R-Scalar`).  R-Mint: "a write whose target is the FRESH variable e — the literal
+// element's in-place sets, and § V-d's OpCopyRecord delivery of a builder's result into e —
+// contributes nothing to (R-Scalar)'s write set: a record minted inside the body cannot be
+// named by a variable whose getter the prelude already ran".  So a loop appending records of
+// type P may keep a P field it reads hoisted — and must still drop it the moment the body
+// writes that field through any OTHER name.  Freshness over-applied is the failure the rule's
+// own falsifier names: a write through an alias read as a write of the fresh element.
+// And `@FR-R-State` for the field form: a mint over `R.fld` has "the key a read of R.fld
+// (OpGetField(R, pos, tp)) already has, so the append and the reads share ONE holder" — m6
+// mints into `h.items` and reads its length and an element in the same pass, all three through
+// the one push header (`--native-emit`: `__ph_1` and no `__vh_` for the path).
+//
+// Axes it MOVES: the minted record's type against the read record's (same type), the vector
+// (bare local, a field of a plain record — the field clause), the delivery (literal, a
+// builder's result), an alias write in the same body (absent, present).  Values
+// hand-computed in each cell's comment.
+//
+// Firing read off `--native-emit` (the mint through the loop's push header, the read hoisted
+// in the prelude where nothing else writes P) and `LOFT_HOIST_VERIFY=1` (each hoisted scalar
+// re-read).  Cross-backend; `LOFT_NO_MINT_HOIST=1`, `LOFT_NO_SCALAR_HOIST=1` and
+// `LOFT_NO_FIELD_MINT=1` answer the same.
+//
+// @falsified-at: none — a conformance guard; m2 and m4 are the alias cells a too-wide
+//   freshness fails (a stale `r.a` answers 4 for 64 in m2).
+// CHANNEL: the asserts.
+// ARMED: LOFT_HOIST_VERIFY=1 on --native.
+// WITNESS: each message prints the sums.
+// HOLDS: the interpreter is the oracle.
+
+struct P { a: integer, b: integer }
+struct H { k: integer, items: vector<P> }
+
+fn mk(a: integer, b: integer) -> P { P { a: a, b: b } }
+
+fn sum_a(v: const vector<P>) -> integer { s = 0; for e in v { s += e.a; } s }
+fn sum_b(v: const vector<P>) -> integer { s = 0; for e in v { s += e.b; } s }
+
+// m1 — a parameter of type P read every pass while P records are minted: a = 3 + i,
+// b = 4·i over 0..5 → Σa 15 + 10 = 25, Σb 40.
+fn build(p: const P, n: integer) -> vector<P> {
+  out: vector<P> = [];
+  for i in 0..n { out += [P { a: p.a + i, b: p.b * i }]; }
+  out
+}
+fn test_a_parameter_field_beside_fresh_mints() {
+  out = build(P { a: 3, b: 4 }, 5);
+  assert(len(out) == 5 && sum_a(out) == 25 && sum_b(out) == 40, "m1 {sum_a(out)} {sum_b(out)}");
+}
+
+// m2 — the same with a write of the read field through an alias each pass: r.a reads 1, 11,
+// 21, 31 → Σa 64; b = i → 6.
+fn test_an_alias_write_beside_the_mints_evicts() {
+  rs = [P { a: 1, b: 0 }];
+  r = rs[0]?;
+  q = rs[0]?;
+  out: vector<P> = [];
+  for i in 0..4 { out += [P { a: r.a, b: i }]; q.a += 10; }
+  assert(sum_a(out) == 64 && sum_b(out) == 6 && r.a == 41, "m2 {sum_a(out)}");
+}
+
+// m3 — the field clause: mints into h.items read h.k and h.items' own length (staged before
+// the append).  a = 2·i → Σ 30; b = len before the append = i → Σ 15; len 6.
+fn test_mints_into_a_record_field_read_its_scalars() {
+  h = H { k: 2, items: [] };
+  for i in 0..6 { h.items += [P { a: h.k * i, b: len(h.items) }]; }
+  assert(len(h.items) == 6 && sum_a(h.items) == 30 && sum_b(h.items) == 15, "m3 {sum_a(h.items)} {sum_b(h.items)}");
+}
+
+// m4 — a builder's result delivered into the fresh element, beside an alias write of the
+// read field: r.a reads 5, 6, 7 → Σa 18; b = i·10 → 30.
+fn test_a_builder_delivered_into_the_element_beside_an_alias_write() {
+  rs = [P { a: 5, b: 0 }];
+  r = rs[0]?;
+  q = rs[0]?;
+  out: vector<P> = [];
+  for i in 0..3 { out += [mk(r.a, i * 10)]; q.a += 1; }
+  assert(sum_a(out) == 18 && sum_b(out) == 30, "m4 {sum_a(out)} {sum_b(out)}");
+}
+
+// m5 — the field clause past the first claim, beside a field write of the PARENT that is
+// not P (h.k += 1): a = k at each pass = 2..21 over 20 passes → Σ (2+21)·20/2 = 230.
+fn test_mints_into_a_field_past_a_growth_while_the_parent_scalar_moves() {
+  h = H { k: 2, items: [] };
+  for _ in 0..20 { h.items += [P { a: h.k, b: 1 }]; h.k += 1; }
+  assert(len(h.items) == 20 && sum_a(h.items) == 230 && sum_b(h.items) == 20 && h.k == 22, "m5 {sum_a(h.items)}");
+}
+
+// m6 — mints into h.items and reads of the same path in one pass (one holder, R-State): a =
+// i·h.k = 2i; t += len (i + 1) + items[i / 2].a (0, 0, 2, 2, 4, 4) → Σ 21 + 12 = 33.
+fn test_mints_and_reads_of_one_field_path_share_one_holder() {
+  h = H { k: 2, items: [] };
+  t = 0;
+  for i in 0..6 { h.items += [P { a: i * h.k, b: 0 }]; t += len(h.items) + h.items[i / 2].a; }
+  assert(t == 33 && len(h.items) == 6 && sum_a(h.items) == 30, "m6 {t}");
+}
+
+fn main() {
+  test_a_parameter_field_beside_fresh_mints();
+  test_an_alias_write_beside_the_mints_evicts();
+  test_mints_into_a_record_field_read_its_scalars();
+  test_a_builder_delivered_into_the_element_beside_an_alias_write();
+  test_mints_into_a_field_past_a_growth_while_the_parent_scalar_moves();
+  test_mints_and_reads_of_one_field_path_share_one_holder();
+}

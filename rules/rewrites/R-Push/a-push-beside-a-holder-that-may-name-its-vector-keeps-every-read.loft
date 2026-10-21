@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PUSH BESIDE A HOLDER THAT MAY NAME ITS VECTOR KEEPS EVERY READ (`@FR-R-Push` crossed with
+// `@FR-R-Alias`).  R-Push keeps a pushed path's header current in the loop and serves every read of
+// that path from it; "the push is a MOVER, admitted beside other holders under (R-Alias)" — only
+// where no other held path can name the same vector: a root that is a local owning its store is
+// exclusive, "a parameter cannot alias an owned local", but "a `&` link or a view can alias
+// anything" and two parameters are never proven apart.  So: pushing into an owned local while
+// reading a parameter by index takes the rewrite; pushing into a `&` parameter, or into a by-value
+// one, that the caller handed the SAME vector as the parameter being read, and pushing into one
+// field of a record while reading (and growing) another, must each read the elements as they are
+// at each read — the original ones below the length taken before the loop.
+//
+// Values hand-computed (mk(n) = [1, …, n]; fold = (31·fold + e) mod 1000003, by a model):
+//   dbl(v, v), v = mk(100): appends 2·v[i] for i < 100 → len 200, v[100] 2, v[199] 200, fold 67130
+//   dbl2(w, w), w = mk(100): appends w[i] + 1 → len 200, w[100] 2, w[199] 101
+//   own(mk(50)): per element 3e then the running length → len 100, o[0] 3, o[1] 1, o[99] 99
+//   fields(S{x: mk(3), y: mk(40)}): 40 rounds (len(s.y) taken once) of x += [y[i] + 100], y += [0]
+//     → len(x) 43, x[3] 101, x[42] 140, len(y) 80
+//
+// Axes it MOVES: the pushed root (an owned local, a `&` parameter, a by-value parameter, a field of
+//   a record parameter), what the read names (a parameter the caller made the same vector, the
+//   sibling field, a parameter apart), growth past several blocks (100 elements).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed, interpret and
+//   native, and the same under LOFT_POISON=1 (a moved block is poisoned) and LOFT_HOIST_VERIFY=1.
+//   Fires: LOFT_REWRITE_CENSUS_FN counts R-Push in `n_own` (and `n_mk`) and none in `n_dbl`,
+//   `n_dbl2`, `n_fields`.
+// CHANNEL: the asserts.
+// ARMED: LOFT_POISON=1 by hand.
+// WITNESS: each message prints the lengths and elements.
+// HOLDS: `a-versioned-loop-sees-its-adopted-buffer` (R-Alias).
+
+struct S { x: vector<integer>, y: vector<integer> }
+
+fn dbl(a: &vector<integer>, b: vector<integer>) {
+  n = len(b);
+  for i in 0..n { a += [b[i] * 2]; }
+}
+
+fn dbl2(a: vector<integer>, b: vector<integer>) {
+  n = len(b);
+  for i in 0..n { a += [b[i] + 1]; }
+}
+
+fn own(b: vector<integer>) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..len(b) {
+    out += [b[i] * 3];
+    out += [len(out)];
+  }
+  out
+}
+
+fn fields(s: S) {
+  for i in 0..len(s.y) {
+    s.x += [s.y[i] + 100];
+    s.y += [0];
+  }
+}
+
+fn mk(n: integer) -> vector<integer> {
+  v: vector<integer> = [];
+  for i in 0..n { v += [i + 1]; }
+  v
+}
+
+fn fold(v: vector<integer>) -> integer {
+  s = 0;
+  for e in v { s = (s * 31 + e) % 1000003; }
+  s
+}
+
+fn test_one_vector_through_a_link_and_a_parameter() {
+  v = mk(100);
+  dbl(v, v);
+  assert(len(v) == 200 && v[100] == 2 && v[199] == 200 && fold(v) == 67130, "dbl: {len(v)} {v[100]} {v[199]} {fold(v)}");
+}
+
+fn test_one_vector_through_two_parameters() {
+  w = mk(100);
+  dbl2(w, w);
+  assert(len(w) == 200 && w[100] == 2 && w[199] == 101, "dbl2: {len(w)} {w[100]} {w[199]}");
+}
+
+fn test_an_owned_local_beside_a_parameter() {
+  o = own(mk(50));
+  assert(len(o) == 100 && o[0] == 3 && o[1] == 1 && o[99] == 99, "own: {len(o)} {o[0]} {o[1]} {o[99]}");
+}
+
+fn test_two_fields_of_one_record() {
+  s = S { x: mk(3), y: mk(40) };
+  fields(s);
+  assert(len(s.x) == 43 && s.x[3] == 101 && s.x[42] == 140 && len(s.y) == 80, "fields: {len(s.x)} {s.x[42]} {len(s.y)}");
+}
+
+fn main() {
+  test_one_vector_through_a_link_and_a_parameter();
+  test_one_vector_through_two_parameters();
+  test_an_owned_local_beside_a_parameter();
+  test_two_fields_of_one_record();
+}

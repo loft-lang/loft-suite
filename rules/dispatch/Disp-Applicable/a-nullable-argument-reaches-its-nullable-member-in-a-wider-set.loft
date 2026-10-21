@@ -1,0 +1,112 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE ARGUMENT REACHES ITS NULLABLE MEMBER IN A WIDER SET (`@FR-Disp-Applicable` crossed
+// with `@FR-F-Recv`).  Disp-Applicable decides applicability "after (F-Recv)'s nullability
+// routing, so a nullable argument reaches the `τ?` member where one is declared", and F-Recv says
+// the routing is per spelling of the receiver — `m(τ)` for a `τ` receiver, `m(τ?)` for a `τ?` one,
+// an absent receiver reaching `m(τ?)` with `self == null` — in both call spellings, and at any
+// later position as at the receiver.  The routing is a property of the PAIR `m(τ)` / `m(τ?)`;
+// the rest of the set does not enter it.  So the same answers hold when the set has members
+// beside the pair: one on another receiver type (`RQ`), one on the same dense receiver with
+// another second parameter (`(RP, text)`), one with another arity, one on the nullable receiver
+// with another second parameter.
+//
+// Values hand-computed: p = RP{1}, q: RP? = RP{2}, z: RP? = null.
+//   pair alone and pair + (RQ, integer):  p.g(5) "P,int 1 5", q.g(6) "P?,int 2 6",
+//                                         z.g(7) "P?,int null 7", g(q, 6) / g(z, 7) alike
+//   later position, pair alone:           p.h(q) "P?,P? 12", z.h(z) "P?,P? -1-1", p.h(p) "P,P 11"
+//   pair + (RP, text):                    the pair's answers unchanged, p.g("t") "P,text 1 t"
+//   pair + (RP?, text):                   p.g(5) "P,int 1 5" (the dense receiver's member)
+//
+// DEFECT (the IGNOREd functions): a third member that shares the receiver's TYPE — (RP, text),
+// (RP, integer, integer), (RP?, text) — collapses the routing to one spelling for every
+// receiver.  Observed on both backends:
+//   pair + (RP, text):    "P,int 1 5|P,int 2 6|P,int null 7"  — the DENSE body runs with
+//                         `self == null`, and the call warns that a `RP?` "becomes null there"
+//   pair + (RP?, text):   "P?,int 1 5|…"                       — a dense receiver reaches m(τ?)
+//   h pair + (RP, integer): p.h(q) "P,P 12", z.h(z) "P,P nullnull"
+// Repro: agentA/repro/d3-nullable-receiver-routing-with-a-third-member.loft (rule walk batch 4).
+//
+// Axes it MOVES: the set beside the pair (nothing, another receiver type, the same dense receiver,
+//   another arity, the same nullable receiver), the receiver's nullability and presence, the call
+//   spelling, the position of the nullable argument.
+//
+// Cross-backend; `main` runs every passing cell so the leak gate reads the file.
+//
+// @falsified-at: none for the passing half — a conformance guard; the IGNOREd half fails on the
+//   current tree, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: `a-method-and-its-nullable-twin-are-two-bodies` (F-Recv) — the pair alone.
+
+struct RP { x: integer }
+struct RQ { y: integer }
+
+fn ga(self: RP, k: integer) -> text { "P,int {self.x} {k}" }
+fn ga(self: RP?, k: integer) -> text { if self == null { "P?,int null {k}" } else { "P?,int {self.x} {k}" } }
+fn ga(self: RQ, k: integer) -> text { "Q,int {self.y} {k}" }
+
+fn gb(self: RP, k: integer) -> text { "P,int {self.x} {k}" }
+fn gb(self: RP?, k: integer) -> text { if self == null { "P?,int null {k}" } else { "P?,int {self.x} {k}" } }
+fn gb(self: RP, t: text) -> text { "P,text {self.x} {t}" }
+
+fn gc(self: RP, k: integer) -> text { "P,int {self.x} {k}" }
+fn gc(self: RP?, k: integer) -> text { if self == null { "P?,int null {k}" } else { "P?,int {self.x} {k}" } }
+fn gc(self: RP?, t: text) -> text { "P?,text {t}" }
+
+fn h(self: RP, q: RP) -> text { "P,P {self.x}{q.x}" }
+fn h(self: RP?, q: RP?) -> text { "P?,P? {self.x ?? -1}{q.x ?? -1}" }
+
+fn hb(self: RP, q: RP) -> text { "P,P {self.x}{q.x}" }
+fn hb(self: RP?, q: RP?) -> text { "P?,P? {self.x ?? -1}{q.x ?? -1}" }
+fn hb(self: RP, n: integer) -> text { "P,int {self.x} {n}" }
+
+fn test_the_pair_beside_another_receiver_type_routes_by_nullability() {
+  p = RP { x: 1 };
+  q: RP? = RP { x: 2 };
+  z: RP? = null;
+  r = RQ { y: 3 };
+  s = "{p.ga(5)}|{q.ga(6)}|{z.ga(7)}|{ga(q, 6)}|{ga(z, 7)}|{r.ga(8)}";
+  assert(s == "P,int 1 5|P?,int 2 6|P?,int null 7|P?,int 2 6|P?,int null 7|Q,int 3 8", "pair + RQ: {s}");
+}
+
+fn test_a_later_nullable_argument_reaches_the_nullable_member() {
+  p = RP { x: 1 };
+  q: RP? = RP { x: 2 };
+  z: RP? = null;
+  s = "{p.h(p)}|{p.h(q)}|{q.h(p)}|{z.h(z)}|{h(p, z)}";
+  assert(s == "P,P 11|P?,P? 12|P?,P? 21|P?,P? -1-1|P?,P? 1-1", "later position: {s}");
+}
+
+// @IGNORE
+fn test_a_third_member_on_the_dense_receiver_keeps_the_routing() {
+  p = RP { x: 1 };
+  q: RP? = RP { x: 2 };
+  z: RP? = null;
+  s = "{p.gb(5)}|{q.gb(6)}|{z.gb(7)}|{gb(z, 7)}|{p.gb("t")}";
+  assert(s == "P,int 1 5|P?,int 2 6|P?,int null 7|P?,int null 7|P,text 1 t", "pair + (RP, text): {s}");
+}
+
+// @IGNORE
+fn test_a_third_member_on_the_nullable_receiver_keeps_the_routing() {
+  p = RP { x: 1 };
+  z: RP? = null;
+  s = "{p.gc(5)}|{z.gc(7)}|{p.gc("t")}";
+  assert(s == "P,int 1 5|P?,int null 7|P?,text t", "pair + (RP?, text): {s}");
+}
+
+// @IGNORE
+fn test_a_third_member_keeps_the_later_position_routing() {
+  p = RP { x: 1 };
+  q: RP? = RP { x: 2 };
+  z: RP? = null;
+  s = "{p.hb(q)}|{z.hb(z)}|{p.hb(p)}|{p.hb(4)}";
+  assert(s == "P?,P? 12|P?,P? -1-1|P,P 11|P,int 1 4", "h + (RP, integer): {s}");
+}
+
+fn main() {
+  test_the_pair_beside_another_receiver_type_routes_by_nullability();
+  test_a_later_nullable_argument_reaches_the_nullable_member();
+}
