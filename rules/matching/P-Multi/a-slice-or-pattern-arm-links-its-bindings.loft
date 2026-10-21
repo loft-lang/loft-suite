@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Multi` over a VECTOR subject — `[9, ..] | [1, ..]` is one arm, and a name both slice
+// patterns bind is one variable: whichever pattern matched writes it from ITS OWN positions, then
+// the one body reads it.  `,` lists them the same way.  `@FR-P-Alt-Diff`: a name only some
+// patterns bind is `τ?`, null in the others (c3).  `@FR-P-Guard` × P-Multi: the guard holds for
+// whichever pattern matched, so a guard that fails under the first is tried under the next (c4).
+// Each value is computed by hand, on both backends.
+//
+// Bodies are ORDER-SENSITIVE: a body that read the first pattern's positions for the second's
+// match would answer the other element.
+//
+//   c1 [9, ..] | [1, ..]           [1,2,3] → 1, [9] → 1, [5] → 0
+//   c2 [a, 1, ..] | [1, a, ..]      [7,1,5] → 70, [1,8] → 80, [1,1] → 10, [2,2] → 0
+//   c3 [x] | []                    [4] → 4, [] → -1, [1,2] → 0
+//   c4 [a, ..] | [.., a] if a > 5   [1,9] → 9, [8,1] → 8, [1,2] → 0
+//   c5 [A { n }, ..] | [B { n }, ..]   [B{3}] → 3, [A{4},C] → 4, [C] → 0
+//   c6 [9, ..], [1, ..]            [1] → 1, [2] → 0
+//   c7 [t, "x"] | ["x", t]          ["y","x"] → "y!", ["x","z"] → "z!", ["q"] → "-"
+//
+// Guards loft#2107: a multi-pattern arm of slice patterns was refused (*"Expect token =>"*) at
+// the first `|`, on both backends — a parse refusal of a shape P-Multi admits.
+//
+// @falsified-at: e71f24b34 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: a refusal (*"Expect token =>"*), on BOTH backends.
+//   ARMED: nothing.
+//   WITNESS: exit 1 with the parse error at the first `|` between slice patterns.
+//   HOLDS: nothing runs; every cell is unreached.
+
+enum Sh { A { n: integer }, B { n: integer }, C }
+
+fn c1(v: vector<integer>) -> integer { match v { [9, ..] | [1, ..] => 1, _ => 0 } }
+fn c2(v: vector<integer>) -> integer { match v { [a, 1, ..] | [1, a, ..] => a * 10, _ => 0 } }
+fn c3(v: vector<integer>) -> integer { match v { [x] | [] => x ?? -1, _ => 0 } }
+fn c4(v: vector<integer>) -> integer { match v { [a, ..] | [.., a] if a > 5 => a, _ => 0 } }
+fn c5(v: vector<Sh>) -> integer { match v { [A { n }, ..] | [B { n }, ..] => n, _ => 0 } }
+fn c6(v: vector<integer>) -> integer { match v { [9, ..], [1, ..] => 1, _ => 0 } }
+fn c7(v: vector<text>) -> text { match v { [t, "x"] | ["x", t] => "{t}!", _ => "-" } }
+
+fn test_a_slice_or_pattern_arm_matches_either_pattern() {
+  s = "{c1([1, 2, 3])} {c1([9])} {c1([5])} | {c6([1])} {c6([2])}";
+  assert(s == "1 1 0 | 1 0", "c1/c6: {s}");
+}
+
+fn test_a_slice_or_pattern_arm_links_its_bindings() {
+  s = "{c2([7, 1, 5])} {c2([1, 8])} {c2([1, 1])} {c2([2, 2])}";
+  assert(s == "70 80 10 0", "c2: {s}");
+  e: vector<integer> = [];
+  s3 = "{c3([4])} {c3(e)} {c3([1, 2])}";
+  assert(s3 == "4 -1 0", "c3: {s3}");
+  s4 = "{c4([1, 9])} {c4([8, 1])} {c4([1, 2])}";
+  assert(s4 == "9 8 0", "c4: {s4}");
+  s5 = "{c5([B { n: 3 }])} {c5([A { n: 4 }, C])} {c5([C])}";
+  assert(s5 == "3 4 0", "c5: {s5}");
+  s7 = "{c7(["y", "x"])} {c7(["x", "z"])} {c7(["q"])}";
+  assert(s7 == "y! z! -", "c7: {s7}");
+}
+
+fn main() {
+  test_a_slice_or_pattern_arm_matches_either_pattern();
+  test_a_slice_or_pattern_arm_links_its_bindings();
+}

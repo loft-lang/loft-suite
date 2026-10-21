@@ -129,13 +129,10 @@ fn test_a_generic_read_declines_the_hold() {
   assert(s == 2172749311 && f#next == 12, "f6 {s} {f#next}");
 }
 
-// f7 — DEFECT (found with this cell, both backends): `f#read(n) as T` with n below T's width
-// answers null — and STDLIB_FILES says "the position does not move then" — but the cursor
-// moves by n.  A held loop of three `f#read(6) as integer` from 0: each null, #next must stay
-// 0; observed 12 on --interpret and --native, every switch (straight line: 6 after one).
-// Expected 0 / observed 12.  Silent: every value is the documented null, only the cursor —
-// and so every later read — is off.
-// @IGNORE
+// f7 — `f#read(n) as T` with n below T's width answers null and, STDLIB_FILES says, "the
+// position does not move then": three held `f#read(6) as integer` from 0 are each null and
+// leave #next at 0.  Guards loft#2119: the cursor moved by n (12 after three) on --interpret
+// and --native, every switch — every value the documented null, only the cursor off.
 fn test_a_narrow_count_read_keeps_the_cursor() {
   f = opened("f7", true);
   nulls = 0;
@@ -150,4 +147,5 @@ fn main() {
   test_a_short_read_at_the_end();
   test_a_return_out_of_the_loop();
   test_a_generic_read_declines_the_hold();
+  test_a_narrow_count_read_keeps_the_cursor();
 }

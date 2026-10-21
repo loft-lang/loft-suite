@@ -19,12 +19,13 @@
 //   held(3): w.r = v[1] BEFORE the literal; h.items[1].v = 70 → "3 70 2"
 //   ref_local(3): r = v[2] before; h.items[2].v = 90 → "90 3"
 //   back(3): w.r = v[1] before; w.r.v = 55 → h.items[1].v stays 2 → "2 55"
+//   view(3): e = v[1] (a view, B-View-Base) before; h.items[1].v = 80 → e.v stays 2 → "80 2"
 //
-// DEFECT (the IGNOREd function): the host clause is ADMITTED (LOFT_TRACE_PLACE=1, `[literal-host]
-// … ADMITTED — built in `__ref_1`'s store, `v` moved`) although a stored reference homed in the
-// vector's store is live, and the reference then names the literal's element: held "3 70 70",
-// ref_local "90 90", back "55 55", on both backends; LOFT_NO_LITERAL_HOST=1 answers the
-// hand-computed values.  Repro: agentA/repro/d7-… (rule walk batch 4).
+// Guards loft#2118: the host clause was ADMITTED (LOFT_TRACE_PLACE=1) while a stored reference
+// into the vector's store was live — R-MoveLast's decline asked only of a home moved out for a
+// holder that outlives it — or while a view of the vector was read after the move; the reference
+// then named the literal's element: held "3 70 70", ref_local "90 90", back "55 55", view "80 80",
+// on both backends.  LOFT_NO_LITERAL_HOST=1 answered the hand-computed values.
 //
 // Axes it MOVES: where a reference sits (a field of the literal into a third store, into the
 //   literal's own field after the move, in the literal naming the source, in a holder local before
@@ -32,9 +33,9 @@
 //
 // Cross-backend; `main` runs every passing cell so the leak gate reads the file.
 //
-// @falsified-at: none for the passing half — a conformance guard, the same under
-//   LOFT_NO_LITERAL_HOST=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1; the IGNOREd half fails on the
-//   current tree, interpret and native.
+// @falsified-at: e71f24b34 — test_a_reference_into_the_vector_keeps_the_copy fails there,
+//   interpret and native; the other half is a conformance guard, the same under
+//   LOFT_NO_LITERAL_HOST=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
 // CHANNEL: the asserts.
 // ARMED: no instrument (the switches above, by hand).
 // WITNESS: each message prints the literal's field and the reference.
@@ -108,17 +109,25 @@ fn back(n: integer) -> text {
   "{h.items[1].v} {w.r.v}"
 }
 
+fn view(n: integer) -> text {
+  v = mk(n);
+  e = v[1];
+  h = Host { items: v, k: 7 };
+  h.items[1].v = 80;
+  "{h.items[1].v} {e.v}"
+}
+
 fn test_the_host_move_where_no_reference_names_the_vector() {
   s = "{plain(3)} | {withref(3)} | {later(3)} | {intoitems(2)}";
   assert(s == "4 99 7 | 3 41 5 | 3 60 | 2 1 50", "host: {s}");
 }
 
-// @IGNORE
 fn test_a_reference_into_the_vector_keeps_the_copy() {
-  s = "{held(3)} | {ref_local(3)} | {back(3)}";
-  assert(s == "3 70 2 | 90 3 | 2 55", "a reference homed in the vector's store: {s}");
+  s = "{held(3)} | {ref_local(3)} | {back(3)} | {view(3)}";
+  assert(s == "3 70 2 | 90 3 | 2 55 | 80 2", "a reference homed in the vector's store: {s}");
 }
 
 fn main() {
   test_the_host_move_where_no_reference_names_the_vector();
+  test_a_reference_into_the_vector_keeps_the_copy();
 }

@@ -19,14 +19,13 @@
 //   pair + (RP, text):                    the pair's answers unchanged, p.g("t") "P,text 1 t"
 //   pair + (RP?, text):                   p.g(5) "P,int 1 5" (the dense receiver's member)
 //
-// DEFECT (the IGNOREd functions): a third member that shares the receiver's TYPE — (RP, text),
-// (RP, integer, integer), (RP?, text) — collapses the routing to one spelling for every
-// receiver.  Observed on both backends:
+// Guards loft#2114: a third member that shares the receiver's TYPE — (RP, text),
+// (RP, integer, integer), (RP?, text) — collapsed the routing to one spelling for every
+// receiver — `m(τ?)` has a key of its own, so it never joined the set.  Observed on both backends:
 //   pair + (RP, text):    "P,int 1 5|P,int 2 6|P,int null 7"  — the DENSE body runs with
 //                         `self == null`, and the call warns that a `RP?` "becomes null there"
 //   pair + (RP?, text):   "P?,int 1 5|…"                       — a dense receiver reaches m(τ?)
 //   h pair + (RP, integer): p.h(q) "P,P 12", z.h(z) "P,P nullnull"
-// Repro: agentA/repro/d3-nullable-receiver-routing-with-a-third-member.loft (rule walk batch 4).
 //
 // Axes it MOVES: the set beside the pair (nothing, another receiver type, the same dense receiver,
 //   another arity, the same nullable receiver), the receiver's nullability and presence, the call
@@ -34,8 +33,8 @@
 //
 // Cross-backend; `main` runs every passing cell so the leak gate reads the file.
 //
-// @falsified-at: none for the passing half — a conformance guard; the IGNOREd half fails on the
-//   current tree, interpret and native.
+// @falsified-at: e71f24b34 — the three test_a_third_member_* functions fail there, interpret and
+//   native; the rest is a conformance guard.
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the answers.
@@ -80,7 +79,6 @@ fn test_a_later_nullable_argument_reaches_the_nullable_member() {
   assert(s == "P,P 11|P?,P? 12|P?,P? 21|P?,P? -1-1|P?,P? 1-1", "later position: {s}");
 }
 
-// @IGNORE
 fn test_a_third_member_on_the_dense_receiver_keeps_the_routing() {
   p = RP { x: 1 };
   q: RP? = RP { x: 2 };
@@ -89,7 +87,6 @@ fn test_a_third_member_on_the_dense_receiver_keeps_the_routing() {
   assert(s == "P,int 1 5|P?,int 2 6|P?,int null 7|P?,int null 7|P,text 1 t", "pair + (RP, text): {s}");
 }
 
-// @IGNORE
 fn test_a_third_member_on_the_nullable_receiver_keeps_the_routing() {
   p = RP { x: 1 };
   z: RP? = null;
@@ -97,7 +94,6 @@ fn test_a_third_member_on_the_nullable_receiver_keeps_the_routing() {
   assert(s == "P,int 1 5|P?,int null 7|P?,text t", "pair + (RP?, text): {s}");
 }
 
-// @IGNORE
 fn test_a_third_member_keeps_the_later_position_routing() {
   p = RP { x: 1 };
   q: RP? = RP { x: 2 };
@@ -109,4 +105,7 @@ fn test_a_third_member_keeps_the_later_position_routing() {
 fn main() {
   test_the_pair_beside_another_receiver_type_routes_by_nullability();
   test_a_later_nullable_argument_reaches_the_nullable_member();
+  test_a_third_member_on_the_dense_receiver_keeps_the_routing();
+  test_a_third_member_on_the_nullable_receiver_keeps_the_routing();
+  test_a_third_member_keeps_the_later_position_routing();
 }

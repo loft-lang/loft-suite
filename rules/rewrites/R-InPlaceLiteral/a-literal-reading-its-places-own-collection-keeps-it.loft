@@ -21,11 +21,18 @@
 //   h.c = C{ items: h.c.items, n: h.c.n * 2 } on C{7,[1,2,3],"h"} → n 14, items [1,2,3], t ""
 //     (the omitted text takes its default)
 //
-// DEFECT (the IGNOREd function): the FIELD form `o.f = C { items: o.f.items, … }` empties the
-// collection — observed n 14, len(items) 0, both backends, every LOFT_NO_* switch of the rule; the
-// same through a local view (`x = o.f.items; o.f = C { items: x }`) and one level deeper
-// (`g.h.c = …`).  The element form, a whole-local rebind (`l = C { items: l.items }`) and a
-// field copy `o.f = o.f` keep it.  Repro: agentA/repro/d6-… (rule walk batch 4).
+//   the field form's wider cells (test_a_field_literal_stages_copies_of_its_heap_reads):
+//     two collection fields swapped → [40,50] / [1,2,3]; a fresh vector into one, the old one
+//     into the other → [9] / [1,2,3]; two embedded records swapped → 3:2 / 2:1; a keyed field
+//     kept → 20 10; through a parameter → 3 8; one level deeper → 3 8; in a loop → [4,5] 3;
+//     on an element's field → 1 2; a collection LITERAL whose elements read the place →
+//     [1,3,9] [3]; calls in a collection field's literal reading the place → [5] [2,3]
+//
+// Guards loft#2117: the FIELD form staged a heap read as a VIEW of the place (B-View-Base),
+// and the field writes then released or overwrote what it named — `o.f = C { items: o.f.items }`
+// answered len 0, a swap answered one value twice, on both backends; and a collection field's
+// value, built in the field after every collection header of the place was zeroed, read the
+// place empty (`[null,null,9]`).
 //
 // Axes it MOVES: the destination (an element at a variable index, a field, a field of a field),
 //   the field read from the place (scalar, text, the place's own collection, another element's
@@ -33,9 +40,9 @@
 //
 // Cross-backend; `main` runs every passing cell so the leak gate reads the file.
 //
-// @falsified-at: none for the passing half — a conformance guard, the same under
-//   LOFT_NO_ELEMENT_IN_PLACE=1, LOFT_NO_NESTED_IN_PLACE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1;
-//   the IGNOREd half fails on the current tree, interpret and native.
+// @falsified-at: e71f24b34 — the two field functions fail there (len 0, a swap read twice),
+//   interpret and native; the element half is a conformance guard, the same under
+//   LOFT_NO_ELEMENT_IN_PLACE=1, LOFT_NO_NESTED_IN_PLACE=1, LOFT_POISON=1 and LOFT_STRICT_STORES=1.
 // CHANNEL: the asserts.
 // ARMED: no instrument (the switches above, by hand).
 // WITNESS: each message prints the place's fields.
@@ -74,7 +81,6 @@ fn test_a_field_swaps_its_scalars() {
   assert(h.s.a == 6 && h.s.b == 5 && len(h.c.items) == 3, "h.s: {h.s.a} {h.s.b}");
 }
 
-// @IGNORE
 fn test_a_field_keeps_its_own_collection() {
   h = H { s: S { a: 5, b: 6 }, c: C { n: 7, items: [1, 2, 3], t: "h" } };
   h.c = C { items: h.c.items, n: h.c.n * 2 };
@@ -86,9 +92,58 @@ fn test_a_field_keeps_its_own_collection() {
   assert(len(k.c.items) == 2 && k.c.items[1] == 5, "k.c.items through a view lost: len {len(k.c.items)}");
 }
 
+struct C2 { items: vector<integer>, o: vector<integer> }
+struct H2 { c: C2 }
+struct I { w: vector<integer>, k: integer }
+struct R2 { i: I, j: I }
+struct HR { r: R2 }
+struct E { id: integer, v: integer }
+struct K { h: hash<E[id]>, n: integer }
+struct HK { c: K }
+struct G { h: H }
+
+fn cnt(v: vector<integer>) -> integer { len(v) }
+
+fn bump(a: H) { a.c = C { items: a.c.items, n: a.c.n + 1, t: a.c.t }; }
+
+fn test_a_field_literal_stages_copies_of_its_heap_reads() {
+  a = H2 { c: C2 { items: [1, 2, 3], o: [40, 50] } };
+  a.c = C2 { items: a.c.o, o: a.c.items };
+  assert("{a.c.items} {a.c.o}" == "[40,50] [1,2,3]", "swap: {a.c.items} {a.c.o}");
+  b = H2 { c: C2 { items: [1, 2, 3], o: [40, 50] } };
+  b.c = C2 { items: [9], o: b.c.items };
+  assert("{b.c.items} {b.c.o}" == "[9] [1,2,3]", "fresh then old: {b.c.items} {b.c.o}");
+  r = HR { r: R2 { i: I { w: [1, 2], k: 1 }, j: I { w: [7, 8, 9], k: 2 } } };
+  r.r = R2 { i: r.r.j, j: r.r.i };
+  assert("{len(r.r.i.w)}:{r.r.i.k} {len(r.r.j.w)}:{r.r.j.k}" == "3:2 2:1", "records: {len(r.r.i.w)}:{r.r.i.k} {len(r.r.j.w)}:{r.r.j.k}");
+  k = HK { c: K { h: [E { id: 1, v: 10 }, E { id: 2, v: 20 }], n: 1 } };
+  k.c = K { h: k.c.h, n: 5 };
+  assert("{k.c.h[2].v ?? -1} {k.c.h[1].v ?? -1} {k.c.n}" == "20 10 5", "keyed: {k.c.h[2].v ?? -1} {k.c.h[1].v ?? -1}");
+  p = H { s: S { a: 0, b: 0 }, c: C { n: 7, items: [1, 2, 3], t: "p" } };
+  bump(p);
+  assert("{len(p.c.items)} {p.c.n}" == "3 8", "parameter: {len(p.c.items)} {p.c.n}");
+  g = G { h: H { s: S { a: 0, b: 0 }, c: C { n: 7, items: [1, 2, 3], t: "g" } } };
+  g.h.c = C { items: g.h.c.items, n: 8, t: "" };
+  assert("{len(g.h.c.items)} {g.h.c.n}" == "3 8", "deeper: {len(g.h.c.items)} {g.h.c.n}");
+  l = H { s: S { a: 0, b: 0 }, c: C { n: 0, items: [4, 5], t: "" } };
+  for i in 0..3 { l.c = C { items: l.c.items, n: l.c.n + i, t: "" }; }
+  assert("{l.c.items} {l.c.n}" == "[4,5] 3", "loop: {l.c.items} {l.c.n}");
+  v = [H { s: S { a: 0, b: 0 }, c: C { n: 1, items: [6], t: "" } }];
+  v[0].c = C { items: v[0].c.items, n: 2, t: "" };
+  assert("{len(v[0].c.items)} {v[0].c.n}" == "1 2", "element field: {len(v[0].c.items)} {v[0].c.n}");
+  e = H2 { c: C2 { items: [1, 2, 3], o: [40, 50] } };
+  e.c = C2 { items: [e.c.items[0], e.c.items[2], 9], o: [len(e.c.items)] };
+  assert("{e.c.items} {e.c.o}" == "[1,3,9] [3]", "elements read the place: {e.c.items} {e.c.o}");
+  q = H2 { c: C2 { items: [1, 2, 3], o: [40, 50] } };
+  q.c = C2 { items: [5], o: [cnt(q.c.o), cnt(q.c.items)] };
+  assert("{q.c.items} {q.c.o}" == "[5] [2,3]", "a call reads the place: {q.c.items} {q.c.o}");
+}
+
 fn main() {
   test_a_scalar_element_swaps_through_its_place();
   test_an_element_keeps_its_own_collection();
   test_an_element_keeps_a_collection_read_through_a_view();
   test_a_field_swaps_its_scalars();
+  test_a_field_keeps_its_own_collection();
+  test_a_field_literal_stages_copies_of_its_heap_reads();
 }

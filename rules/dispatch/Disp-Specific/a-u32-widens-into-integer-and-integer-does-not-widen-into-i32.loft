@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE
-//
 // A u32 WIDENS INTO integer, AND integer DOES NOT WIDEN INTO i32 (`@FR-Disp-Specific` crossed
 // with `@FR-C-Int`, and `@FR-Disp-Applicable`'s lone-twin parity).  `integer` holds every `u32`
 // value (`[0, 2^32-2] ⊆ i64`), so a `u32` argument ranks WIDENED against an `integer` member —
@@ -11,8 +9,8 @@
 // `fn f(x: i32)` refuses it ("cannot implicitly narrow"), so in a set the `i32` member is not
 // applicable at all and the `float` member (CONVERTED) is the selection.
 //
-// DEFECT (ignored until fixed): the rank compares against a plain `integer` whose range is the
-// 32-bit one.  Observed on both lanes' parser (interpret shown; native is the same front end):
+// Guards loft#2113: the rank compared raw bounds, and a plain `integer` reports the 32-bit ones
+// while it holds the 64-bit range.  Observed there on both backends:
 //   wu1(integer | float) with u32 7     → "float 7"   (expected "integer 7") — SILENT WRONG
 //   wu2(integer | text)  with u32 7     → refused "no definition of `wu2` takes (u32)"
 //   wu3(i32 | integer)   with u32 7     → refused "no definition of `wu3` takes (u32)"
@@ -20,7 +18,7 @@
 //                                          (expected "float 7": the i32 member is not applicable)
 // Correct beside it: wu1 with u16 → "integer", wu4 with i32 → "i32", a lone f(integer) with u32.
 //
-// @falsified-at: none yet — the cell is the defect's record; it fails on the current tree.
+// @falsified-at: e71f24b34 — wu1 answers "float 7" and wu2–wu4 are refused, interpret and native.
 // CHANNEL: the compile (a refusal), then the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the answer.

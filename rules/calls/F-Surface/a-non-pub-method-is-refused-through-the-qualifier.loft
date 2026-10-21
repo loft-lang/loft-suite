@@ -1,21 +1,16 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @IGNORE
-//
 // A NON-PUB METHOD IS REFUSED THROUGH THE QUALIFIER (`@FR-F-Surface`; found walking its pair with
 // `@FR-Disp-Trigger`, whose triggers derive only from the pub surface).  `fn fs_tm(self: text)`
 // is declared without `pub`, so `f_surface_fixture_lib::fs_tm("hi")` is an outside reach of a
 // non-pub item and must be refused exactly as the non-pub plain function is.
 //
-// DEFECT (ignored until fixed): the call is accepted and prints "hi." on both backends; a non-pub
-// METHOD (first parameter `self`) is reached by the qualifier where a non-pub plain function is
-// refused.  The same leak through the METHOD spelling on the library's own record
-// (`p.fs_rm()`, no qualifier) is the cell beside this one; and once a trigger has loaded a
-// package (`"hi".shout()`, Disp-Trigger), its non-pub `text` method answers `"yo".whisper()`
-// with no `use` at all — agentA/p/tlib + trig6.loft (rule walk batch 4).
+// Guards loft#2115: the call was accepted and printed "hi." on both backends — a qualified call
+// asked the library for the item by NAME, and a method is keyed by its receiver.  The method
+// spelling on the library's own record is the cell beside this one.
 //
-// @falsified-at: none yet — the cell is the defect's record; it fails on the current tree.
+// @falsified-at: e71f24b34 — accepted there (prints "hi."), interpret and native.
 // CHANNEL: the compile (the expected diagnostic).
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the item and the library.
