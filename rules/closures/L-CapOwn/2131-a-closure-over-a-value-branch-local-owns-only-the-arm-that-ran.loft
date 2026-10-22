@@ -1,0 +1,126 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2131, `@FR-L-CapOwn` / `@FR-L-CapHeap` / `@FR-O-Complete` — A CLOSURE OVER A VALUE-BRANCH
+// LOCAL OWNS ONLY THE ARM THAT RAN.
+//
+// `r = if p { mk(5) } else { base.inner }` hands `r` a store of its own on one run and a view
+// of the caller's record on the other.  A closure that captures `r` SHARES what `r` names at
+// the build (`(L-CapHeap)`), and `(L-CapOwn)` frees a captured store once, by whichever of the
+// frame and the record outlives the other.  Which store the record owns is therefore a fact
+// about the RUN: the call's store on the first, nothing on the second.  The record carries it
+// in a hidden owner slot beside the capture, and the frame's holder of the call's store — the
+// join's arm temp — hands it over at the build by store identity.
+//
+// Before the fix the record decided ownership once, from `r`'s dep list.  The dep list names
+// the parameter, so the record borrowed on every run, and the frame freed the call's store at
+// its exit while the escaped closure still read it: the filler `mk(99)` took the store and the
+// closure answered 99 where 5 is right, on both backends.  The literal arm leaked instead.
+//
+// Each case runs twice in a loop, with a filler built between the call and the read, so a store
+// freed in the first round and reused shows in the second.  The caller's record is checked
+// intact afterwards: a record that adopted the view would free the caller's store.  In
+// `local_view` the view arm points into a record THIS frame owns: the record adopts that one
+// through the capture, and the frame releases the arm that did not run by store identity.
+//
+// @falsified-at: c333142d5 — scored by hand against that build (no cure switch: the owner slot
+//   has none).  interpret 6 of 7 tests fail (5 assertion failures: 99 or a garbage value where
+//   5 is right; `literal` leaks `In×2`) -> 0; native 4 of 7 fail on assertions -> 0.  Clean
+//   under LOFT_STRICT_STORES=1 and LOFT_POISON=1 on both backends after the fix.
+// CHANNEL: assertion failures and the leak, both backends.
+//
+// Held FIXED, so NOT measured here: one capture per closure, a two-arm join (an `if` or a
+// two-arm `match`), the closure returned or stored in a struct field (never in a collection).
+
+struct In { v: integer }
+struct Box { inner: In, id: integer }
+struct D { items: vector<integer>, v: integer }
+struct BoxD { inner: D, id: integer }
+struct Holder { f: fn() -> integer }
+
+fn mk(v: integer) -> In { In { v: v } }
+fn mkd(v: integer) -> D { D { items: [v, v], v: v } }
+fn bx() -> Box { Box { inner: In { v: 40 }, id: 1 } }
+fn bxd() -> BoxD { BoxD { inner: D { items: [1, 2, 3], v: 40 }, id: 1 } }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn call_or_view(base: Box, p: boolean) -> fn() -> integer {
+  r = if p { mk(5) } else { base.inner };
+  fn() -> integer { r.v }
+}
+fn match_view_or_call(base: Box, p: integer) -> fn() -> integer {
+  r = match p { 0 => base.inner, _ => mk(5) };
+  fn() -> integer { r.v }
+}
+fn in_a_field(base: Box, p: boolean) -> Holder {
+  r = if p { mk(5) } else { base.inner };
+  Holder { f: fn() -> integer { r.v } }
+}
+fn literal_or_view(base: Box, p: boolean) -> fn() -> integer {
+  r = if p { In { v: 5 } } else { base.inner };
+  fn() -> integer { r.v }
+}
+// A member with a drop walk: the record's release runs the vector's hooks too.
+fn droppable(base: BoxD, p: boolean) -> fn() -> integer {
+  x = if p { mkd(5) } else { base.inner };
+  fn() -> integer { x.v + len(x.items) }
+}
+// The control: the view arm points into a record this frame owns.
+fn local_view(p: boolean) -> fn() -> integer {
+  base = Box { inner: In { v: 40 }, id: 1 };
+  r = if p { mk(5) } else { base.inner };
+  fn() -> integer { r.v }
+}
+
+fn test_call_arm() {
+  b = bx();
+  for _i in 0..2 { f = call_or_view(b, true); j = mk(99); check("call arm", f(), 5); }
+  check("call arm: the caller's record", b.inner.v, 40);
+}
+fn test_view_arm() {
+  b = bx();
+  for _i in 0..2 { f = call_or_view(b, false); j = mk(99); check("view arm", f(), 40); }
+  check("view arm: the caller's record", b.inner.v, 40);
+}
+fn test_match() {
+  b = bx();
+  for _i in 0..2 {
+    f = match_view_or_call(b, 1); g = match_view_or_call(b, 0); j = mk(99);
+    check("match: call arm", f(), 5);
+    check("match: view arm", g(), 40);
+  }
+  check("match: the caller's record", b.inner.v, 40);
+}
+fn test_field() {
+  b = bx();
+  for _i in 0..2 {
+    h = in_a_field(b, true); k = in_a_field(b, false); j = mk(99);
+    check("field: call arm", h.f(), 5);
+    check("field: view arm", k.f(), 40);
+  }
+  check("field: the caller's record", b.inner.v, 40);
+}
+fn test_literal() {
+  b = bx();
+  for _i in 0..2 {
+    f = literal_or_view(b, true); g = literal_or_view(b, false); j = mk(99);
+    check("literal arm", f(), 5);
+    check("literal: view arm", g(), 40);
+  }
+  check("literal: the caller's record", b.inner.v, 40);
+}
+fn test_droppable() {
+  b = bxd();
+  for _i in 0..2 {
+    f = droppable(b, true); g = droppable(b, false); j = mkd(99);
+    check("droppable: call arm", f(), 7);
+    check("droppable: view arm", g(), 43);
+  }
+  check("droppable: the caller's vector", len(b.inner.items), 3);
+}
+fn test_local_view() {
+  for _i in 0..2 {
+    f = local_view(true); g = local_view(false); j = mk(99);
+    check("local view: call arm", f(), 5);
+    check("local view: view arm", g(), 40);
+  }
+}

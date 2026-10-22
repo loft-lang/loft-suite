@@ -1,0 +1,127 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — without the witness the record decides ownership from the binding: the interpreter leaks the store each rebind displaced and, rebuilt in a loop, frees the caller's record (the closure reads 11 where 401 is right); `--native` copies the projection, so a write through the local no longer reaches the caller (`write_through` reads 4009 where 909 is right).
+//
+// loft#2132, `@FR-O-Latest` / `@FR-L-CapRebind` / `@FR-B-View` / `@FR-O-NoDiverge` — A CAPTURED
+// LOCAL REBOUND BEFORE THE BUILD RELEASES WHAT THE REBIND DISPLACED.
+//
+// `x = mk(1); x = base.inner; fn() { x.v }`: the closure does not exist yet when the rebind
+// runs, so the store the rebind displaces is the frame's, and `(O-Latest)` makes the frame
+// release it there.  What `x` names AT THE BUILD is what the record shares (`(L-CapRebind)`):
+// a view of the caller's record here, which the record must never release, or a store of the
+// frame's own (`x = base.inner; x = mk(7)`), which it must release once.  A projection stays a
+// view however the local is captured (`(B-View)`): a write through `x` after the build reaches
+// the caller.
+//
+// Before the fix a captured local was never given the owner witness that answers this per run,
+// so the record read `x`'s empty dep list as "owns": on the interpreter every rebind leaked one
+// store, and a closure dropped and rebuilt in a loop freed the CALLER's record, whose store the
+// next `mk(1)` reused — the closure then answered 11.  `--native` copied the projection into a
+// store of the local's instead, which leaked nothing and broke the write-through.  The two
+// backends disagreed, which `(O-NoDiverge)` forbids.
+//
+// Each case runs twice in a loop with a filler between the call and the read, and the caller's
+// record is checked intact afterwards.
+//
+// @falsified-at: c333142d5 — scored by hand against that build.  interpret 10 of 10 tests fail
+//   (5 wrong values — 1 or 11 where 40, 30 or 401 is right — and 5 leaks) -> 0; native 1 of 10
+//   (`write_through` 4009 where 909 is right) -> 0.  LOFT_NO_OWNER_WITNESS=1 on the fixed build
+//   moves the same channels the same way.  Clean under LOFT_STRICT_STORES=1 and LOFT_POISON=1.
+// CHANNEL: assertion failures and the leak on the interpreter, assertion failures on native.
+//
+// Held FIXED, so NOT measured here: a struct with integer members only (the droppable member is
+// `a-captured-local-rebuilt-in-a-loop-keeps-the-store-it-still-names.loft`'s, in O-Witness),
+// one closure per local, straight-line rebinds (one conditional, `rebound_in_a_branch`).
+
+struct In { v: integer }
+struct Box { inner: In, id: integer }
+
+fn mk(v: integer) -> In { In { v: v } }
+fn bx() -> Box { Box { inner: In { v: 40 }, id: 1 } }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn mint_then_view(base: Box) -> fn() -> integer { x = mk(1); x = base.inner; fn() -> integer { x.v } }
+fn typed_read_then_view(base: Box) -> fn() -> integer {
+  x: In = mk(1); t = x.v; x = base.inner;
+  fn() -> integer { x.v * 10 + t }
+}
+fn not_escaping(base: Box) -> integer {
+  x: In = mk(1); t = x.v; x = base.inner;
+  f = fn() -> integer { x.v + t * 0 };
+  f()
+}
+fn whole_parameter(q: In) -> fn() -> integer { x: In = mk(1); t = x.v; x = q; fn() -> integer { x.v + t * 0 } }
+fn mint_over_mint(base: Box) -> fn() -> integer { x: In = mk(1); t = x.v; x = mk(2); fn() -> integer { x.v + t * 0 } }
+fn frame_local_view() -> fn() -> integer {
+  b = Box { inner: In { v: 40 }, id: 1 };
+  x: In = mk(1); t = x.v; x = b.inner;
+  fn() -> integer { x.v + t * 0 }
+}
+fn view_then_mint(base: Box) -> fn() -> integer {
+  x: In = base.inner; t = x.v; x = mk(7);
+  fn() -> integer { x.v * 100 + t }
+}
+fn write_through(base: Box) -> integer {
+  x = mk(1); t = x.v; x = base.inner;
+  f = fn() -> integer { x.v };
+  x.v = 9;
+  base.inner.v * 100 + f() + t * 0
+}
+fn nullable(base: Box) -> fn() -> integer {
+  x: In? = mk(1); t = x?.v ?? 0; x = base.inner;
+  fn() -> integer { (x?.v ?? -1) + t * 0 }
+}
+fn rebound_in_a_branch(base: Box, c: boolean) -> fn() -> integer {
+  x: In = mk(1); t = x.v; x = base.inner;
+  if c { x = mk(8); }
+  fn() -> integer { x.v + t * 0 }
+}
+
+fn test_mint_then_view() {
+  b = bx();
+  for _i in 0..2 { f = mint_then_view(b); j = mk(99); check("mint then view", f(), 40); }
+  check("mint then view: the caller's record", b.inner.v, 40);
+}
+fn test_typed_read_then_view() {
+  b = bx();
+  for _i in 0..3 { f = typed_read_then_view(b); j = mk(99); check("typed read then view", f(), 401); }
+  check("typed read then view: the caller's record", b.inner.v, 40);
+}
+fn test_not_escaping() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("not escaping", not_escaping(b), 40); }
+}
+fn test_whole_parameter() {
+  q = In { v: 30 };
+  for _i in 0..2 { f = whole_parameter(q); j = mk(99); check("whole parameter", f(), 30); }
+  check("whole parameter: the caller's record", q.v, 30);
+}
+fn test_mint_over_mint() {
+  b = bx();
+  for _i in 0..2 { f = mint_over_mint(b); j = mk(99); check("mint over mint", f(), 2); }
+}
+fn test_frame_local_view() {
+  for _i in 0..2 { f = frame_local_view(); j = mk(99); check("frame-local view", f(), 40); }
+}
+fn test_view_then_mint() {
+  b = bx();
+  for _i in 0..3 { f = view_then_mint(b); j = mk(99); check("view then mint", f(), 740); }
+  check("view then mint: the caller's record", b.inner.v, 40);
+}
+fn test_write_through() {
+  for _i in 0..2 { b = bx(); j = mk(99); check("write through", write_through(b), 909); }
+}
+fn test_nullable() {
+  b = bx();
+  for _i in 0..2 { f = nullable(b); j = mk(99); check("nullable", f(), 40); }
+  check("nullable: the caller's record", b.inner.v, 40);
+}
+fn test_rebound_in_a_branch() {
+  b = bx();
+  for _i in 0..2 {
+    f = rebound_in_a_branch(b, true); g = rebound_in_a_branch(b, false); j = mk(99);
+    check("rebound in the branch", f(), 8);
+    check("not rebound", g(), 40);
+  }
+  check("branch: the caller's record", b.inner.v, 40);
+}

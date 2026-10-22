@@ -1,0 +1,172 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the pre-witness form leaks the stores each rebind displaced and, for the view cases, releases the caller's record: `rebuilt_mint_or_view` answers 3331 where 40331 is right, and the droppable cases free the caller's vector.
+//
+// `@FR-O-Witness` for a CAPTURED local (loft#2131, loft#2132): the closure record's owner slot.
+// A captured record local whose assignments mix ownership, or that is assigned more than once,
+// carries an owner witness like any other mixed local.  At each closure build the witness is
+// handed to a hidden OWNER slot of the record — the store the frame owned there, or nothing
+// where the local held a view — and the capture slot only reads (`@FR-L-CapHeap`).  The record
+// then releases exactly what it owned (`@FR-L-CapOwn`), whichever outlives the other.
+//
+// A build in a LOOP rebuilds the record every pass.  Before the rebuild the old record is
+// released, and its owner slot goes back to the witness first wherever the local still names
+// that store, so this pass's record takes it again: released with the old record, the next pass
+// read a freed store (`rebuilt_not_reassigned`, caught by LOFT_POISON=1 while the fix was being
+// written).  Where the local moved on between the builds, the old store is released there.
+//
+// Every case runs twice with a filler between, and the caller's record is checked intact where
+// the local viewed it.  Hand-computed: `rebuilt_mint_or_view` ends on pass 3 holding mk(3), so
+// 33 * 10 + 1 + 40 * 1000; `droppable_rebuilt` ends on mkd(7), so (7 + 2) * 10 + 1.
+//
+// @falsified-at: c333142d5 — scored by hand against that build.  interpret 9 of 11 tests fail
+//   (3 wrong values, including the caller's vector losing an element, and 6 leaks) -> 0; native
+//   2 of 11 -> 0.  LOFT_NO_OWNER_WITNESS=1 on the fixed build: interpret 10, native 3.  Clean
+//   under LOFT_STRICT_STORES=1 and LOFT_POISON=1 on both backends.
+// CHANNEL: assertion failures and the leak, both backends.
+//
+// Held FIXED, so NOT measured here: integer loop bounds with no `break`, closures held by a
+// local (never a collection), and a record type with no `OpCopy`.
+
+struct In { v: integer }
+struct Box { inner: In, id: integer }
+struct D { items: vector<integer>, v: integer }
+struct BoxD { inner: D, id: integer }
+
+fn mk(v: integer) -> In { In { v: v } }
+fn mkd(v: integer) -> D { D { items: [v, v], v: v } }
+fn bx() -> Box { Box { inner: In { v: 40 }, id: 1 } }
+fn bxd() -> BoxD { BoxD { inner: D { items: [1, 2, 3], v: 40 }, id: 1 } }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+// Reassigned AFTER the build while it held a view: the closure keeps the view (`@FR-L-CapRebind`).
+fn view_then_reassigned(base: Box) -> integer {
+  x: In = mk(1); t = x.v; x = base.inner;
+  f = fn() -> integer { x.v };
+  x = mk(7);
+  f() * 100 + x.v + t * 0
+}
+fn view_then_reassigned_escaping(base: Box) -> fn() -> integer {
+  x: In = base.inner; t = x.v;
+  f = fn() -> integer { x.v + t * 0 };
+  x = mk(7);
+  assert(x.v == 7, "the local moved on");
+  f
+}
+// Built every pass, the local unchanged between the builds.
+fn rebuilt_not_reassigned(base: Box) -> integer {
+  x: In = mk(3); t = x.v; x = mk(4);
+  s = 0;
+  for i in 0..3 { f = fn() -> integer { x.v + i }; s += f(); }
+  s * 10 + t
+}
+fn rebuilt_kept_outside(base: Box) -> integer {
+  x: In = mk(3); t = x.v; x = mk(4);
+  g = fn() -> integer { 0 };
+  for i in 0..3 { g = fn() -> integer { x.v + i }; }
+  g() * 10 + t
+}
+// Built every pass, the local reassigned between the builds.
+fn rebuilt_reassigned(base: Box) -> integer {
+  x: In = mk(1); t = x.v;
+  g = fn() -> integer { 0 };
+  for i in 0..3 { x = mk(10 * (i + 1)); g = fn() -> integer { x.v + i }; }
+  g() * 10 + t
+}
+fn rebuilt_mint_or_view(base: Box) -> integer {
+  x: In = mk(1); t = x.v;
+  g = fn() -> integer { 0 };
+  for i in 0..4 {
+    if i % 2 == 0 { x = base.inner; } else { x = mk(i); }
+    g = fn() -> integer { x.v * 10 + i };
+  }
+  g() * 10 + t + base.inner.v * 1000
+}
+// A member with a drop walk: the old record's release runs through a snapshot.
+fn droppable_rebuilt(base: BoxD) -> integer {
+  x: D = mkd(1); t = x.v;
+  g = fn() -> integer { 0 };
+  for i in 0..3 {
+    if i == 1 { x = base.inner; } else { x = mkd(i + 5); }
+    g = fn() -> integer { x.v + len(x.items) };
+  }
+  g() * 10 + t
+}
+fn droppable_view(base: BoxD) -> fn() -> integer {
+  x: D = mkd(1); t = x.v; x = base.inner;
+  fn() -> integer { x.v + len(x.items) + t * 0 }
+}
+// Two closures over one witnessed local: the first build takes the store, the second nothing.
+fn two_closures(base: Box) -> integer {
+  x: In = mk(1); t = x.v; x = mk(6);
+  f = fn() -> integer { x.v };
+  g = fn() -> integer { x.v * 2 };
+  f() + g() * 10 + t * 1000
+}
+fn two_closures_escaping(base: Box) -> fn() -> integer {
+  x: In = mk(1); t = x.v; x = mk(6);
+  f = fn() -> integer { x.v };
+  g = fn() -> integer { x.v * 2 + f() + t * 0 };
+  g
+}
+// A build that may not run: on the run that skips it the witness keeps the store.
+fn built_conditionally(base: Box, c: boolean) -> integer {
+  x: In = mk(1); t = x.v; x = mk(8);
+  r = 0;
+  if c { f = fn() -> integer { x.v }; r = f(); }
+  r * 10 + x.v + t * 0
+}
+
+fn test_view_then_reassigned() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("view, then reassigned", view_then_reassigned(b), 4007); }
+  check("view, then reassigned: the caller's record", b.inner.v, 40);
+}
+fn test_view_then_reassigned_escaping() {
+  b = bx();
+  for _i in 0..2 { f = view_then_reassigned_escaping(b); j = mk(99); check("escaping view", f(), 40); }
+  check("escaping view: the caller's record", b.inner.v, 40);
+}
+fn test_rebuilt_not_reassigned() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("rebuilt, not reassigned", rebuilt_not_reassigned(b), 153); }
+}
+fn test_rebuilt_kept_outside() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("rebuilt, kept outside", rebuilt_kept_outside(b), 63); }
+}
+fn test_rebuilt_reassigned() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("rebuilt, reassigned", rebuilt_reassigned(b), 321); }
+}
+fn test_rebuilt_mint_or_view() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("rebuilt, mint or view", rebuilt_mint_or_view(b), 40331); }
+  check("mint or view: the caller's record", b.inner.v, 40);
+}
+fn test_droppable_rebuilt() {
+  b = bxd();
+  for _i in 0..2 { j = mkd(99); check("droppable, rebuilt", droppable_rebuilt(b), 91); }
+  check("droppable, rebuilt: the caller's vector", len(b.inner.items), 3);
+}
+fn test_droppable_view() {
+  b = bxd();
+  for _i in 0..2 { f = droppable_view(b); j = mkd(99); check("droppable view", f(), 43); }
+  check("droppable view: the caller's vector", len(b.inner.items), 3);
+}
+fn test_two_closures() {
+  b = bx();
+  for _i in 0..2 { j = mk(99); check("two closures", two_closures(b), 1126); }
+}
+fn test_two_closures_escaping() {
+  b = bx();
+  for _i in 0..2 { g = two_closures_escaping(b); j = mk(99); check("two closures, escaping", g(), 18); }
+}
+fn test_built_conditionally() {
+  b = bx();
+  for _i in 0..2 {
+    j = mk(99);
+    check("built", built_conditionally(b, true), 88);
+    check("not built", built_conditionally(b, false), 8);
+  }
+}
