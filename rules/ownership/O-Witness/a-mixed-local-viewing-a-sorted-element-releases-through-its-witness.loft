@@ -1,0 +1,207 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the pre-witness form releases the wrong store: the interpreter frees the container a view pointed into (the copy-over test reads the filler's 2 where the element holds 50), and `--native` copies where the view must write through (the write-through test reads 50 where it wrote 55).
+//
+// @FR-O-Witness with the view taken from a `sorted<E[k]>` element.
+// A record local whose assignments mix a store of its own (a copy of `a`) and a VIEW
+// (`c[5]`) carries an owner witness: it releases the store the local minted, by store
+// identity, and never the store a view points into.  The rule's earlier cells took every
+// view from a vector element or a field, so the container KIND sat at one value; this cell
+// and its siblings (hash, sorted, index, spatial, tuple) move it.
+//
+// A release of the wrong store frees the CONTAINER.  The filler `junk()`, built right after
+// the copy-over, then takes that store, and a read of the original sees 1, 2, 3 where it
+// holds 30, 50, 80.  Every test runs its case twice, so a store freed in the first round and
+// reused in the second shows.  The interpreter and `--native` pass with no leak under
+// LOFT_STRICT_STORES=1 and no fault under LOFT_POISON=1.
+//
+// The key-write test draws the rule's boundary: a write to a KEY field puts the binding under
+// binding.md's materialise clause, and a binding that clause names is never witnessed — the
+// element is copied out (`advice: ... copied out of c because k is one of c's keys`), so
+// every bind of `s` is a store of its own and the container keeps its key.
+//
+// Held FIXED, so NOT measured here: the element type (a two-integer struct), the key type
+// (integer), a container in a local or a parameter (no global), no closure capture.
+
+struct E { k: integer, v: integer }
+
+fn mkc() -> sorted<E[k]> { [E { k: 3, v: 30 }, E { k: 5, v: 50 }, E { k: 8, v: 80 }] }
+
+// A same-kind container built after the copy-over: a container freed too early hands its
+// store to this one, and a read of the original then sees 1, 2, 3.
+fn junk() -> sorted<E[k]> { [E { k: 3, v: 1 }, E { k: 5, v: 2 }, E { k: 8, v: 3 }] }
+
+// copy -> view -> filler, write through the view: 55*1e6 + 55*1e4 + 11*100 + 22
+fn write_through(c: sorted<E[k]>) -> integer {
+  a = E { k: 1, v: 11 };
+  x: E? = a;
+  assert(x.v == a.v, "the copy holds its source");
+  x = c[5];
+  filler = E { k: 2, v: 22 };
+  x.v = 55;
+  (x.v * 1000000 + c[5].v * 10000 + a.v * 100 + filler.v)?
+}
+
+// SHARP copy -> view -> copy -> write: c[5] 50, a 11, b 12, s 7
+fn copy_over_view(c: sorted<E[k]>) -> integer {
+  a = E { k: 1, v: 11 };
+  b = E { k: 2, v: 12 };
+  s: E? = a;
+  assert(s.v == a.v, "the copy holds its source");
+  s = c[5];
+  assert(s.v == 50, "the view sees the element");
+  s = b;
+  s.v = 7;
+  j = junk();
+  assert(j[5].v == 2, "the filler is its own container");
+  (c[5].v * 1000000 + a.v * 10000 + b.v * 100 + s.v)?
+}
+
+// view first -> copy -> write: 50*1e4 + 11*100 + 7
+fn view_then_copy(c: sorted<E[k]>) -> integer {
+  a = E { k: 1, v: 11 };
+  s: E? = c[5];
+  assert(s.v == 50, "the view sees the element");
+  s = a;
+  s.v = 7;
+  j = junk();
+  assert(j[5].v == 2, "the filler is its own container");
+  (c[5].v * 10000 + a.v * 100 + s.v)?
+}
+
+// the view on one arm: 80 / 11
+fn view_on_one_arm(c: sorted<E[k]>, take: boolean) -> integer {
+  a = E { k: 1, v: 11 };
+  cur: E? = a;
+  assert(cur.v == a.v, "the copy holds its source");
+  if take { cur = c[8]; }
+  (cur.v)?
+}
+
+// a walk over keys, 200 rounds: (11 + 30 + 50 + 80) * 200
+fn walk_keys(c: sorted<E[k]>) -> integer {
+  a = E { k: 1, v: 11 };
+  t = 0;
+  for _r in 0..200 {
+    cur: E? = a;
+    for kk in [3, 5, 8] { t += cur.v ?? 0; cur = c[kk]; }
+    t += cur.v ?? 0;
+  }
+  t
+}
+
+// an absent key: null, 1*1e4 + 11*100 + 22
+fn absent_key(c: sorted<E[k]>) -> integer {
+  a = E { k: 1, v: 11 };
+  x: E? = a;
+  assert(x.v == a.v, "the copy holds its source");
+  x = c[99];
+  r = if x == null { 1 } else { 2 };
+  filler = E { k: 2, v: 22 };
+  r * 10000 + a.v * 100 + filler.v
+}
+
+// a callee-returned container: 30*1e4 + 11*100 + 9
+fn callee_container() -> integer {
+  c = mkc();
+  a = E { k: 1, v: 11 };
+  s: E? = a;
+  assert(s.v == a.v, "the copy holds its source");
+  s = c[3];
+  assert(s.v == 30, "the view sees the element");
+  s = a;
+  s.v = 9;
+  j = junk();
+  assert(j[5].v == 2, "the filler is its own container");
+  (c[3].v * 10000 + a.v * 100 + s.v)?
+}
+
+// a local literal container, write through a view then rebind: 88*100 + 30
+fn frame_container() -> integer {
+  c: sorted<E[k]> = [E { k: 3, v: 30 }, E { k: 5, v: 50 }, E { k: 8, v: 80 }];
+  x: E? = E { k: 1, v: 11 };
+  assert(x.v == 11, "the copy holds its source");
+  x = c[8];
+  x.v = 88;
+  t = c[8].v;
+  x = c[3];
+  (t * 100 + x.v)?
+}
+
+// the copy over a view rewrites its KEY: the collection still finds 5, not 6; keys sum 16
+fn copy_rewrites_key(c: sorted<E[k]>) -> integer {
+  a = E { k: 4, v: 44 };
+  s: E? = a;
+  assert(s.v == a.v, "the copy holds its source");
+  s = c[5];
+  assert(s.v == 50, "the view sees the element");
+  s = a;
+  s.k = 6;
+  j = junk();
+  assert(j[5].v == 2, "the filler is its own container");
+  found = c[5];
+  n = 0;
+  for e in c { n += e.k; }
+  ((if c[6] == null { 1 } else { 2 }) * 100000 + found.v * 100 + n)?
+}
+
+
+fn test_a_write_through_the_view_reaches_the_element() {
+  for _rep in 0..2 {
+    assert(write_through(mkc()) == 55551122, "got {write_through(mkc())}");
+  }
+}
+
+fn test_a_copy_over_a_view_is_a_store_of_its_own() {
+  for _rep in 0..2 {
+    assert(copy_over_view(mkc()) == 50111207, "got {copy_over_view(mkc())}");
+  }
+}
+
+fn test_a_view_first_then_a_copy_leaves_the_element() {
+  for _rep in 0..2 {
+    assert(view_then_copy(mkc()) == 501107, "got {view_then_copy(mkc())}");
+  }
+}
+
+fn test_a_view_on_one_arm_is_right_when_taken() {
+  for _rep in 0..2 {
+    assert(view_on_one_arm(mkc(), true) == 80, "got {view_on_one_arm(mkc(), true)}");
+  }
+}
+
+fn test_a_view_on_one_arm_is_right_when_skipped() {
+  for _rep in 0..2 {
+    assert(view_on_one_arm(mkc(), false) == 11, "got {view_on_one_arm(mkc(), false)}");
+  }
+}
+
+fn test_a_walk_over_the_keys_two_hundred_times() {
+  for _rep in 0..2 {
+    assert(walk_keys(mkc()) == 34200, "got {walk_keys(mkc())}");
+  }
+}
+
+fn test_an_absent_key_releases_the_copy_once() {
+  for _rep in 0..2 {
+    assert(absent_key(mkc()) == 11122, "got {absent_key(mkc())}");
+  }
+}
+
+fn test_a_container_a_callee_returned() {
+  for _rep in 0..2 {
+    assert(callee_container() == 301109, "got {callee_container()}");
+  }
+}
+
+fn test_a_container_built_in_the_frame() {
+  for _rep in 0..2 {
+    assert(frame_container() == 8830, "got {frame_container()}");
+  }
+}
+
+fn test_a_copy_over_a_view_that_rewrites_its_key() {
+  for _rep in 0..2 {
+    assert(copy_rewrites_key(mkc()) == 105016, "got {copy_rewrites_key(mkc())}");
+  }
+}
