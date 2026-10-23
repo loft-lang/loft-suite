@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @observes: LOFT_NO_HALF_LOAD — its output measures the bucket table's byte size, which the load factor that rebuilds it decides.
 // @observes: LOFT_NO_POW2_BUCKETS — its output measures the bucket table's byte size, which the growth step decides.
+// @observes: LOFT_NO_HASH_INLINE — its output measures the bucket table's byte size, which holds the entries only on an inline table.
+// @observes: LOFT_NO_HASH_TAG — its output measures the bucket table's byte size, which a slot's width decides.
 //
 // @PLN110 sub-arc 1c — `size(hash)` = the full bucket table, HOLES INCLUDED.
-// The hash's own allocation is the bucket array: `elms` slots, each a 4-byte
-// record-id.  An empty slot is a hole (a zero rec-id) and still counts, because
+// The hash's own allocation is the bucket array: `elms` slots (see @C152 below for what a
+// slot holds).  An empty slot is a hole (a zero rec-id) and still counts, because
 // open addressing's spare capacity IS the format — unlike a vector, whose spare
-// capacity is reserve and is excluded.  Allocation-local: the pointed-to entry
-// entries live in the collection's entry ARENA and are NOT counted.  The table
+// capacity is reserve and is excluded.  Allocation-local: entries that live in the
+// collection's entry ARENA are NOT counted; an inline table's are its own (@C152).  The table
 // grows in steps as it rehashes (rebuilt at HALF full, room → room·2−1); those step
 // sizes encode the resize policy, so a policy change is a conscious layout change
 // that flips this test (that is the intent — @PLN97).
@@ -35,6 +37,13 @@
 // are climbed by the 9th, 17th and 33rd insert; this samples both sides of each (8|9,
 // 16|17, 32|33).  `LOFT_NO_POW2_BUCKETS=1` is the old ladder.
 //
+// @C152 moved the BYTES PER SLOT, deliberately (`(Col-Tag)`, `(Col-Inline)`): a slot is 8 bytes —
+// the entry, then its key digest's low half — and a table that owns its entries keeps them
+// IN the table, an entry of `stride` bytes per slot.  `K` is two integers, so a slot is
+// 8 + 16 = 24 bytes and `size(h)` still counts the table's own allocation (@C150: it reports the
+// representation).  The slot counts are what this file pins — 16, 32, 64, 128 — and they did
+// not move; `slot` below names the bytes each one costs.
+//
 // The fills are `while` loops, on purpose: a COUNTED fill (`for i in a..b { h += … }`) may
 // reserve its table up front (@C150, `(R-PushFill)`'s hash clause), and `size(h)` then answers
 // the reserved table — this file measures the growth ladder an unreserved fill climbs.
@@ -47,15 +56,16 @@ struct K {
 }
 
 fn main() {
+  slot = 24;  // 8-byte tagged slot + a 16-byte inline `K`
   h: hash<K[id]> = [];
   assert(size(h) == 0, "empty hash = 0 (no table allocated yet): {size(h)}");
 
   h += K { id: 1, v: 10 };
   h += K { id: 2, v: 20 };
   h += K { id: 3, v: 30 };
-  // initial table: room = 12 words, elms = (12 − 4) · 2 = 16 slots × 4 bytes
-  assert(size(h) == 64, "initial table = 16 slots × 4 = 64 (13 holes counted): {size(h)}");
-  assert(size(h) >= len(h)*4, "table ≥ live entries × 4 (holes make it larger)");
+  // initial table: 16 slots
+  assert(size(h) == 16 * slot, "initial table = 16 slots (13 holes counted): {size(h)}");
+  assert(size(h) >= len(h) * slot, "table ≥ live entries × slot (holes make it larger)");
 
   j = 4;
   while j < 9 {
@@ -64,20 +74,20 @@ fn main() {
   }
   // 8 entries: exactly half of 16 slots, and the table is still the first one — the
   // rebuild belongs to the insert that FINDS it half full.
-  assert(size(h) == 64, "8 entries still fit the first table: {size(h)}");
+  assert(size(h) == 16 * slot, "8 entries still fit the first table: {size(h)}");
   h += K { id: 9, v: 90 };
-  // first rehash: 16 → 32 slots × 4
-  assert(size(h) == 128, "the 9th insert rebuilds: 32 slots × 4 = 128: {size(h)}");
+  // first rehash: 16 → 32 slots
+  assert(size(h) == 32 * slot, "the 9th insert rebuilds: 32 slots: {size(h)}");
 
   j = 10;
   while j < 17 {
     h += K { id: j, v: j * 10 };
     j += 1;
   }
-  assert(size(h) == 128, "16 entries = half of 32: not yet: {size(h)}");
+  assert(size(h) == 32 * slot, "16 entries = half of 32: not yet: {size(h)}");
   h += K { id: 17, v: 170 };
-  // second rehash: 32 → 64 slots × 4
-  assert(size(h) == 256, "the 17th insert rebuilds: 64 slots × 4 = 256: {size(h)}");
+  // second rehash: 32 → 64 slots
+  assert(size(h) == 64 * slot, "the 17th insert rebuilds: 64 slots: {size(h)}");
 
   j = 18;
   while j < 32 {
@@ -86,14 +96,14 @@ fn main() {
   }
   // the full table exceeds the live count: 31 live entries in a 64-slot table
   assert(
-    len(h) == 31 && size(h) / 4 == 64,
-    "64-slot table holds 31 live: len={len(h)} slots={size(h) / 4}"
+    len(h) == 31 && size(h) / slot == 64,
+    "64-slot table holds 31 live: len={len(h)} slots={size(h) / slot}"
   );
   h += K { id: 32, v: 320 };
-  assert(size(h) == 256, "32 entries = half of 64: not yet: {size(h)}");
+  assert(size(h) == 64 * slot, "32 entries = half of 64: not yet: {size(h)}");
   h += K { id: 33, v: 330 };
-  // third rehash: 64 → 128 slots × 4
-  assert(size(h) == 512, "the 33rd insert rebuilds: 128 slots × 4 = 512: {size(h)}");
+  // third rehash: 64 → 128 slots
+  assert(size(h) == 128 * slot, "the 33rd insert rebuilds: 128 slots: {size(h)}");
   // every key is still found after three rebuilds
   found = 0;
   for i in 1..34 { if h[i] != null { found += 1; } }

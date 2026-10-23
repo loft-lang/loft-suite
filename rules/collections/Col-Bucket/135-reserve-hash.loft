@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @observes: LOFT_NO_POW2_BUCKETS — it asserts the reserved table's byte size, which the bucket-count rule decides.
 // @observes: LOFT_NO_HALF_LOAD — it pins the reserved table's size (65536 slots for 20000 entries), which the load rule decides.
+// @observes: LOFT_NO_HASH_INLINE — it asserts the reserved table's byte size, which holds the entries only on an inline table.
+// @observes: LOFT_NO_HASH_TAG — it asserts the reserved table's byte size, which a slot's width decides.
 // @PLN135 arc C — `reserve(h, n)` sizes a hash's BUCKET TABLE for `n` entries up
 // front, so filling it does not rebuild the table on the way (a million inserts
 // rebuilt it 17 times).
@@ -105,7 +107,8 @@ fn main() {
   // size after the 20000 inserts is the size the reserve gave it.  Since @C146 a table's
   // bucket count is a power of two (`@FR-Col-Bucket`), so the reserve rounds up to the
   // power growth would have reached — 65536 slots for 20000 entries either way — and it
-  // is never larger than the grown table.
+  // is never larger than the grown table.  A slot costs 24 bytes (@C152): an 8-byte tagged
+  // slot and the 16-byte `RRec` an inline table keeps in it.
   big_plain: hash<RRec[k]> = [];
   big_res: hash<RRec[k]> = [];
   reserve(big_res, 20000);
@@ -113,7 +116,7 @@ fn main() {
   for i in 0..20000 { big_plain += RRec { k: i, v: i }; big_res += RRec { k: i, v: i }; }
   assert(len(big_plain) == 20000 && len(big_res) == 20000,
     "big lens {len(big_plain)}/{len(big_res)}");
-  assert(size(big_res) == reserved_size && reserved_size == 65536 * 4,
+  assert(size(big_res) == reserved_size && reserved_size == 65536 * 24,
     "the reserved table is not rebuilt by the fill: {reserved_size} then {size(big_res)}");
   assert(size(big_res) <= size(big_plain),
     "a reserved table is never larger than a grown one: {size(big_res)} vs {size(big_plain)}");
