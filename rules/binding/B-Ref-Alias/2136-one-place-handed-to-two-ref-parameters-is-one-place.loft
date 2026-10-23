@@ -13,6 +13,11 @@
 //
 // @falsified-at: 143dec434 — native: rustc refused the file (E0499 at every same-place call, the
 //   forwarded `*var_p` included), interpret unchanged (linux-probe run 39999242379).
+// CHANNEL: native exit (the compile), interpret unchanged.
+// WITNESS: on the control rustc reports E0499, "cannot borrow var_m as mutable more than once at
+//   a time", at `n_twice(cell, &mut var_m, &mut var_m, 5_i64)`, and the same for var_n and *var_p.
+// HOLDS: the interpreter passes on both trees; after the fix every assertion holds on both
+//   backends with nothing leaked.
 
 struct Mp { name: text, cs: vector<integer> }
 struct Box { inner: Mp, tag: integer }
