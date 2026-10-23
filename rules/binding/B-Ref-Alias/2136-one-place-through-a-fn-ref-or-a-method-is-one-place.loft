@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-B-Ref-Alias — the `2136-one-place-handed-to-two-ref-parameters` cell's rule, through the
+// call forms that file leaves out: a fn-ref call, a method call (`self` and a `&` parameter on
+// one record), and a `&` parameter beside a BY-VALUE parameter naming the same record.  The
+// last is the sharp one: a rebind through the `&` reaches the caller, while the by-value
+// parameter keeps the record the call began with (@FR-B-View) — so it reads the old length.
+//
+// A fn-ref call to a text-returning function with a `&text` parameter also broke the
+// interpreter (loft#2150) — a crash, or the caller's text read back empty: its fn-ref frame
+// trim counted that parameter as a work buffer and left a spare buffer on the frame.
+// Every value below is hand-computed from the rules.
+//
+// @falsified-at: 143dec434 — native: rustc refused the file (E0499 at the same-place calls, E0596
+//   at the by-value parameter's `_pre_` copy); interpret exit 1, one assertion failure
+//   (linux-probe run 40027924579).
+// CHANNEL: native exit (the compile); interpret assertion failures.
+// WITNESS: on the control rustc reports E0499 for var_m, var_t, var_v and var_n and E0596 for
+//   `_pre_44`, the copy the `&` parameter of `mixed(q, q)` was handed; the interpreter answers
+//   `fn-ref text: ` — `t` reads empty after the `&text` fn-ref call (loft#2150).
+// HOLDS: after both fixes every assertion holds on both backends with nothing leaked.
+
+struct Mp { name: text, cs: vector<integer> }
+
+fn twice(a: &Mp, b: &Mp, x: integer) -> integer {
+  b.cs += [x];
+  a.cs += [x + 1];
+  len(a.cs)
+}
+
+fn rebind(a: &Mp, b: &Mp) -> text {
+  a = Mp { name: "new", cs: [9] };
+  r = "{b.name}:{len(b.cs)}";
+  b.cs += [0];
+  r
+}
+
+fn tt(a: &text, b: &text) -> text { a += "x"; b += "y"; a }
+fn tv(a: &vector<integer>, b: &vector<integer>) -> integer { a += [1]; b += [2]; len(a) }
+
+// `self` and `other` name one record.
+fn grow(self: &Mp, other: &Mp) -> integer {
+  self.cs += [1];
+  other.cs += [2];
+  len(self.cs)
+}
+
+// The `&` rebinds the caller's record; `b` keeps the one the call began with.
+fn mixed(a: &Mp, b: Mp) -> integer {
+  a = Mp { name: "m", cs: [5, 6, 7] };
+  a.cs += [8];
+  len(b.cs)
+}
+
+fn main() {
+  f = twice;
+  m = Mp { name: "e" };
+  assert(f(m, m, 5) == 2 && "{m.cs}" == "[5,6]", "fn-ref: {m.cs}");
+  g = rebind;
+  assert(g(m, m) == "new:1", "fn-ref rebind: b reads the record a rebound to");
+  assert(m.name == "new" && "{m.cs}" == "[9,0]", "fn-ref rebind reaches m: {m.name} {m.cs}");
+
+  h = tt;
+  t = "s";
+  assert(h(t, t) == "sxy" && t == "sxy", "fn-ref text: {t}");
+  u = "p";
+  w = "q";
+  assert(h(u, w) == "px" && u == "px" && w == "qy", "fn-ref text, two places: {u} {w}");
+
+  k = tv;
+  v: vector<integer> = [];
+  assert(k(v, v) == 2 && "{v}" == "[1,2]", "fn-ref vector: {v}");
+
+  n = Mp { name: "n" };
+  assert(n.grow(n) == 2 && "{n.cs}" == "[1,2]", "method: {n.cs}");
+
+  q = Mp { name: "q", cs: [1] };
+  assert(mixed(q, q) == 1, "the by-value parameter keeps the record the call began with");
+  assert(q.name == "m" && "{q.cs}" == "[5,6,7,8]", "the & rebind reaches q: {q.name} {q.cs}");
+  println("2136 forms ok");
+}
