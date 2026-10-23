@@ -1,0 +1,232 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-O-Complete` / `@FR-L-CapHeap` / `@FR-B-Copy` / `@FR-B-View` — A CLOSURE OVER A JOINED
+// LOCAL READS THE STORE ITS RUN CHOSE.
+//
+// `(O-Complete)` keeps a binding's ownership fact per path: each arm of a value branch hands the
+// binding the store that arm made.  A closure that captures the binding SHARES what it names at
+// the build (`(L-CapHeap)`): a mutation through the binding after the build reaches the closure,
+// the closure's own write reaches the binding's store, and a whole-value rebind after the build
+// does not reach the closure.  Which store that is follows from the arm that ran:
+//   - a call arm hands over the call's own store;
+//   - a whole-local or constant arm is a plain bind, which copies (`(B-Copy)`), so the source
+//     is untouched by what the closure sees;
+//   - a struct projection arm (`base.inner`) is a view (`(B-View)`), so a write through the
+//     closure reaches `base`, and a later write to `base` reaches the closure.  The same holds
+//     where the branch is a call argument (`keep(find(p) ?? base.inner)`): the chosen operand
+//     is passed, not bound, and a heap argument shares the caller's store (`(F-ParamHeap)`).
+//
+// The cell walks what the chapter's other cells leave out: the captured binding a vector (a
+// call arm against a copied arm, a block arm, a constant arm, a rebind on one path only), a
+// capture read through a comprehension, a `text` element, and a closure that writes through
+// a struct join.  Every case runs both arms twice in a loop, with a filler built between the
+// build and the read where a freed store would be taken.  Every value is worked out by hand
+// from the rules above.
+//
+// @falsified-at: b1016d006 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native
+//   exit 1 -> 0, native 1 assertion failures -> 0 (LOFT_STRICT_STORES=1 LOFT_POISON=1 make
+//   falsify).  b1016d006 is the 2026.9.0 release; the cell is depth for `(O-Complete)`, and four
+//   of its cases fail there.  The 2137 half (`coalesce_arg`) also fails on 790d88c5c, the commit
+//   before loft#2137's fix, on the interpreter: its receipt is the loft#2137 cell's.
+// CHANNEL: assertion failures and a panic, both backends.
+// WITNESS: on the control, `coalesce argument: view arm: got 4040, want 4041` (the place was
+//   copied) and `constant: copied arm` panics `Write to read-only store` (the constant arm was
+//   not copied, so the append wrote into the constant).  Run as programs, one case each, it also
+//   leaks `Box×2` in `write_through(true)` and `vector<integer>×2` in `one_path(false)`.
+// HOLDS: after the fix every case passes on both backends and nothing leaks, under
+//   LOFT_STRICT_STORES=1 and LOFT_POISON=1 too.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell;
+//   the control's `--tests` did not leak-check, so its two leaks were scored by program runs.
+//
+// Held FIXED, so NOT measured here: one capture per closure, a two-arm join, the closure called
+// in the frame that built it (an escaping closure over a join is
+// `closures/L-CapOwn/2131-a-closure-over-a-value-branch-local-owns-only-the-arm-that-ran.loft`).
+
+struct In { v: integer }
+struct Box { inner: In, id: integer }
+
+SEED = [4, 5, 6];
+
+fn mk(v: integer) -> In { In { v: v } }
+fn bx() -> Box { Box { inner: In { v: 40 }, id: 1 } }
+fn find(p: boolean) -> In? { if p { mk(5) } else { null } }
+fn grow(src: vector<integer>) -> vector<integer> {
+  out: vector<integer> = [];
+  for x in src { out += [x + 10]; }
+  out
+}
+fn shout(src: vector<text>) -> vector<text> {
+  out: vector<text> = [];
+  for s in src { out += [s + "!"]; }
+  out
+}
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+// The closure writes through the join: the view arm reaches `base`, the call arm does not.
+fn write_through(p: boolean) -> integer {
+  base = bx();
+  r = if p { mk(5) } else { base.inner };
+  g = fn() { r.v = 77; };
+  g();
+  filler = mk(99);
+  r.v * 100 + base.inner.v + filler.v * 0
+}
+
+// An append after the build reaches the closure; the copied arm leaves `src` at 3.
+fn vec_append(p: boolean) -> integer {
+  src = [1, 2, 3];
+  line = if p { grow(src) } else { src };
+  f = fn() -> integer { len(line) * 100 + (line[0] ?? -1) };
+  a1 = f();
+  line += [9];
+  a2 = f();
+  a1 * 10000 + a2 * 10 + len(src)
+}
+
+// A whole-value rebind after the build does not reach the closure.
+fn vec_rebind(p: boolean) -> integer {
+  src = [1, 2, 3];
+  line = if p { grow(src) } else { src };
+  f = fn() -> integer { len(line) * 100 + (line[0] ?? -1) };
+  a1 = f();
+  line = [7];
+  a2 = f();
+  a1 * 10000 + a2 * 10 + len(line)
+}
+
+// Thirty rounds, the arms alternating: an even round reads 3 + (i + 10), an odd one 3 + i.
+fn vec_loop() -> integer {
+  t = 0;
+  for i in 0..30 {
+    src = [i, i + 1, i + 2];
+    line = if i % 2 == 0 { grow(src) } else { src };
+    f = fn() -> integer { len(line) + (line[0] ?? 0) };
+    t += f() - i;
+  }
+  t
+}
+
+// The capture is read through a comprehension; the scalar `k` is captured by value, so the
+// rebind to 50 does not reach it.
+fn comprehension(p: boolean) -> integer {
+  src = [1, 2, 3];
+  k = 5;
+  line = if p { grow(src) } else { src };
+  f = fn() -> integer { w = [for v in line { v + k }]; (w[0] ?? -1) * 10 + len(w) };
+  k = 50;
+  f() * 100 + k
+}
+
+// The call arm is a block whose tail is a local of its own.
+fn block_arm(p: boolean) -> integer {
+  src = [1, 2, 3];
+  line = if p { t = grow(src); t } else { src };
+  f = fn() -> integer { len(line) * 100 + (line[0] ?? -1) };
+  a1 = f();
+  line += [9];
+  a2 = f();
+  a1 * 10000 + a2 * 10 + len(src)
+}
+
+// The binding is rebound on one path only; the other path keeps its literal.
+fn one_path(p: boolean) -> integer {
+  line = [1, 2, 3];
+  if p { line = grow(line); }
+  f = fn() -> integer { len(line) * 100 + (line[0] ?? -1) };
+  a1 = f();
+  line += [9];
+  a2 = f();
+  a1 * 1000 + a2
+}
+
+// The join is a call argument, and the callee's closure captures its parameter.
+fn keep(r: In) -> fn() -> integer { fn() -> integer { r.v } }
+fn coalesce_arg(p: boolean) -> integer {
+  base = bx();
+  f = keep(find(p) ?? base.inner);
+  filler = mk(99);
+  a1 = f();
+  base.inner.v = 41;
+  a2 = f();
+  a1 * 100 + a2 + filler.v * 0
+}
+
+// A `text` element.
+fn text_join(p: boolean) -> text {
+  src = ["a", "b"];
+  names = if p { shout(src) } else { src };
+  f = fn() -> text { "{len(names)}" + (names[0] ?? "-") };
+  a1 = f();
+  names += ["c"];
+  a1 + "/" + f() + "/" + "{len(src)}"
+}
+
+// A constant arm copies, so the append lands in the binding's own store, not the constant.
+fn global_arm(p: boolean) -> integer {
+  line = if p { grow(SEED) } else { SEED };
+  f = fn() -> integer { len(line) * 100 + (line[0] ?? -1) };
+  a1 = f();
+  line += [9];
+  a2 = f();
+  a1 * 10000 + a2 * 10 + len(SEED)
+}
+
+fn test_write_through() {
+  for _i in 0..2 {
+    check("write through: call arm", write_through(true), 7740);
+    check("write through: view arm", write_through(false), 7777);
+  }
+}
+fn test_vec_append() {
+  for _i in 0..2 {
+    check("append: call arm", vec_append(true), 3114113);
+    check("append: copied arm", vec_append(false), 3014013);
+  }
+}
+fn test_vec_rebind() {
+  for _i in 0..2 {
+    check("rebind: call arm", vec_rebind(true), 3113111);
+    check("rebind: copied arm", vec_rebind(false), 3013011);
+  }
+}
+fn test_vec_loop() {
+  for _i in 0..2 { check("loop", vec_loop(), 240); }
+}
+fn test_comprehension() {
+  for _i in 0..2 {
+    check("comprehension: call arm", comprehension(true), 16350);
+    check("comprehension: copied arm", comprehension(false), 6350);
+  }
+}
+fn test_block_arm() {
+  for _i in 0..2 {
+    check("block: call arm", block_arm(true), 3114113);
+    check("block: copied arm", block_arm(false), 3014013);
+  }
+}
+fn test_one_path() {
+  for _i in 0..2 {
+    check("one path: rebound", one_path(true), 311411);
+    check("one path: kept", one_path(false), 301401);
+  }
+}
+fn test_coalesce_arg() {
+  for _i in 0..2 {
+    check("coalesce argument: call arm", coalesce_arg(true), 505);
+    check("coalesce argument: view arm", coalesce_arg(false), 4041);
+  }
+}
+fn test_text_join() {
+  for _i in 0..2 {
+    t1 = text_join(true);
+    assert(t1 == "2a!/3a!/2", "text: call arm: {t1}");
+    t2 = text_join(false);
+    assert(t2 == "2a/3a/2", "text: copied arm: {t2}");
+  }
+}
+fn test_global_arm() {
+  for _i in 0..2 {
+    check("constant: call arm", global_arm(true), 3144143);
+    check("constant: copied arm", global_arm(false), 3044043);
+  }
+}

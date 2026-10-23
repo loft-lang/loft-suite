@@ -1,0 +1,139 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2137, `@FR-F-ParamHeap` / `@FR-B-View` / `@FR-F-Ret` / `@FR-O-NoDiverge` — A `??` CALL
+// ARGUMENT SHARES THE PLACE IT CHOSE.
+//
+// `set(find(p) ?? b.inner)` passes whichever operand the `??` chose.  On the null path that is
+// `b.inner`, a struct projection, which is a view (`(B-View)`), and a heap argument shares the
+// caller's store (`(F-ParamHeap)`): the callee's write through its parameter reaches `b`.  On
+// the minting path it is `find`'s own store, which the frame frees once.  The `if` spelling of
+// the same argument was always right on both backends.
+//
+// Before the fix the inline `??` was lifted into an owned temp, as if its borrowed arm came
+// back from a callee that may return its argument (loft#1118, where `(F-Ret)` makes a copy the
+// right answer).  Here the borrow is the DEFAULT arm, a place of this frame.  The interpreter
+// bound the temp through the runtime guard, which COPIED the place, so the callee's write was
+// lost.  `--native` kept the place and freed it at the frame's exit as if the frame owned it,
+// so a place reached through a PARAMETER was freed under the caller, which then read garbage.
+// The lift now fires only when the borrow arrives through the subject's own return.
+//
+// The cases vary one axis each: the spelling (`??` with two and three operands against `if`
+// and `match`), what was chosen (a field projection, a vector element, a local view, a
+// parameter's field), the left operand (a call, a nullable local), the position (an argument
+// against a bind, a constructor field and a call that returns it), and the statement context
+// of the argument, in a loop that alternates the minting and the null path so a store the
+// frame fails to free shows on the leak channel.  `pick` returns its argument or a mint, the
+// shape the lift still serves: its returned argument is a fresh copy (`(F-Ret)`).  Every value
+// is worked out by hand from those rules.
+//
+// @falsified-at: 790d88c5c — interpret exit 1 -> 0, interpret 4 assertion failures -> 0, native
+//   exit 1 -> 0, native 4 assertion failures -> 0 (LOFT_STRICT_STORES=1 LOFT_POISON=1 make
+//   falsify; plain, native fails 2 of them).
+// @falsified-by: tests/falsified/2137-a-coalesce-argument-shares-the-place-it-chose.patch — the
+//   same channels.
+// CHANNEL: assertion failures, both backends.
+// WITNESS: on the control the interpreter copies the place: `two operands: got 40, want 9`,
+//   `element: got 21, want 91`, `through a parameter: got 4040`, `loop write: got 40, want 140`.
+//   Native frees it: `through a parameter: got 999, want 909` (the filler `mk(99)` took the
+//   caller's freed store) and `loop: got 540, want 4500`.
+// HOLDS: the `if`, `match`, bound, constructor-field, returned and `pick` cases pass on both
+//   trees; after the fix every case passes on both backends with nothing leaked, under
+//   LOFT_STRICT_STORES=1 and LOFT_POISON=1 too.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell;
+//   the native free reads as a wrong VALUE only because a filler reuses the store, and as more
+//   failures under LOFT_POISON=1.
+//
+// Held FIXED, so NOT measured here: a struct element type (a vector or text `??` argument is
+// delivered by its own path), one callee per call.
+
+struct In { v: integer }
+struct Box { inner: In, id: integer }
+struct H { r: In }
+
+fn mk(v: integer) -> In { In { v: v } }
+fn bx() -> Box { Box { inner: In { v: 40 }, id: 1 } }
+fn find(p: boolean) -> In? { if p { mk(5) } else { null } }
+fn pick(a: In?, c: boolean) -> In? { if c { a } else { mk(7) } }
+fn same(r: In) -> In { r }
+fn set(r: In) { r.v = 9; }
+fn bump(r: In) { r.v = r.v + 1; }
+fn get(r: In) -> integer { r.v }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn two() -> integer { b = bx(); set(find(false) ?? b.inner); b.inner.v }
+fn three() -> integer { b = bx(); set(find(false) ?? find(false) ?? b.inner); b.inner.v }
+fn as_if() -> integer { b = bx(); set(if false { mk(5) } else { b.inner }); b.inner.v }
+fn as_match() -> integer { b = bx(); k = 1; set(match k { 0 => mk(5), _ => b.inner }); b.inner.v }
+fn element() -> integer { v = [mk(1), mk(2)]; set(find(false) ?? v[1]); v[1].v * 10 + v[0].v }
+fn local_view() -> integer { b = bx(); w = b.inner; set(find(false) ?? w); w.v * 100 + b.inner.v }
+fn through_param(b: Box) -> integer { set(find(false) ?? b.inner); b.inner.v }
+fn nullable_local() -> integer { b = bx(); n: In? = null; set(n ?? b.inner); b.inner.v }
+fn minted() -> integer { b = bx(); set(find(true) ?? b.inner); b.inner.v }
+fn bound() -> integer { b = bx(); r = find(false) ?? b.inner; r.v = 9; b.inner.v }
+fn in_a_field() -> integer { b = bx(); h = H { r: find(false) ?? b.inner }; h.r.v = 9; b.inner.v }
+fn returned() -> integer { b = bx(); x = same(find(false) ?? b.inner); x.v = 9; b.inner.v }
+fn pick_default() -> integer { b = bx(); n: In? = null; set(pick(n, true) ?? b.inner); b.inner.v }
+fn pick_minted() -> integer { b = bx(); n: In? = null; set(pick(n, false) ?? b.inner); b.inner.v }
+fn pick_argument() -> integer { b = bx(); w = mk(3); set(pick(w, true) ?? b.inner); w.v * 100 + b.inner.v }
+
+// Statement contexts, N rounds alternating the minting and the null path.
+fn ctx_loop(b: Box, n: integer) -> integer { t = 0; for i in 0..n { t += get(find(i % 2 == 0) ?? b.inner); } t }
+fn ctx_write(b: Box, n: integer) -> integer { for i in 0..n { bump(find(i % 2 == 0) ?? b.inner); } b.inner.v }
+fn ctx_field(b: Box, n: integer) -> integer { t = 0; for i in 0..n { t += (find(i % 2 == 0) ?? b.inner).v; } t }
+fn ctx_if_arm(b: Box, p: boolean) -> integer { if p { get(find(true) ?? b.inner) } else { get(find(false) ?? b.inner) } }
+fn ctx_block(b: Box) -> integer { x = { get(find(true) ?? b.inner) }; x }
+fn ctx_interpolation(b: Box) -> text { "{get(find(true) ?? b.inner)}/{get(find(false) ?? b.inner)}" }
+fn ctx_condition(b: Box) -> integer { if get(find(true) ?? b.inner) == 5 { 1 } else { 0 } }
+fn ctx_nested(b: Box) -> integer { get(find(false) ?? (find(true) ?? b.inner)) }
+
+fn test_spelling() {
+  for _i in 0..2 {
+    check("two operands", two(), 9);
+    check("three operands", three(), 9);
+    check("if", as_if(), 9);
+    check("match", as_match(), 9);
+  }
+}
+fn test_chosen() {
+  for _i in 0..2 {
+    check("element", element(), 91);
+    check("local view", local_view(), 909);
+    check("nullable local", nullable_local(), 9);
+    check("minted", minted(), 40);
+  }
+}
+fn test_through_a_parameter() {
+  for _i in 0..2 {
+    b = bx();
+    got = through_param(b);
+    filler = mk(99);
+    check("through a parameter", got * 100 + b.inner.v + filler.v * 0, 909);
+  }
+}
+fn test_position() {
+  for _i in 0..2 {
+    check("bound", bound(), 9);
+    check("a constructor field copies", in_a_field(), 40);
+    check("a returned value is fresh", returned(), 40);
+  }
+}
+fn test_join_subject() {
+  for _i in 0..2 {
+    check("pick: default", pick_default(), 9);
+    check("pick: minted", pick_minted(), 40);
+    check("pick: returned argument", pick_argument(), 340);
+  }
+}
+fn test_contexts() {
+  b = bx();
+  check("loop", ctx_loop(b, 200), 100 * 5 + 100 * 40);
+  check("loop write", ctx_write(b, 200), 140);
+  b.inner.v = 40;
+  check("loop field", ctx_field(b, 200), 4500);
+  check("if arm", ctx_if_arm(b, true) * 100 + ctx_if_arm(b, false), 540);
+  check("block", ctx_block(b), 5);
+  s = ctx_interpolation(b);
+  assert(s == "5/40", "interpolation: {s}");
+  check("condition", ctx_condition(b), 1);
+  check("nested", ctx_nested(b), 5);
+}
