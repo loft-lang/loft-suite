@@ -1,0 +1,89 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-B-Ref-Alias — a `&τ` parameter is a live LINK to the caller's place, for every τ.  So one
+// place handed to two `&` parameters of one call is ONE place seen twice: a write through
+// either lands in it, and a REBIND through one (`a = …`) is what the other reads from then on.
+// @FR-B-Ref-Repoint is not involved: a rebind of a `&` parameter writes the caller's variable.
+//
+// loft#1605 was the scalar form (`add2(x, x)`).  This file is the heap form (loft#2136): a
+// record, a vector, a text, a tuple and a struct enum, each handed twice — and three times,
+// and through a forwarded `&` parameter, which hands its own link on twice.  Every value
+// below is hand-computed from the rule; the interpreter has always answered them.
+//
+// @falsified-at: 143dec434 — native: rustc refused the file (E0499 at every same-place call, the
+//   forwarded `*var_p` included), interpret unchanged (linux-probe run 39999242379).
+
+struct Mp { name: text, cs: vector<integer> }
+struct Box { inner: Mp, tag: integer }
+enum Sh { Sq { s: integer }, Ci { r: integer } }
+
+fn twice(a: &Mp, b: &Mp, x: integer) -> integer {
+  b.cs += [x];
+  a.cs += [x + 1];
+  len(a.cs)
+}
+
+// A rebind through `a`: `b` reads the new record, and `b`'s write lands in it.
+fn rebind(a: &Mp, b: &Mp) -> text {
+  a = Mp { name: "new", cs: [9] };
+  r = "{b.name}:{len(b.cs)}";
+  b.cs += [0];
+  r
+}
+
+// A forwarded `&` parameter, handed on twice.
+fn fwd(p: &Mp) -> integer { twice(p, p, 20) }
+
+fn three(a: &Mp, b: &Mp, c: &Mp) -> text {
+  a.name = "x";
+  b.name += "y";
+  c.name += "z";
+  a.name
+}
+
+// A rebind through `b`, then a field write through `a`: it lands on the new record.
+fn rebind_then_write(a: &Mp, b: &Mp) {
+  b = Mp { name: "nb", cs: [] };
+  a.cs += [42];
+}
+
+fn tv(a: &vector<integer>, b: &vector<integer>) -> integer { a += [1]; b += [2]; len(a) }
+fn tt(a: &text, b: &text) -> text { a += "x"; b += "y"; a }
+fn tu(a: &(integer, integer), b: &(integer, integer)) -> integer { a.0 += 1; b.0 += 10; a.0 }
+fn te(a: &Sh, b: &Sh) -> integer {
+  a = Sq { s: 4 };
+  b = Ci { r: 9 };
+  match a { Sq { s } => s, Ci { r } => r * 100 }
+}
+
+fn main() {
+  m = Mp { name: "e" };
+  assert(twice(m, m, 5) == 2, "twice: {m.cs}");
+  assert("{m.cs}" == "[5,6]", "both appends reach m: {m.cs}");
+
+  assert(rebind(m, m) == "new:1", "b reads the record a rebound to");
+  assert(m.name == "new" && "{m.cs}" == "[9,0]", "the rebind and b's write reach m: {m.name} {m.cs}");
+
+  n = Mp { name: "f" };
+  assert(fwd(n) == 2 && "{n.cs}" == "[20,21]", "forwarded twice: {n.cs}");
+  assert(three(n, n, n) == "xyz" && n.name == "xyz", "three links: {n.name}");
+
+  q = Mp { name: "q", cs: [1] };
+  rebind_then_write(q, q);
+  assert(q.name == "nb" && "{q.cs}" == "[42]", "rebind then write: {q.name} {q.cs}");
+
+  // A field handed twice: two links to one record's field.
+  bx = Box { inner: Mp { name: "i" }, tag: 3 };
+  assert(twice(bx.inner, bx.inner, 1) == 2 && "{bx.inner.cs}" == "[1,2]", "field: {bx.inner.cs}");
+
+  v: vector<integer> = [];
+  assert(tv(v, v) == 2 && "{v}" == "[1,2]", "vector: {v}");
+  t = "s";
+  assert(tt(t, t) == "sxy" && t == "sxy", "text: {t}");
+  u = (0, 0);
+  assert(tu(u, u) == 11 && u.0 == 11, "tuple: {u.0}");
+  e: Sh = Sq { s: 1 };
+  assert(te(e, e) == 900, "a struct enum rebound through both");
+  println("2136 ok");
+}
