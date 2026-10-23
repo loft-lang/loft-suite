@@ -24,6 +24,12 @@
 //   2 of 11 -> 0.  LOFT_NO_OWNER_WITNESS=1 on the fixed build: interpret 10, native 3.  Clean
 //   under LOFT_STRICT_STORES=1 and LOFT_POISON=1 on both backends.
 // CHANNEL: assertion failures and the leak, both backends.
+// WITNESS: on the control `rebuilt_mint_or_view` answers 3331 where 40331 is right and the
+//   caller's vector reads length 2 where 3 is right, on both backends; the interpreter leaks
+//   `In×2` in six more.
+// HOLDS: panics and free-refusals are clean on both trees; after the fix every assertion
+//   passes and nothing leaks on both backends, under LOFT_STRICT_STORES=1 and LOFT_POISON=1 too.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
 //
 // Held FIXED, so NOT measured here: integer loop bounds with no `break`, closures held by a
 // local (never a collection), and a record type with no `OpCopy`.

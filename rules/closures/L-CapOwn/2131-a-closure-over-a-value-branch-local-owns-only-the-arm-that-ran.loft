@@ -27,6 +27,11 @@
 //   5 is right; `literal` leaks `In×2`) -> 0; native 4 of 7 fail on assertions -> 0.  Clean
 //   under LOFT_STRICT_STORES=1 and LOFT_POISON=1 on both backends after the fix.
 // CHANNEL: assertion failures and the leak, both backends.
+// WITNESS: on the control `call arm` answers 99 where 5 is right (the filler took the freed
+//   store), `match` and `field` read garbage, `literal` leaks `In×2`.
+// HOLDS: panics and free-refusals are clean on both trees; after the fix every assertion
+//   passes and nothing leaks on both backends, under LOFT_STRICT_STORES=1 and LOFT_POISON=1 too.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
 //
 // Held FIXED, so NOT measured here: one capture per closure, a two-arm join (an `if` or a
 // two-arm `match`), the closure returned or stored in a struct field (never in a collection).

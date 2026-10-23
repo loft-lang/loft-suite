@@ -28,6 +28,11 @@
 //   (`write_through` 4009 where 909 is right) -> 0.  LOFT_NO_OWNER_WITNESS=1 on the fixed build
 //   moves the same channels the same way.  Clean under LOFT_STRICT_STORES=1 and LOFT_POISON=1.
 // CHANNEL: assertion failures and the leak on the interpreter, assertion failures on native.
+// WITNESS: on the control the interpreter answers 11 where 401 is right (`typed_read_then_view`)
+//   and leaks `In×2`/`In×3`; native answers 4009 where 909 is right (`write_through`).
+// HOLDS: panics and free-refusals are clean on both trees; after the fix every assertion
+//   passes and nothing leaks on both backends, under LOFT_STRICT_STORES=1 and LOFT_POISON=1 too.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
 //
 // Held FIXED, so NOT measured here: a struct with integer members only (the droppable member is
 // `a-captured-local-rebuilt-in-a-loop-keeps-the-store-it-still-names.loft`'s, in O-Witness),
