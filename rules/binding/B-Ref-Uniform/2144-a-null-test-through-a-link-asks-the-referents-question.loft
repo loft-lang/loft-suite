@@ -1,0 +1,158 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2144, `@FR-B-Ref-Uniform` / `@FR-L-Null` — A NULL TEST THROUGH A LINK ASKS THE
+// REFERENT'S QUESTION.
+//
+// `(B-Ref-Uniform)` makes a `&τ?` variable usable exactly like a `τ?` one, with no operation
+// special-cased by the link, so `c == null` on a `&τ?` answers what it answers on the `τ?` the
+// link names.  For a nullable STRUCT the test used to miss the struct arm (it matched only the
+// bare `S?` spelling) and fall to a generic compare of a truthiness bit against the boolean
+// null, which never matched: `c != null` answered true for a null slot, and a guarded write
+// then filled the caller's null on both backends.
+//
+// The cases vary one axis each: the referent's type (a struct, a struct-enum, a value enum, a
+// vector, a text, an integer, a float, a boolean), the spelling of the test (`==`, `!=`, a
+// negated `==`, `!=` inside `&&`), its context (an interpolation, a bound result, an `if`
+// condition guarding a write through the link), and whether the caller's slot is null or
+// holds a value.  After the guarded write the caller's own variable is read back: a null slot
+// stays null, a present one holds the write.  Each answer is the one the plain `τ?` parameter
+// gives, worked out by hand.
+//
+// @falsified-at: b095481f4 — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-by: tests/falsified/2144-a-null-test-through-a-link-asks-the-referents-question.patch — interpret exit 1 ->
+//   0, native exit 1 -> 0
+// CHANNEL: the exit channel on the control, both backends — the `&Shape?` test is refused, so the
+//   program never runs; with that half removed, assertion failures on both backends.
+// WITNESS: on b095481f4 both backends refuse with `No matching operator '==' on '&Shape?' and 'null'`;
+//   with `t_shape` and `test_struct_enum` taken out they answer `struct, null: got
+//   false/true/true/true, want true/false/false/false` and fail `bound, null`.
+// HOLDS: every assertion passes on both trees once the fix is in; no leak, no panic.
+// ARMED: the failures are values; nothing here needs a switch.
+//
+// Held FIXED, so NOT measured here: one link per function, the link a parameter (a local
+// `p = &x` of a nullable referent is not spelled here).
+
+struct S { v: integer }
+enum Shape { Circle { r: integer }, Square { s: integer } }
+enum Hue { Red, Blue }
+
+fn mk(v: integer) -> S { S { v: v } }
+fn same(name: text, got: text, want: text) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+// Each answers "== / != / !(==) / != && w", then writes through the link only when it is present.
+fn t_s(c: &S?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = mk(5); }
+  r
+}
+fn t_shape(c: &Shape?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = Square { s: 5 }; }
+  r
+}
+fn t_hue(c: &Hue?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = Blue; }
+  r
+}
+fn t_vec(c: &vector<integer>?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = [5]; }
+  r
+}
+fn t_text(c: &text?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = "five"; }
+  r
+}
+fn t_int(c: &integer?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = 5; }
+  r
+}
+fn t_float(c: &float?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = 5.5; }
+  r
+}
+fn t_bool(c: &boolean?, w: boolean) -> text {
+  r = "{c == null}/{c != null}/{!(c == null)}/{c != null && w}";
+  if c != null && w { c = false; }
+  r
+}
+
+// The test bound, and as the condition of a value branch.
+fn bound(c: &S?, w: boolean) -> integer {
+  present = c != null;
+  if w { c = mk(7); }
+  if present { 1 } else { 0 }
+}
+fn branch(c: &S?) -> integer {
+  r = if c == null { 40 } else { (c ?? mk(0)).v };
+  c = mk(r + 1);
+  r
+}
+
+fn test_struct() {
+  for _r in 0..2 {
+    ns: S? = null;
+    same("struct, null", t_s(ns, true), "true/false/false/false");
+    assert(ns == null, "struct: the null slot stays null");
+    ps: S? = mk(1);
+    same("struct, present", t_s(ps, true), "false/true/true/true");
+    assert((ps ?? mk(0)).v == 5, "struct: the present slot holds the write");
+  }
+}
+fn test_struct_enum() {
+  for _r in 0..2 {
+    ns: Shape? = null;
+    same("struct-enum, null", t_shape(ns, true), "true/false/false/false");
+    assert(ns == null, "struct-enum: the null slot stays null");
+    ps: Shape? = Circle { r: 1 };
+    same("struct-enum, present", t_shape(ps, true), "false/true/true/true");
+    assert(ps != null, "struct-enum: the present slot holds the write");
+  }
+}
+fn test_scalars_and_collections() {
+  for _r in 0..2 {
+    nh: Hue? = null;
+    same("value enum, null", t_hue(nh, true), "true/false/false/false");
+    assert(nh == null, "value enum stays null");
+    ph: Hue? = Red;
+    same("value enum, present", t_hue(ph, true), "false/true/true/true");
+    nv: vector<integer>? = null;
+    same("vector, null", t_vec(nv, true), "true/false/false/false");
+    assert(nv == null, "vector stays null");
+    pv: vector<integer>? = [1];
+    same("vector, present", t_vec(pv, true), "false/true/true/true");
+    assert(len(pv ?? []) == 1 && (pv ?? [0])[0] == 5, "vector holds the write");
+    nt: text? = null;
+    same("text, null", t_text(nt, true), "true/false/false/false");
+    pt: text? = "one";
+    same("text, present", t_text(pt, true), "false/true/true/true");
+    assert(pt == "five", "text holds the write");
+    ni: integer? = null;
+    same("integer, null", t_int(ni, true), "true/false/false/false");
+    pi: integer? = 1;
+    same("integer, present", t_int(pi, true), "false/true/true/true");
+    nf: float? = null;
+    same("float, null", t_float(nf, true), "true/false/false/false");
+    pf: float? = 1.5;
+    same("float, present", t_float(pf, true), "false/true/true/true");
+    nb: boolean? = null;
+    same("boolean, null", t_bool(nb, true), "true/false/false/false");
+    pb: boolean? = true;
+    same("boolean, present", t_bool(pb, true), "false/true/true/true");
+  }
+}
+fn test_contexts() {
+  for _r in 0..2 {
+    ns: S? = null;
+    assert(bound(ns, false) == 0, "bound, null");
+    assert(bound(ns, true) == 0, "bound, null, written after");
+    assert((ns ?? mk(0)).v == 7, "and the write lands");
+    n2: S? = null;
+    assert(branch(n2) == 40, "value branch, null");
+    assert(branch(n2) == 41, "value branch, then present");
+  }
+}

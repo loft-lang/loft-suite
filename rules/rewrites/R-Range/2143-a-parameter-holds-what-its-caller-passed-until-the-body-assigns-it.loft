@@ -1,0 +1,145 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2143, `@FR-R-Range` — A PARAMETER HOLDS WHAT ITS CALLER PASSED UNTIL THE BODY ASSIGNS IT.
+//
+// `(R-Range)` proves a LOCAL whose every assignment is ranged, and says a parameter is never
+// proven by its shape (@C80): the caller's argument is an assignment the body does not show.
+// So a parameter the body assigns only literals still holds the null, the NaN or the extreme
+// value that was passed until the first of those assignments runs, and every operator that
+// reads it before then keeps the guard that value needs.  The interpreter has no such proof;
+// `--native` used both the non-null proof and the range proof on the parameter as if it were a
+// local, and dropped a `??` fallback, the overflow and null checks of `+` `*` `&`, and the
+// NaN-aware float compare.
+//
+// The cases vary one axis each: the parameter's type (`integer`, `integer?`, `float`,
+// `&integer?`, `&float`), the shape of the trusted assignment (a literal, a negated literal,
+// a literal mask, an `if` of two literals, a counted loop's counter), where the read stands
+// (before the assignment, after an assignment on a branch not taken, in a loop whose first
+// round reads the argument and whose second reads the assigned value), and the operator that
+// reads it (`??`, `+`, `*`, `&`, `>>`, unary `-`, `<`, a float `<` and `==`).  Each runs with
+// the sentinel argument and with an ordinary one, and on both paths of the branch.  Every value
+// is worked out by hand from `(E-Coalesce)`, `(N-Arith)` (an overflow or a null operand answers
+// null) and the total order in which null sorts below every number.
+//
+// @falsified-at: 143dec434 — native exit 1 -> 0, native 10 assertion failures -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: assertion failures, native.
+// WITNESS: on 143dec434 native answers `?? null: got null, want 3`, `float < NaN: got false, want true`,
+//   `negated literal: got null, want 3`, `after an untaken assignment: got null, want 3` and
+//   `link ?? null: got null, want 3`.
+// HOLDS: every assertion passes on both trees on the interpreter; no leak, no panic on either.
+// ARMED: native is where the proofs live; the interpreter is the control and passes on both trees.
+//
+// Held FIXED, so NOT measured here: one parameter per function, no caller-side range (a
+// ranged variant's seeds are `(R-RangedCall)`'s, and that rule keeps a seed only for a
+// parameter the body never assigns).
+
+MIN = 0 - 9223372036854775807 - 1;
+MAX = 9223372036854775807;
+
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+fn absent(name: text, got: integer) { assert(got == null, "{name}: got {got}, want null"); }
+fn truth(name: text, got: boolean, want: boolean) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+// The operator, read BEFORE a literal assignment on a branch.
+fn co(c: integer?, w: boolean) -> integer { r = c ?? 3; if w { c = 5; } r }
+fn add(c: integer, w: boolean) -> integer { r = c + 1; if w { c = 5; } r }
+fn mul(c: integer, w: boolean) -> integer { r = c * 3; if w { c = 5; } r }
+fn msk(c: integer, w: boolean) -> integer { r = c & 7; if w { c = 5; } r }
+fn shr(c: integer, w: boolean) -> integer { r = c >> 1; if w { c = 5; } r }
+fn neg(c: integer, w: boolean) -> integer { r = -c; if w { c = 5; } r }
+fn lt(c: integer, w: boolean) -> boolean { r = c < 1; if w { c = 5; } r }
+fn flt(x: float, w: boolean) -> boolean { r = x < 1.0; if w { x = 2.0; } r }
+fn feq(x: float, w: boolean) -> boolean { r = x == x; if w { x = 2.0; } r }
+fn fco(x: float?, w: boolean) -> float { r = x ?? 3.5; if w { x = 2.0; } r }
+
+// The shape of the trusted assignment.
+fn sh_neg(c: integer?, w: boolean) -> integer { r = c ?? 3; if w { c = -5; } r }
+fn sh_mask(c: integer?, w: boolean) -> integer { r = c ?? 3; if w { c = 12 & 7; } r }
+fn sh_if(c: integer?, w: boolean) -> integer { r = c ?? 3; if w { c = if r > 0 { 1 } else { 2 }; } r }
+fn sh_counter(c: integer?, n: integer) -> integer { r = c ?? 3; for i in 0..n { c = i; } r * 10 + (c ?? 9) }
+
+// Where the read stands.
+fn after_untaken(c: integer?, w: boolean) -> integer { if w { c = 5; } c ?? 3 }
+fn loop_rounds(c: integer?) -> integer { t = 0; for _i in 0..2 { t = t * 10 + (c ?? 3); c = 5; } t }
+fn add_after(c: integer, w: boolean) -> integer { if w { c = 5; } c + 1 }
+
+// Through a link: the caller's value is the referent's.
+fn lco(c: &integer?, w: boolean) -> integer { r = c ?? 3; if w { c = 5; } r }
+fn ladd(c: &integer?, w: boolean) -> integer { r = c + 1; if w { c = 5; } r }
+fn lflt(x: &float, w: boolean) -> boolean { r = x < 1.0; if w { x = 2.0; } r }
+
+fn test_operators() {
+  n: integer? = null;
+  for _r in 0..2 {
+    check("?? null", co(n, false), 3);
+    check("?? null, assigned after", co(n, true), 3);
+    check("?? 4", co(4, false), 4);
+    absent("+ null", add(MIN, false));
+    absent("+ null, assigned after", add(MIN, true));
+    check("+ 4", add(4, false), 5);
+    absent("* overflow", mul(MAX, false));
+    absent("* overflow, assigned after", mul(MAX, true));
+    check("* 4", mul(4, true), 12);
+    absent("& null", msk(MIN, false));
+    check("& 13", msk(13, false), 5);
+    absent(">> null", shr(MIN, false));
+    check(">> 13", shr(13, true), 6);
+    absent("- null", neg(MIN, false));
+    check("- 4", neg(4, false), -4);
+    truth("< null", lt(MIN, false), true);
+    truth("< 4", lt(4, true), false);
+  }
+}
+
+fn test_floats() {
+  nan = 0.0 / 0.0;
+  nf: float? = null;
+  for _r in 0..2 {
+    truth("float < NaN", flt(nan, false), true);
+    truth("float < NaN, assigned after", flt(nan, true), true);
+    truth("float < 4.0", flt(4.0, false), false);
+    truth("float == NaN", feq(nan, false), true);
+    truth("float == 4.0", feq(4.0, true), true);
+    assert(fco(nf, false) == 3.5, "float ?? null: {fco(nf, false)}");
+    assert(fco(1.25, true) == 1.25, "float ?? 1.25");
+  }
+}
+
+fn test_assignment_shapes() {
+  n: integer? = null;
+  for _r in 0..2 {
+    check("negated literal", sh_neg(n, true), 3);
+    check("literal mask", sh_mask(n, true), 3);
+    check("if of literals", sh_if(n, true), 3);
+    check("counter, no rounds", sh_counter(n, 0), 39);
+    check("counter, three rounds", sh_counter(n, 3), 32);
+    check("counter, present", sh_counter(6, 2), 61);
+  }
+}
+
+fn test_read_position() {
+  n: integer? = null;
+  for _r in 0..2 {
+    check("after an untaken assignment", after_untaken(n, false), 3);
+    check("after a taken assignment", after_untaken(n, true), 5);
+    check("first round reads the argument", loop_rounds(n), 35);
+    check("first round, present", loop_rounds(8), 85);
+    absent("+ after an untaken assignment", add_after(MIN, false));
+    check("+ after a taken assignment", add_after(MIN, true), 6);
+  }
+}
+
+fn test_through_a_link() {
+  for _r in 0..2 {
+    n: integer? = null;
+    check("link ?? null", lco(n, false), 3);
+    assert(n == null, "the untaken write leaves the caller's null");
+    check("link ?? null, assigned after", lco(n, true), 3);
+    check("and the caller holds the write", n ?? -1, 5);
+    m: integer? = null;
+    absent("link + null", ladd(m, false));
+    nan = 0.0 / 0.0;
+    truth("link float < NaN", lflt(nan, false), true);
+  }
+}

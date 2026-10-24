@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2149, `@FR-B-Ref-Lvalue` / `@FR-B-Ref-Write` / `@FR-B-Ref-Uniform` — A STRUCT-ENUM PLACE
+// TAKES A WRITE THROUGH A LINK.
+//
+// A field or an element is a place a link names (`(B-Ref-Lvalue)`), a whole-value write through
+// the link reaches it (`(B-Ref-Write)`), and no type is an exception (`(B-Ref-Uniform)`).  A
+// struct-enum place is a record in its holder's bytes, as a struct field is.  The struct field
+// was linked through an owned copy that the call writes back; the struct-enum place was linked as
+// a sub-reference into the holder, so the callee's write-back re-pointed the link, released the
+// holder as the "displaced" value, and the place kept its old value — the new one leaked.
+//
+// The cases vary one axis each: where the place is (a field, a vector element), whether it may
+// be absent (`Shape`, `Shape?`), what it holds (absent, present), what the callee writes (a
+// value, null, nothing on this run, only a read) and the evaluation count (a loop, so a released
+// holder or a leaked value shows on the next round and on the leak channel).  After each call
+// the caller reads the place and the field beside it.  Every value is worked out by hand from
+// the rules above.
+//
+// @falsified-at: 80fc2ee59 — interpret exit 1 -> 0, interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4
+//   assertion failures -> 0, native panicked -> clean
+// @falsified-by: tests/falsified/2149-a-struct-enum-place-takes-a-write-through-a-link.patch — interpret exit 1 -> 0,
+//   interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4 assertion failures -> 0, native panicked -> clean
+// CHANNEL: assertion failures, both backends; the store-lifetime channel under
+//   LOFT_STRICT_STORES=1.
+// WITNESS: on 80fc2ee59 both backends answer `a field takes the value: got null, want 305` and `an absent
+//   field filled: got null, want 40`; the interpreter reports `[strict-store] USE AFTER FREE (read)
+//   store #7 type=H` (the released holder) and native panics in src/store.rs.
+// HOLDS: every assertion passes on both trees once the fix is in; no leak, no panic.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
+//
+// Held FIXED, so NOT measured here: a struct-enum with a heap member in its variants.
+
+enum Shape { Circle { r: integer }, Square { s: integer } }
+struct H { a: Shape, n: Shape?, k: integer }
+
+fn mkc(r: integer) -> Shape { Circle { r: r } }
+fn sq(c: &Shape) { c = Square { s: 3 }; }
+fn sqn(c: &Shape?) { c = Square { s: 4 }; }
+fn drop_it(c: &Shape?) { c = null; }
+fn maybe(c: &Shape, go: boolean) { if go { c = mkc(7); } }
+fn size(sh: Shape) -> integer { match sh { Circle { r } => r, Square { s } => s * 10 } }
+fn opt(sh: Shape?) -> integer { if sh == null { -1 } else { size(sh ?? mkc(0)) } }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn test_a_field() {
+  for _r in 0..3 {
+    h = H { a: mkc(1), n: null, k: 5 };
+    sq(h.a);
+    check("a field takes the value", size(h.a) * 10 + h.k, 305);
+    maybe(h.a, false);
+    check("nothing written on this run", size(h.a), 30);
+    maybe(h.a, true);
+    check("written on this one", size(h.a), 7);
+  }
+}
+
+fn test_a_nullable_field() {
+  for _r in 0..3 {
+    h = H { a: mkc(1), n: null, k: 5 };
+    sqn(h.n);
+    check("an absent field filled", opt(h.n), 40);
+    drop_it(h.n);
+    check("emptied again", opt(h.n), -1);
+    h.n = mkc(2);
+    sqn(h.n);
+    check("a present field replaced", opt(h.n) * 10 + size(h.a), 401);
+  }
+}
+
+fn test_an_element() {
+  for _r in 0..3 {
+    v: vector<Shape> = [mkc(1), mkc(2)];
+    sq(v[1]);
+    check("an element takes the value", size(v[0]) * 100 + size(v[1]), 130);
+    w: vector<Shape?> = [null, mkc(2)];
+    sqn(w[0]);
+    drop_it(w[1]);
+    check("nullable elements", opt(w[0]) * 10 + opt(w[1]), 399);
+  }
+}

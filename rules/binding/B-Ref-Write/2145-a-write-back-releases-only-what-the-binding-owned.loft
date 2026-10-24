@@ -1,0 +1,145 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2145, `@FR-B-Ref-Write` / `@FR-O-Latest` / `@FR-R-Reuse` — A WRITE-BACK RELEASES ONLY
+// WHAT THE BINDING OWNED.
+//
+// A whole-value write through a `&` parameter means what the same assignment written in the
+// caller means (`(B-Ref-Write)`: the binding takes the new value and the value it displaces
+// is released).  Two things follow for the caller's binding, and each had a hole:
+//
+//   - The released value is the BINDING's.  A local bound from a call (`s = mk(1)`) may live
+//     in the caller's return buffer, which a loop allocates once and refills (`(R-Reuse)`), so
+//     the store under it was the buffer's.  The callee freed it, and the next round wrote a
+//     record into the freed store.
+//   - The new value is the binding's from then on (`(O-Latest)`).  A local bound as a VIEW
+//     (`x = b.t`, `x = v[0]`, `(B-View)`) does not own what it views, so the store a callee
+//     installed was never released (a leak), and when the field sat at offset 0 the callee's
+//     release of the "displaced" view freed `b` itself.
+//
+// The cases vary one axis each: where the caller's binding came from (a call into the loop's
+// buffer, a struct literal, a field at offset 0, a later field, a vector element), what the
+// callee writes (a call result, a struct literal, nothing on this run), how many write-backs
+// one binding takes (one, two), the kind (a struct, a struct-enum) and the evaluation count (a
+// loop, so a freed buffer or a leaked store shows on the next round and on the leak channel).
+// After each call the caller reads its binding and the place it viewed; where nothing was
+// written the binding still views that place, so a later write to the place reaches it.
+// Every value is worked out by hand from the rules above.
+//
+// @falsified-at: 7be7a4679 — interpret exit 1 -> 0, interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4
+//   assertion failures -> 0, native panicked -> clean
+// @falsified-by: tests/falsified/2145-a-write-back-releases-only-what-the-binding-owned.patch — interpret exit 1 -> 0,
+//   interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4 assertion failures -> 0, native panicked -> clean
+// CHANNEL: the leak and the store-lifetime channels, both backends.
+// WITNESS: on 7be7a4679 the interpreter reports `[strict-store] USE AFTER FREE (write) store #5 type=S`
+//   killed by the free of `<anon>`; native answers `and the field it viewed: got -2401053088876216593,
+//   want 2` and `two write-backs: got -2401053088876216533, want 62`, then panics in src/store.rs.
+// HOLDS: every assertion passes on both trees once the fix is in; no leak, no panic.
+// ARMED: the use-after-free shows under LOFT_STRICT_STORES=1 (the suite's poison and strict runs);
+//   the leak under LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
+//
+// Held FIXED, so NOT measured here: a view local bound more than once in its scope (the snapshot
+// sits after its one bind), a vector or keyed binding (the record and struct-enum kinds only).
+
+struct S { v: integer }
+struct B { t: S, n: integer, u: S }
+enum Shape { Circle { r: integer }, Square { s: integer } }
+
+fn mk(v: integer) -> S { S { v: v } }
+fn put(c: &S) { c = mk(5); }
+fn put_lit(c: &S) { c = S { v: 6 }; }
+fn put_if(c: &S, go: boolean) { if go { c = mk(7); } }
+fn circ(r: integer) -> Shape { Circle { r: r } }
+fn grow_shape(c: &Shape) { c = Square { s: 9 }; }
+fn size(sh: Shape) -> integer { match sh { Circle { r } => r, Square { s } => s * 10 } }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn test_a_binding_in_the_loop_buffer() {
+  t = 0;
+  for r in 0..4 {
+    s = mk(r);
+    put(s);
+    filler = mk(100 + r);
+    t += s.v + filler.v * 0;
+  }
+  check("one write a round", t, 20);
+  u = 0;
+  for r in 0..4 {
+    s = mk(r);
+    put_lit(s);
+    u += s.v;
+  }
+  check("a literal written", u, 24);
+  w = 0;
+  for r in 0..3 {
+    s = mk(r);
+    put(s);
+    put_lit(s);
+    w += s.v;
+  }
+  check("two writes a round", w, 18);
+  k = 0;
+  for r in 0..3 {
+    sh = circ(r);
+    grow_shape(sh);
+    k += size(sh);
+  }
+  check("a struct-enum", k, 270);
+}
+
+fn test_a_literal_binding() {
+  t = 0;
+  for r in 0..3 {
+    s = S { v: r };
+    put(s);
+    t += s.v;
+  }
+  check("a literal binding", t, 15);
+}
+
+fn test_a_view_of_a_field() {
+  for _r in 0..3 {
+    b = B { t: mk(2), n: 7, u: mk(3) };
+    x = b.t;
+    put(x);
+    y = mk(99);
+    check("view at offset 0: the binding", x.v, 5);
+    check("and the field it viewed", b.t.v, 2);
+    check("and the record beside it", b.n * 100 + b.u.v + y.v * 0, 703);
+    z = b.u;
+    put(z);
+    check("view of a later field", z.v * 10 + b.u.v, 53);
+  }
+}
+
+fn test_a_view_left_in_place() {
+  for _r in 0..3 {
+    b = B { t: mk(2), n: 7, u: mk(3) };
+    x = b.t;
+    put_if(x, false);
+    b.t.v = 4;
+    check("nothing written: still a view", x.v, 4);
+    q = b.u;
+    put_if(q, true);
+    b.u.v = 8;
+    check("written: no longer a view", q.v * 10 + b.u.v, 78);
+  }
+}
+
+fn test_a_view_written_twice() {
+  for _r in 0..3 {
+    b = B { t: mk(2), n: 7, u: mk(3) };
+    x = b.t;
+    put(x);
+    put_lit(x);
+    check("two write-backs", x.v * 10 + b.t.v, 62);
+  }
+}
+
+fn test_a_view_of_an_element() {
+  for _r in 0..3 {
+    v = [mk(1), mk(2)];
+    e = v[0];
+    put(e);
+    check("view of an element", e.v * 100 + v[0].v * 10 + v[1].v, 512);
+  }
+}

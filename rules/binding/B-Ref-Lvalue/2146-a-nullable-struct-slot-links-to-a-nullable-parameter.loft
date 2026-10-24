@@ -1,0 +1,89 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2146, `@FR-B-Ref-Lvalue` / `@FR-B-Ref-Uniform` — A NULLABLE STRUCT SLOT LINKS TO A NULLABLE
+// PARAMETER.
+//
+// `(B-Ref-Lvalue)` lets a link name a variable, a field or an element, and `(B-Ref-Uniform)`
+// covers every τ a `&τ` is admitted for, the nullable slot included (loft#1372).  A nullable
+// STRUCT field or `vector<S?>` element is stored inline — a record pointer, `0` when absent —
+// and handing one to a `&S?` parameter was refused ("expected &S?, got __nullable<S>") while
+// every other field and element kind linked.
+//
+// A link through such a slot behaves as the link to a local `S?` does: the callee reads null
+// for an absent slot and the record for a present one; a field write through the link reaches
+// the slot's record; a whole-value write fills an absent slot or replaces a present one; a null
+// written empties it.  The cases vary one axis each: where the slot is (a field, a vector
+// element), what the slot holds (absent, present), what the callee does (only reads, writes a
+// field, writes a whole value, writes null, writes nothing on this run), the callee's return
+// (none, a scalar), and the evaluation count (a loop, so a temp the link goes through that is
+// not released shows on the leak channel).  After each call the caller reads the slot and the
+// record beside it.  Every value is worked out by hand from the rules above.
+//
+// @falsified-at: e5e7d148c — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-by: tests/falsified/2146-a-nullable-struct-slot-links-to-a-nullable-parameter.patch — interpret exit 1 -> 0,
+//   native exit 1 -> 0
+// CHANNEL: the exit channel — the control refuses the program.
+// WITNESS: on e5e7d148c both backends refuse with `expected &S?, got __nullable<S> on argument 1 of call
+//   to fill` at the first `fill(b.s)`.
+// HOLDS: every assertion passes on both trees once the program is admitted; no leak, no panic.
+// ARMED: the leak channel needs LOFT_LEAK_CHECK=1, which the suite runner sets for every cell.
+//
+// Held FIXED, so NOT measured here: a callee returning a heap value (the link's store-back runs
+// after the call, and a heap result would be held in a temp across it), a struct-enum slot.
+
+struct S { v: integer }
+struct B { s: S?, id: integer }
+
+fn mk(v: integer) -> S { S { v: v } }
+fn fill(c: &S?) { if c == null { c = mk(5); } }
+fn bump(c: &S?) { if c != null { c.v = c.v + 10; } else { c = mk(-1); } }
+fn put(c: &S?) { c = mk(6); }
+fn clear(c: &S?) { c = null; }
+fn maybe(c: &S?, go: boolean) { if go { c = mk(7); } }
+fn peek(c: &S?, go: boolean) -> integer { if go { c = mk(8); } (c ?? mk(0)).v }
+fn val(b: B) -> integer { (b.s ?? mk(0)).v }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn test_a_field() {
+  for _r in 0..3 {
+    b = B { s: null, id: 1 };
+    fill(b.s);
+    check("fill an absent field", val(b), 5);
+    fill(b.s);
+    check("fill leaves a present one", val(b), 5);
+    bump(b.s);
+    check("a field write reaches the slot", val(b), 15);
+    put(b.s);
+    check("a whole value replaces it", val(b) * 10 + b.id, 61);
+    clear(b.s);
+    assert(b.s == null, "a null written empties the slot");
+    bump(b.s);
+    check("and the absent branch fills it", val(b), -1);
+    maybe(b.s, false);
+    check("nothing written on this run", val(b), -1);
+    maybe(b.s, true);
+    check("written on this one", val(b), 7);
+  }
+}
+
+fn test_a_scalar_return() {
+  for _r in 0..3 {
+    b = B { s: null, id: 2 };
+    check("peek, nothing written", peek(b.s, false), 0);
+    assert(b.s == null, "and the slot stays absent");
+    check("peek, written", peek(b.s, true), 8);
+    check("and the slot holds it", val(b), 8);
+  }
+}
+
+fn test_an_element() {
+  for _r in 0..3 {
+    v: vector<S?> = [null, mk(2)];
+    fill(v[0]);
+    bump(v[1]);
+    check("elements", (v[0] ?? mk(0)).v * 100 + (v[1] ?? mk(0)).v, 512);
+    clear(v[1]);
+    assert(v[1] == null, "an element emptied");
+    check("and its neighbour kept", (v[0] ?? mk(0)).v, 5);
+  }
+}

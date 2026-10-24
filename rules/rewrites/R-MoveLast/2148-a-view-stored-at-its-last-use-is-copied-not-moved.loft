@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2148, `@FR-R-MoveLast` / `@FR-B-View` / `@FR-B-Copy` — A VIEW STORED AT ITS LAST USE IS
+// COPIED, NOT MOVED.
+//
+// `(R-MoveLast)` turns a record copy from a source's last use into a move: the source's store
+// is handed to the destination instead of duplicated.  That needs a store the source OWNS.  A
+// local bound from a field is a VIEW (`(B-View)`) and owns nothing; storing it into a field is
+// `(B-Copy)`'s copy.  The move route took a field projection for the handle of a fresh buffer —
+// the shape the vector-copy idiom's compiler buffer has — and dropped the copy with nothing in
+// its place, so the destination kept its old value, silently.  A local rebound to an owned value
+// after the view bind took the same route.
+//
+// The cases vary one axis each: whether the view is rebound before the store (no, to a call's
+// value, to a literal), where the store lands (the field the view came from, another field, a
+// vector element), the kind (a struct, a struct-enum), and whether the local is read after the
+// store (the last use, or not).  After the store the source field is written, which must not
+// reach the destination: it holds a copy.  Every case runs in a loop.  Every value is worked out
+// by hand from the rules above.
+//
+// @falsified-at: 92e485bf3 — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6
+//   assertion failures -> 0
+// @falsified-by: tests/falsified/2148-a-view-stored-at-its-last-use-is-copied-not-moved.patch — interpret exit 1 -> 0,
+//   interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+// CHANNEL: assertion failures, both backends.
+// WITNESS: on 92e485bf3 the interpreter answers `another field takes a copy: got 39, want 29`,
+//   `the field it came from: got 2, want 6` and `a struct-enum view: got 2, want 1`.
+// HOLDS: every assertion passes on both trees once the fix is in; no leak, no panic.
+// ARMED: the move is default-on; `LOFT_NO_MOVE_ELIDE=1` is the control that answers right on
+//   both trees.
+//
+// Held FIXED, so NOT measured here: a vector or text source (the record-copy route only).
+
+struct S { v: integer }
+struct H { t: S, u: S, n: integer }
+enum Shape { Circle { r: integer }, Square { s: integer } }
+struct G { a: Shape, b: Shape }
+
+fn mk(v: integer) -> S { S { v: v } }
+fn mkc(r: integer) -> Shape { Circle { r: r } }
+fn size(sh: Shape) -> integer { match sh { Circle { r } => r, Square { s } => s * 10 } }
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn test_a_view_never_rebound() {
+  for _r in 0..3 {
+    h = H { t: mk(2), u: mk(3), n: 4 };
+    x = h.t;
+    h.u = x;
+    h.t.v = 9;
+    check("another field takes a copy", h.u.v * 10 + h.t.v, 29);
+    v = [mk(5), mk(6)];
+    e = v[0];
+    v[1] = e;
+    v[0].v = 7;
+    check("an element takes a copy", v[1].v * 10 + v[0].v, 57);
+  }
+}
+
+fn test_a_view_rebound() {
+  for _r in 0..3 {
+    h = H { t: mk(2), u: mk(3), n: 4 };
+    x = h.t;
+    check("the view reads its field", x.v, 2);
+    x = mk(6);
+    h.t = x;
+    check("the field it came from", h.t.v, 6);
+    k = h.u;
+    k = S { v: 8 };
+    h.u = k;
+    check("rebound to a literal", h.u.v, 8);
+  }
+}
+
+fn test_read_after_the_store() {
+  for _r in 0..3 {
+    h = H { t: mk(2), u: mk(3), n: 4 };
+    x = h.t;
+    h.u = x;
+    h.t.v = 9;
+    check("not the last use", h.u.v * 100 + x.v * 10 + h.t.v, 299);
+  }
+}
+
+fn test_a_struct_enum() {
+  for _r in 0..3 {
+    g = G { a: mkc(1), b: mkc(2) };
+    y = g.a;
+    g.b = y;
+    check("a struct-enum view", size(g.b), 1);
+    z = g.a;
+    z = mkc(6);
+    g.a = z;
+    check("a rebound struct-enum view", size(g.a) * 10 + size(g.b), 61);
+  }
+}
