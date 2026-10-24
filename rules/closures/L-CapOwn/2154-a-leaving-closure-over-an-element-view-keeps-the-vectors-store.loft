@@ -1,0 +1,149 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2154, `@FR-L-CapOwn` / `@FR-B-View` / `@FR-O-Latest` — A LEAVING CLOSURE OVER AN ELEMENT
+// VIEW KEEPS THE VECTOR'S STORE.
+//
+// `y = vs[1]` is a view (`(B-View)`): it names a place inside the store `vs` reaches, and `vs`
+// is itself a view of the store its literal minted.  A closure capturing `y` shares that store
+// (`(L-CapHeap)`), and a closure that LEAVES its frame takes the store's release over
+// (`(L-CapOwn)`), so the frame must not free it.  The frame looked one view deep: it gave up
+// the release of `vs`, which owns nothing, and freed the store under the closure.  Returned
+// directly, the closure then read a freed store; returned in a struct field, it read `null`.
+//
+// The cases vary one axis each: how the record leaves (the return, a struct field), what the
+// element holds (a heap member, scalars only), the index, where the vector came from (a literal,
+// a call), a nested projection (`qs[0].s`), and what happens to the vector after the build (a
+// rebind, an append) — the record keeps the store it was built with (`(L-CapRebind)`).  The
+// controls beside them passed before: a field view, the closure called in its frame, the whole
+// vector captured, an element of a vector parameter, an element reached through a struct field.
+// Each runs three rounds, so a double release or a leak also shows on the store-lifetime
+// channel.  Every value is worked out by hand.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0,
+//   native 2 assertion failures -> 0, native panicked -> clean (the installed main as the control)
+// CHANNEL: assertion failures and store panics, both backends.
+// WITNESS: on b36d0449f `test_the_return` and `test_the_vector_after_the_build` hit `Store access out of
+//   bounds: rec=3735928559` (the poison pattern: a freed store read) and `test_a_struct_field`
+//   answers `left in a struct field: got null, want 202`; `test_the_controls` passes there too.
+// HOLDS: every assertion passes on both backends here; no store reported read after free or never freed.
+// ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1 turn the freed read into a reported use-after-free.
+//
+// Held FIXED, so NOT measured here: keyed collections (an element of a hash reached through `??`
+// is a copy), and a record left behind in its frame.
+
+struct S { v: integer, w: vector<integer> }
+struct P { v: integer }
+struct Q { s: S }
+struct Bag { items: vector<S> }
+struct Box { f: fn() -> integer }
+
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn two(n: integer) -> vector<S> { [S { v: n, w: [1] }, S { v: n + 1, w: [1, 2] }] }
+
+fn returned(n: integer) -> fn() -> integer { vs = two(n); y = vs[1]; fn() -> integer { y.v * 100 + len(y.w) } }
+fn literal(n: integer) -> fn() -> integer {
+  vs = [S { v: n, w: [1] }, S { v: n + 1, w: [1, 2] }];
+  y = vs[1];
+  fn() -> integer { y.v * 100 + len(y.w) }
+}
+fn first(n: integer) -> fn() -> integer {
+  vs = [S { v: n, w: [1] }, S { v: n + 1, w: [1, 2] }];
+  y = vs[0];
+  fn() -> integer { y.v * 100 + len(y.w) }
+}
+fn scalars(n: integer) -> fn() -> integer { vs = [P { v: n }, P { v: n + 1 }]; y = vs[1]; fn() -> integer { y.v } }
+fn nested(n: integer) -> fn() -> integer {
+  qs = [Q { s: S { v: n, w: [1, 2, 3] } }];
+  z = qs[0].s;
+  fn() -> integer { z.v * 100 + len(z.w) }
+}
+fn boxed(n: integer) -> Box {
+  vs = [S { v: n, w: [1] }, S { v: n + 1, w: [1, 2] }];
+  y = vs[1];
+  Box { f: fn() -> integer { y.v * 100 + len(y.w) } }
+}
+fn rebound(n: integer) -> fn() -> integer {
+  vs = [S { v: n, w: [1] }, S { v: n + 1, w: [1, 2] }];
+  y = vs[1];
+  f = fn() -> integer { y.v * 100 + len(y.w) };
+  vs = [S { v: 50, w: [] }];
+  check("the vector rebound", len(vs), 1);
+  f
+}
+fn appended(n: integer) -> fn() -> integer {
+  vs = [S { v: n, w: [1] }, S { v: n + 1, w: [1, 2] }];
+  y = vs[1];
+  f = fn() -> integer { y.v * 100 + len(y.w) };
+  vs += [S { v: 60, w: [] }];
+  f
+}
+
+// Controls.
+fn field_view(n: integer) -> fn() -> integer {
+  q = Q { s: S { v: n, w: [1, 2, 3] } };
+  x = q.s;
+  fn() -> integer { x.v * 100 + len(x.w) }
+}
+fn in_frame(n: integer) -> integer {
+  vs = two(n);
+  y = vs[1];
+  f = fn() -> integer { y.v * 100 + len(y.w) };
+  f()
+}
+fn whole(n: integer) -> fn() -> integer { vs = two(n); fn() -> integer { vs[1].v * 100 + len(vs[1].w) } }
+fn of_param(vs: vector<S>) -> fn() -> integer { y = vs[1]; fn() -> integer { y.v * 100 + len(y.w) } }
+fn through_field(n: integer) -> fn() -> integer {
+  bg = Bag { items: two(n) };
+  y = bg.items[1];
+  fn() -> integer { y.v * 100 + len(y.w) }
+}
+
+fn test_the_return() {
+  for r in 1..4 {
+    f = returned(r);
+    check("a call's vector", f(), (r + 1) * 100 + 2);
+    check("read twice", f(), (r + 1) * 100 + 2);
+    g = literal(r);
+    check("a literal vector", g(), (r + 1) * 100 + 2);
+    h = first(r);
+    check("index 0", h(), r * 100 + 1);
+    k = scalars(r);
+    check("an element with no heap member", k(), r + 1);
+    m = nested(r);
+    check("a nested projection", m(), r * 100 + 3);
+  }
+}
+
+fn test_a_struct_field() {
+  for r in 1..4 {
+    b = boxed(r);
+    g = b.f;
+    check("left in a struct field", g(), (r + 1) * 100 + 2);
+  }
+}
+
+fn test_the_vector_after_the_build() {
+  for r in 1..4 {
+    f = rebound(r);
+    check("the store it was built with", f(), (r + 1) * 100 + 2);
+    g = appended(r);
+    check("after an append", g(), (r + 1) * 100 + 2);
+  }
+}
+
+fn test_the_controls() {
+  for r in 1..4 {
+    a = field_view(r);
+    check("a field view", a(), r * 100 + 3);
+    check("called in its frame", in_frame(r), (r + 1) * 100 + 2);
+    c = whole(r);
+    check("the whole vector", c(), (r + 1) * 100 + 2);
+    vs = two(r);
+    d = of_param(vs);
+    check("an element of a parameter", d(), (r + 1) * 100 + 2);
+    check("the caller's vector", len(vs), 2);
+    e = through_field(r);
+    check("through a struct field", e(), (r + 1) * 100 + 2);
+  }
+}

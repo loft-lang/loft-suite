@@ -1,0 +1,116 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2155, `@FR-L-CapOwn` / `@FR-L-CapKeep` — A REBIND RELEASES THE CLOSURE IT DISPLACES,
+// WHATEVER REPLACES IT.
+//
+// A closure record that LEAVES its frame is released by the fn-ref holding it (`(L-CapOwn)`),
+// and once a rebind makes that fn-ref name something else, nothing names the old record.  The
+// rebind released it only when the NEW value was another call's closure; a named function, a
+// lambda that captures nothing and a lambda built in the frame each left the displaced record,
+// and every store it captured, to nobody.  The answers stayed right and the stores leaked.
+//
+// The cases vary one axis each: what replaces the closure (a named function, a non-capturing
+// lambda, a capturing lambda built here, a non-capturing lambda on one branch, a call — the
+// control), what the displaced closure captured (a local struct, a by-value parameter, a `&S`
+// parameter, a `&vector` parameter), and how many rebinds follow.  The loop cases keep the
+// fn-ref in a local declared outside the loop, so the displaced value is sometimes the frame's
+// OWN record from the pass before, which releases through itself and must not be released twice
+// (`(L-CapKeep)`).  Every value is worked out by hand.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret leaked kt=101 __closure_mk_0×11, kt=100 S×9 ->
+//   clean; native INERT (the installed main as the control; native's `--tests` has no per-test leak check)
+// CHANNEL: the leak channel, interpreter: under LOFT_LEAK_CHECK=1 a test with a store never freed fails.
+// WITNESS: on b36d0449f three of the four tests fail — `2 store(s) not freed at exit: kt=101
+//   __closure_mk_0×11, kt=100 S×9`, then `__closure_by_value_0×3, __closure_by_ref_0×3,
+//   __closure_by_vec_0×3`, then `S×3, __closure_mk_0×3`; the values are right on both trees.  Native
+//   leaks the same records, measured with a `main` under LOFT_NATIVE_LEAK_CHECK=1 (`stores not freed at
+//   program exit: … S×3, … __closure_mk_0×3`).
+// HOLDS: every assertion passes on both backends here, and no store is reported never freed.
+// ARMED: LOFT_LEAK_CHECK=1 (the suite runner sets it for every cell) and LOFT_STRICT_STORES=1.
+//
+// Held FIXED, so NOT measured here: a fn-ref another local shares (`g = f`), whose rebind
+// releases nothing by design.
+
+struct S { v: integer, w: vector<integer> }
+
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn mk(n: integer) -> fn() -> integer { s = S { v: n, w: [1, 0] }; fn() -> integer { s.v * 10 + len(s.w) } }
+fn by_value(s: S) -> fn() -> integer { fn() -> integer { s.v * 10 + len(s.w) } }
+fn by_ref(s: &S) -> fn() -> integer { s.w += [0]; fn() -> integer { s.v * 10 + len(s.w) } }
+fn by_vec(w: &vector<integer>) -> fn() -> integer { w += [7]; fn() -> integer { len(w) } }
+fn none() -> fn() -> integer { fn() -> integer { 4 } }
+fn plain() -> integer { 5 }
+
+fn test_what_replaces_it() {
+  for r in 1..4 {
+    f = mk(r);
+    check("before, named", f(), r * 10 + 2);
+    f = plain;
+    check("a named function", f(), 5);
+    g = mk(r);
+    check("before, literal", g(), r * 10 + 2);
+    g = fn() -> integer { 0 };
+    check("a non-capturing lambda", g(), 0);
+    h = mk(r);
+    check("before, capturing", h(), r * 10 + 2);
+    t = S { v: 9, w: [] };
+    h = fn() -> integer { t.v };
+    check("a capturing lambda built here", h(), 9);
+    k = mk(r);
+    if r > 1 { k = fn() -> integer { 0 }; }
+    check("on one branch", k(), if r > 1 { 0 } else { r * 10 + 2 });
+    m = mk(r);
+    m = none();
+    check("a call, the control", m(), 4);
+  }
+}
+
+fn test_what_it_captured() {
+  for r in 1..4 {
+    a = S { v: r, w: [1] };
+    f = by_value(a);
+    check("a by-value parameter", f(), r * 10 + 1);
+    f = plain;
+    check("the caller's struct after", len(a.w), 1);
+    b = S { v: r, w: [1] };
+    g = by_ref(b);
+    check("a & parameter", g(), r * 10 + 2);
+    g = plain;
+    check("the caller's struct after the & capture", len(b.w), 2);
+    v = [r];
+    h = by_vec(v);
+    check("a & vector", h(), 2);
+    h = plain;
+    check("the caller's vector after", len(v), 2);
+  }
+}
+
+fn test_a_chain() {
+  for r in 1..4 {
+    f = mk(r);
+    f = fn() -> integer { 0 };
+    f = mk(r + 10);
+    check("three bindings", f(), (r + 10) * 10 + 2);
+  }
+}
+
+fn test_the_frames_own_record_in_a_loop() {
+  f = fn() -> integer { 0 };
+  acc = 0;
+  for i in 1..4 {
+    f = mk(i);
+    acc = acc * 100 + f();
+    t = S { v: i * 3, w: [] };
+    f = fn() -> integer { t.v };
+    acc = acc * 100 + f();
+  }
+  check("a call's closure, then the frame's own", acc, 120322063209);
+  g = mk(0);
+  acc = 0;
+  for i in 1..5 {
+    if i % 2 == 0 { g = mk(i); } else { u = S { v: i, w: [] }; g = fn() -> integer { u.v }; }
+    acc = acc * 100 + g();
+  }
+  check("alternating by branch", acc, 1220342);
+}

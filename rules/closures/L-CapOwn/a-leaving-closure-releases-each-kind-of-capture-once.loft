@@ -1,0 +1,130 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-L-CapOwn` / `@FR-L-CapOne` / `@FR-L-CapRef` — A LEAVING CLOSURE RELEASES EACH KIND OF
+// CAPTURE ONCE.
+//
+// `(L-CapOwn)`: a closure record that leaves its frame takes over the release of what it
+// captured, and its CASCADE is its reach — each capture is freed once, by the record, and the
+// frame frees none of them.  Where the frame never owned the store, the record has nothing to
+// take over and must free nothing: a parameter is the caller's (`(L-CapRef)` for `&S`), a
+// constant is the program's.
+//
+// The cases vary one axis each.  WHAT is captured: a hash, a sorted and an index collection, a
+// closure that itself captured a struct (the cascade reaches the inner record), a tuple holding
+// a struct, a nullable struct present and absent.  HOW the record leaves: the return, a struct
+// field, two records over ONE store in one struct (`(L-CapOne)`: one owns, both leave).  WHERE
+// the capture came from: a by-value parameter, a `&S` parameter, a call's result, a constant.
+// The caller reads its own value after the closure is gone.  Each runs three rounds, so a
+// double release or a leak shows on the store-lifetime channel as well.  Every value is worked
+// out by hand.
+//
+// @falsified-at: none — a conformance guard: every cell answered as the rule says, on both
+//   backends, on the tree it landed on; the defects this pass found are 2154 and 2155 beside it.
+// CHANNEL: the asserts, and the store-lifetime channel under LOFT_STRICT_STORES=1.
+// ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1, which the suite's leak sweep arms.
+// WITNESS: each message names the capture and prints the answer.
+// HOLDS: every assertion passes on both backends; no store is reported never freed or read after free.
+//
+// Held FIXED, so NOT measured here: capturing closures in collections (refused by @C116), and
+// the `&fn` link route (1609 beside it).
+
+struct S { v: integer, w: vector<integer> }
+struct E { k: text, v: integer }
+struct Box { f: fn() -> integer, k: integer }
+struct Two { a: fn() -> integer, b: fn() -> integer }
+
+GV = [4, 5, 6];
+
+fn check(name: text, got: integer, want: integer) { assert(got == want, "{name}: got {got}, want {want}"); }
+
+fn of_hash(n: integer) -> fn() -> integer {
+  h: hash<E[k]> = [E { k: "a", v: n }, E { k: "b", v: n * 2 }];
+  fn() -> integer { len(h) * 100 + (h["b"] ?? E { k: "z", v: -1 }).v }
+}
+fn of_sorted(n: integer) -> fn() -> integer {
+  s: sorted<E[k]> = [E { k: "b", v: n * 3 }, E { k: "a", v: n }];
+  fn() -> integer { len(s) * 100 + (s["b"] ?? E { k: "z", v: -1 }).v }
+}
+fn of_index(n: integer) -> fn() -> integer {
+  x: index<E[k]> = [E { k: "c", v: n * 5 }, E { k: "a", v: n }];
+  fn() -> integer { len(x) * 100 + (x["c"] ?? E { k: "z", v: -1 }).v }
+}
+fn of_closure(n: integer) -> fn() -> integer {
+  s = S { v: n, w: [1, 2] };
+  inner = fn() -> integer { s.v + len(s.w) };
+  fn() -> integer { inner() * 10 }
+}
+fn of_tuple(n: integer) -> fn() -> integer {
+  t = (S { v: n, w: [1, 2, 3] }, n * 2);
+  fn() -> integer { t.0.v * 100 + len(t.0.w) * 10 + t.1 }
+}
+fn of_nullable(n: integer, present: boolean) -> fn() -> integer {
+  s: S? = null;
+  if present { s = S { v: n, w: [n] }; }
+  fn() -> integer { if s == null { -1 } else { (s ?? S { v: 0, w: [] }).v } }
+}
+fn in_a_field(n: integer) -> Box {
+  s = S { v: n, w: [n, n + 1] };
+  Box { f: fn() -> integer { s.v * 10 + len(s.w) }, k: n }
+}
+fn two_over_one(n: integer) -> Two {
+  s = S { v: n, w: [n, n, n] };
+  Two { a: fn() -> integer { s.v }, b: fn() -> integer { len(s.w) * 100 + s.v } }
+}
+fn of_value_param(s: S) -> fn() -> integer { fn() -> integer { s.v * 10 + len(s.w) } }
+fn of_ref_param(s: &S) -> fn() -> integer { s.w += [0]; fn() -> integer { s.v * 10 + len(s.w) } }
+fn build(n: integer) -> S { S { v: n, w: [n, n] } }
+fn of_call(n: integer) -> fn() -> integer { s = build(n); fn() -> integer { s.v * 100 + len(s.w) } }
+fn of_constant(n: integer) -> fn() -> integer { fn() -> integer { len(GV) * 10 + n } }
+
+fn test_what_is_captured() {
+  for r in 1..4 {
+    a = of_hash(r);
+    check("a hash", a(), 200 + r * 2);
+    b = of_sorted(r);
+    check("a sorted", b(), 200 + r * 3);
+    c = of_index(r);
+    check("an index", c(), 200 + r * 5);
+    d = of_closure(r);
+    check("a closure", d(), (r + 2) * 10);
+    check("a closure, again", d(), (r + 2) * 10);
+    e = of_tuple(r);
+    check("a tuple", e(), r * 100 + 30 + r * 2);
+    f = of_nullable(r, true);
+    check("a present nullable", f(), r);
+    g = of_nullable(r, false);
+    check("an absent nullable", g(), -1);
+  }
+}
+
+fn test_how_it_leaves() {
+  for r in 1..4 {
+    bx = in_a_field(r);
+    g = bx.f;
+    check("in a struct field", g() * 10 + bx.k, (r * 10 + 2) * 10 + r);
+    t = two_over_one(r);
+    a = t.a;
+    b = t.b;
+    check("two over one store", a() * 1000 + b(), r * 1000 + 300 + r);
+  }
+}
+
+fn test_where_it_came_from() {
+  for r in 1..4 {
+    p = S { v: r, w: [1, 2] };
+    f = of_value_param(p);
+    check("a by-value parameter", f(), r * 10 + 2);
+    p.w += [3];
+    check("the caller's struct", len(p.w), 3);
+    q = S { v: r, w: [1] };
+    g = of_ref_param(q);
+    check("a & parameter", g(), r * 10 + 2);
+    q.w += [9];
+    check("shared with the caller", g(), r * 10 + 3);
+    h = of_call(r);
+    check("a call's result", h(), r * 100 + 2);
+    k = of_constant(r);
+    check("a constant", k(), 30 + r);
+  }
+  check("the constant afterwards", len(GV), 3);
+}
