@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INCLUSIVE BOUND BETWEEN TWO KEYS STOPS AT IT (`@FR-Slice-KeyedIter`, `@FR-Col-Order-Sign`).
+// `c[..=b]` walks every key up to and including `b`, and no further, whether or not a stored key
+// equals `b`: over keys 1, 3, 5, `..=4` is 1, 3.  On `sorted` and on the `ordered` form a
+// sorted takes in a linked group (`@FR-Col-Group`), forward and reversed, ascending and
+// descending.
+//
+// @falsified-at: the parent of the fix — `..=4` walked 1, 3, 5 on both backends: the range
+//   end added one slot whenever no stored key equalled the bound.
+// CHANNEL: the asserts.
+// HOLDS: every cell on both backends.
+
+struct E { k: integer }
+struct F { k: integer }
+struct G { es: vector<F>, by: sorted<F[k]> }
+
+fn test_sorted_inclusive_bound_between_keys() {
+  s: sorted<E[k]> = [];
+  for k in [5, 1, 3] { s += [E { k: k }]; }
+  a = ""; for e in s[..=4] { a += "{e.k},"; }
+  assert(a == "1,3,", "..=4 over 1,3,5: {a}");
+  b = ""; for e in s[2..=4] { b += "{e.k},"; }
+  assert(b == "3,", "2..=4: {b}");
+  c = ""; for e in rev(s[..=4]) { c += "{e.k},"; }
+  assert(c == "3,1,", "rev ..=4: {c}");
+  d = ""; for e in s[..=3] { d += "{e.k},"; }
+  assert(d == "1,3,", "..=3, on a key: {d}");
+  n = 0; for e in s[..=0] { n += 1 + e.k * 0; }
+  assert(n == 0, "..=0 below every key: {n}");
+  f = ""; for e in s[..=9] { f += "{e.k},"; }
+  assert(f == "1,3,5,", "..=9 past every key: {f}");
+}
+
+fn test_descending_inclusive_bound_between_keys() {
+  s: sorted<E[-k]> = [];
+  for k in [5, 1, 3] { s += [E { k: k }]; }
+  a = ""; for e in s[..=2] { a += "{e.k},"; }
+  assert(a == "5,3,", "descending ..=2 over 5,3,1: {a}");
+  b = ""; for e in s[4..=2] { b += "{e.k},"; }
+  assert(b == "3,", "descending 4..=2: {b}");
+}
+
+fn test_ordered_inclusive_bound_between_keys() {
+  g = G {};
+  g.es += [F { k: 5 }, F { k: 1 }, F { k: 3 }];
+  a = ""; for e in g.by[..=4] { a += "{e.k},"; }
+  assert(a == "1,3,", "group sorted ..=4 over 1,3,5: {a}");
+  b = ""; for e in rev(g.by[..=4]) { b += "{e.k},"; }
+  assert(b == "3,1,", "group sorted rev ..=4: {b}");
+}
