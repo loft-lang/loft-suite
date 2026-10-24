@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_WORK_BUFFER_POOL — without the pool every call mints its buffers afresh, so the store census grows from call to call, which `test_the_census_after_many_calls` checks.
 //
 // A KEPT ELEMENT'S TEXT WRITE BLOCKS THE MINT HOIST, AND THE READS STAY RIGHT (`@FR-R-RefillText`
 // crossed with `@FR-R-Mint`).  R-Mint's TEXT clause admits the first text written into a FRESH

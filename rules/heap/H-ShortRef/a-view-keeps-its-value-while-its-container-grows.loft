@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance summary a container grown one frame down is not seen, so the view is not copied and the advice that names the copy is missing.
 //
 // `@FR-H-ShortRef` — a variable may name vector or string content, or a record inline in a
 // collection, and while it lives the store it names into takes no addition and the collection

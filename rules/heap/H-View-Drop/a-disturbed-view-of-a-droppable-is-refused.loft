@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance summary the growth one frame down (`r8_grown_one_frame_down`) is no longer refused.
 //
 // `@FR-H-View-Drop` — a VIEW of a member that owns a droppable without `OpCopy` stays a view,
 // so disturbing its container while the view is still used (`@FR-B-Disturb`) is refused at the

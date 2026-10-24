@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, which loses the release of the store a second rebind replaces in place (`D2` goes missing from the trace).
 //
 // A REBOUND CAPTURE IS RELEASED ONCE, BY WHOEVER KEEPS IT (`@FR-L-CapRebind` crossed with
 // `@FR-L-CapOwn` and `@FR-H-Drop`).  L-CapRebind: a whole-value rebind of a captured heap local
