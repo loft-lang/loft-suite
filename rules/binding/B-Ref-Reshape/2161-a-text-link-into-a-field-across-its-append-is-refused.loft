@@ -11,6 +11,7 @@
 // @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected diagnostic.
 // ARMED: no instrument.
+// HOLDS: leak, panic and free-refusal are equal on both trees, on both backends (falsify reports only the channels that move).
 // @EXPECT_ERROR: cannot grow `w` while `t` references a place inside it
 
 struct T { tag: integer, ts: vector<text> }
