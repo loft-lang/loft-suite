@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARAMETER RETURNED ON ONE OF SEVERAL PATHS IS THE CALLER'S COPY (`@FR-F-Ret`, `@FR-B-Copy`,
+// loft#2179).  A function that hands back a record parameter on one path and something else on
+// another — another parameter, a copy, a call's result — gives its caller a value that may
+// borrow an argument, so the bind that takes it copies it, and a write through the result never
+// reaches the argument.  Two defects broke that, both in silence on both backends:
+//
+//   - a NAMED function with two early `return <param>` declared only the LAST one as borrowed:
+//     each early-return site pruned the parameter the previous one had merged, so the caller
+//     guarded against one argument and adopted the other's store (`mw`, `m2`);
+//   - a GENERIC instance whose paths mix a parameter with a store it made declared nothing at
+//     all — it has no return buffer to copy into — so the caller adopted the parameter's store as
+//     a fresh one (`ga`, `gb`, `mx`, `gw`, `gp`, `gt`).
+//
+// Axes it MOVES: generic or named, the other path (a copy of a parameter, a call's result, the
+// other parameter, a recursion, a partner function), where the parameter is returned (an early
+// `return`, the tail), how the tail is spelled (a bound local, a typed `return z`), and which
+// path the run takes.  Each cell binds the result, writes through it, and reads both arguments
+// back.  Values hand-computed: a run ending at `a` reads q's 5, at `b` w's 9, each plus 100.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: fdd915061 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the first failing message names the argument the write reached (`ga 0: 105 q105 w9`).
+// HOLDS: the typed-return generic (`mz`), the named twin of `gb` (`hb`) and every path ending in a
+//   copy were right on the control.
+
+struct Pt { x: integer, s: text }
+
+fn mk<T>(b: T) -> T { y: T = b; y }
+fn ga<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } y: T = b; y }
+fn gb<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } r = mk(b); r }
+fn gt<T>(a: T, b: T, n: integer) -> T { if n == 1 { y: T = b; return y; } a }
+fn mx<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } if n == 1 { y: T = b; return y; } r = mx(a, b, n - 2); r }
+fn gw<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } if n == 1 { return b; } r = gw(a, b, n - 2); r }
+fn gp<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } if n == 1 { y: T = b; return y; } r = gp_again(a, b, n - 2); r }
+fn gp_again<T>(a: T, b: T, n: integer) -> T { gp(a, b, n) }
+fn mz<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } if n == 1 { y: T = b; return y; } z: T = mz(a, b, n - 2); return z; }
+fn mw(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } if n == 1 { return b; } r = mw(a, b, n - 2); r }
+fn m2(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } if n == 1 { return b; } Pt { x: 1, s: "m" } }
+fn hb(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } r = mk(b); r }
+
+// write through the bound result, and read both arguments back
+fn rep(r: Pt, q: Pt, w: Pt) -> text {
+  r.x += 100;
+  r.s = "z";
+  "{r.x} q{q.x}{q.s} w{w.x}{w.s}"
+}
+
+// one function per callee, each binding the call directly: fresh arguments every cell
+fn c_ga(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = ga(q, w, k); rep(r, q, w) }
+fn c_gb(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = gb(q, w, k); rep(r, q, w) }
+fn c_gt(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = gt(q, w, k); rep(r, q, w) }
+fn c_mx(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = mx(q, w, k); rep(r, q, w) }
+fn c_gw(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = gw(q, w, k); rep(r, q, w) }
+fn c_gp(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = gp(q, w, k); rep(r, q, w) }
+fn c_mz(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = mz(q, w, k); rep(r, q, w) }
+fn c_mw(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = mw(q, w, k); rep(r, q, w) }
+fn c_m2(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = m2(q, w, k); rep(r, q, w) }
+fn c_hb(k: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = hb(q, w, k); rep(r, q, w) }
+
+fn test_a_named_function_with_two_returned_parameters() {
+  assert(c_mw(0) == "105 q5q w9w" && c_mw(1) == "109 q5q w9w" && c_mw(3) == "109 q5q w9w",
+    "mw: {c_mw(0)} / {c_mw(1)} / {c_mw(3)}");
+  assert(c_m2(1) == "109 q5q w9w" && c_m2(0) == "105 q5q w9w" && c_m2(2) == "101 q5q w9w",
+    "m2: {c_m2(0)} / {c_m2(1)} / {c_m2(2)}");
+}
+
+fn test_a_generic_whose_paths_mix_a_parameter_with_its_own_store() {
+  assert(c_ga(0) == "105 q5q w9w" && c_ga(1) == "109 q5q w9w", "ga 0: {c_ga(0)}, ga 1: {c_ga(1)}");
+  assert(c_gb(0) == "105 q5q w9w" && c_gb(1) == "109 q5q w9w", "gb 0: {c_gb(0)}, gb 1: {c_gb(1)}");
+  assert(c_gt(0) == "105 q5q w9w" && c_gt(1) == "109 q5q w9w", "gt 0: {c_gt(0)}, gt 1: {c_gt(1)}");
+}
+
+fn test_a_recursive_generic() {
+  for k in [0, 1, 2, 3] {
+    want = if k % 2 == 0 { "105 q5q w9w" } else { "109 q5q w9w" };
+    assert(c_mx(k) == want, "mx {k}: {c_mx(k)}");
+    assert(c_gw(k) == want, "gw {k}: {c_gw(k)}");
+    assert(c_gp(k) == want, "gp {k}: {c_gp(k)}");
+    assert(c_mz(k) == want, "mz {k}: {c_mz(k)}");
+  }
+  assert(c_hb(0) == "105 q5q w9w" && c_hb(1) == "109 q5q w9w", "hb: {c_hb(0)} / {c_hb(1)}");
+}
+
+// the issue's own program: q and w shared by every call, so a write that reached one of them
+// shows in every later answer
+fn test_the_arguments_shared_by_every_call() {
+  q = Pt { x: 5, s: "q" };
+  w = Pt { x: 9, s: "w" };
+  o = "";
+  for k in [4, 3, 0, 1] { o += "{mx(q, w, k).x} "; }
+  for k in [3, 2] { r = mx(q, w, k); r.x += 100; r.s = "z"; o += "{r.x}{r.s} "; }
+  assert(o == "5 9 5 9 109z 105z " && q.x == 5 && q.s == "q" && w.x == 9 && w.s == "w",
+    "{o}q {q.x} {q.s} w {w.x} {w.s}");
+}
+
+fn main() {
+  test_a_named_function_with_two_returned_parameters();
+  test_a_generic_whose_paths_mix_a_parameter_with_its_own_store();
+  test_a_recursive_generic();
+  test_the_arguments_shared_by_every_call();
+}
