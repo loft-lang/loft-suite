@@ -13,9 +13,11 @@
 //   - a REASSIGNMENT of the base still materialises: that is the one `(B-Disturb)` event which
 //     leaves the slot itself with nothing to point at, and sparing it would hand out a link to
 //     a store the reassignment released;
-//   - a link INTO the container, and a PLAIN bind off a loop variable, are unchanged — the
-//     second is `(B-View)`'s own answer, and it is the cell a cure that skipped the `&` fact
-//     would break.
+//   - a link INTO the container is unchanged: a plain element view across the growth is
+//     still copied out (`(B-View)`'s own answer);
+//   - a PLAIN bind off a loop variable is a view OF the field (`(B-View-Base)`), so it names
+//     the slot exactly as the `&` link does, and re-reads it across the growth (loft#2161,
+//     loft#2181).
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 // @falsified-at: 6eece5cdd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 // @falsified-by: tests/falsified/a-link-to-a-whole-container-survives-that-containers-growth.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
@@ -29,16 +31,14 @@
 //   read 0 where 11 is right, the removal 13 where 22 is, the write-through lost its write
 //   (`1 99 2`), and the control cells answered exactly what they answer now (nine of them then,
 //   eight here — see the note below).
-//   HOLDS: the eight control cells must not move on either tree — the reassigned base still
-//   materialises (`1 2`), an element view still answers `1`, the plain loop-variable bind still
-//   copies (`2`), the sibling field stays `1 1`, and the keyed and nested links stay `2 two` and
-//   `2 7`.  Advice must fire on exactly THREE cells — the element view, the plain loop-variable
-//   bind and the reassigned base (measured 2026-09-17, both backends) — and on none of the three
-//   fixed ones.  It was four while the ninth control below was here.  Leak, panic and
-//   free-refusal are equal on both trees.
-//   Those cells are what reject the two neighbouring cures: one that spares every
-//   `(B-Disturb)` cause moves the reassigned base, and one that skips the `&` fact moves the
-//   plain loop-variable bind.
+//   HOLDS: the control cells must not move on either tree — an element view still answers `1`,
+//   the sibling field stays `1 1`, and the keyed and nested links stay `2 two` and `2 7`.
+//   Advice fires on exactly ONE cell, the element view, and on none of the fixed ones (measured
+//   on main @ 39ebf3bca, both backends).  Leak, panic and free-refusal are equal on both trees.
+//   The element view is what rejects a cure that spares every growth: it is a view INTO the
+//   container, and it must still be copied out.
+//   The loop-variable cell answers `800` here; a build before loft#2161 answers `210` (the
+//   copy kept 2 elements and lost the write, with a `lost-write` warning), both backends.
 //   ⚠ A NINTH control stood here until 2026-09-17: a `&` link INTO the field-held container
 //   across a growth (`d = &pv.items[0]; pv.items += [P{n: 7}]; d.n`), asserting `1`.
 //   `(B-Ref-Reshape)` refuses that program — the walk simply could not see a field-qualified
@@ -134,14 +134,17 @@ fn an_element_view_is_unchanged() -> integer {
   c.n
 }
 
-// A PLAIN bind off a loop variable aliases and is materialised by `(B-View)` — a plain bind
-// already meant value semantics, so losing write-through is consistent with what it asked for.
-// This is the cell that says the `&` fact is load-bearing: without it the cure changes this.
-fn a_plain_bind_off_a_loop_variable_still_materialises() -> integer {
+// A PLAIN bind off a loop variable is a view OF the field (`(B-View-Base)`), and a view of a
+// field names its SLOT: the growth moves the field's elements, not the slot, so the view
+// re-reads the grown vector and a write through it lands in `bv` — as `c = o.inner.v` does
+// across the same growth, and as the same loop's view follows a REBUILD of the field
+// (loft-suite `rules/binding/B-Disturb/2161-a-disturbance-ends-only-the-places-inside-its-
+// container.loft`).  Expected: 3 elements seen, the write lands, the field keeps its 3.
+fn a_plain_bind_off_a_loop_variable_re_reads_its_slot() -> integer {
   bv: vector<Hold> = [Hold{vecf: [1, 2]}];
   s = 0;
-  for b in bv { c = b.vecf; b.vecf += [9]; s += len(c); }
-  s
+  for b in bv { c = b.vecf; b.vecf += [9]; s += len(c); c[0] = 50; }
+  s * 100 + (bv[0].vecf[0] ?? -1) * 10 + len(bv[0].vecf) - 3
 }
 
 // ── neighbours ───────────────────────────────────────────────────────────────────────
@@ -181,8 +184,8 @@ fn main() {
 
   assert(an_element_view_is_unchanged() == 1,
          "an element view keeps today's answer: {an_element_view_is_unchanged()}");
-  assert(a_plain_bind_off_a_loop_variable_still_materialises() == 2,
-         "a plain bind off a loop variable still copies: {a_plain_bind_off_a_loop_variable_still_materialises()}");
+  assert(a_plain_bind_off_a_loop_variable_re_reads_its_slot() == 800,
+         "a plain bind off a loop variable re-reads its slot: {a_plain_bind_off_a_loop_variable_re_reads_its_slot()}");
 
   assert(a_growth_of_a_sibling_field_does_not_reach_the_link() == "1 1",
          "a sibling field's growth reaches nothing: {a_growth_of_a_sibling_field_does_not_reach_the_link()}");
