@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHARACTER-CURSOR LEXER SLICES ITS TOKENS FROM THE SOURCE (`@FR-Slice-Value`).  Slice-Value:
+// `t[a..b]` on a text yields a fresh substring.  The lexer a compiler written in loft starts
+// with (loft-lang/plans#202, probe `l2`): an integer cursor over `src`, `src[i]` read as a
+// character and compared against character literals, and each token cut out as `src[a..b]`
+// once its end is found — the half-open bound leaves the terminator for the next round.
+//
+// Axes it MOVES: the token class (a word, a single punctuation character), the gap between
+// tokens (one space, two, none), the position (first, last).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 9121f1b50, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the tokens.
+// HOLDS: the Slice-Value cells beside it, the bounds alone.
+
+fn lex(src: text) -> vector<text> {
+  toks: vector<text> = [];
+  i = 0;
+  n = len(src);
+  while i < n {
+    c = src[i];
+    if c == ' ' { i += 1; continue; }
+    if c >= 'a' && c <= 'z' {
+      start = i;
+      while i < n && src[i] >= 'a' && src[i] <= 'z' { i += 1; }
+      toks += [src[start..i]];
+    } else {
+      toks += [src[i..i + 1]];
+      i += 1;
+    }
+  }
+  toks
+}
+
+fn main() {
+  t = lex("fn main ( )");
+  assert(len(t) == 4, "four tokens: {t}");
+  assert(t[0] == "fn" && t[1] == "main" && t[2] == "(" && t[3] == ")", "fn main ( ): {t}");
+  u = lex("ab  cd(e)");
+  assert(len(u) == 5, "five tokens: {u}");
+  assert(u[0] == "ab" && u[1] == "cd" && u[2] == "(" && u[3] == "e" && u[4] == ")", "ab  cd(e): {u}");
+  e = lex("   ");
+  assert(len(e) == 0, "only spaces: {e}");
+}

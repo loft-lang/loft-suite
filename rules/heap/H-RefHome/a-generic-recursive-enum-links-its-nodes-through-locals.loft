@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC RECURSIVE ENUM LINKS ITS NODES THROUGH LOCALS (`@FR-H-RefHome`).  H-RefHome: a
+// record a stored reference names lives as long as the store of its holder — here every node
+// is a typed local of `main`, and a `Node` holds its children as `reference<Tree<T>>`, the
+// spelling a self-containing enum has (held by value it would have no finite size, and is
+// refused).  Both closers of a nested type argument are read: `>>` and `> >`.  The OCaml
+// bar's A5 (loft: doc/claude/bars/OCAML_BAR.md), instantiated at `integer` and at `text`.
+//
+// Axes it MOVES: the type argument (integer, text), the depth (a leaf, one node, two), the
+// closer spelling (`>>`, `> >`).  Values hand-computed: `size` counts the Node records.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 9121f1b50, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: `binding/B-Ref-Intro/a-reference-needs-a-place-not-a-constructed-temporary` is the refusal beside it.
+
+enum Tree<T> {
+  Leaf,
+  Node { left: reference<Tree<T>>, value: T, right: reference<Tree<T> > },
+}
+
+fn size<T>(t: Tree<T>) -> integer {
+  match t {
+    Leaf => 0,
+    Node { left, value, right } => 1 + size(left) + size(right),
+  }
+}
+
+fn main() {
+  l: Tree<integer> = Leaf;
+  assert(size(l) == 0, "a leaf has no node: {size(l)}");
+  n1: Tree<integer> = Node { left: &l, value: 1, right: &l };
+  assert(size(n1) == 1, "one node over two leaves: {size(n1)}");
+  t: Tree<integer> = Node { left: &n1, value: 2, right: &l };
+  assert(size(t) == 2, "a node over a node: {size(t)}");
+  lt: Tree<text> = Leaf;
+  s: Tree<text> = Node { left: &lt, value: "a", right: &lt };
+  assert(size(s) == 1, "instantiated at text: {size(s)}");
+}

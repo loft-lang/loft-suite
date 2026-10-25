@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOLE BEHIND A NESTED PATTERN IS NAMED BY ITS OUTER VARIANT (`@FR-M-Exhaust` crossed with
+// `@FR-M-Total`).  M-Total: `total(V{f…})` holds only when every field sub-pattern is total, so
+// the two `Node` arms — one asking both children to be `Leaf`, one asking the left to be a
+// `Node` — leave `Node { l: Leaf, r: Node }` uncovered, and `Node` does not count as covered.
+// M-Exhaust then refuses the match, naming the variant whose arms are not total: `Node`, the
+// outer variant, not the uncovered shape inside it.  That is the contract today (the OCaml
+// bar's C6 reads PARTIAL for it); a sharper message is a change to this cell.
+//
+// @EXPECT_ERROR: match on T is not exhaustive — missing: Node
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 9121f1b50, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the outer variant.
+// HOLDS: `a-hole-in-a-token-match-names-the-missing-variants` beside it.
+
+enum T { Leaf, Node { l: reference<T>, r: reference<T> } }
+
+fn f(t: T) -> integer {
+  match t {
+    Leaf => 0,
+    Node { l: Leaf, r: Leaf } => 1,
+    Node { l: Node { l, r }, r: _ } => 2,
+  }
+}
+
+fn main() {
+  assert(f(Leaf) == 0, "unreachable");
+}

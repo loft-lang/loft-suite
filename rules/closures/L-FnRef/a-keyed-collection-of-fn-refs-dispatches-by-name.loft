@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEYED COLLECTION OF FN-REFS DISPATCHES BY NAME (`@FR-L-FnRef` crossed with
+// `@FR-Col-Lookup`).  L-FnRef: a bare function name in a fn-typed position is a fn-ref value,
+// a closure with an empty environment — so, unlike a capturing closure (`L-Escape` beside it),
+// it has one layout and a record can hold it in a keyed collection.  Col-Lookup: the point
+// lookup is nullable, so an absent rule is a null record, not a fault.  A Pratt parser's
+// prefix/infix table (loft-lang/plans#202); the OCaml bar's B1, its `won't` half.
+//
+// Axes it MOVES: how the table is filled (a literal, `+=`), the rule looked up (present,
+// absent), the function (two bodies).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 9121f1b50, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: `1658-a-native-called-through-a-function-value-runs` beside it.
+
+fn inc(x: integer) -> integer { x + 1 }
+fn dbl(x: integer) -> integer { x * 2 }
+
+struct Rule { name: text, apply: fn(integer) -> integer }
+
+fn run(table: hash<Rule[name]>, name: text, x: integer) -> integer {
+  r = table[name];
+  if r { r.apply(x) } else { -1 }
+}
+
+fn main() {
+  table: hash<Rule[name]> = [Rule { name: "inc", apply: inc }];
+  table += [Rule { name: "dbl", apply: dbl }];
+  assert(len(table) == 2, "two rules: {len(table)}");
+  got = run(table, "inc", 1);
+  assert(got == 2, "inc(1): {got}");
+  got = run(table, "dbl", 4);
+  assert(got == 8, "dbl(4): {got}");
+  got = run(table, "none", 4);
+  assert(got == -1, "an absent rule is the null record: {got}");
+  literal: hash<Rule[name]> = [Rule { name: "inc", apply: inc }, Rule { name: "dbl", apply: dbl }];
+  got = run(literal, "dbl", 5);
+  assert(got == 10, "the table built as one literal: {got}");
+}
