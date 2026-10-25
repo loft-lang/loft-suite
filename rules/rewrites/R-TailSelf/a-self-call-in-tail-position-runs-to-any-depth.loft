@@ -20,6 +20,7 @@
 //
 // @falsified-at: 3742a69ed — `count(100000, 0)` stops there with "call stack overflow — exceeded
 //   10000 stack frames" on both backends (exit 1); the shallow cells pass.
+// @falsified-by: tests/falsified/a-self-call-in-tail-position-runs-to-any-depth.patch — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: exit — the depth fault; the asserts for the values.
 // ARMED: no instrument.
 // WITNESS: each message prints the value.
