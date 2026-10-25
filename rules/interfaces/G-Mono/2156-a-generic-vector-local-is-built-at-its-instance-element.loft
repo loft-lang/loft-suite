@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC'S VECTOR LOCAL IS BUILT AT ITS INSTANCE'S ELEMENT (`@FR-G-Mono`, loft#2156).  The
+// template mints a vector local's backing as `main_vector<K>`, a named wrapper whose only field
+// is `vector<K>`; substitution reached the field's type and not the wrapper, so the instance's
+// backing kept the type variable's zero-size element.  A deep copy of it then copied
+// `length * 0` bytes.  The copy is hidden while the store swap moves the source instead, and the
+// swap is declined inside a loop over a keyed collection (its sorted scratch is live), so there
+// `sort_by` answered a scrambled vector and a generic returning a local answered garbage.
+//
+// Axes it MOVES: the element type (integer, text, struct), the key type of `sort_by` (integer,
+// text), the generic (stdlib `sort_by`, a user `fn<T>` returning a local it built), the site
+// (inside a `for` over a hash, and outside it as the control).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 39ebf3bca — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the first failing message prints the sorted vector (`a: integer keys [1,8,2,4]` on the control).
+// HOLDS: the outside-the-loop cell, where the store swap hides the copy, was the control.
+
+struct Item { name: text, n: integer }
+struct Box { items: hash<Item[name]> }
+struct P { x: integer }
+
+fn dup<T>(v: vector<T>) -> vector<T> {
+  w: vector<T> = [];
+  for x in v { w += [x]; }
+  k = w;
+  k
+}
+
+fn test_sort_by_inside_a_hash_loop() {
+  b = Box { items: [Item { name: "a", n: 1 }] };
+  for it in b.items {
+    q = [4, 2, 8, 1];
+    q.sort_by(|n| { n });
+    assert("{q}" == "[1,2,4,8]", "{it.name}: integer keys {q}");
+    t = ["d", "b", "c", "a"];
+    t.sort_by(|s| { s });
+    assert("{t}" == "[\"a\",\"b\",\"c\",\"d\"]", "{it.name}: text keys {t}");
+    ps = [P { x: 3 }, P { x: 1 }, P { x: 2 }];
+    ps.sort_by(|p| { p.x });
+    assert(ps[0].x == 1 && ps[1].x == 2 && ps[2].x == 3, "{it.name}: struct elements");
+    tk = [P { x: 30 }, P { x: 10 }, P { x: 20 }];
+    tk.sort_by(|p| { "k{p.x}" });
+    assert(tk[0].x == 10 && tk[1].x == 20 && tk[2].x == 30, "{it.name}: text keys of structs");
+  }
+}
+
+fn test_a_generic_returning_its_local_inside_a_hash_loop() {
+  b = Box { items: [Item { name: "a", n: 1 }] };
+  for it in b.items {
+    di = dup([5, 6, 7]);
+    assert("{di}" == "[5,6,7]", "{it.name}: integer {di}");
+    dt = dup(["x", "yy"]);
+    assert("{dt}" == "[\"x\",\"yy\"]", "{it.name}: text {dt}");
+    dp = dup([P { x: 8 }, P { x: 9 }]);
+    assert(len(dp) == 2 && dp[0].x == 8 && dp[1].x == 9, "{it.name}: struct");
+  }
+}
+
+fn test_outside_the_loop_is_the_control() {
+  q = [4, 2, 8, 1];
+  q.sort_by(|n| { n });
+  assert("{q}" == "[1,2,4,8]", "outside: {q}");
+  assert("{dup([5, 6, 7])}" == "[5,6,7]", "outside: dup");
+}
+
+fn main() {
+  test_sort_by_inside_a_hash_loop();
+  test_a_generic_returning_its_local_inside_a_hash_loop();
+  test_outside_the_loop_is_the_control();
+}

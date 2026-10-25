@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN APPEND THROUGH A REFERENCE PARAMETER NAMES ITS CALLER'S RECORD (`@FR-H-LongRef`,
+// `@FR-H-RefHome`, loft#2163).  `v += [T { c: &v[len(v) - 1] }]` on a `&vector<T>` parameter
+// sets the field to a record of the caller's vector, which lives as long as the holder it is
+// appended into.  The append's snapshot of `v` took the `&` with its reads, so the field named
+// the snapshot's copy, and `(H-RefHome)` rightly refused that — but the refusal named the
+// compiler's own temp (`the record lives in `_build_src_1``) for a program that was correct.
+// The place now keeps the parameter as its root, and the snapshot only serves the index.
+//
+// Axes it MOVES: the destination (a `&vector` parameter; the local and the field are the sibling
+// cell), the index (`len - 1` read from the snapshot), repetition (a loop in the callee).  Values
+// hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 39ebf3bca — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — the control refuses the program at compile time (`the `c` field inside `v`
+//   would outlive the record it names: that record lives in `_build_src_1``), so no assert runs.
+// ARMED: no instrument.
+// WITNESS: the refusal names the snapshot temp, a name the program never wrote.
+// HOLDS: nothing on the control; the local and field destinations are the sibling cell's.
+
+struct T { name: text, c: reference<T>? }
+
+fn grow(v: &vector<T>) {
+  for i in 0..3 { v += [T { name: "p{i}", c: &v[len(v) - 1] }]; }
+}
+
+fn test_a_reference_parameter_destination() {
+  a: vector<T> = [T { name: "top", c: null }];
+  grow(a);
+  assert(a[1].c.name == "top" && a[2].c.name == "p0" && a[3].c.name == "p1",
+    "parameter: {a[1].c.name} {a[2].c.name} {a[3].c.name}");
+}
+
+fn main() {
+  test_a_reference_parameter_destination();
+}
