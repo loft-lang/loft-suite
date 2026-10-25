@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A QUALIFIED VARIANT OF A GENERIC ENUM BELONGS TO THE TARGET'S INSTANCE (`@FR-G-Type`).  G-Type:
+// `Tree<T>` is a TEMPLATE, never a type; `Tree<integer>` names an instance.  So `Tree.Leaf` on
+// its own names no value — its instance is the one the target is: a typed local, a parameter of
+// a concrete instance.  The bare spelling (`l: Tree<integer> = Leaf`) answers the same, and a
+// plain enum's qualified variant (`Color.Red`) is unchanged.  Without a target the spelling is
+// refused naming the cure (`tests/error_messages/cases/62_…`); it used to answer a value of no
+// type ("Unknown type null").  loft-lang/plans#202 P8.
+//
+// Axes it MOVES: the target (a typed local, a concrete parameter), the type argument (integer,
+// text), the spelling (qualified, bare).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: b36d0449f — every qualified cell is refused there with "Unknown type null —
+//   did you mean 'JNull'?", on both backends; the bare and plain-enum cells compile.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the size read.
+// HOLDS: `heap/H-RefHome/a-generic-recursive-enum-links-its-nodes-through-locals`, the bare spelling.
+
+enum Tree<T> {
+  Leaf,
+  Node { left: reference<Tree<T>>, value: T, right: reference<Tree<T>> },
+}
+enum Color { Red, Green }
+
+fn size<T>(t: Tree<T>) -> integer {
+  match t {
+    Leaf => 0,
+    Node { left, value, right } => 1 + size(left) + size(right),
+  }
+}
+
+fn count(t: Tree<integer>) -> integer { size(t) }
+
+fn main() {
+  l: Tree<integer> = Tree.Leaf;
+  assert(size(l) == 0, "a typed local: {size(l)}");
+  n: Tree<integer> = Node { left: &l, value: 1, right: &l };
+  assert(size(n) == 1, "a node over qualified leaves: {size(n)}");
+  assert(count(Tree.Leaf) == 0, "a concrete parameter: {count(Tree.Leaf)}");
+  s: Tree<text> = Tree.Leaf;
+  assert(size(s) == 0, "instantiated at text: {size(s)}");
+  b: Tree<integer> = Leaf;
+  assert(size(b) == 0, "the bare spelling: {size(b)}");
+  c = Color.Red;
+  assert(c is Red, "a plain enum's qualified variant is unchanged");
+}
