@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFERENCE FIELD TAKES A LINK BY ASSIGNMENT AS IN A LITERAL (`@FR-B-Ref-StoredRef`).  The
+// field's type is what admits the `&`: a `reference<τ>` field holds a cross-store pointer, so
+// `d.r = &p` stores the pointer exactly as the literal `Rec { r: &p }` and the `&`-less
+// `d.r = p` do.  loft#2166: the assignment handed the `&` to the stack-link lowering instead —
+// the interpreter stored a stack address where the field holds a DbRef (a garbage record on
+// read, nothing said) and `--native` did not compile.
+//
+// Axes it MOVES: the destination (a local's field, a parameter's field, a field reached
+// through a nested record, an element's field, a nullable field), the source (a local, a
+// parameter), what happens to the record afterwards (returned, kept).  Values hand-computed:
+// the source is written after the link is stored, and the field reads the new value.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: b36d0449f — fails there: the local, nested, element and nullable cells read a
+//   garbage record on the interpreter (`34359738369`), and no cell compiles on `--native`.
+// CHANNEL: the asserts (interpreter), the compile (native).
+// ARMED: no instrument.
+// WITNESS: each message prints the value read through the link.
+// HOLDS: the two refusal cells beside it, the inline record field.
+
+struct Other { k: integer }
+struct Rec { i: integer, r: reference<Other> }
+struct Inner { r: reference<Other> }
+struct Outer { n: Inner, v: vector<Inner> }
+struct Opt { i: integer, r: reference<Other>? }
+
+fn upd(base: Rec, o: Other) -> Rec { d = base; d.r = &o; d }
+
+fn set(d: Rec, o: Other) { d.r = &o; }
+
+fn main() {
+  o = Other { k: 9 };
+  p = Other { k: 4 };
+  // A local's field, from a local.
+  a = Rec { i: 1, r: &o };
+  d = a;
+  d.r = &p;
+  p.k = 5;
+  assert(d.r.k == 5 && a.r.k == 9, "a local's field: {d.r.k}, the copy's source untouched: {a.r.k}");
+  // A parameter's field, from a parameter, the record returned.
+  b = upd(a, o);
+  o.k = 11;
+  assert(b.r.k == 11 && a.r.k == 11, "returned: {b.r.k}, and `a` still names `o`: {a.r.k}");
+  // Into a parameter's record, from a parameter.
+  q = Other { k: 2 };
+  set(a, q);
+  q.k = 6;
+  assert(a.r.k == 6, "into a parameter's record: {a.r.k}");
+  // Through a nested record and through an element.
+  w = Outer { n: Inner { r: &o }, v: [Inner { r: &o }] };
+  w.n.r = &p;
+  w.v[0].r = &p;
+  p.k = 7;
+  assert(w.n.r.k == 7 && w.v[0].r.k == 7, "nested: {w.n.r.k}, element: {w.v[0].r.k}");
+  // A nullable pointer field: absent, linked, cleared.
+  n = Opt { i: 1 };
+  assert(n.r == null, "absent first");
+  n.r = &p;
+  p.k = 8;
+  assert(n.r != null && n.r.k == 8, "a nullable pointer field: {n.r.k}");
+  n.r = null;
+  assert(n.r == null, "cleared again");
+}
