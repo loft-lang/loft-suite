@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SELF-CALL IN TAIL POSITION RUNS TO ANY DEPTH (`@FR-R-TailSelf`).  In a function whose
+// parameters and locals are all scalars, a self-call that is the last thing the function does
+// — the value of an `if` arm, the value a `return` answers, the last statement of a void body,
+// a `match` arm's value — is a jump to the function's entry, so the recursion a compiler's
+// loops are written as runs to 100 000 where a call stops at `MAX_CALL_DEPTH` (10 000 frames).
+// The arguments are all read before any parameter is rebound (`swap`), a tail call inside a
+// user loop continues the function's own loop (`inner`, `whiles`), a mixed body keeps its
+// non-tail call (`mixed`), and the value is the recursion's own in every shape.  The OCaml
+// bar's H1 (loft-lang/plans#202 P5a).
+//
+// Axes it MOVES: the tail spelling (if-expression, explicit return, void statement, void arm,
+// match arm, a return inside a for and a while loop, a return before a fall-through value), the
+// parameter types (integer, float, boolean, character, a plain enum), the depth (shallow, and
+// 100 000 on two shapes).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 3742a69ed — `count(100000, 0)` stops there with "call stack overflow — exceeded
+//   10000 stack frames" on both backends (exit 1); the shallow cells pass.
+// CHANNEL: exit — the depth fault; the asserts for the values.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: `a-self-call-outside-tail-position-or-beside-a-store-stays-a-call` beside it.
+
+enum Dir { Up, Down }
+
+fn count(n: integer, acc: integer) -> integer { if n == 0 { acc } else { count(n - 1, acc + 1) } }
+fn count2(n: integer, acc: integer) -> integer { if n == 0 { return acc; } return count2(n - 1, acc + 1); }
+fn total_to(n: integer, acc: integer) -> integer { if n == 0 { acc } else { total_to(n - 1, acc + n) } }
+fn walk(n: integer) { if n == 0 { println("bottom"); return; } walk(n - 1); }
+fn walk2(n: integer) { if n > 0 { walk2(n - 1) } else { println("bottom2") } }
+fn inner(n: integer, i: integer) -> integer { for k in 0..3 { if n > 0 { return inner(n - 1, i + k + 10); } } i }
+fn whiles(n: integer, i: integer) -> integer { k = 0; while k < 3 { if n > 0 { return whiles(n - 1, i + k + 100); } k += 1; } i }
+fn mixed(n: integer, acc: integer) -> integer { if n == 0 { acc } else if n % 2 == 0 { mixed(n - 1, acc + 1) } else { 1 + mixed(n - 1, acc) } }
+fn swap(a: integer, b: integer, n: integer) -> integer { if n == 0 { a * 10 + b } else { swap(b, a, n - 1) } }
+fn approach(x: float, n: integer) -> float { if n == 0 { x } else { approach(x / 2.0, n - 1) } }
+fn even(n: integer, b: boolean) -> boolean { if n == 0 { b } else { even(n - 1, !b) } }
+fn pick(c: character, n: integer) -> character { if n == 0 { c } else { pick(if c == 'a' { 'b' } else { 'a' }, n - 1) } }
+fn flip(d: Dir, n: integer) -> Dir { if n == 0 { d } else { flip(if d is Up { Down } else { Up }, n - 1) } }
+fn arms(n: integer, acc: integer) -> integer { match n { 0 => acc, _ => arms(n - 1, acc + 2) } }
+fn fall(n: integer) -> integer { if n > 0 { return fall(n - 1); } 7 }
+
+fn main() {
+  assert(count(10, 0) == 10 && count2(10, 0) == 10, "shallow: {count(10, 0)} {count2(10, 0)}");
+  assert(count(100000, 0) == 100000, "an if-expression tail, 100 000 deep: {count(100000, 0)}");
+  assert(count2(100000, 0) == 100000, "an explicit-return tail, 100 000 deep: {count2(100000, 0)}");
+  assert(total_to(50000, 0) == 1250025000, "an accumulator over the depth: {total_to(50000, 0)}");
+  walk(100000);
+  walk2(3);
+  assert(inner(2, 0) == 20, "a return inside a for loop: {inner(2, 0)}");
+  assert(whiles(2, 0) == 200, "a return inside a while loop: {whiles(2, 0)}");
+  assert(mixed(5, 0) == 5, "one arm a jump, one arm a call: {mixed(5, 0)}");
+  assert(swap(1, 2, 3) == 21, "the arguments swap the parameters: {swap(1, 2, 3)}");
+  assert(approach(1024.0, 10) == 1.0, "float: {approach(1024.0, 10)}");
+  assert(even(7, true) == false, "boolean: {even(7, true)}");
+  assert(pick('a', 3) == 'b', "character: {pick('a', 3)}");
+  assert(flip(Up, 3) is Down, "a plain enum");
+  assert(arms(4, 0) == 8, "a match arm: {arms(4, 0)}");
+  assert(fall(5) == 7, "a return before the fall-through value: {fall(5)}");
+}
