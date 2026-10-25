@@ -76,8 +76,11 @@ fn depth(n: integer) -> integer {
 }
 
 fn pick<T>(n: integer, a: T, b: T) -> T {
-  if n == 0 { a } else { pick(n - 1, b, a) }
+  if n == 0 { a } else { pick_again(n - 1, b, a) }
 }
+// Through a partner, as `passdown` is: a self-call in tail position is `(R-TailSelf)`'s jump or,
+// for the text instance (two text parameters swapped), its refusal.
+fn pick_again<T>(n: integer, a: T, b: T) -> T { pick(n, a, b) }
 
 fn tri(n: integer) -> integer {
   if n == 0 {

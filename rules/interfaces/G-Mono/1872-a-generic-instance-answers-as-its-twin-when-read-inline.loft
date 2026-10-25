@@ -25,13 +25,17 @@
 struct S { x: integer }
 struct E { k: integer, v: integer }
 
-fn pick<T>(n: integer, a: T, b: T) -> T { if n == 0 { a } else { pick(n - 1, b, a) } }
+// Through a partner, as `twin` below: a self-call in tail position is `(R-TailSelf)`'s jump
+// where the frame can be reused, and its refusal where it cannot — the text instance swaps its
+// two text parameters, which only pass through as themselves.
+fn pick<T>(n: integer, a: T, b: T) -> T { if n == 0 { a } else { pick_again(n - 1, b, a) } }
+fn pick_again<T>(n: integer, a: T, b: T) -> T { pick(n, a, b) }
 fn id<T>(a: T) -> T { a }
 fn sel<T>(n: integer, a: T, b: T) -> T { if n == 0 { a } else { b } }
 fn wrap<T>(a: T) -> T { y: T = a; y }
 fn outer<T>(n: integer, a: T, b: T) -> T { pick(n + 1, a, b) }
 // Through a partner: a mutual recursion is a call, where a self-call in tail position would be
-// `(R-TailSelf)`'s jump or its refusal (a record result).
+// `(R-TailSelf)`'s jump.
 fn twin(n: integer, a: S, b: S) -> S { if n == 0 { a } else { twin_again(n - 1, b, a) } }
 fn twin_again(n: integer, a: S, b: S) -> S { twin(n, a, b) }
 
