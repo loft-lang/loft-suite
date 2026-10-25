@@ -44,6 +44,11 @@ fn mw(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } if n == 1 { retu
 fn m2(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } if n == 1 { return b; } Pt { x: 1, s: "m" } }
 fn hb(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } r = mk(b); r }
 
+// beside a branch arm that may hand back an argument (loft#2188): the generic's copy is a fresh
+// store, and the binding must own it whichever arm ran
+fn c_chain(s: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { ga(q, w, 0) } else if s == 1 { hb(q, w, 0) } else { Pt { x: 1, s: "l" } }; rep(r, q, w) }
+fn c_local(s: integer) -> text { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { ga(q, w, 0) } else { t = hb(q, w, 1); t }; rep(r, q, w) }
+
 // write through the bound result, and read both arguments back
 fn rep(r: Pt, q: Pt, w: Pt) -> text {
   r.x += 100;
@@ -99,9 +104,16 @@ fn test_the_arguments_shared_by_every_call() {
     "{o}q {q.x} {q.s} w {w.x} {w.s}");
 }
 
+fn test_beside_a_branch_arm_that_may_hand_back_an_argument() {
+  assert(c_chain(0) == "105 q5q w9w" && c_chain(1) == "105 q5q w9w" && c_chain(2) == "101 q5q w9w",
+    "chain: {c_chain(0)} / {c_chain(1)} / {c_chain(2)}");
+  assert(c_local(0) == "105 q5q w9w" && c_local(1) == "109 q5q w9w", "local: {c_local(0)} / {c_local(1)}");
+}
+
 fn main() {
   test_a_named_function_with_two_returned_parameters();
   test_a_generic_whose_paths_mix_a_parameter_with_its_own_store();
   test_a_recursive_generic();
   test_the_arguments_shared_by_every_call();
+  test_beside_a_branch_arm_that_may_hand_back_an_argument();
 }
