@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RESULT HELD IN A STORE IS DELIVERED AS THE CALL WOULD (`@FR-R-TailSelf`'s result clause).
+// A text, record, vector, nullable-record or generic result reaches the caller through the
+// scope pass's own place — the `&text` buffer, the return buffer, the `__ret_N` temporary —
+// which the final arm writes; the jump's path writes nothing and runs the frame's releases
+// first, so what the caller reads is what the call would have put there, and what it owns
+// afterwards is what the call would have left it (a parameter answered is COPIED by the
+// caller, a swapped parameter among several: `(O-Oracle)` reads the jump's pointer writes
+// as definitions).  The recursion runs to 100 000 where a call stopped at 10 000 frames.
+//
+// Axes it MOVES: the result's kind (text, record, nullable record, vector, a generic at
+// integer/text/record), what the final arm answers (a parameter, a fresh record, an element, a
+// literal), the arm's position (an `if` arm, an early `return`, a `return` before the tail),
+// whether parameters are swapped on the way, the depth (100 000 on nine shapes).  Values
+// hand-computed; a swapped pair's caller records are read back unchanged.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 8ff0f33c6 — every function here is refused there ("its result is a `text`",
+//   "its result is a `Pt`", …) on both backends: the clause did not exist and @C155 refused the
+//   shape; at 591763c7a each stops at 10 000 frames.
+// CHANNEL: the compile, then the exit (the depth fault), then the asserts and the leak gate.
+// ARMED: `LOFT_STRICT_STORES=1` for the swapped pair (a use after free of the caller's record
+//   when the oracle read the rebound parameter as pristine).
+// WITNESS: each message prints the value.
+// HOLDS: `a-parameter-passed-through-is-the-pointer-the-call-binds` — the parameters these
+//   frames pass through; `a-tail-self-call-the-frame-cannot-jump-is-refused` — what stays refused.
+
+struct Pt { x: integer, s: text }
+struct VsN { n: integer }
+
+fn text_result(n: integer, acc: text) -> text { if n == 0 { acc } else { text_result(n - 1, acc) } }
+fn rec_result(r: Pt, n: integer) -> Pt { if n == 0 { r } else { rec_result(r, n - 1) } }
+fn pick(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { a } else { pick(b, a, n - 1) } }
+fn pick_copy(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } if n == 1 { y = b; return y; } pick_copy(b, a, n - 2) }
+fn fresh_or_param(a: Pt, n: integer) -> Pt { if n == 0 { Pt { x: a.x + 1, s: "f" } } else { fresh_or_param(a, n - 1) } }
+fn same<T>(a: T, n: integer) -> T { if n == 0 { a } else { same(a, n - 1) } }
+fn view<T>(v: vector<T>, i: integer) -> T { if i == 0 { v[0] } else { view(v, i - 1) } }
+fn vs_rec(vs_a: VsN?, vs_n: integer) -> VsN? { if vs_n <= 0 { vs_a } else { vs_rec(vs_a, vs_n - 1) } }
+fn keep(v: vector<integer>, n: integer) -> vector<integer> { if n == 0 { v } else { keep(v, n - 1) } }
+fn early(r: Pt, n: integer) -> Pt { s = "q"; if n > 0 { return early(r, n - 1); } assert(s == "q", "the local survives to the bottom: {s}"); r }
+fn lit_then_tail(n: integer) -> text { if n == 0 { return "lo0" } lit_then_tail(n - 1) }
+
+fn test_a_text_and_a_record_passed_down() {
+  q = Pt { x: 5, s: "q" };
+  assert(text_result(100000, "ab") == "ab", "text, 100 000 deep: {text_result(100000, \"ab\")}");
+  assert(rec_result(q, 100000).x == 5, "record passed through 100 000 deep: {rec_result(q, 100000).x}");
+  assert(lit_then_tail(100000) == "lo0", "a text literal returned early, then the tail: {lit_then_tail(100000)}");
+}
+
+fn test_a_swapped_pair_is_copied_by_the_caller() {
+  q = Pt { x: 5, s: "q" };
+  w = Pt { x: 9, s: "w" };
+  assert(pick(q, w, 3).x == 9 && pick(q, w, 4).x == 5, "two records swapped: {pick(q, w, 3).x} {pick(q, w, 4).x}");
+  o = "";
+  for k in [2, 3, 4, 0, 1] { o += "{pick_copy(q, w, k).x} "; }
+  assert(o == "9 5 5 5 9 " && q.x == 5 && q.s == "q" && w.x == 9 && w.s == "w", "a swap beside a copy arm, read inline: {o}q {q.x} {q.s} w {w.x} {w.s}");
+  r = pick_copy(q, w, 2);
+  r.x += 100;
+  assert(r.x == 109 && w.x == 9, "the bound result is the caller's own: {r.x} w {w.x}");
+}
+
+fn test_a_fresh_record_and_the_generic_shapes() {
+  q = Pt { x: 5, s: "q" };
+  w = Pt { x: 9, s: "w" };
+  f = fresh_or_param(q, 100000);
+  assert(f.x == 6 && f.s == "f" && q.x == 5, "a fresh record at the bottom: {f.x} {f.s} {q.x}");
+  assert(same(7, 100000) == 7 && same("t", 100000) == "t" && same(q, 100000).x == 5, "generic at integer, text, record: {same(7, 100000)} {same(\"t\", 100000)} {same(q, 100000).x}");
+  assert(view([1, 2], 100000) == 1 && view([q, w], 100000).x == 5, "generic view at integer and record: {view([1, 2], 100000)} {view([q, w], 100000).x}");
+}
+
+fn test_a_nullable_record_a_vector_and_an_early_return() {
+  q = Pt { x: 5, s: "q" };
+  z: VsN? = VsN { n: 3 };
+  assert((vs_rec(z, 100000) ?? VsN { n: 0 }).n == 3, "a nullable record: {(vs_rec(z, 100000) ?? VsN { n: 0 }).n}");
+  assert(len(keep([1, 2, 3], 100000)) == 3, "a vector result: {len(keep([1, 2, 3], 100000))}");
+  assert(early(q, 100000).x == 5, "an early return beside a text local: {early(q, 100000).x}");
+}
+
+fn main() {
+  test_a_text_and_a_record_passed_down();
+  test_a_swapped_pair_is_copied_by_the_caller();
+  test_a_fresh_record_and_the_generic_shapes();
+  test_a_nullable_record_a_vector_and_an_early_return();
+}
