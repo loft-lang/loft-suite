@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFERENCE NEEDS A PLACE, NOT A CONSTRUCTED TEMPORARY (`@FR-B-Ref-Intro`).  B-Ref-Intro: a
+// `&` binding links the bound name to an LVALUE — a variable, a field, an element.  A struct
+// literal is a value under construction, not a place, so `Add { l: &Lit { v: 1 }, … }` is
+// refused, naming what `&` takes; the recursive shape is written through locals
+// (`heap/H-RefHome/a-generic-recursive-enum-links-its-nodes-through-locals`) or with the
+// children in a `vector<Expr>` (`heap/H-NewRec/…`).  The OCaml bar's A5b note; loft-lang/plans#202
+// closed its P6 (binding a hidden local for the temporary) as not needed.  The second error is
+// the first's cascade: refused as a link, the temporary is read as the record itself, which
+// the `reference<Expr>` field does not take.
+//
+// @EXPECT_ERROR: requires an addressable operand
+// @EXPECT_ERROR: Cannot assign Lit to field Add.l
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 9121f1b50, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names what `&` takes.
+// HOLDS: the B-Ref-Intro cells beside it, the admitted places.
+
+enum Expr {
+  Lit { v: integer },
+  Add { l: reference<Expr>, r: reference<Expr> },
+}
+
+fn eval(e: Expr) -> integer {
+  match e {
+    Lit { v } => v,
+    Add { l, r } => eval(l) + eval(r),
+  }
+}
+
+fn main() {
+  two: Expr = Lit { v: 2 };
+  e = Add { l: &Lit { v: 1 }, r: &two };
+  assert(eval(e) == 3, "unreachable: {eval(e)}");
+}

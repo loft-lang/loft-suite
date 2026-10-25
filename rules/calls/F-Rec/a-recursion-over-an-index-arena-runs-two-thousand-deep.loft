@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECURSION OVER AN INDEX ARENA RUNS TWO THOUSAND DEEP (`@FR-F-Rec`).  F-Rec: a call to the
+// same function gets its own fresh frame — recursion is ordinary, bounded only by the stack.
+// The tree is an arena: a vector of nodes whose children are INDICES into it, the AST
+// representation loft-lang/plans#202 fixes for a compiler written in loft (never `&v[i]` into
+// a vector that grows, loft#2163).  `eval` recurses one frame per node, 2001 frames at the
+// deepest, well inside the 10 000 the call stack holds.
+//
+// Axes it MOVES: the depth (0, 1, 1999, 2000 negations).  Values hand-computed: node 0 is
+// the literal 1 and node i negates node i - 1, so `eval(k)` is (-1)^k.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 9121f1b50, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: `heap/H-LongRef/a-stored-reference-into-a-keyed-collection-holds-while-it-grows`, the same depth through stored references.
+
+enum Expr { Lit { v: integer }, Neg { child: integer } }
+
+fn eval(nodes: vector<Expr>, i: integer) -> integer {
+  match nodes[i] {
+    Lit { v } => v,
+    Neg { child } => -eval(nodes, child),
+  }
+}
+
+fn main() {
+  nodes: vector<Expr> = [Lit { v: 1 }];
+  for i in 0..2000 { nodes += [Neg { child: i }]; }
+  assert(len(nodes) == 2001, "the arena: {len(nodes)}");
+  assert(eval(nodes, 0) == 1, "the literal itself: {eval(nodes, 0)}");
+  assert(eval(nodes, 1) == -1, "one negation: {eval(nodes, 1)}");
+  assert(eval(nodes, 1999) == -1, "1999 negations: {eval(nodes, 1999)}");
+  assert(eval(nodes, 2000) == 1, "2000 negations, 2001 frames: {eval(nodes, 2000)}");
+}

@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STORED REFERENCE INTO A KEYED COLLECTION HOLDS WHILE IT GROWS (`@FR-H-LongRef` crossed
+// with `@FR-H-RefHome`).  H-LongRef: a reference held in a store's record names a record with
+// a home of its own — a keyed collection's record has one, so a link over it stays valid when
+// the collection grows (a vector's inline record has none: loft#2163).  H-RefHome: the record
+// lives as long as its holder's store.  Here 2000 nodes are appended to a `hash<Node[id]>`,
+// each naming the one before it through `reference<Node>?`, and the chain reads through every
+// growth step.  The AST representation loft-lang/plans#202 fixes for a compiler in loft.
+//
+// Axes it MOVES: the chain length read (1, 2, 2000), the collection's growth under the
+// references (1 to 2000 records).  Values hand-computed: every node adds 1.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 9121f1b50, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: `a-stored-reference-keeps-its-record-when-the-collection-moves` beside it.
+
+struct Node { id: integer, v: integer, child: reference<Node>? }
+
+fn eval(n: Node) -> integer {
+  if n.child { n.v + eval(n.child) } else { n.v }
+}
+
+fn at(nodes: hash<Node[id]>, id: integer) -> integer {
+  n = nodes[id];
+  if n { eval(n) } else { -1 }
+}
+
+fn main() {
+  nodes: hash<Node[id]> = [Node { id: 0, v: 1 }];
+  for i in 1..2000 { nodes += [Node { id: i, v: 1, child: &nodes[i - 1] }]; }
+  assert(len(nodes) == 2000, "the arena: {len(nodes)}");
+  assert(at(nodes, 0) == 1, "the root alone: {at(nodes, 0)}");
+  assert(at(nodes, 1) == 2, "one link: {at(nodes, 1)}");
+  assert(at(nodes, 1999) == 2000, "a chain of 2000 through a collection that grew under it: {at(nodes, 1999)}");
+  assert(at(nodes, 2000) == -1, "an absent key: {at(nodes, 2000)}");
+}

@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HOLE IN A TOKEN MATCH NAMES THE MISSING VARIANTS (`@FR-M-Exhaust`).  M-Exhaust: a match on
+// an enum covers every variant or carries a `_`; a match missing one is a STATIC ERROR naming
+// what is missing.  The compiler's own use: adding a token kind must break every match that
+// forgot it, and the message must say which — here two of six are missing, both named, in
+// declaration order.  The OCaml bar's C6 family (loft-lang/plans#202, probe `c9`).
+//
+// @EXPECT_ERROR: match on Tok is not exhaustive — missing: Minus, RParen
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 9121f1b50, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both missing variants.
+// HOLDS: `M-Total/unit-arms-cover-an-enum-without-a-wildcard`, the covered half.
+
+enum Tok { Ident { s: text }, Num { v: integer }, Plus, Minus, LParen, RParen }
+
+fn show(t: Tok) -> text {
+  match t {
+    Ident { s } => s,
+    Num { v } => "{v}",
+    Plus => "+",
+    LParen => "(",
+  }
+}
+
+fn main() {
+  assert(show(Plus) == "+", "unreachable");
+}
