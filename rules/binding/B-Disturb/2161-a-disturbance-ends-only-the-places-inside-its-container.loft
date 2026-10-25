@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2161 — A DISTURBANCE ENDS ONLY THE PLACES INSIDE ITS CONTAINER (`@FR-B-Disturb`,
+// `@FR-B-View-Depth`).  The control half of the field-and-element cells beside it: every view
+// here names a place the event does NOT end, so it stays an alias and a write through it lands
+// in the container.  A place was the root variable and the field nearest it, so a removal from
+// `o.inner.a` also ended a view into `o.inner.b`, and a view of the struct `o.inner` itself,
+// and the write through each was lost.  Field runs now add (`o.inner.b` is its own slot), and
+// a container one element read deep ends only views deeper than it.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+//
+// Axes moved: the sibling's level (first field, field of a field), the event (removal, growth,
+// rebuild), what the view names (an element of a sibling, the struct around the container, the
+// element slot holding the container, another element at a literal index).
+
+struct S { n: integer }
+struct W { tag: integer, a: vector<S> }
+struct In2 { a: vector<S>, b: vector<S> }
+struct O2 { x: integer, inner: In2 }
+
+fn test_a_nested_sibling_is_not_disturbed() {
+  o = O2 { x: 1, inner: In2 { a: [S { n: 1 }, S { n: 2 }], b: [S { n: 301 }, S { n: 302 }] } };
+  d = o.inner.b[0];
+  o.inner.a.remove(0);
+  d.n = 7;
+  assert(o.inner.b[0].n == 7 && len(o.inner.a) == 1, "a removal from a sibling: {o.inner.b[0].n}");
+  p = O2 { x: 1, inner: In2 { a: [S { n: 1 }], b: [S { n: 301 }] } };
+  e = p.inner.b[0];
+  for i in 0..200 { p.inner.a += [S { n: i }]; }
+  e.n = 7;
+  assert(p.inner.b[0].n == 7, "a growth of a sibling: {p.inner.b[0].n}");
+  q = In2 { a: [S { n: 1 }], b: [S { n: 301 }] };
+  f = q.b[0];
+  for i in 0..200 { q.a += [S { n: i }]; }
+  f.n = 7;
+  assert(q.b[0].n == 7, "a first-level sibling: {q.b[0].n}");
+}
+
+fn test_a_view_of_the_struct_around_the_container() {
+  // `a` is the FIRST member, so `o.inner.a` and `o.inner` share one address
+  o = O2 { x: 1, inner: In2 { a: [S { n: 1 }], b: [S { n: 301 }] } };
+  x = o.inner;
+  for i in 0..200 { o.inner.a += [S { n: i }]; }
+  x.a[0].n = 7;
+  assert(len(x.a) == 201 && o.inner.a[0].n == 7, "growth of its first member: {len(x.a)} {o.inner.a[0].n}");
+  p = O2 { x: 1, inner: In2 { a: [S { n: 1 }, S { n: 2 }], b: [S { n: 301 }] } };
+  y = p.inner;
+  p.inner.a.remove(0);
+  y.b[0].n = 7;
+  assert(len(y.a) == 1 && p.inner.b[0].n == 7, "removal from its first member: {len(y.a)}");
+}
+
+fn test_an_element_slot_and_another_element() {
+  // `(B-View-Depth)` cell A: the slot re-reads the repointed handle
+  vv: vector<vector<integer>> = [[1, 2], [3]];
+  a = vv[0];
+  vv[0] += [9];
+  a[0] = 5;
+  assert(len(a) == 3 && vv[0][0] == 5 && len(vv[0]) == 3, "the element slot: {len(a)} {vv[0][0]}");
+  ww: vector<vector<S>> = [[S { n: 101 }], [S { n: 201 }]];
+  e = ww[1][0];
+  for i in 0..200 { ww[0] += [S { n: i }]; }
+  e.n = 7;
+  assert(ww[1][0].n == 7, "another element at a literal index: {ww[1][0].n}");
+  xs: vector<vector<S>> = [[S { n: 101 }], [S { n: 201 }]];
+  row = xs[1];
+  f = row[0];
+  for i in 0..200 { xs[0] += [S { n: i }]; }
+  f.n = 7;
+  assert(xs[1][0].n == 7, "another element through a row view: {xs[1][0].n}");
+}
+
+fn test_a_removal_from_a_container_inside_an_element() {
+  vv: vector<vector<S>> = [[S { n: 1 }, S { n: 2 }], [S { n: 201 }]];
+  a = vv[1];
+  vv[0].remove(0);
+  a[0].n = 7;
+  assert(vv[1][0].n == 7 && len(vv[0]) == 1, "another element's slot: {vv[1][0].n}");
+  ww: vector<vector<S>> = [[S { n: 1 }, S { n: 2 }], [S { n: 201 }]];
+  b = ww[0];
+  ww[0].remove(0);
+  b[0].n = 7;
+  assert(ww[0][0].n == 7 && len(b) == 1, "the slot re-reads the shorter vector: {ww[0][0].n} {len(b)}");
+  xs: vector<vector<S>> = [[S { n: 1 }, S { n: 2 }], [S { n: 201 }]];
+  e = xs[1][0];
+  xs[0].remove(0);
+  e.n = 7;
+  assert(xs[1][0].n == 7, "another element at a literal index: {xs[1][0].n}");
+}
+
+fn view_of_a_rebuilt_field(ws: vector<W>) -> integer {
+  r = 0;
+  for b in ws {
+    c = b.a;
+    b.a = [S { n: 9 }, S { n: 8 }];
+    r += len(c) * 100 + c[0].n;
+  }
+  r
+}
+
+fn test_the_view_of_a_rebuilt_field_follows_it() {
+  // overwriting a place is not disturbing it: the view OF the field sees the new value
+  assert(view_of_a_rebuilt_field([W { tag: 1, a: [S { n: 1 }] }]) == 209, "a view of the field");
+}

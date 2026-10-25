@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2161 — A REFERENCE INTO A CONTAINER INSIDE AN ELEMENT ACROSS ITS GROWTH IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  `vv[0] += [x]` grows the vector held in an element; a container reached through an element read was not recognised at all.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/2161-a-container-named-through-a-field-or-an-element-ends-its-views.loft`.
+// @EXPECT_ERROR: cannot grow `vv` while `c` references a place inside it
+
+struct S { n: integer }
+struct W { tag: integer, a: vector<S> }
+
+fn main() {
+  vv: vector<vector<S>> = [[S { n: 101 }], [S { n: 201 }]];
+  c = &vv[0][0];
+  vv[0] += [S { n: 3 }];
+  c.n = 7;
+  println("{vv[0][0].n}");
+}

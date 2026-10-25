@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2161 — A TEXT LINK INTO A FIELD ACROSS ITS APPEND IS REFUSED (`@FR-B-Ref-Reshape`,
+// `@FR-B-Disturb`).  A `&text` link to an element is a view by the same relation a record link
+// is (it holds the slot's address), and appending a vector to the field moves every slot.  The
+// append was not recognised as a growth, so the program compiled; with two elements and room
+// to spare the write happened to land, which is exactly the allocator-dependent answer
+// `(B-Disturb)` rules out.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// @EXPECT_ERROR: cannot grow `w` while `t` references a place inside it
+
+struct T { tag: integer, ts: vector<text> }
+
+fn main() {
+  w = T { tag: 1, ts: ["ab", "cd"] };
+  more: vector<text> = ["x", "y"];
+  t = &w.ts[0];
+  w.ts += more;
+  t = "zz";
+  println("{w.ts[0]}");
+}

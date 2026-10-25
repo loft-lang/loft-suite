@@ -1,0 +1,177 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2161 — A CONTAINER NAMED THROUGH A FIELD OR AN ELEMENT ENDS ITS VIEWS (`@FR-B-Disturb`,
+// `@FR-H-Materialise`).  The four events end the place a view names however the container is
+// spelled, so a view live across one is copied out at the bind: it keeps the element it named,
+// the container reads its own value, and a write through the view stays in the view.  The scope
+// pass named a grown container by its own match on the op's first argument, and took a field
+// only for `+= [x]`; `+= vector`, `insert`, a field of a field and a container inside an element
+// moved the elements under a live view, which then read the freed block (`0`, `2147483648`) or
+// the element that shifted in, on both backends and in silence.  A field REBUILT whole
+// (`w.a = …`) was subtracted as an overwrite, which spares the view OF the field but also
+// spared the views INTO its elements.
+//
+// Every cell grows past the first allocation (200 elements) with a record allocated after the
+// container, so a stale view reads a moved block rather than a coincidence.  Hand values: each
+// view names the element whose `n` is 101; the write through it is 7.
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret 7 assertion failures -> 0, native exit 1 -> 0, native 14 assertion failures -> 0
+// CHANNEL: the asserts; the suite's leak gate for every copied-out view.
+// ARMED: LOFT_LEAK_CHECK, LOFT_STRICT_STORES, LOFT_POISON for the control run.
+// HOLDS: every cell on both backends, under LOFT_STRICT_STORES and LOFT_POISON.
+//
+// Axes moved: the event (append, append-a-vector, insert, removal, rebuild from a literal or a
+// call, rebuild then grow), how the container is named (field, field of a field, through a struct
+// view, element, field of an element), where (inline, one call down, two calls down, a
+// parameter's own field), the statement (straight-line, an `if` arm, a loop's back edge) and
+// the view (plain, a `??` discharge).
+
+struct S { n: integer }
+struct W { tag: integer, a: vector<S> }
+struct In { a: vector<S> }
+struct O { x: integer, inner: In }
+
+fn big(b: integer) -> vector<S> {
+  r: vector<S> = [];
+  for i in 0..200 { r += [S { n: b + i }]; }
+  r
+}
+
+fn test_a_field_grown_by_a_vector() {
+  w = W { tag: 1, a: [S { n: 101 }, S { n: 102 }] };
+  d = w.a[0];
+  pad = W { tag: 2, a: [S { n: 9 }] };
+  w.a += big(5000);
+  assert(d.n == 101, "the view keeps the element it named: {d.n}");
+  d.n = 7;
+  assert(w.a[0].n == 101 && len(w.a) == 202 && pad.tag == 2, "the field keeps its own: {w.a[0].n} {len(w.a)}");
+}
+
+fn test_a_field_insert() {
+  w = W { tag: 1, a: [S { n: 101 }, S { n: 102 }] };
+  d = w.a[0];
+  for i in 0..200 { w.a.insert(0, S { n: i }); }
+  assert(d.n == 101, "not the element that shifted in: {d.n}");
+  d.n = 7;
+  assert(w.a[200].n == 101 && len(w.a) == 202, "{w.a[200].n} {len(w.a)}");
+}
+
+fn test_a_field_of_a_field() {
+  o = O { x: 1, inner: In { a: [S { n: 101 }, S { n: 102 }] } };
+  d = o.inner.a[0];
+  pad = W { tag: 2, a: [S { n: 9 }] };
+  for i in 0..200 { o.inner.a += [S { n: i }]; }
+  assert(d.n == 101, "{d.n}");
+  d.n = 7;
+  assert(o.inner.a[0].n == 101 && len(o.inner.a) == 202 && pad.tag == 2, "{o.inner.a[0].n}");
+  // the same place spelled through a view of the struct
+  o2 = O { x: 1, inner: In { a: [S { n: 101 }] } };
+  t = o2.inner;
+  e = t.a[0];
+  o2.inner.a += big(5000);
+  assert(e.n == 101, "through a struct view: {e.n}");
+  e.n = 7;
+  assert(o2.inner.a[0].n == 101 && len(o2.inner.a) == 201, "{o2.inner.a[0].n}");
+}
+
+fn test_a_container_inside_an_element() {
+  vv: vector<vector<S>> = [[S { n: 101 }, S { n: 102 }], [S { n: 201 }]];
+  d = vv[0][0];
+  for i in 0..200 { vv[0] += [S { n: i }]; }
+  assert(d.n == 101, "{d.n}");
+  d.n = 7;
+  assert(vv[0][0].n == 101 && len(vv[0]) == 202 && vv[1][0].n == 201, "{vv[0][0].n}");
+  // a field of an element, and the element reached through a row view
+  v = [W { tag: 1, a: [S { n: 101 }] }, W { tag: 2, a: [S { n: 201 }] }];
+  f = v[0].a[0];
+  for i in 0..200 { v[0].a += [S { n: i }]; }
+  assert(f.n == 101 && v[0].a[0].n == 101 && len(v[0].a) == 201, "field of an element: {f.n}");
+  ww: vector<vector<S>> = [[S { n: 101 }], [S { n: 201 }]];
+  row = ww[0];
+  g = row[0];
+  for i in 0..200 { ww[0] += [S { n: i }]; }
+  assert(g.n == 101 && ww[0][0].n == 101, "through a row view: {g.n}");
+  // a removal from the container inside the element renumbers it
+  xs: vector<vector<S>> = [[S { n: 1 }, S { n: 101 }], [S { n: 201 }]];
+  h = xs[0][1];
+  xs[0].remove(0);
+  assert(h.n == 101, "not the element that shifted down: {h.n}");
+  h.n = 7;
+  assert(xs[0][0].n == 101 && len(xs[0]) == 1, "{xs[0][0].n}");
+}
+
+fn test_a_rebuilt_field() {
+  w = W { tag: 1, a: [S { n: 101 }, S { n: 102 }] };
+  d = w.a[0];
+  w.a = [S { n: 901 }];
+  assert(d.n == 101, "not the new vector's element: {d.n}");
+  d.n = 7;
+  assert(w.a[0].n == 901 && len(w.a) == 1, "the write stays out of the new vector: {w.a[0].n}");
+  w2 = W { tag: 1, a: [S { n: 101 }, S { n: 102 }] };
+  e = w2.a[0];
+  w2.a = big(900);
+  assert(e.n == 101 && w2.a[0].n == 900 && len(w2.a) == 200, "rebuilt from a call: {e.n}");
+  // rebuilt first, viewed, then grown in earnest
+  w3 = W { tag: 1, a: [S { n: 1 }] };
+  w3.a = [S { n: 101 }, S { n: 102 }];
+  g = w3.a[0];
+  pad = W { tag: 2, a: [S { n: 9 }] };
+  for i in 0..200 { w3.a += [S { n: i }]; }
+  assert(g.n == 101 && w3.a[0].n == 101 && len(w3.a) == 202 && pad.tag == 2, "rebuilt then grown: {g.n}");
+}
+
+fn grow_a(w: W) { w.a += big(50); }
+fn grow_a2(w: W) { grow_a(w); }
+fn ins_a(w: W) { for i in 0..200 { w.a.insert(0, S { n: i }); } }
+fn grow_in(i: In) { for k in 0..200 { i.a += [S { n: k }]; } }
+
+fn test_one_and_two_calls_down() {
+  w = W { tag: 1, a: [S { n: 101 }, S { n: 102 }] };
+  d = w.a[0];
+  pad = W { tag: 2, a: [S { n: 9 }] };
+  grow_a2(w);
+  assert(d.n == 101 && w.a[0].n == 101 && len(w.a) == 202 && pad.tag == 2, "two calls down: {d.n}");
+  w2 = W { tag: 1, a: [S { n: 101 }, S { n: 102 }] };
+  e = w2.a[0];
+  ins_a(w2);
+  assert(e.n == 101 && w2.a[200].n == 101, "an insert one call down: {e.n}");
+  o = O { x: 1, inner: In { a: [S { n: 101 }, S { n: 102 }] } };
+  f = o.inner.a[0];
+  grow_in(o.inner);
+  f.n = 7;
+  assert(o.inner.a[0].n == 101 && len(o.inner.a) == 202, "a field of a field one call down: {o.inner.a[0].n}");
+}
+
+fn grown_through_a_parameter(w: W) -> integer {
+  d = w.a[0];
+  pad = W { tag: 2, a: [S { n: 9 }] };
+  w.a += big(5000);
+  r = d.n;
+  d.n = 7;
+  r * 1000 + w.a[0].n + pad.tag - 2
+}
+
+fn test_the_statement_and_the_spelling_of_the_view() {
+  w = W { tag: 1, a: [S { n: 101 }] };
+  d = w.a[0] ?? S { n: 0 };
+  pad = W { tag: 2, a: [S { n: 9 }] };
+  w.a += big(5000);
+  assert(d.n == 101, "a discharged view: {d.n}");
+  d.n = 7;
+  assert(w.a[0].n == 101 && pad.tag == 2, "{w.a[0].n}");
+  w2 = W { tag: 1, a: [S { n: 101 }] };
+  e = w2.a[0];
+  if pad.tag > 0 { w2.a += big(5000); }
+  assert(e.n == 101, "grown in an if arm: {e.n}");
+  w3 = W { tag: 1, a: [S { n: 101 }] };
+  f = w3.a[0];
+  if pad.tag > 0 { w3.a = [S { n: 901 }]; }
+  assert(f.n == 101 && w3.a[0].n == 901, "rebuilt in an if arm: {f.n}");
+  // bound before the loop, grown at the bottom of the body: the next pass reads it
+  w4 = W { tag: 1, a: [S { n: 101 }] };
+  g = w4.a[0];
+  t = 0;
+  for i in 0..3 { t += g.n; w4.a += big(i); }
+  assert(t == 303 && w4.a[0].n == 101 && len(w4.a) == 601, "the back edge: {t}");
+  assert(grown_through_a_parameter(W { tag: 1, a: [S { n: 101 }] }) == 101101, "a parameter's field");
+}

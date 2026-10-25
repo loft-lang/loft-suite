@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2161 — A REFERENCE INTO A FIELD ACROSS ITS APPEND OF A VECTOR IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  Growing the field `w.a` by a whole vector moves every element, exactly as `+= [x]` does, and was not recognised as a growth: the program compiled and the write through `c` was lost.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/2161-a-container-named-through-a-field-or-an-element-ends-its-views.loft`.
+// @EXPECT_ERROR: cannot grow `w` while `c` references a place inside it
+
+struct S { n: integer }
+struct W { tag: integer, a: vector<S> }
+
+fn main() {
+  w = W { tag: 1, a: [S { n: 101 }] };
+  more: vector<S> = [S { n: 2 }, S { n: 3 }];
+  c = &w.a[0];
+  w.a += more;
+  c.n = 7;
+  println("{w.a[0].n}");
+}
