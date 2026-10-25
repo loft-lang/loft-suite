@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHECKED VARIANT CAST INTO A NON-NULL DESTINATION WARNS (`@FR-N-Cast`, `(N-Cast?)`, `(N-Store)`;
+// @C131).  `s as V?` types as `V?`, so storing it into a local or a parameter declared `V`
+// is the nullable-into-non-null store `(N-Store)` reports — as `c: V? = …; x: V = c` always did.
+// Typed `V`, it was silent and the non-null `V` held null.
+//
+// @falsified-at: fdd915061 (the installed main, hand-measured): both warnings absent on both
+//   backends (a warning-only channel).
+// CHANNEL: the two warnings.
+// ARMED: no instrument.
+// WITNESS: each warning names its destination.
+// HOLDS: the program's output on both trees.
+// @EXPECT_WARNING: a nullable `Bin?` is stored into the local `x` of the non-null type `Bin`
+// @EXPECT_WARNING: a nullable `Bin?` is stored into parameter 1 of `take` of the non-null type `Bin`
+
+enum Node { Lit { v: integer }, Bin { op: integer, l: integer, r: integer } }
+
+fn take(b: Bin) -> integer { b.l ?? -1 }
+
+fn main() {
+  n: Node = Lit { v: 1 };
+  c = n as Bin?;
+  x: Bin = c;
+  println("{x == null} {take(c)}");
+}
