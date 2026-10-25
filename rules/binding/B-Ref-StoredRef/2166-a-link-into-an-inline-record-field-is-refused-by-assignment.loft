@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK INTO AN INLINE RECORD FIELD IS REFUSED BY ASSIGNMENT (`@FR-B-Ref-StoredRef` crossed
+// with `@FR-B-Ref-Reshape`).  B-Ref-StoredRef: the field's type admits the `&`, and a plain
+// record field holds the record itself, not a pointer — so `d.o = &p` has nothing to bind.
+// B-Ref-Reshape: loft declines a link it cannot honour, it never downgrades it to a copy.
+// loft#2166: the `&` reached the stack-link lowering and the interpreter wrote a stack address
+// into the record's bytes (`d.o.k` read `34359738369`), `--native` a rustc syntax error.
+//
+// @EXPECT_ERROR: holds the record itself
+//
+// @falsified-at: b36d0449f — accepted there, with the garbage read and the native syntax error.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the two cures.
+// HOLDS: `2166-a-reference-field-takes-a-link-by-assignment-as-in-a-literal` beside it.
+
+struct Other { k: integer }
+struct Rec { i: integer, o: Other }
+
+fn main() {
+  p = Other { k: 4 };
+  d = Rec { i: 1, o: Other { k: 7 } };
+  d.o = &p;
+  assert(d.o.k == 4, "unreachable: {d.o.k}");
+}

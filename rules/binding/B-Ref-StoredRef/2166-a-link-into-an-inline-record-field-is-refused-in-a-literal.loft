@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK INTO AN INLINE RECORD FIELD IS REFUSED IN A LITERAL (`@FR-B-Ref-StoredRef` crossed
+// with `@FR-B-Ref-Reshape`).  B-Ref-StoredRef admits a prefix `&` on a literal field on the
+// strength of the field's type, `reference<τ>`; a field declared with the record type itself
+// holds the record inline, so `Rec { o: &p }` has nothing to bind.  B-Ref-Reshape: loft
+// declines a link it cannot honour, it never downgrades it to a copy.  loft#2166: the literal
+// accepted the `&` and silently copied `p` (an `avoidable-copy` advice was all it said).
+//
+// @EXPECT_ERROR: holds the record itself
+//
+// @falsified-at: b36d0449f — accepted there, a silent copy on both backends.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the two cures.
+// HOLDS: `2166-a-reference-field-takes-a-link-by-assignment-as-in-a-literal` beside it.
+
+struct Other { k: integer }
+struct Rec { i: integer, o: Other }
+
+fn main() {
+  p = Other { k: 4 };
+  a = Rec { i: 1, o: &p };
+  assert(a.o.k == 4, "unreachable: {a.o.k}");
+}
