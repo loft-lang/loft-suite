@@ -84,7 +84,7 @@ fn main() {
   k.go(o);
   assert(o.s == "main:0 t_4Tick_go:84 chain:53", "method: {o.s}");
   rec(2, o);
-  assert(o.s == "main:0 rec:86 rec:58 rec:58 chain:60", "recursion: {o.s}");
+  assert(o.s == "main:0 rec:86 chain:60", "recursion: {o.s}"); // one `rec` frame: a tail self-call is `(R-TailSelf)`'s jump, entered at the call's line
   two(1,
       o);
   assert(o.s == "main:0 two:88 chain:65", "two lines: {o.s}");

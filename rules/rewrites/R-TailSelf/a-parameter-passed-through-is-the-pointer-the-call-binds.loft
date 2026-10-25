@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARAMETER PASSED THROUGH IS THE POINTER THE CALL BINDS (`@FR-R-TailSelf`'s parameter clause).
+// A parameter held in a store — a vector, a text, a record — and a `&` parameter are pointers the
+// frame never owned: a call SHARES them with the caller (`(F-ParamHeap)`), so a tail self-call
+// that hands the parameter itself, another parameter, or a part of one (a reference field, an
+// element) binds exactly what the call would, and the jump rebinds the pointer and nothing
+// else.  The recursion runs to 100 000 where a call stopped at 10 000 frames.
+//
+// Axes it MOVES: the parameter's kind (vector, text, record, `&integer`), the argument (the
+// parameter itself, a swap of two parameters, a reference field of one), the depth (100 000 on
+// four shapes).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 591763c7a — every deep cell stops there with "call stack overflow — exceeded
+//   10000 stack frames" on both backends (exit 1): the scalar clause declined a frame with a
+//   store-held parameter and left the call.
+// CHANNEL: exit — the depth fault; the asserts for the values; the leak gate for the pointers.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: `a-tail-self-call-the-frame-cannot-jump-is-refused` — the arguments the clause declines.
+
+struct Rec { n: integer, next: reference<Rec> }
+
+fn walk_vec(v: vector<integer>, i: integer, acc: integer) -> integer { if i == len(v) { acc } else { walk_vec(v, i + 1, acc + v[i]) } }
+fn count_nodes(r: Rec, n: integer) -> integer { if r.next == null { n + 1 } else { count_nodes(r.next, n + 1) } }
+fn swap_pair(a: vector<integer>, b: vector<integer>, n: integer) -> integer { if n == 0 { a[0] * 10 + b[0] } else { swap_pair(b, a, n - 1) } }
+fn pass_text(src: text, i: integer) -> integer { if i < len(src) && src[i] == ' ' { pass_text(src, i + 1) } else { i } }
+fn ref_pass(n: integer, out: &integer) { if n == 0 { out = 7; return; } ref_pass(n - 1, out); }
+fn deep_vec(v: vector<integer>, n: integer, acc: integer) -> integer { if n == 0 { acc + len(v) } else { deep_vec(v, n - 1, acc + 1) } }
+
+fn main() {
+  r2 = Rec { n: 2, next: null }; r1 = Rec { n: 1, next: &r2 };
+  o = 0; ref_pass(100000, o);
+  big = []; k = 0; while k < 100000 { big += [1]; k += 1; }
+  blanks = ""; b = 0; while b < 100000 { blanks += " "; b += 1; } blanks += "x";
+  assert(walk_vec(big, 0, 0) == 100000, "a vector walked 100 000 deep: {walk_vec(big, 0, 0)}");
+  assert(count_nodes(r1, 0) == 2, "a reference field as the argument: {count_nodes(r1, 0)}");
+  assert(swap_pair([1], [2], 3) == 21, "two vector parameters swapped: {swap_pair([1], [2], 3)}");
+  assert(pass_text(blanks, 0) == 100000, "a text cursor 100 000 deep: {pass_text(blanks, 0)}");
+  assert(o == 7, "a & parameter passed through 100 000 deep: {o}");
+  assert(deep_vec([1, 2], 100000, 0) == 100002, "a vector passed through 100 000 deep: {deep_vec([1, 2], 100000, 0)}");
+}

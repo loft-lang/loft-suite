@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FRAME THAT OWNS A STORE IS RELEASED BEFORE THE JUMP (`@FR-R-TailSelf`'s local clause).  A
+// local held in a store — a `text`, a vector, a record, the compiler's own work buffer behind
+// an interpolated `println`, a local declared in the arm that makes the call, one read by the
+// call's own argument — is declared afresh by every iteration, so the jump runs the releases
+// the return would have run, after the arguments are read (`(O-Detach)`), and the recursion
+// still runs to 100 000 where a call stopped at 10 000 frames.  The parameters stay scalars.
+//
+// Axes it MOVES: the local's kind (text, vector, record, work text), where it is declared
+// (the body, the calling arm), the tail spelling (if-expression, early return, void
+// statement).  Values hand-computed: text_local adds 1 per level plus len("x");
+// vec_local/rec_local sum 1..100000 = 5 000 050 000; arm_local adds len("yy") per level.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 591763c7a — `text_local(100000, 0)` and the others stop there with "call stack
+//   overflow — exceeded 10000 stack frames" on both backends (exit 1): the scalar clause alone
+//   declined a frame with a store-held local and left the call.
+// CHANNEL: exit — the depth fault; the asserts for the values; the leak gate for the releases.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: `a-self-call-in-tail-position-runs-to-any-depth` and `a-parameter-passed-through-is-the-pointer-the-call-binds` beside it.
+
+struct Rec { n: integer }
+
+fn text_local(n: integer, acc: integer) -> integer { s = "x"; if n == 0 { acc + len(s) } else { text_local(n - 1, acc + 1) } }
+fn vec_local(n: integer, acc: integer) -> integer { v = [n]; if n == 0 { acc } else { vec_local(n - 1, acc + v[0]) } }
+fn rec_local(n: integer, acc: integer) -> integer { r = Rec { n: n }; if n == 0 { acc } else { rec_local(n - 1, acc + r.n) } }
+fn work_text(n: integer) { if n == 0 { println("bottom {n}"); return; } work_text(n - 1); }
+fn arm_local(n: integer, acc: integer) -> integer { if n == 0 { acc } else { t = "yy"; arm_local(n - 1, acc + len(t)) } }
+fn early(n: integer, acc: integer) -> integer { s = "q"; if n > 0 { return early(n - 1, acc + len(s)); } acc }
+
+fn main() {
+  assert(text_local(100000, 0) == 100001, "a text local: {text_local(100000, 0)}");
+  assert(vec_local(100000, 0) == 5000050000, "a vector local: {vec_local(100000, 0)}");
+  assert(rec_local(100000, 0) == 5000050000, "a record local: {rec_local(100000, 0)}");
+  assert(arm_local(100000, 0) == 200000, "a local of the calling arm: {arm_local(100000, 0)}");
+  assert(early(100000, 0) == 100000, "an early return reading the local: {early(100000, 0)}");
+  work_text(100000);
+}

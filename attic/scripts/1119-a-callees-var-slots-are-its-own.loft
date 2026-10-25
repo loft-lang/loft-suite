@@ -72,8 +72,9 @@ fn vs_arms(vs_a: VsN?, vs_n: integer) -> VsN? {
 // A genuinely recursive callee whose return IS its argument: the FUNCTION-level guard is a
 // separate set from the variable-level one, and must keep answering conservatively.
 fn vs_rec(vs_a: VsN?, vs_n: integer) -> VsN? {
-  if vs_n <= 0 { vs_a } else { vs_rec(vs_a, vs_n - 1) }
+  if vs_n <= 0 { vs_a } else { vs_rec_again(vs_a, vs_n - 1) }
 }
+fn vs_rec_again(vs_a: VsN?, vs_n: integer) -> VsN? { vs_rec(vs_a, vs_n) }
 
 // Reads its argument, so the discarded call statement carries a real value rather than a
 // dead one — the shape is "a call whose RESULT is discarded", not "a call that does nothing".

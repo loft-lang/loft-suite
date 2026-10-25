@@ -25,10 +25,16 @@
 
 struct Pt { x: integer, s: text }
 
-fn ev<T>(v: vector<T>, i: integer) -> T { if i == 0 { y: T = v[0]; y } else { ev(v, i - 1) } }
+// `ev` recurses through a partner and `mx` binds its recursive result to a typed local before
+// returning it: each is a CALL, where a self-call in tail position would be `(R-TailSelf)`'s jump
+// or its refusal (a heap result).  The two other spellings of `mx` — a partner, and a bare
+// `r = mx(…); r` — answer the wrong parameter on one backend or both (loft-lang/loft, filed from
+// the P5b sweep), so the shape here is the one both backends hand back right.
+fn ev<T>(v: vector<T>, i: integer) -> T { if i == 0 { y: T = v[0]; y } else { ev_again(v, i - 1) } }
+fn ev_again<T>(v: vector<T>, i: integer) -> T { ev(v, i) }
 fn ea<T>(v: vector<T>, i: integer) -> T { if i == 0 { y: T = v[1]; y } else { eb(v, i - 1) } }
 fn eb<T>(v: vector<T>, i: integer) -> T { if i == 0 { y: T = v[0]; y } else { ea(v, i - 1) } }
-fn mx<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } if n == 1 { y: T = b; return y; } mx(a, b, n - 2) }
+fn mx<T>(a: T, b: T, n: integer) -> T { if n == 0 { return a; } if n == 1 { y: T = b; return y; } z: T = mx(a, b, n - 2); return z; }
 fn view<T>(v: vector<T>, i: integer) -> T { if i == 0 { v[0] } else { view(v, i - 1) } }
 fn same<T>(a: T, n: integer) -> T { if n == 0 { a } else { same(a, n - 1) } }
 

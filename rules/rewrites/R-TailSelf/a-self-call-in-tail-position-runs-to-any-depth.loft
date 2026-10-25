@@ -24,7 +24,7 @@
 // CHANNEL: exit — the depth fault; the asserts for the values.
 // ARMED: no instrument.
 // WITNESS: each message prints the value.
-// HOLDS: `a-self-call-outside-tail-position-or-beside-a-store-stays-a-call` beside it.
+// HOLDS: `a-self-call-outside-tail-position-stays-a-call` beside it.
 
 enum Dir { Up, Down }
 

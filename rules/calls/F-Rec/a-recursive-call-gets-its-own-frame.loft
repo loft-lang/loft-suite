@@ -156,9 +156,13 @@ fn passdown(p: S, n: integer) -> S {
     p
   } else {
     p = S { x: p.x + 1, u: 0 };
-    passdown(p, n - 1)
+    // Through a partner, so the recursion is a CALL with its own frame — the shape this cell
+    // is about; a SELF-call here would be `(R-TailSelf)`'s jump.
+    passdown_again(p, n - 1)
   }
 }
+
+fn passdown_again(p: S, n: integer) -> S { passdown(p, n) }
 
 fn main() {
   assert(fact(10) == 3628800, "fact: got {fact(10)}");

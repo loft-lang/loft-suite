@@ -93,7 +93,8 @@ fn tally(f: Flag) -> integer { if f.on { f.n } else { -f.n } }
 fn tally2(f: Flag) -> integer { tally(f) * 2 }
 
 // c15 — recursion through an admitted call
-fn walk(p: V3, n: integer) -> float { if n == 0 { p.x } else { walk(v3(p.x + 1.0, p.y, p.z), n - 1) } }
+fn walk(p: V3, n: integer) -> float { if n == 0 { p.x } else { walk_again(v3(p.x + 1.0, p.y, p.z), n - 1) } }
+fn walk_again(p: V3, n: integer) -> float { walk(p, n) }
 
 // c16 — a nested record: a candidate since 2026-09-28 (its scalars at the summed offsets;
 //       tests/scripts/158-nested-value-record.loft is the matrix)
