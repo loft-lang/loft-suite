@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// SLICE ARMS THAT LEAVE A LENGTH UNCOVERED ARE REFUSED (`@FR-M-Total`).  The vector clause
+// counts an arm only with total element patterns and no guard, and asks that every length be
+// covered: a rest arm alone leaves the empty vector out; `[]` with `[x, y, ..rest]` leaves
+// length one out; a guard on the rest arm covers nothing (`total(pat if cond) = false`); a
+// variant element pattern can fail on the element.  Each is the refusal that holds since
+// @PLN35, now worded with the covering spelling.  One function per shape.
+//
+// @falsified-at: none — the negation cells of a rule that holds; the refusal fires on
+//   b36d0449f too, worded without the covering spelling.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build admitting one of these compiles its function and leaves its claim unanswered.
+// HOLDS: `head-and-tail-arms-cover-every-length` beside it.
+
+enum T { Leaf, Node { v: integer } }
+
+// @EXPECT_ERROR: a slice pattern can fail
+fn test_a_rest_arm_alone() {
+  v = [1];
+  n = match v { [x, ..rest] => x };
+  assert(n == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: a slice pattern can fail
+fn test_a_length_left_out() {
+  v = [1];
+  n = match v { [] => 0, [x, y, ..rest] => x + y };
+  assert(n == 0, "unreachable");
+}
+
+// @EXPECT_ERROR: a slice pattern can fail
+fn test_a_guarded_rest_arm() {
+  v = [1];
+  n = match v { [] => 0, [x, ..rest] if x > 0 => x };
+  assert(n == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: a slice pattern can fail
+fn test_a_variant_element() {
+  v: vector<T> = [];
+  n = match v { [] => 0, [Leaf, ..rest] => 1 };
+  assert(n == 0, "unreachable");
+}

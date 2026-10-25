@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// HEAD-AND-TAIL ARMS COVER EVERY LENGTH (`@FR-M-Total` crossed with `@FR-P-Rest`).  M-Total's
+// vector clause: one slice arm is length-constrained, so it never covers every length on its
+// own — the ARMS do when, each with total element patterns and no guard, an exact arm covers
+// its length and a rest arm every length from its minimum, and no length is left out.  Then no
+// `_` is needed and the join is not nullable: `[]` with `[x, ..rest]` is the list recursion.
+// P-Rest: `..rest` binds the fresh sub-vector after the fixed head.  The OCaml bar's C8
+// (loft-lang/plans#202 P4); before it the match was refused ("a slice pattern can fail").
+//
+// Axes it MOVES: the arm set (two arms, three with two exact lengths), the element type
+// (integer, text), the length matched (0, 1, 2, more).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: b36d0449f — refused there on both backends: "match on vector is not exhaustive
+//   — a slice pattern can fail".
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: `slice-arms-that-leave-a-length-uncovered-are-refused` beside it.
+
+fn total(v: vector<integer>) -> integer {
+  match v {
+    [] => 0,
+    [x, ..rest] => x + total(rest),
+  }
+}
+
+fn shape(v: vector<integer>) -> integer {
+  match v {
+    [] => 0,
+    [x] => x,
+    [x, y, ..r] => x + y + len(r) * 100,
+  }
+}
+
+fn first(v: vector<text>) -> text {
+  match v {
+    [] => "none",
+    [f, ..] => f,
+  }
+}
+
+fn main() {
+  assert(total([]) == 0, "the empty arm: {total([])}");
+  assert(total([7]) == 7, "one element: {total([7])}");
+  assert(total([1, 2, 3]) == 6, "the recursion over the rest: {total([1, 2, 3])}");
+  assert(shape([]) == 0 && shape([5]) == 5, "two exact lengths: {shape([])} {shape([5])}");
+  assert(shape([1, 2]) == 3, "the rest arm at its minimum: {shape([1, 2])}");
+  assert(shape([1, 2, 9, 9]) == 203, "the rest arm with a rest: {shape([1, 2, 9, 9])}");
+  assert(first([]) == "none" && first(["q", "r"]) == "q", "a text element: {first([\"q\", \"r\"])}");
+}

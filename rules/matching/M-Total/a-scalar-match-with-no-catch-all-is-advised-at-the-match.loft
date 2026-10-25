@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SCALAR MATCH WITH NO CATCH-ALL IS ADVISED AT THE MATCH (`@FR-M-Total`).  M-Total: a scalar
+// subject's coverage is not decidable, so a match with no total arm may select nothing — as an
+// expression it answers null and its type is `τ?`, as a statement it does nothing.  That is the
+// rule's answer, not a fault, and the type says so where the value flows; the ADVICE
+// `match-scalar-hole` says it at the match itself, where a lexer's unhandled character is
+// otherwise silent.  A `_` arm, a bare-binding arm and a boolean naming both values are total,
+// so they draw no advice.  The OCaml bar's C7 (loft-lang/plans#202 P3).
+//
+// @EXPECT_WARNING: selects no arm
+//
+// @falsified-at: b36d0449f — nothing is said there: the statement match and the two expression
+//   matches compile in silence, and the values are the same.
+// CHANNEL: the advice (claimed), and the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value the hole answered.
+// HOLDS: the total arms in this file, which draw no advice.
+
+fn kind(c: character) -> text {
+  k = "";
+  match c {
+    'a' => { k = "a"; },
+    'b' => { k = "b"; },
+  }
+  k
+}
+
+fn code(n: integer) -> integer? { match n { 1 => 10, 2 => 20 } }
+fn name(s: text) -> integer? { match s { "x" => 1 } }
+fn classify(x: integer) -> integer { match x { 1 => 100, n => n * 10 } }
+fn flag(w: boolean) -> text { match w { true => "t", false => "f" } }
+
+fn main() {
+  assert(kind('a') == "a" && kind('z') == "", "a statement match: `z` selects no arm, the statement does nothing: `{kind('z')}`");
+  assert(code(1) == 10 && code(7) == null, "an expression match answers null: {code(7)}");
+  assert(name("x") == 1 && name("y") == null, "a text subject: {name(\"y\")}");
+  assert(classify(1) == 100 && classify(3) == 30, "a bare binding is total: {classify(3)}");
+  assert(flag(true) == "t" && flag(false) == "f", "both booleans are total: {flag(false)}");
+}
