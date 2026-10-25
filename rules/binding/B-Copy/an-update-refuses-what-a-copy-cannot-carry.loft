@@ -3,15 +3,18 @@
 //
 // AN UPDATE REFUSES WHAT A COPY CANNOT CARRY (`@FR-B-Copy`).  `S { f: e, ..base }` is `d = base;
 // d.f = e;`, so it refuses what those two statements refuse and what a copy cannot mean: a
-// VARIANT literal (the base's tag would need checking against the literal's), an ABSENT base (a
-// copy of null is no record to write into), a base of ANOTHER type, `..base` anywhere but last
-// (the fields it is written over come first), and a `const` field (write-once at construction,
-// as every assignment to one is refused).  One function per refusal, each answered by its own
-// diagnostic; the refused value is not read afterwards, so each claim is one diagnostic.
-// loft-lang/plans#202 P2.
+// variant literal over a base typed as the ENUM (which variant the base holds is a runtime fact,
+// and the update makes no runtime check — the cure names the variant through the checked cast,
+// or, for a generic enum, whose variants have no static type, a `match`), a base of ANOTHER
+// variant, an ABSENT base (a copy of null is no record to write into), a base of ANOTHER type,
+// `..base` anywhere but last (the fields it is written over come first), and a `const` field
+// of a struct or a variant (write-once at construction, as every assignment to one is
+// refused).  One function per refusal, each answered by its own diagnostic; the refused value
+// is not read afterwards, so each claim is one diagnostic.  loft-lang/plans#202 P2 and P2b.
 //
 // @falsified-at: none — the negation cells of a rule that holds; on b36d0449f the spelling
-//   itself is refused ("Expect token ;"), so no earlier build is a control for these.
+//   itself is refused ("Expect token ;"), so no earlier build is a control for these.  The
+//   variant refusals' wording moved with P2b (fdd915061 refused every variant literal).
 // CHANNEL: expect — each function's diagnostic.
 // ARMED: no instrument.
 // WITNESS: a build admitting one of these compiles its function and leaves its claim unanswered.
@@ -21,12 +24,37 @@ struct Unit { hp: integer, x: integer }
 struct Other { k: integer }
 struct Keyed { const id: integer, hp: integer }
 enum Node { Lit { v: integer }, Bin { op: integer, l: integer, r: integer } }
+enum KeyedV { Kv { const id: integer, hp: integer }, Kw { hp: integer } }
+enum Gen<T> { Full { v: T, n: integer }, Hollow { n: integer } }
 
-// @EXPECT_ERROR: `..base` completes a struct literal, and `Bin` is a variant
-fn test_a_variant() {
+fn gen_n<T>(g: Gen<T>) -> integer { if g is Hollow { 0 } else { 1 } }
+
+// @EXPECT_ERROR: the base after `..` is a `Node`, which may hold any of its variants — name the variant: `..(base as Bin)` inside `if base is Bin`
+fn test_a_base_typed_as_the_enum() {
   n: Node = Bin { op: 1, l: 2, r: 3 };
   m: Node = Bin { l: 9, ..n };
   assert(n is Bin, "unreachable");
+}
+
+// @EXPECT_ERROR: the base after `..` must be a `Bin`, the literal's own variant — got Lit
+fn test_a_base_of_another_variant() {
+  l = Lit { v: 1 };
+  m = Bin { l: 9, ..l };
+  assert(l.v == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: the base after `..` is a `Gen<integer>`, which may hold any of its variants — `match` on it and build `Full` from its fields
+fn test_a_generic_enum_base() {
+  f: Gen<integer> = Full { v: 5, n: 1 };
+  g: Gen<integer> = Full { n: 9, ..f };
+  assert(gen_n(f) == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: cannot reassign const field 'id' of variant 'Kv'
+fn test_a_const_variant_field() {
+  k = Kv { id: 1, hp: 2 };
+  d = Kv { id: 7, ..k };
+  assert(k.id == 1, "unreachable");
 }
 
 // @EXPECT_ERROR: the base after `..` may be absent

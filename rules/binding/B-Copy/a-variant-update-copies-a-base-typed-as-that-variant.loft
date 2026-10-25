@@ -1,0 +1,129 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT UPDATE COPIES A BASE TYPED AS THAT VARIANT (`@FR-B-Copy`).  `Bin { l: 9, ..n }` is
+// the record update of `a-record-update-copies-the-base-then-writes-the-named-fields` spelled
+// on a variant: `d = n; d.l = 9;` in one expression.  It is admitted when the base's STATIC
+// type is that variant — a `Bin` local or parameter, a call answering `Bin`, a `Bin` field, or
+// the checked cast `n as Bin` inside `if n is Bin` — so the copy carries the tag and no runtime
+// variant check is made (loft-lang/plans#202 P2b).  A base typed as the enum is refused; that
+// is the sibling `an-update-refuses-what-a-copy-cannot-carry`.
+//
+// Axes it MOVES: the base (a local, a parameter, a call, a value branch of locals, a variant
+// field, the checked cast of a local, of an element and of an enum field), the destination (a
+// fresh local, one declared as the enum, a nullable enum local, an enum local re-bound, the
+// base's own variable inside a loop, a temporary handed to a call, a postfix, an appended
+// element, a return), the fields written (an integer, a text, a vector, a stored reference),
+// and the direction of a write after the copy.  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: fdd915061 — refused there on both backends: "`..base` completes a struct
+//   literal, and `Bin` is a variant".
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the fields read.
+// HOLDS: `an-update-refuses-what-a-copy-cannot-carry` beside it.
+
+struct VuOther { k: integer }
+enum VuNode { VuLit { v: integer }, VuBin { op: integer, l: integer, r: integer } }
+enum VuTok { VuIdent { name: text, tags: vector<integer> }, VuNum { v: integer } }
+enum VuLn { VuLink { to: reference<VuOther>, n: integer }, VuNil { n: integer } }
+struct VuHolder { b: VuBin, e: VuNode }
+
+fn vu_show(n: VuNode) -> text {
+  if n is VuBin {
+    b = n as VuBin;
+    "{b.op}/{b.l}/{b.r}"
+  } else {
+    "lit"
+  }
+}
+
+fn vu_relabel(b: VuBin) -> VuBin { VuBin { op: b.op + 10, ..b } }
+
+fn vu_make(x: integer) -> VuBin { VuBin { op: x, l: x + 1, r: x + 2 } }
+
+fn main() {
+  n = VuBin { op: 1, l: 2, r: 3 };
+  // A fresh local; a write to the copy does not reach the base.
+  m = VuBin { l: 9, ..n };
+  assert(m.op == 1 && m.l == 9 && m.r == 3, "a fresh local: {m.op}/{m.l}/{m.r}");
+  m.r = 33;
+  assert(n.l == 2 && n.r == 3, "the base keeps its value: {n.l}/{n.r}");
+  // A destination declared as the enum: the update widens into it.
+  m2: VuNode = VuBin { l: 8, ..n };
+  assert(vu_show(m2) == "1/8/3", "an enum destination: {vu_show(m2)}");
+  // A nullable enum destination, and an enum local re-bound from another variant.
+  m3: VuNode? = VuBin { r: 9, ..n };
+  assert(vu_show(m3 ?? VuLit { v: 0 }) == "1/2/9", "a nullable destination: {vu_show(m3 ?? VuLit { v: 0 })}");
+  m4: VuNode = VuLit { v: 4 };
+  assert(vu_show(m4) == "lit", "before the re-bind");
+  m4 = VuBin { op: 8, ..n };
+  assert(vu_show(m4) == "8/2/3" && n.op == 1, "an enum local re-bound: {vu_show(m4)}");
+  // A parameter base, returned, twice over.
+  e = vu_relabel(n);
+  f = vu_relabel(e);
+  assert(e.op == 11 && f.op == 21 && f.l == 2 && n.op == 1, "returned: {e.op} {f.op} {f.l} {n.op}");
+  // A call as the base.
+  a = VuBin { r: 50, ..vu_make(3) };
+  assert(a.op == 3 && a.l == 4 && a.r == 50, "a call: {a.op}/{a.l}/{a.r}");
+  // A value branch of two locals as the base: neither arm is written.
+  p = VuBin { op: 1, l: 2, r: 3 };
+  q = VuBin { op: 4, l: 5, r: 6 };
+  b = VuBin { l: 77, ..(if p.op == 1 { p } else { q }) };
+  assert(b.op == 1 && b.l == 77 && p.l == 2 && q.l == 5, "a value branch: {b.op}/{b.l} {p.l} {q.l}");
+  // The checked cast of an enum local, inside the check that proves it.
+  n2: VuNode = VuBin { op: 4, l: 5, r: 6 };
+  hit = "";
+  if n2 is VuBin {
+    c = VuBin { r: 7, ..(n2 as VuBin) };
+    hit = "{c.op}/{c.l}/{c.r}";
+  }
+  assert(hit == "4/5/7" && vu_show(n2) == "4/5/6", "a checked cast: {hit}, the base {vu_show(n2)}");
+  // The checked cast of an ELEMENT: the cast alone views it, the update copies.
+  v: vector<VuNode> = [VuBin { op: 7, l: 8, r: 9 }, VuLit { v: 1 }];
+  if v[0] is VuBin {
+    x = VuBin { l: 80, ..(v[0] as VuBin) };
+    assert(x.op == 7 && x.l == 80 && x.r == 9, "an element's cast: {x.op}/{x.l}/{x.r}");
+  }
+  assert(vu_show(v[0] ?? VuLit { v: 0 }) == "7/8/9", "the element keeps its value: {vu_show(v[0] ?? VuLit { v: 0 })}");
+  // A variant field, and the checked cast of an enum field.
+  h = VuHolder { b: VuBin { op: 1, l: 2, r: 3 }, e: VuBin { op: 4, l: 5, r: 6 } };
+  g = VuBin { l: 9, ..h.b };
+  assert(g.l == 9 && h.b.l == 2, "a variant field: {g.l}, the field {h.b.l}");
+  if h.e is VuBin {
+    k = VuBin { l: 9, ..(h.e as VuBin) };
+    assert(k.l == 9 && k.op == 4, "an enum field's cast: {k.op}/{k.l}");
+  }
+  assert(vu_show(h.e) == "4/5/6", "the enum field keeps its value: {vu_show(h.e)}");
+  // The base's own variable, inside a loop.
+  s = VuBin { op: 0, l: 0, r: 0 };
+  for i in 1..4 {
+    s = VuBin { l: s.l + i, ..s };
+  }
+  assert(s.l == 6 && s.op == 0, "over itself in a loop: {s.l}");
+  // Two fields in the opposite order of the declaration, each reading the base.
+  w = VuBin { r: n.l, l: n.r, ..n };
+  assert(w.l == 3 && w.r == 2 && w.op == 1, "the fields read the base: {w.op}/{w.l}/{w.r}");
+  // A temporary handed to a call, a postfix, an appended element.
+  t = vu_show(VuBin { l: 0, ..n });
+  assert(t == "1/0/3" && n.l == 2, "a temporary: {t}");
+  o = VuBin { l: 5, ..n }.l;
+  assert(o == 5 && n.l == 2, "a postfix: {o}");
+  v += [VuBin { op: 0, ..n }];
+  assert(len(v) == 3 && vu_show(v[2] ?? VuLit { v: 0 }) == "0/2/3", "an appended element: {len(v)}");
+  // A text and a vector field: the copy's are replaced, the base's kept.
+  ti = VuIdent { name: "a", tags: [1, 2] };
+  tu = VuIdent { name: "b", ..ti };
+  assert(tu.name == "b" && len(tu.tags) == 2 && tu.tags[1] == 2 && ti.name == "a", "a text field: {tu.name} {tu.tags} {ti.name}");
+  tw = VuIdent { tags: [7], ..ti };
+  assert(len(tw.tags) == 1 && tw.tags[0] == 7 && tw.name == "a" && len(ti.tags) == 2, "a vector field: {tw.tags} {tw.name} {ti.tags}");
+  // A stored reference field: the copy links what it is handed.
+  o1 = VuOther { k: 1 };
+  o2 = VuOther { k: 2 };
+  l1 = VuLink { to: &o1, n: 10 };
+  l2 = VuLink { to: &o2, ..l1 };
+  o2.k = 22;
+  assert(l2.to.k == 22 && l2.n == 10 && l1.to.k == 1, "a stored reference: {l2.to.k} {l2.n} {l1.to.k}");
+}

@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UPDATE COPIES A BASE THAT VIEWS A PLACE (`@FR-B-Copy`, loft#2184).  `S { f: e, ..base }`
+// is a COPY of `base` with `f` written, whatever shape `base` has.  A base whose value is a VIEW
+// of a place — a value branch over projections — was bound as the copy itself, so the named
+// fields wrote into the place it viewed.  The base is now held as the view it is, then copied as
+// a bare variable is.  The variant twin (the checked cast of a field or an element, where the
+// scope's free of the "copy" also freed the place's record) is in
+// `a-variant-update-copies-a-base-typed-as-that-variant`.
+//
+// Axes it MOVES: the base shape (a value branch of struct fields, of elements, of a field and a
+// local; a field and an element read directly, which copied before) and the arm taken.  Every
+// place is read again after the update and at the end, so a write through shows.  Values
+// hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: fdd915061 — interpret and native: "a value branch of fields: copy=9 base=9"
+//   (the write reached `h.u`).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the copy and the place it was taken from.
+// HOLDS: `a-record-update-copies-the-base-then-writes-the-named-fields` beside it.
+
+struct VpUnit { hp: integer, x: integer }
+struct VpHold { u: VpUnit, w: VpUnit }
+
+fn main() {
+  h = VpHold { u: VpUnit { hp: 1, x: 2 }, w: VpUnit { hp: 3, x: 4 } };
+  pick = h.u.x == 2;
+  // A value branch of two fields.
+  d = VpUnit { hp: 9, ..(if pick { h.u } else { h.w }) };
+  assert(d.hp == 9 && d.x == 2, "a value branch of fields: the copy {d.hp}/{d.x}");
+  assert(h.u.hp == 1 && h.w.hp == 3, "a value branch of fields: copy={d.hp} base={h.u.hp}");
+  // A value branch of two elements, the other arm taken.
+  us: vector<VpUnit> = [VpUnit { hp: 10, x: 20 }, VpUnit { hp: 30, x: 40 }];
+  e = VpUnit { x: 0, ..(if !pick { us[0] } else { us[1] }) };
+  assert(e.hp == 30 && e.x == 0, "a value branch of elements: the copy {e.hp}/{e.x}");
+  assert(us[1].x == 40 && us[0].x == 20, "a value branch of elements: {us[0].x} {us[1].x}");
+  // A value branch of a field and a local.
+  loc = VpUnit { hp: 50, x: 60 };
+  f = VpUnit { hp: 0, ..(if pick { loc } else { h.u }) };
+  assert(f.hp == 0 && f.x == 60 && loc.hp == 50, "a field or a local: {f.hp}/{f.x} {loc.hp}");
+  // A field and an element read directly: these copied before, and still do.
+  m = VpUnit { hp: 99, ..h.w };
+  p = VpUnit { hp: 98, ..us[0] };
+  assert(m.hp == 99 && m.x == 4 && h.w.hp == 3, "a field: {m.hp} {h.w.hp}");
+  assert(p.hp == 98 && p.x == 20 && us[0].hp == 10, "an element: {p.hp} {us[0].hp}");
+  // Every place, once more, at the end.
+  assert(h.u.hp == 1 && h.u.x == 2 && h.w.x == 4 && us[1].hp == 30, "the places at the end");
+}
