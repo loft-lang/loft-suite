@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WILDCARD ARM ANSWERING NULL JOINS THE MATCH AS NULLABLE (`@FR-M-Wild` crossed with
+// `@FR-M-Total` and `@FR-N-Join`).  M-Wild: `_` is the catch-all arm.  M-Total: a `null` arm
+// lowers to the result type's null sentinel.  N-Join: a branch answering null widens the join to
+// `τ?`.  So `match n { Lit { v } => v, _ => null }` is an `integer?`, exactly as the named
+// spelling `Var { name } => null` is.  loft#2170: the wildcard arm was unified strictly and
+// refused ("cannot unify: integer and null") while the named arm beside it was accepted.
+//
+// Axes it MOVES: the arms' type (integer, text, a record), the subject (a plain enum, a
+// struct-enum local, a vector element, a typed destination), the null arm's spelling (named,
+// wildcard, a wildcard with a value beside a named null).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: b36d0449f — every wildcard-null function is refused there with "cannot unify:
+//   <type> and null", on both backends; the named-null controls compile.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value and whether it is null.
+// HOLDS: the named-null controls in this file.
+
+enum C { Red, Green, Blue }
+enum Node { Lit { v: integer }, Var { name: text }, Neg { e: integer } }
+struct P { x: integer }
+
+fn code(c: C) -> integer? { match c { Red => 1, _ => null } }
+fn lit_of(n: Node) -> integer? { match n { Lit { v } => v, _ => null } }
+fn name_of(n: Node) -> text? { match n { Var { name } => name, _ => null } }
+fn p_of(n: Node) -> P? { match n { Lit { v } => P { x: v }, _ => null } }
+fn at(ns: vector<Node>, i: integer) -> integer? { match ns[i] { Lit { v } => v, _ => null } }
+// The named spelling, the control.
+fn lit_named(n: Node) -> integer? { match n { Lit { v } => v, Var { name } => null, Neg { e } => null } }
+fn mixed(n: Node) -> integer? { match n { Lit { v } => v, Var { name } => null, _ => -1 } }
+
+fn main() {
+  assert(code(Red) == 1 && code(Blue) == null, "a plain enum: {code(Red)} {code(Blue)}");
+  a = lit_of(Lit { v: 3 });
+  b = lit_of(Var { name: "x" });
+  assert(a == 3 && b == null, "integer arms: {a} {b}");
+  s = name_of(Var { name: "x" });
+  t = name_of(Lit { v: 1 });
+  assert(s == "x" && t == null, "text arms: {s} {t}");
+  p = p_of(Lit { v: 4 });
+  q = p_of(Neg { e: 0 });
+  assert(p != null && p.x == 4 && q == null, "record arms: {p != null} {q == null}");
+  ns = [Lit { v: 5 }, Var { name: "y" }];
+  assert(at(ns, 0) == 5 && at(ns, 1) == null, "an element subject: {at(ns, 0)} {at(ns, 1)}");
+  r: integer? = match ns[1] { Lit { v } => v, _ => null };
+  assert(r == null, "a typed destination: {r}");
+  assert(lit_named(Lit { v: 6 }) == 6 && lit_named(Neg { e: 1 }) == null, "the named spelling: {lit_named(Lit { v: 6 })}");
+  assert(mixed(Lit { v: 7 }) == 7 && mixed(Var { name: "z" }) == null && mixed(Neg { e: 1 }) == -1, "mixed: {mixed(Neg { e: 1 })}");
+}

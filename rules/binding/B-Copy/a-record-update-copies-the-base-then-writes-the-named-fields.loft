@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD UPDATE COPIES THE BASE, THEN WRITES THE NAMED FIELDS (`@FR-B-Copy`).  B-Copy: a plain
+// bind of a whole heap value is a COPY, independent of its source.  `d = Unit { hp: 0, ..u }` is
+// that bind and the writes after it, in one expression — `d = u; d.hp = 0;` — so `u` keeps its
+// value, the named fields are written as the assignments they stand for (a text or collection
+// field releases what the copy brought), and each field reads the BASE, never the half-written
+// copy.  The OCaml bar's H1 (loft-lang/plans#202 P2).
+//
+// Axes it MOVES: the destination (a fresh local, the base's own variable, a temporary handed to
+// a call, a returned value, a postfix on the literal), the base (a local, a parameter), the
+// fields written (an integer, a text, a vector, a stored reference), how many (one, two in the
+// opposite order of the declaration).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: b36d0449f — refused there on both backends: "Expect token ;" at the `..`.
+// CHANNEL: the compile, then the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the fields read.
+// HOLDS: `an-update-refuses-what-a-copy-cannot-carry` beside it.
+
+struct Unit { hp: integer, x: integer, y: integer }
+struct Other { k: integer }
+struct Rec { i: integer, t: text, v: vector<integer>, r: reference<Other> }
+
+fn show(u: Unit) -> text { "{u.hp}/{u.x}/{u.y}" }
+fn hurt(u: Unit) -> Unit { Unit { hp: u.hp - 1, ..u } }
+
+fn main() {
+  u = Unit { hp: 10, x: 3, y: 4 };
+  // A fresh local.
+  d = Unit { hp: 0, ..u };
+  assert(d.hp == 0 && d.x == 3 && d.y == 4, "the copy with hp written: {d.hp}/{d.x}/{d.y}");
+  assert(u.hp == 10, "the base keeps its value: {u.hp}");
+  // The base's own variable: the fields are written over the record it holds.
+  d = Unit { hp: 7, ..d };
+  assert(d.hp == 7 && d.x == 3, "over itself: {d.hp}/{d.x}");
+  // A temporary handed to a call.
+  s = show(Unit { hp: 0, ..u });
+  assert(s == "0/3/4" && u.hp == 10, "a temporary: {s}, the base untouched: {u.hp}");
+  // Returned, from a parameter base, twice over.
+  e = hurt(u);
+  f = hurt(e);
+  assert(e.hp == 9 && f.hp == 8 && f.y == 4 && u.hp == 10, "returned: {e.hp} {f.hp} {f.y} {u.hp}");
+  // A postfix on the literal.
+  n = Unit { hp: 5, ..u }.hp;
+  assert(n == 5 && u.hp == 10, "a postfix: {n}");
+  // Two fields, each reading the base, in the opposite order of the declaration.
+  g = Unit { y: u.hp, hp: u.y, ..u };
+  assert(g.hp == 4 && g.y == 10 && g.x == 3, "the fields read the base: {g.hp}/{g.x}/{g.y}");
+  // A text, a vector and a stored-reference field: the copy's are replaced, the base's kept.
+  o = Other { k: 9 };
+  p = Other { k: 4 };
+  a = Rec { i: 1, t: "aa", v: [1, 2], r: &o };
+  b = Rec { t: "tt", v: [7], r: &p, ..a };
+  p.k = 5;
+  assert(b.i == 1 && b.t == "tt" && len(b.v) == 1 && b.v[0] == 7 && b.r.k == 5, "b: {b.i} {b.t} {b.v} {b.r.k}");
+  assert(a.t == "aa" && len(a.v) == 2 && a.r.k == 9, "a untouched: {a.t} {a.v} {a.r.k}");
+}

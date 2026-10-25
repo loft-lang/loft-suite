@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UPDATE REFUSES WHAT A COPY CANNOT CARRY (`@FR-B-Copy`).  `S { f: e, ..base }` is `d = base;
+// d.f = e;`, so it refuses what those two statements refuse and what a copy cannot mean: a
+// VARIANT literal (the base's tag would need checking against the literal's), an ABSENT base (a
+// copy of null is no record to write into), a base of ANOTHER type, `..base` anywhere but last
+// (the fields it is written over come first), and a `const` field (write-once at construction,
+// as every assignment to one is refused).  One function per refusal, each answered by its own
+// diagnostic.  loft-lang/plans#202 P2.
+//
+// @falsified-at: none — the negation cells of a rule that holds; on b36d0449f the spelling
+//   itself is refused ("Expect token ;"), so no earlier build is a control for these.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build admitting one of these compiles its function and leaves its claim unanswered.
+// HOLDS: `a-record-update-copies-the-base-then-writes-the-named-fields` beside it.
+
+struct Unit { hp: integer, x: integer }
+struct Other { k: integer }
+struct Keyed { const id: integer, hp: integer }
+enum Node { Lit { v: integer }, Bin { op: integer, l: integer, r: integer } }
+
+// @EXPECT_ERROR: `..base` completes a struct literal, and `Bin` is a variant
+fn test_a_variant() {
+  n: Node = Bin { op: 1, l: 2, r: 3 };
+  m: Node = Bin { l: 9, ..n };
+  assert(m is Bin, "unreachable");
+}
+
+// @EXPECT_ERROR: the base after `..` may be absent
+fn test_an_absent_base() {
+  u: Unit? = null;
+  d = Unit { hp: 0, ..u };
+  assert(d.hp == 0, "unreachable");
+}
+
+// @EXPECT_ERROR: the base after `..` must be a `Unit`
+fn test_a_base_of_another_type() {
+  o = Other { k: 1 };
+  d = Unit { hp: 0, ..o };
+  assert(d.hp == 0, "unreachable");
+}
+
+// @EXPECT_ERROR: `..base` is the last entry of the literal
+fn test_a_base_not_last() {
+  u = Unit { hp: 1, x: 2 };
+  d = Unit { ..u, hp: 0 };
+  assert(d.hp == 0, "unreachable");
+}
+
+// @EXPECT_ERROR: cannot reassign const field 'id'
+fn test_a_const_field() {
+  k = Keyed { id: 1, hp: 2 };
+  d = Keyed { id: 7, ..k };
+  assert(d.id == 7, "unreachable");
+}
