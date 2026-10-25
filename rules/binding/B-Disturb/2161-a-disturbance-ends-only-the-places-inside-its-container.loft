@@ -10,6 +10,7 @@
 // a container one element read deep ends only views deeper than it.
 //
 // @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+// HOLDS: leak, panic and free-refusal are equal on both trees, on both backends (falsify reports only the channels that move).
 //
 // Axes moved: the sibling's level (first field, field of a field), the event (removal, growth,
 // rebuild), what the view names (an element of a sibling, the struct around the container, the
