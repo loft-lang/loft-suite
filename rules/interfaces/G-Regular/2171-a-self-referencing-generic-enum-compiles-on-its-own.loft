@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SELF-REFERENCING GENERIC ENUM COMPILES ON ITS OWN (`@FR-G-Regular`, loft#2171).  A variant
+// that names its own enum at its own type variables (`Node { left: reference<Tree<T>> }`) mints
+// the open instance `Tree<T>` while the variant is still being read, so the instance's copy of
+// the variant lacked that field.  It was caught up only when something named `Tree<T>` again —
+// a generic FUNCTION over it on pass 1, the field itself on pass 2 — so a program with no such
+// function laid the variant out with one field on pass 1 and two on pass 2, and the compiler
+// stopped on its own two-pass contract (an internal compiler error), on both backends, even
+// where the program never used the enum.  A struct template already refreshed its instances
+// at the end of its declaration; an enum now does too.
+//
+// Axes it MOVES: how the self-reference is held (`reference<…>`, nullable, `vector<…>`), how
+// many self fields, how many type variables, how many such enums, and use (declared only, a
+// value, a tree built and walked through the field).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: fdd915061 — interpret exit 101 -> 0, interpret panicked -> clean, native exit 101 -> 0, native panicked -> clean
+// CHANNEL: the compile — the control stops on the H5 contract before any cell runs.
+// ARMED: no instrument.
+// WITNESS: the control's internal compiler error names `Node` growing `left` on pass 2.
+// HOLDS: the generic-function spelling and the non-generic enum compiled on the control.
+
+enum Tree<T> { Leaf { v: T }, Node { v: T, left: reference<Tree<T>>, right: reference<Tree<T>> } }
+enum Lst<T> { Nil, Cons { h: T, t: reference<Lst<T>>? } }
+enum Rose<T> { Bud, Stem { v: T, kids: vector<Rose<T>> } }
+enum Pair<K, V> { End, Link { k: K, v: V, next: reference<Pair<K, V>> } }
+enum Unused<T> { None1, Some1 { o: reference<Unused<T>> } }
+
+fn total(t: Tree<integer>) -> integer {
+  match t { Leaf { v } => v, Node { v, left, right } => v + total(left) + total(right) }
+}
+
+fn test_a_tree_built_and_walked_through_its_self_fields() {
+  nodes: vector<Tree<integer>> = [Leaf { v: 1 }, Leaf { v: 20 }];
+  nodes += [Node { v: 300, left: &nodes[0], right: &nodes[1] }];
+  assert(total(nodes[2]) == 321, "walked: {total(nodes[2])}");
+}
+
+fn test_a_nullable_self_field() {
+  n: Lst<text> = Nil;
+  c: Lst<text> = Cons { h: "a", t: null };
+  r = match c { Cons { h, t } => "{h}{if t { "+" } else { "." }}", Nil => "nil" };
+  assert(r == "a." && match n { Nil => true, _ => false }, "nullable: {r}");
+}
+
+fn test_a_vector_of_itself() {
+  r: Rose<integer> = Stem { v: 4, kids: [Bud, Stem { v: 5, kids: [] }] };
+  got = match r { Stem { v, kids } => v * 10 + len(kids), Bud => -1 };
+  assert(got == 42, "vector: {got}");
+}
+
+fn test_two_type_variables() {
+  p: Pair<text, integer> = End;
+  assert(match p { End => true, _ => false }, "two variables");
+}
+
+fn main() {
+  test_a_tree_built_and_walked_through_its_self_fields();
+  test_a_nullable_self_field();
+  test_a_vector_of_itself();
+  test_two_type_variables();
+}
