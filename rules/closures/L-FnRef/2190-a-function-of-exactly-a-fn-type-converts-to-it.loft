@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FUNCTION OF EXACTLY A FN TYPE CONVERTS TO IT, A HEAP TUPLE RESULT INCLUDED.  A function
+// declared `-> (integer, text)` returns the boxed `__tuple<…>` record, while the TYPE
+// `fn(integer) -> (integer, text)` kept the bare tuple, so `app(1, mk)` was refused as
+// "expected fn(integer) -> (integer, text), got fn(integer) -> (integer, text)" on both
+// backends, and so was a lambda of that type (loft#2190, `@FR-L-FnRef`).  The fn type now boxes
+// its result exactly as the declaration does.  Values are hand-computed.
+//
+// @falsified-at: 6f31a726b — interpret exit 1 -> 0, native exit 1 -> 0 (make falsify)
+// CHANNEL: exit (the refusal) on both backends.
+// HOLDS: every assertion holds on both backends.
+
+fn mk(x: integer) -> (integer, text) { (x, "a{x}") }
+fn mt(x: integer) -> (text, text) { ("l{x}", "r{x}") }
+fn mv(x: integer) -> (integer, vector<integer>) { (x, [x, x + 1, x + 2]) }
+fn mi(x: integer) -> (integer, integer) { (x, x * 2) }
+fn app(x: integer, f: fn(integer) -> (integer, text)) -> text { r = f(x); "{r.0}:{r.1}" }
+fn app_unused(x: integer, f: fn(integer) -> (integer, text)) -> integer { f(x); x }
+fn appt(x: integer, f: fn(integer) -> (text, text)) -> text { r = f(x); r.0 + r.1 }
+fn appv(x: integer, f: fn(integer) -> (integer, vector<integer>)) -> integer { r = f(x); r.0 + len(r.1) + r.1[2] }
+fn appi(x: integer, f: fn(integer) -> (integer, integer)) -> integer { r = f(x); r.0 + r.1 }
+fn main() {
+  assert(app(1, mk) == "1:a1", "named");
+  assert(app(2, fn(x: integer) -> (integer, text) { (x * 10, "lam{x}") }) == "20:lam2", "lambda");
+  assert(app_unused(3, mk) == 3, "result unused");
+  assert(appt(4, mt) == "l4r4", "(text, text)");
+  assert(appv(5, mv) == 5 + 3 + 7, "(integer, vector<integer>)");
+  assert(appi(6, mi) == 18, "(integer, integer)");
+  h: fn(integer) -> (integer, text) = mk;
+  r = h(7);
+  assert(r.0 == 7 && r.1 == "a7", "a typed local");
+  total = "";
+  for i in 0..3 { total += app(i, mk); }
+  assert(total == "0:a01:a12:a2", "repeated: {total}");
+  println("2190 ok");
+}

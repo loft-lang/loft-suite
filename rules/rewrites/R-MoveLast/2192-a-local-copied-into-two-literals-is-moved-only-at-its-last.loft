@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LOCAL COPIED INTO TWO LITERALS IS MOVED ONLY AT ITS LAST.  `a = Img { data: op }; b = Img
+// { data: op }` copies `op` into `a` and moves it into `b` (`@FR-R-MoveLast`: the source is dead
+// after the assignment).  The construction move-elision built `op` straight into the FIRST
+// copy's field and dropped that copy, so the second appended a vector nothing had built: `b.data`
+// read 0 elements, or 65535 through a null view, on both backends, and `--native` refused to
+// compile the read (loft#2192).  A second copy is a read of the source, so the source escapes
+// and stays a copy.  Values are hand-computed.
+//
+// @falsified-at: 6f31a726b — interpret exit 101 -> 0, interpret panicked -> clean, native exit 101 -> 0,
+//   native panicked -> clean (LOFT_STRICT_STORES=1 LOFT_POISON=1 make falsify; the control ICEs in codegen on the integer cell)
+// CHANNEL: assertion failures on both backends.
+// HOLDS: every assertion holds on both backends with nothing leaked.
+
+struct Px { r: integer limit(0, 255), g: integer limit(0, 255) }
+struct Img { w: integer, data: vector<Px> }
+struct Img2 { w: integer, d: vector<integer> }
+fn len_self(self: const Img) -> integer { len(self.data) }
+fn appended() {
+  op: vector<Px> = [];
+  for i in 0..4 { op += [Px{r: (10 * i)?, g: 20}]; }
+  a = Img { w: 2, data: op };
+  b = Img { w: 3, data: op };
+  assert(len(a.data) == 4 && len(b.data) == 4, "appended copy+move: {len(a.data)} {len(b.data)}");
+  assert(b.data[3].r == 30 && a.data[2].r == 20, "appended values");
+  assert(a.len_self() == 4 && b.len_self() == 4, "through a const method");
+}
+fn literal() {
+  op5: vector<Px> = [Px{r: 1, g: 2}, Px{r: 3, g: 4}];
+  a5 = Img { w: 2, data: op5 };
+  b5 = Img { w: 3, data: op5 };
+  assert(len(a5.data) == 2 && len(b5.data) == 2 && b5.data[1].g == 4, "literal copy+move: {len(a5.data)} {len(b5.data)}");
+}
+fn three() {
+  op: vector<Px> = [Px{r: 5, g: 6}];
+  a = Img { w: 1, data: op };
+  b = Img { w: 2, data: op };
+  c = Img { w: 3, data: op };
+  assert(len(a.data) + len(b.data) + len(c.data) == 3 && c.data[0].r == 5, "copy copy move");
+}
+fn independent() {
+  op: vector<Px> = [Px{r: 7, g: 8}, Px{r: 9, g: 10}];
+  a = Img { w: 1, data: op };
+  b = Img { w: 2, data: op };
+  a.data += [Px{r: 11, g: 12}];
+  assert(len(a.data) == 3 && len(b.data) == 2 && len(op) == 2, "copies are independent: {len(a.data)} {len(b.data)} {len(op)}");
+}
+fn read_after() {
+  op: vector<Px> = [Px{r: 1, g: 1}, Px{r: 2, g: 2}, Px{r: 3, g: 3}];
+  a = Img { w: 1, data: op };
+  b = Img { w: 2, data: op };
+  assert(len(op) == 3 && op[2].r == 3 && len(a.data) == 3 && len(b.data) == 3, "source read after both copies");
+}
+fn move_only() {
+  op: vector<Px> = [Px{r: 4, g: 4}];
+  a = Img { w: 1, data: op };
+  assert(len(a.data) == 1 && a.data[0].r == 4, "move only");
+}
+fn ints() {
+  iv: vector<integer> = [1, 2, 3];
+  a = Img2 { w: 1, d: iv };
+  b = Img2 { w: 2, d: iv };
+  assert(len(a.d) == 3 && len(b.d) == 3 && b.d[2] == 3, "integer vector into two literals");
+}
+fn in_loop() {
+  total = 0;
+  for k in 0..3 {
+    op: vector<Px> = [Px{r: (k)?, g: 0}, Px{r: (k)?, g: 1}];
+    a = Img { w: k, data: op };
+    b = Img { w: k, data: op };
+    total += len(a.data) * 10 + len(b.data);
+  }
+  assert(total == 66, "inside a loop body: {total}");
+}
+fn main() { appended(); literal(); three(); independent(); read_after(); move_only(); ints(); in_loop(); println("2192 ok"); }

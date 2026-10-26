@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RETURNED BLOCK-BOUND RECORD IS NOT FREED BY ITS SIBLING.  `m12` binds `a` and `b` from block
+// values and returns either: `a` is promoted onto the hidden return buffer, and `return b`
+// copies `b` into it, in the store the block-bound `p` handed `a`.  The return's sweep frees
+// every local unless it shares the returned store, witnessed by `a`; the release of `a` itself
+// ran BEFORE that sweep and, on the interpreter, reset `a`'s slot even when it declined, so the
+// sweep's witness read null and freed the record being returned (loft#2194, `@FR-O-Buffer`).
+// Plain runs answered right because the freed store was not reused yet; `LOFT_POISON=1` reads
+// it.  Values are hand-computed.
+//
+// @falsified-at: 6f31a726b — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT
+//   (expected: native answered right on the control) (LOFT_STRICT_STORES=1 LOFT_POISON=1 make falsify)
+// CHANNEL: assertion failures on the interpreter under LOFT_POISON=1.
+// ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1 (the nightly poison sweep).
+// HOLDS: every assertion holds on both backends with nothing leaked.
+
+struct A { x: integer }
+struct T { s: text, n: integer }
+fn m12(k: integer) -> A {
+  a: A = if true { p: A = A { x: 15 }; p } else { z: A = A { x: 0 }; z };
+  b: A = if true { q: A = A { x: 16 }; q } else { z: A = A { x: 0 }; z };
+  if k == 0 { return a }
+  return b;
+}
+fn m3(k: integer) -> A {
+  a: A = if k > 5 { p: A = A { x: 1 }; p } else { p2: A = A { x: 2 }; p2 };
+  b: A = if true { q: A = A { x: 3 }; q } else { z: A = A { x: 0 }; z };
+  c: A = if true { r: A = A { x: 4 }; r } else { z: A = A { x: 0 }; z };
+  if k == 0 { return a }
+  if k == 1 { return b }
+  return c;
+}
+fn mt(k: integer) -> T {
+  a: T = if true { p: T = T { s: "first", n: 1 }; p } else { z: T = T { s: "", n: 0 }; z };
+  b: T = if true { q: T = T { s: "second", n: 2 }; q } else { z: T = T { s: "", n: 0 }; z };
+  if k == 0 { return a }
+  return b;
+}
+fn main() {
+  assert(m12(0).x == 15 && m12(1).x == 16, "m12");
+  assert(m3(0).x == 2 && m3(1).x == 3 && m3(2).x == 4 && m3(9).x == 4, "m3: k=9 takes neither early return, so c");
+  r0 = mt(0);
+  r1 = mt(1);
+  assert(r0.s == "first" && r1.s == "second" && r1.n == 2, "text member: {r0.s} {r1.s}");
+  sum = 0;
+  for i in 0..4 { sum += m12(i % 2).x; }
+  assert(sum == 62, "repeated: {sum}");
+  println("2194 ok");
+}

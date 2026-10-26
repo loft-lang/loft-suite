@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BY-VALUE PARAMETER KEEPS THE RECORD A `&` REBIND DISPLACED.  `mixed(q, q)` hands one record
+// to a `&` parameter and to a by-value one.  The rebind `a = Mp { … }` replaces the caller's
+// record and releases the one it displaced (`@FR-B-Ref-Write`), while `b` still views that record
+// (`@FR-B-View`, `@FR-B-Ref-Alias`) and reads it after the rebind: a freed store on both
+// backends (loft#2195).  The call site protects the store for the call, as for loft#1287's
+// foreign binding, and releases it after the call when the local was re-pointed.  A VECTOR
+// rebind replaces the contents in the vector's own store, so there the by-value view sees the
+// new length.  Values are hand-computed; nothing may leak.
+//
+// @falsified-at: 6f31a726b — interpret exit 101 -> 0, interpret panicked -> clean, native exit 1 -> 0,
+//   native panicked -> clean (LOFT_STRICT_STORES=1 LOFT_POISON=1 make falsify)
+// CHANNEL: panic (a freed store read) on both backends under LOFT_POISON=1; the leak channel
+//   under LOFT_STRICT_STORES=1.
+// ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1 (the nightly poison sweep).
+// HOLDS: every assertion holds on both backends with nothing leaked.
+
+struct Mp { name: text, cs: vector<integer> }
+struct W { m: Mp }
+fn mixed(a: &Mp, b: Mp) -> integer { a = Mp { name: "m", cs: [5, 6, 7] }; a.cs += [8]; len(b.cs) }
+fn norebind(a: &Mp, b: Mp) -> integer { a.cs += [3]; len(b.cs) }
+fn maybe(a: &Mp, b: Mp, go: boolean) -> integer { if go { a = Mp { name: "g", cs: [] } } len(b.cs) + len(a.cs) * 100 }
+fn mv(a: &vector<integer>, b: vector<integer>) -> integer { a = [7, 8, 9]; len(b) }
+fn pm(a: &W, b: Mp) -> integer { a = W { m: Mp { name: "z", cs: [1, 2] } }; len(b.cs) }
+fn main() {
+  q = Mp { name: "q", cs: [1] };
+  assert(mixed(q, q) == 1, "by-value keeps the record the call began with");
+  assert(q.name == "m" && "{q.cs}" == "[5,6,7,8]", "the & rebind reaches q: {q.name} {q.cs}");
+  assert(mixed(q, q) == 4 && mixed(q, q) == 4 && "{q.cs}" == "[5,6,7,8]", "repeated");
+  n = Mp { name: "n", cs: [1] };
+  assert(norebind(n, n) == 2 && "{n.cs}" == "[1,3]", "no rebind: one record, seen by both");
+  g = Mp { name: "g0", cs: [4, 4] };
+  assert(maybe(g, g, false) == 202 && maybe(g, g, true) == 2 && g.name == "g", "conditional rebind");
+  v: vector<integer> = [1];
+  assert(mv(v, v) == 3 && "{v}" == "[7,8,9]", "vector: a rebind replaces the contents in the vector's own store (B-Ref-Write), which the by-value view sees: {v}");
+  w = W { m: Mp { name: "w", cs: [4, 4, 4] } };
+  assert(pm(w, w.m) == 3 && w.m.name == "z" && len(w.m.cs) == 2, "a projection by value");
+  for i in 0..3 { t = Mp { name: "t", cs: [i] }; assert(mixed(t, t) == 1, "in a loop"); }
+  println("2195 ok");
+}
