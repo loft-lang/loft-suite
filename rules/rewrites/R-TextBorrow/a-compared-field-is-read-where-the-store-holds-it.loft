@@ -20,6 +20,8 @@
 //   c6  s = "<"; s += rs[1].name; s += ">" → "<beta>"; then `s += rs[1].name + grow(w)` where
 //       grow pushes 500 records and answers "!": "<beta>beta!"; len(rs) 3 + 500 = 503
 //   c7  "{rs[2].name:>7}|" → "  gamma|"
+//   c8  a callee that writes no store takes a field as its text argument: rs[1].name set to
+//       "rock" → index_of 2; rs[2].name "gamma" → -1; 2·10 + (-1) = 19
 //
 // @falsified-at: none — the C reading and this guard land together; the planted defect is
 //   recorded in the loft commit that adds the reading (`text_reads` ignoring a later writing
@@ -84,5 +86,9 @@ fn main() {
 
   c7 = "{w.rs[2].name:>7}|";
   assert(c7 == "  gamma|", "c7: {c7}");
+
+  w.rs[1].name = "rock";
+  c8 = index_of(pal, w.rs[1].name) * 10 + index_of(pal, w.rs[2].name);
+  assert(c8 == 19, "c8: {c8}");
   println(w.rs[2].name);
 }
