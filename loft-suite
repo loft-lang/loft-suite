@@ -25,7 +25,10 @@
 #
 # A cell's annotations are the ones `loft --tests` reads (`@EXPECT_ERROR`, `@EXPECT_WARNING`,
 # `@EXPECT_FAIL`, `@IGNORE`, `@ARGS`) plus `@STORE_LIMIT: n`, handed to the binary as
-# `LOFT_STORE_LIMIT`.  Every run arms `LOFT_LEAK_CHECK=1` (a store left behind by a function
+# `LOFT_STORE_LIMIT`, and `@ARMED: LOFT_X=v …`, the instruments the cell's defect is only
+# visible under (a stale address reads the old bytes until the allocator reuses them, so a
+# plain run passes on the broken build too; `LOFT_POISON=1` overwrites the freed block) —
+# each `LOFT_X=v` is set for both lanes.  Every run arms `LOFT_LEAK_CHECK=1` (a store left behind by a function
 # that returned cleanly fails the cell); the native lane asks the compiled program the same
 # question.  A warning the cell does not claim is printed, not failed (see `run_cell`).
 
@@ -49,6 +52,8 @@ ATTIC = os.path.join(ROOT, "attic")
 # match `@FR-B-View-Base` (21 of the rules are a prefix of another).
 CITE = re.compile(r"@FR-([A-Z][A-Za-z0-9-]*[A-Za-z0-9])(?![A-Za-z0-9-])")
 STORE_LIMIT = re.compile(r"^\s*//\s*@STORE_LIMIT:\s*(\d+)", re.M)
+ARMED = re.compile(r"^\s*//\s*@ARMED:(.*)$", re.M)
+ARMED_SWITCH = re.compile(r"\b(LOFT_[A-Z0-9_]+)=([^\s`.,;)]+)")
 
 
 def rule_name(sel):
@@ -142,6 +147,8 @@ def run_cell(loft, cell, mode, timeout):
     m = STORE_LIMIT.search(src)
     if m:
         env["LOFT_STORE_LIMIT"] = m.group(1)
+    for line in ARMED.findall(src):
+        env.update(ARMED_SWITCH.findall(line))
     cmd = [loft, "--tests"]
     if mode == "native":
         cmd.append("--native")

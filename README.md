@@ -39,6 +39,7 @@ oracle, and the annotations are the ones `loft test` reads:
 | `// @IGNORE` | the function below is not run |
 | `// @ARGS: <argv…>` | positional arguments; `--lib`, `--project`, `--production`, `--log-conf` as flags |
 | `// @STORE_LIMIT: <n>` | a ceiling on live stores, handed to the binary as `LOFT_STORE_LIMIT` |
+| `// @ARMED: LOFT_X=<v> …` | instruments set for both lanes — for a defect a plain run cannot see (a stale address reads the old bytes until the allocator reuses them; `LOFT_POISON=1` overwrites the freed block) |
 | `// @falsified-at: <sha> — …` | the receipt that the cell FAILED on the build it was written to catch |
 
 Where an annotation sits decides its scope.  Everything before the file's first `fn`,
