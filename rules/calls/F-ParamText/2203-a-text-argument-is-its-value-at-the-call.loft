@@ -1,0 +1,140 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT ARGUMENT IS ITS VALUE AT THE CALL (`@FR-F-ParamText`, loft#2203).  A text read out of
+// a record — `f(w, w.rs[0].name)` — was handed to the callee as a VIEW of the store's bytes,
+// and a callee that grew that store moved the bytes under it: the interpreter printed garbage
+// and native read freed memory.  The store can be grown by any route the callee has to it, so
+// the cells vary the ROUTE: the same vector, a sibling field, one call deeper, a parameter
+// forwarded on, a closure the callee calls, a closure called directly, and a LATER argument
+// of the same call.  Two controls: a read-only callee (the copy is dropped there and the
+// answer is unchanged) and a `&text` parameter, which is a place and must still write back.
+//
+// @ARMED: LOFT_POISON=1
+//
+// @falsified-at: 6184655a5 — main fails all nine growth cells under the poison (the moved
+//   block is scribbled), and two of them without it (a block nobody reuses still reads right).
+// CHANNEL: the asserts (value and length).
+// ARMED: `LOFT_POISON=1`, so a view of a moved block reads the scribble rather than luck;
+//   `LOFT_KEEP_ARG_COPY=1` (every copy kept) answers the same.
+// WITNESS: each cell names its route in its text, so a cell that reads another's bytes says so.
+// HOLDS: `F-ParamHeap` beside it — the struct argument itself is still shared.
+
+struct R2203 { name: text, n: integer }
+struct W2203 { rs: vector<R2203>, other: vector<R2203>, title: text, names: vector<text> }
+
+fn pad2203(w: W2203) {
+  for i in 0..2000 { w.rs += [R2203 { name: "padding-padding-padding-padding-{i}", n: i }]; }
+}
+
+fn world2203(name: text) -> W2203 {
+  W2203 { rs: [R2203 { name: name, n: 1 }], other: [], title: name, names: [name] }
+}
+
+fn same_vector2203(w: W2203, s: text) -> text { pad2203(w); "{s}|{len(s)}" }
+
+fn sibling2203(w: W2203, s: text) -> text {
+  for i in 0..2000 { w.other += [R2203 { name: "padding-padding-padding-padding-{i}", n: i }]; }
+  "{s}|{len(s)}"
+}
+
+fn forward2203(w: W2203, s: text) -> text { same_vector2203(w, s) }
+
+fn through_closure2203(grow: fn(), s: text) -> text { grow(); "{s}|{len(s)}" }
+
+fn later2203(s: text, n: integer) -> text { "{s}|{len(s)}|{n}" }
+
+fn grown2203(w: W2203) -> integer { pad2203(w); len(w.rs) }
+
+fn method2203(self: W2203, s: text) -> text { pad2203(self); "{s}|{len(s)}" }
+
+fn reads_only2203(w: W2203, s: text) -> text { "{s}|{len(s)}|{len(w.rs)}" }
+
+fn names2203(w: W2203, s: text) -> text {
+  for i in 0..2000 { w.names += ["padding-padding-padding-padding-{i}"]; }
+  "{s}|{len(s)}"
+}
+
+fn overwrite2203(w: W2203, s: text) -> text {
+  w.rs[0].name = "x";
+  for i in 0..50 { w.rs += [R2203 { name: "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz{i}", n: i }]; }
+  "{s}|{len(s)}"
+}
+
+fn set2203(s: &text) { s = "written-back"; }
+
+fn grow_the_same_vector() {
+  w = world2203("same-vector");
+  r = same_vector2203(w, w.rs[0].name);
+  assert(r == "same-vector|11", "same vector: {r}");
+}
+
+fn grow_a_sibling_field() {
+  w = world2203("sibling-field");
+  r = sibling2203(w, w.rs[0].name);
+  assert(r == "sibling-field|13", "sibling: {r}");
+}
+
+fn grow_one_call_deeper_through_a_forwarded_parameter() {
+  w = world2203("forwarded-parameter");
+  r = forward2203(w, w.rs[0].name);
+  assert(r == "forwarded-parameter|19", "forwarded: {r}");
+}
+
+fn grow_through_a_closure_the_callee_calls() {
+  w = world2203("closure-in-callee");
+  g = fn() { pad2203(w); };
+  r = through_closure2203(g, w.rs[0].name);
+  assert(r == "closure-in-callee|17", "closure in callee: {r}");
+}
+
+fn grow_through_a_closure_called_directly() {
+  w = world2203("closure-called");
+  h = fn(s: text) -> text { pad2203(w); "{s}|{len(s)}" };
+  r = h(w.rs[0].name);
+  assert(r == "closure-called|14", "closure called: {r}");
+}
+
+fn grow_in_a_later_argument() {
+  w = world2203("later-argument");
+  r = later2203(w.rs[0].name, grown2203(w));
+  assert(r == "later-argument|14|2001", "later argument: {r}");
+}
+
+fn grow_under_a_plain_field() {
+  w = world2203("plain-field");
+  r = same_vector2203(w, w.title);
+  assert(r == "plain-field|11", "plain field: {r}");
+}
+
+fn grow_under_a_text_element() {
+  w = world2203("text-element");
+  r = names2203(w, w.names[0]);
+  assert(r == "text-element|12", "text element: {r}");
+}
+
+fn grow_under_a_method_call() {
+  w = world2203("method-call");
+  r = w.method2203(w.rs[0].name);
+  assert(r == "method-call|11", "method call: {r}");
+}
+
+fn overwrite_the_field_then_reuse_its_block() {
+  w = world2203("overwrite-then-reuse");
+  r = overwrite2203(w, w.rs[0].name);
+  assert(r == "overwrite-then-reuse|20", "overwrite: {r}");
+  assert(w.rs[0].name == "x", "the callee's write reaches the caller: {w.rs[0].name}");
+}
+
+fn a_read_only_callee_reads_the_same() {
+  w = world2203("read-only");
+  r = reads_only2203(w, w.rs[0].name);
+  assert(r == "read-only|9|1", "read only: {r}");
+}
+
+fn a_text_place_parameter_still_writes_back() {
+  w = world2203("before");
+  set2203(w.rs[0].name);
+  assert(w.rs[0].name == "written-back", "&text writes back: {w.rs[0].name}");
+  assert(len(w.rs[0].name) == 12, "length {len(w.rs[0].name)}");
+}
