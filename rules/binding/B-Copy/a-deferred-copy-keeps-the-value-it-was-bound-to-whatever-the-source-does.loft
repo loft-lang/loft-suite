@@ -21,6 +21,19 @@
 //              step 0: o 1, next 1, k 10 → 11;   step 1: o 2, next 2 (written: k 90) → 92;
 //              step 2: o 3, next 0, k 0 → 3;     step 3: o 1, next 1, k 10 → 11;
 //              step 4: o 2, next 2, k 90 → 92;   → 11 + 92 + 3 + 11 + 92 = 209
+// The guard at a write compares the written element with the viewed one (`@FR-R-DeferredCopy`):
+//   other:     prog = copy of ps[1] (k 10); ps[2] = mk(7) (k 70) → 10 * 100 + 70 = 1070
+//   from_end:  prog = copy of ps[2] (k 20); op = prog.ops[1] (a 2, b 2); ps[-1] = mk(7) is ps[2]
+//              → 20 * 100 + 2 * 10 + 2 = 2022
+//   fields:    prog = copy of ps[1]; ps[1].k = 55; ps[1].ops[0].a = 9; prog.k 10, prog.ops[0].a 1
+//              → 10 * 100 + 1 * 10 + 55 = 1065
+//   moved:     i = 1; prog = copy of ps[1]; i = 2; ps[2] = mk(7); i = 1; ps[1] = mk(8) → prog.k 10
+//   carried:   prog = copy of ps[1]; op = prog.ops[0] (a 1, b 1); two passes of
+//              sum += op.a * 10 + op.b + prog.k, the first then writing ps[1] = mk(9)
+//              → 21 + 21 = 42 (the view read on the second pass is the copy's)
+//   live:      prog = copy of callee (ps[1]); ps[1] = mk(7); prog.k 10, callee.k 70 → 1070
+//   outlives:  prog = copy of ps[1]; o = prog.ops[2] (a 1, b 3); ps[1] = mk(7); prog rebound to
+//              ps[0] before any read, o read after → 1 * 10 + 3 = 13
 struct Op { a: integer, b: integer }
 struct P { ops: vector<Op>, k: integer }
 
@@ -86,6 +99,78 @@ fn walk(ps: vector<P>, n: integer) -> integer {
   sum
 }
 
+fn other(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[2] = mk(7);
+  prog.k * 100 + (ps[2] ?? panic("in range")).k
+}
+
+fn from_end(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[2] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[1] ?? panic("in range");
+  ps[-1] = mk(7);
+  prog.k * 100 + op.a * 10 + op.b
+}
+
+fn fields(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[1].k = 55;
+  ps[1].ops[0].a = 9;
+  o = prog.ops[0] ?? panic("in range");
+  prog.k * 100 + o.a * 10 + (ps[1] ?? panic("in range")).k
+}
+
+fn moved(ps: vector<P>) -> integer {
+  i = 1;
+  prog = ps[0] ?? panic("in range");
+  callee = ps[i] ?? panic("in range");
+  prog = callee;
+  i = 2;
+  ps[i] = mk(7);
+  i = 1;
+  ps[i] = mk(8);
+  prog.k
+}
+
+fn carried(ps: vector<P>, n: integer) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[0] ?? panic("in range");
+  sum = 0;
+  for step in 0..n {
+    sum += op.a * 10 + op.b + prog.k;
+    if step == 0 {
+      ps[1] = mk(9);
+    }
+  }
+  sum
+}
+
+fn live(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[1] = mk(7);
+  prog.k * 100 + callee.k
+}
+
+fn outlives(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  o = prog.ops[2] ?? panic("in range");
+  ps[1] = mk(7);
+  prog = ps[0] ?? panic("in range");
+  o.a * 10 + o.b + prog.k
+}
+
 fn test_an_overwrite_of_the_source_element() {
   assert(overwrite(mks()) == 1013, "overwrite {overwrite(mks())}");
 }
@@ -104,4 +189,32 @@ fn test_a_clear_of_the_source_vector() {
 
 fn test_a_loop_rebinding_by_copy_beside_a_rare_write() {
   assert(walk(mks(), 5) == 209, "walk {walk(mks(), 5)}");
+}
+
+fn test_a_write_to_another_element() {
+  assert(other(mks()) == 1070, "other {other(mks())}");
+}
+
+fn test_a_write_through_an_index_counted_from_the_end() {
+  assert(from_end(mks()) == 2022, "from_end {from_end(mks())}");
+}
+
+fn test_field_writes_inside_the_viewed_element() {
+  assert(fields(mks()) == 1065, "fields {fields(mks())}");
+}
+
+fn test_an_index_variable_that_moves_between_the_bind_and_the_write() {
+  assert(moved(mks()) == 10, "moved {moved(mks())}");
+}
+
+fn test_a_view_carried_round_a_loop_past_the_write() {
+  assert(carried(mks(), 2) == 42, "carried {carried(mks(), 2)}");
+}
+
+fn test_a_source_still_read_after_the_bind() {
+  assert(live(mks()) == 1070, "live {live(mks())}");
+}
+
+fn test_a_view_still_read_after_its_local_is_rebound() {
+  assert(outlives(mks()) == 13, "outlives {outlives(mks())}");
 }
