@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @C157 — a bare variant two visible enums own, with nothing in its context to pick one, is
+// `@FR-C-Var` with @C157 — a bare variant two visible enums own, with nothing in its context to pick one, is
 // refused and the refusal names both enums.  Its counterpart, where one owner or a sibling arm
 // decides: a-bare-variant-takes-the-enum-that-owns-it.loft.
 //

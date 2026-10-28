@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @C157 — a bare variant is the variant of the one visible enum that owns its name, with no type
-// context; where two enums own it, the other arms of the same `if` or `match` pick the enum.
+// `@FR-C-Var` with @C157 — a bare variant converts to the one visible enum that owns its name,
+// with no type context; where two enums own it, the other arms of the same `if` or `match` pick
+// the enum.
 //
 // Each cell names one position; the values are written out by hand beside each.
 //
