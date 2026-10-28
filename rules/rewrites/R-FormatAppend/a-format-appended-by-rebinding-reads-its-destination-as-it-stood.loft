@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FORMAT APPENDED BY REBINDING READS ITS DESTINATION AS IT STOOD (`@FR-R-FormatAppend`).
+// `x = x + "…{e}…"` appends a format to `x`, like `x += "…"`.  Where no hole reads `x`, the
+// format's writes may go straight into `x`; where one does, the work text is what gives the
+// hole the text as it stood before the statement, so the rewrite declines.  Each cell's value
+// is computed by hand.
+//
+//   c1  x = "ab"; x = x + "{x}!"                      → "abab!"  (the hole reads x)
+//   c2  y = "q"; for c in "xyz" { y = y + "{c}{len(y)}" }
+//       → "qx1", "qx1y3", "qx1y3z5"                   (len(y) is the length before the append)
+//   c3  z = ""; for c in "abc" { z = z + "{c}-" }     → "a-b-c-"  (no hole reads z: written in)
+//   c4  w = "0"; for i in 0..3 { w = w + "{i:>2}" }   → "0 0 1 2"  (a padded hole, pad its own)
+//
+// @falsified-at: none — a conformance guard for the decline.  Applied where a hole reads the
+//   destination, the writes would land in `y` before `len(y)` is read, and c2 would answer
+//   "qx2y5z8".
+
+fn main() {
+  x = "ab";
+  x = x + "{x}!";
+  assert(x == "abab!", "c1: {x}");
+  y = "q";
+  for c in "xyz" { y = y + "{c}{len(y)}"; }
+  assert(y == "qx1y3z5", "c2: {y}");
+  z = "";
+  for c in "abc" { z = z + "{c}-"; }
+  assert(z == "a-b-c-", "c3: {z}");
+  w = "0";
+  for i in 0..3 { w = w + "{i:>2}"; }
+  assert(w == "0 0 1 2", "c4: {w}");
+  println("{x} {y} {z} {w}");
+}
