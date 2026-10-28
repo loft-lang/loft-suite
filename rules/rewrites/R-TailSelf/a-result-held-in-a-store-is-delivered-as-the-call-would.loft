@@ -26,7 +26,7 @@
 //   when the oracle read the rebound parameter as pristine).
 // WITNESS: each message prints the value.
 // HOLDS: `a-parameter-passed-through-is-the-pointer-the-call-binds` — the parameters these
-//   frames pass through; `a-tail-self-call-the-frame-cannot-jump-is-refused` — what stays refused.
+//   frames pass through; `a-tail-self-call-the-frame-cannot-jump-warns` — what stays a call.
 
 struct Pt { x: integer, s: text }
 struct VsN { n: integer }
