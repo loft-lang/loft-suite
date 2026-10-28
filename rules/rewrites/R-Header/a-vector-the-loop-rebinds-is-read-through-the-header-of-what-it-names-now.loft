@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR THE LOOP REBINDS IS READ THROUGH THE HEADER OF WHAT IT NAMES NOW (`@FR-R-Header`'s
+// rebind clause).  The C holds a header — record, length, element base — for a bare vector the
+// loop reads and REBINDS by navigation (`ops = progs[cur].ops`, an interpreter switching to the
+// callee's code), proven apart from every store the loop grows, and derives it again after each
+// rebind.  A header kept across a rebind reads the OLD vector: the old length bounds the index,
+// the old base answers the element.  The cells rebind among vectors of three different lengths
+// while a push grows another store, read past the end of a short one (the `??` default must
+// answer, not the longer vector's element), and run the rebind under a `match` arm.
+//
+// Values hand-computed (progs: ops [1, 2, 3], [10, 20], [100]):
+//   walk(progs, 10): reads 1, 2, 3, 10, 20, 100, 1, 2, 3, 10 → total 152, 10 pushes → 152010
+//   past(progs):     ops = [10, 20]: ops[2] ?? -7 → -7; ops = [100]: ops[1] ?? -7 → -7;
+//                    ops = [1, 2, 3]: ops[2] → 3                         → -11
+//   arms(progs, 6):  step 0..5, kind = step % 3 picks progs[kind]; reads ops[0] each:
+//                    1 + 10 + 100 + 1 + 10 + 100 = 222
+struct Prog { ops: vector<integer> }
+
+fn mk() -> vector<Prog> {
+  [Prog { ops: [1, 2, 3] }, Prog { ops: [10, 20] }, Prog { ops: [100] }]
+}
+
+fn walk(progs: vector<Prog>, n: integer) -> integer {
+  acc: vector<integer> = [];
+  cur = 0;
+  ops = progs[cur].ops;
+  pc = 0;
+  total = 0;
+  for _ in 0..n {
+    total += ops[pc] ?? -1000;
+    acc += [total];
+    pc += 1;
+    if pc >= len(ops) {
+      cur = (cur + 1) % len(progs);
+      ops = progs[cur].ops;
+      pc = 0;
+    }
+  }
+  total * 1000 + len(acc)
+}
+
+fn past(progs: vector<Prog>) -> integer {
+  sum = 0;
+  ops = progs[0].ops;
+  for k in [1, 2, 0] {
+    ops = progs[k].ops;
+    sum += ops[2] ?? -7;
+  }
+  sum
+}
+
+enum Kind { A, B, C }
+
+fn arms(progs: vector<Prog>, n: integer) -> integer {
+  ops = progs[0].ops;
+  sum = 0;
+  for step in 0..n {
+    kind = if step % 3 == 0 { Kind.A } else if step % 3 == 1 { Kind.B } else { Kind.C };
+    match kind {
+      A => { ops = progs[0].ops; },
+      B => { ops = progs[1].ops; },
+      C => { ops = progs[2].ops; },
+    }
+    sum += ops[0] ?? -1000;
+  }
+  sum
+}
+
+fn test_a_rebound_vector_reads_what_it_names_now() {
+  assert(walk(mk(), 10) == 152010, "walk {walk(mk(), 10)}");
+}
+
+fn test_a_short_vector_after_a_rebind_answers_its_own_length() {
+  assert(past(mk()) == -11, "past {past(mk())}");
+}
+
+fn test_a_rebind_under_a_match_arm() {
+  assert(arms(mk(), 6) == 222, "arms {arms(mk(), 6)}");
+}
