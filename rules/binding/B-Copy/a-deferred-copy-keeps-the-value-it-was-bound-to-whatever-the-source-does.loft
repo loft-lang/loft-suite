@@ -25,7 +25,8 @@
 //   other:     prog = copy of ps[1] (k 10); ps[2] = mk(7) (k 70) → 10 * 100 + 70 = 1070
 //   from_end:  prog = copy of ps[2] (k 20); op = prog.ops[1] (a 2, b 2); ps[-1] = mk(7) is ps[2]
 //              → 20 * 100 + 2 * 10 + 2 = 2022
-//   fields:    prog = copy of ps[1]; ps[1].k = 55; ps[1].ops[0].a = 9; prog.k 10, prog.ops[0].a 1
+//   fields:    prog = copy of ps[1]; ps[1].ops[0].a = 9 (the nested write first, so it alone must
+//              take the copy); ps[1].k = 55; prog.k 10, prog.ops[0].a 1
 //              → 10 * 100 + 1 * 10 + 55 = 1065
 //   moved:     i = 1; prog = copy of ps[1]; i = 2; ps[2] = mk(7); i = 1; ps[1] = mk(8) → prog.k 10
 //   carried:   prog = copy of ps[1]; op = prog.ops[0] (a 1, b 1); two passes of
@@ -33,7 +34,9 @@
 //              → 21 + 21 = 42 (the view read on the second pass is the copy's)
 //   live:      prog = copy of callee (ps[1]); ps[1] = mk(7); prog.k 10, callee.k 70 → 1070
 //   outlives:  prog = copy of ps[1]; o = prog.ops[2] (a 1, b 3); ps[1] = mk(7); prog rebound to
-//              ps[0] before any read, o read after → 1 * 10 + 3 = 13
+//              ps[0] (k 0) before any read, o read after → 1 * 10 + 3 + 0 = 13.  The rebind of
+//              `prog` while `o` is live makes `o` its own copy at the bind (`@FR-B-View`), so
+//              this cell pins the values, not the copy point.
 struct Op { a: integer, b: integer }
 struct P { ops: vector<Op>, k: integer }
 
@@ -120,8 +123,8 @@ fn fields(ps: vector<P>) -> integer {
   prog = ps[0] ?? panic("in range");
   callee = ps[1] ?? panic("in range");
   prog = callee;
-  ps[1].k = 55;
   ps[1].ops[0].a = 9;
+  ps[1].k = 55;
   o = prog.ops[0] ?? panic("in range");
   prog.k * 100 + o.a * 10 + (ps[1] ?? panic("in range")).k
 }
