@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C157 — a bare variant is the variant of the one visible enum that owns its name, with no type
+// context; where two enums own it, the other arms of the same `if` or `match` pick the enum.
+//
+// Each cell names one position; the values are written out by hand beside each.
+//
+// @falsified-at: 6f31a726b — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the exit — on the control every cell is refused at compile time ("bare variant
+//   'Green' has no type here"), so nothing runs.
+//   WITNESS: that refusal.
+//   ARMED: nothing.
+//   HOLDS: values, leak and panic — the control never runs, so only the exit can move.
+enum Hue { Red, Green, Blue }
+enum Light { Red, Amber }
+enum Shape { Empty, Circle { r: float } }
+
+fn test_a_sole_owner_needs_no_context() {
+  g = Green;                                   // only Hue has Green
+  e = Empty;                                   // a unit variant of a struct enum
+  hs = [Green, Blue];                          // a vector literal
+  assert(g == Hue.Green, "Green is Hue's");
+  assert(e is Empty, "Empty is Shape's");
+  assert(len(hs) == 2 and hs[1] == Hue.Blue, "a vector<Hue>");
+}
+
+fn test_the_arms_of_an_if_pick_the_enum() {
+  n = 1;
+  a = if n == 0 { Red } else { Blue };         // Blue is only Hue's: Blue
+  b = if n == 0 { Blue } else { Red };         // the shared name second: Hue's Red
+  c = if n == 0 { Red } else if n == 1 { Amber } else { Red };   // Amber is Light's: Amber
+  assert(a == Hue.Blue, "a: {a}");
+  assert(b == Hue.Red, "b: {b}");
+  assert(c == Light.Amber, "c: {c}");
+}
+
+fn test_the_arms_of_a_match_pick_the_enum() {
+  n = 0;
+  m = match n { 0 => Red, _ => Amber };        // the shared name FIRST: Light's Red
+  k = match n { 0 => Green, 1 => Red, _ => Blue };   // Hue's Green
+  assert(m == Light.Red, "m: {m}");
+  assert(k == Hue.Green, "k: {k}");
+}
