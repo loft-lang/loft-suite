@@ -15,7 +15,7 @@
 //
 // @falsified-at: none — a conformance guard for the decline.  Applied where a hole reads the
 //   destination, the writes would land in `y` before `len(y)` is read, and c2 would answer
-//   "qx2y5z8".
+//   "qx2y4z6".
 
 fn main() {
   x = "ab";
