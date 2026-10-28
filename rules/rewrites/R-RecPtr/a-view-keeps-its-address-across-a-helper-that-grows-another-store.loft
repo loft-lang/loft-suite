@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW KEEPS ITS ADDRESS ACROSS A HELPER THAT GROWS ANOTHER STORE (`@FR-R-RecPtr`'s apart-call
+// clause, C).  A record view's address is valid while the store it points into grows nowhere in
+// its extent.  A loft helper reaches only the stores its arguments name, so a call whose every
+// store-naming argument is proven apart from the view's store — a scalar field read of the view
+// passes a number — cannot move it, and the view keeps its address across it.  The cells call a
+// helper that appends to a local stack (apart: the address is kept), one that appends to the
+// vector the view lives IN (a disturbance: the view is a copy taken at its bind, `@FR-B-Disturb`),
+// one handed the view's own container, and one that appends to a SIBLING vector of the record
+// the view's container is a field of — same store, container undisturbed: the clause must
+// decline, or the read after the call goes through an address the store's growth moved.
+//
+// Values hand-computed (ops = [Op{1, 10}, Op{2, 20}, Op{3, 30}]):
+//   apart(ops):   for each op: push op.a then op.b onto st; sum op.a * 100 + op.b after the pushes
+//                 → 110 + 220 + 330 = 660; len(st) 6 → 660 * 10 + 6 = 6606
+//   own(ops):     k = 0, 1: o = ops[k]; grow ops by 40 through a helper (the view's own
+//                 store); then o.a, o.b read: k0 1000 + 100 + 10 = 1110, k1 2000 + 200 + 20 = 2220
+//                 → 3330; len 3 + 80 = 83 → 3330083
+//   handed(ops):  k = 1, 2: o = ops[k]; grow by 30; seen * 1000 + o.b: 2020 + 3030 = 5050;
+//                 len 3 + 60 = 63 → 5050063
+//   sibling(t):   t.items = mk(), t.log = []; k = 0, 1: o = t.items[k]; log 3000 values into
+//                 t.log, enough to grow the store; o.a * 100 + o.b: 110 + 220 = 330;
+//                 len(t.log) 6000 → 336000
+struct Op { a: integer, b: integer }
+
+fn push(st: vector<integer>, v: integer) { st += [v]; }
+
+fn grow(ops: vector<Op>, n: integer) {
+  for i in 0..n { ops += [Op { a: i, b: i }]; }
+}
+
+fn apart(ops: vector<Op>) -> integer {
+  st: vector<integer> = [];
+  sum = 0;
+  for k in 0..len(ops) {
+    op = ops[k] ?? panic("in range");
+    push(st, op.a);
+    push(st, op.b);
+    sum += op.a * 100 + op.b;
+  }
+  sum * 10 + len(st)
+}
+
+fn own(ops: vector<Op>) -> integer {
+  sum = 0;
+  for k in 0..2 {
+    o = ops[k] ?? panic("in range");
+    first = o.a;
+    grow(ops, 40);
+    sum += first * 1000 + o.a * 100 + o.b;
+  }
+  sum * 1000 + len(ops)
+}
+
+fn handed(ops: vector<Op>) -> integer {
+  sum = 0;
+  for k in 1..3 {
+    o = ops[k] ?? panic("in range");
+    seen = o.a;
+    grow(ops, 30);
+    sum += seen * 1000 + o.b;
+  }
+  sum * 1000 + len(ops)
+}
+
+struct Two { items: vector<Op>, log: vector<integer> }
+
+fn note(t: Two, n: integer) {
+  for i in 0..n { t.log += [i]; }
+}
+
+fn sibling(t: Two) -> integer {
+  sum = 0;
+  for k in 0..2 {
+    o = t.items[k] ?? panic("in range");
+    note(t, 3000);
+    sum += o.a * 100 + o.b;
+  }
+  sum * 1000 + len(t.log)
+}
+
+fn mk() -> vector<Op> { [Op { a: 1, b: 10 }, Op { a: 2, b: 20 }, Op { a: 3, b: 30 }] }
+
+fn test_a_helper_growing_another_store_keeps_the_view() {
+  assert(apart(mk()) == 6606, "apart {apart(mk())}");
+}
+
+fn test_a_helper_growing_the_views_own_store_moves_it() {
+  assert(own(mk()) == 3330083, "own {own(mk())}");
+}
+
+fn test_a_helper_handed_the_container() {
+  assert(handed(mk()) == 5050063, "handed {handed(mk())}");
+}
+
+fn test_a_helper_growing_a_sibling_vector_of_the_same_store() {
+  t = Two { items: mk(), log: [] };
+  assert(sibling(t) == 336000, "sibling {sibling(Two { items: mk(), log: [] })}");
+}
