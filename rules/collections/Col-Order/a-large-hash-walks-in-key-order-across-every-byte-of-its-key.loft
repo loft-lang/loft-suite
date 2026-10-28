@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LARGE HASH WALKS IN KEY ORDER ACROSS EVERY BYTE OF ITS KEY (`@FR-Col-Order`, `@FR-Col-Hash`).
+// The walk's ordered snapshot may be built by sorting on the bytes the keys differ in; these
+// cells are big enough for that (hundreds to thousands of entries) and spread their keys over
+// low bytes only, over every byte (a key crossing zero), and over two parts.  Each table is
+// filled in a scrambled order (`i * 7919` modulo a prime, a permutation), so the walk is the
+// ascending key list and each value is computed by hand from it:
+//
+//   c1  k = (i*7919) % 4099 - 2000, 4099 keys      → -2000 … 2098, Σ pos·k = 6150758549
+//   c2  k = (i*7919) % 601 + 1000, 601 keys        → 1000 … 1600, Σ pos·k = 252480100
+//   c3  m = (i*7919) % 3001 (3000 skipped), (q, r) = (m / 50 - 30, m % 50), 3000 keys
+//       → (-30, 0) … (29, 49), Σ pos·(100q + r) = 4384663000
+//   c4  c1's table with every multiple of 3 removed → 2733 keys, Σ pos·k = 2733693157
+//
+// @falsified-at: none — a conformance guard for the ordered snapshot at sizes the corpus's
+//   other walks never reach.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+struct E { k: integer, v: integer }
+struct P { q: integer, r: integer }
+
+// Walks `h`, checking each key is above the one before: its count, first, last and Σ pos·k.
+fn walk(h: hash<E[k]>) -> text {
+  n = 0;
+  first = 0;
+  last = 0;
+  w = 0;
+  for e in h {
+    if n == 0 { first = e.k; } else { assert(e.k > last, "{e.k} after {last}"); }
+    last = e.k;
+    w += n * e.k;
+    n += 1;
+  }
+  "{n} {first} {last} {w}"
+}
+
+fn test_one_part_key_crossing_zero() {
+  h: hash<E[k]> = [];
+  for i in 0..4099 { h += [E { k: (i * 7919) % 4099 - 2000, v: i }]; }
+  assert(walk(h) == "4099 -2000 2098 6150758549", "c1: {walk(h)}");
+  for k in -2000..2099 { if k % 3 == 0 { h[k] = null; } }
+  assert(walk(h) == "2733 -2000 2098 2733693157", "c4: {walk(h)}");
+}
+
+fn test_one_part_key_in_low_bytes() {
+  h: hash<E[k]> = [];
+  for i in 0..601 { h += [E { k: (i * 7919) % 601 + 1000, v: i }]; }
+  assert(walk(h) == "601 1000 1600 252480100", "c2: {walk(h)}");
+}
+
+fn test_two_part_key() {
+  h: hash<P[q, r]> = [];
+  for i in 0..3001 {
+    m = (i * 7919) % 3001;
+    if m != 3000 { h += [P { q: m / 50 - 30, r: m % 50 }]; }
+  }
+  n = 0;
+  w = 0;
+  pq = 0;
+  pr = 0;
+  for p in h {
+    if n > 0 { assert(p.q > pq || (p.q == pq && p.r > pr), "({p.q}, {p.r}) after ({pq}, {pr})"); }
+    if n == 0 { assert(p.q == -30 && p.r == 0, "first ({p.q}, {p.r})"); }
+    pq = p.q;
+    pr = p.r;
+    w += n * (p.q * 100 + p.r);
+    n += 1;
+  }
+  assert(n == 3000 && pq == 29 && pr == 49, "c3: {n} last ({pq}, {pr})");
+  assert(w == 4384663000, "c3: {w}");
+}
