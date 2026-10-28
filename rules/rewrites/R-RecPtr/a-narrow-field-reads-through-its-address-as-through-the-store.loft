@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NARROW FIELD READS THROUGH ITS ADDRESS AS THROUGH THE STORE (`@FR-R-RecPtr`).  A bound view
+// reads its byte, short, 4-byte and enum fields through the record's address with the decoding
+// its store read uses — a byte biased by its minimum, a short and a 4-byte integer in their
+// encodings, an enum as its stored byte — and a NULL view (`e = v[i]` past the end) reads its
+// enum as no variant.  Fifty rows, i = 0..49, then ten reads past the end:
+//
+//   Σ b (i·7 mod 256) = 5247   Σ s (100i − 2500) = −2500   Σ w (100000i − 2000000) = 22500000
+//   Σ x = 1225                 Red / Green / Blue (i mod 3) = 17 / 17 / 16, none past the end
+//
+// @falsified-at: none — a conformance guard for the narrow readers.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+enum Kind { Red, Green, Blue }
+
+struct N { b: u8, s: i16, w: i32, k: Kind, x: integer }
+
+fn kind_of(i: integer) -> Kind {
+  if i % 3 == 0 { Red } else if i % 3 == 1 { Green } else { Blue }
+}
+
+fn test_narrow_fields_read_through_a_view() {
+  v: vector<N> = [];
+  for i in 0..50 {
+    v += [N { b: ((i * 7) & 255) as u8, s: (i * 100 - 2500) as i16 ?? (0 as i16),
+              w: (i * 100000 - 2000000) as i32 ?? (0 as i32), k: kind_of(i), x: i }];
+  }
+  sb = 0;
+  ss = 0;
+  sw = 0;
+  sx = 0;
+  red = 0;
+  green = 0;
+  blue = 0;
+  for i in 0..60 {
+    e = v[i];
+    if e.k == Red { red += 1; }
+    if e.k == Green { green += 1; }
+    if e.k == Blue { blue += 1; }
+    if e != null {
+      sb += e.b as integer;
+      ss += e.s as integer;
+      sw += e.w as integer;
+      sx += e.x;
+    }
+  }
+  assert(sb == 5247 && ss == -2500 && sw == 22500000 && sx == 1225, "sums {sb} {ss} {sw} {sx}");
+  assert(red == 17 && green == 17 && blue == 16, "kinds {red} {green} {blue}");
+}
