@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-N-Decl — a copy of a declared `vector<u8>` constant refuses an element a `u8` cannot
+// hold, as a `vector<u8>` local does; with the annotation discarded it took `300` (loft#2240).
+//
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
+//   native exit 1 -> 0, native expectations FAIL/1 -> 0/1: the control accepted the 300 and
+//   printed [1,2,300].
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+
+CV: vector<u8> = [1, 2];
+
+fn main() {
+  v = CV;
+  v += [300];
+  println("{v}");
+}
