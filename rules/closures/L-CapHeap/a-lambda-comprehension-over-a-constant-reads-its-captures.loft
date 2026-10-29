@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapHeap` / `@FR-L-CapScalar` — a lambda whose body is a COMPREHENSION over a top-level
+// CONSTANT reads its captures inside that comprehension: a scalar by its creation-time value,
+// a collection, a text and a struct as shared heap values.  The container is a constant (a
+// vector of integers, of structs, of texts), never a local or a parameter — the pair
+// `global x through-comprehension` no file in the corpus crossed (`scripts/matrix_axes.py
+// cross A2 A10`), beside loft#1178's cells, which all build their container locally.
+//
+// @falsified-at: none — a control: every cell held on main @ 23bc61e4 (--interpret, --native)
+//   and on spelcompu-pln204-int32 (all three backends) when the pair was first crossed.  It records that the never-crossed
+//   pair works, so a regression there has a cell to fail; corrupt `g6`'s expected sum first if
+//   this file ever looks vacuous.
+// CHANNEL: the VALUE of each comprehension, hand-computed, and the LEAK (`g6` calls the lambda
+//   fifty times, so a per-call leak is fifty stores).
+// ARMED: no instrument.  Ordinary assertions on both backends.
+// HOLDS: every cell, on the interpreter, --native and --native-c.
+
+struct P { a: integer, t: text }
+G = [1, 2, 3];
+GS = [P { a: 1, t: "x" }, P { a: 2, t: "y" }];
+GT = ["u", "vw"];
+
+fn test_g1_scalar() {
+  k = 10;
+  f = fn() -> vector<integer> { [for x in G { x + k }] };
+  v = f();
+  assert("{v}" == "[11,12,13]", "g1 {v}");
+}
+fn test_g2_collection() {
+  ys = [100, 200];
+  f = fn() -> vector<integer> { [for x in G { x + ys[1] }] };
+  v = f();
+  assert("{v}" == "[201,202,203]", "g2 {v}");
+}
+fn test_g3_text() {
+  t = "ab";
+  f = fn() -> vector<text> { [for x in G { "{t}{x}" }] };
+  v = f();
+  assert(v.len() == 3 && v[0] == "ab1" && v[2] == "ab3", "g3 {v}");
+}
+fn test_g4_struct_over_struct_global() {
+  p = P { a: 7, t: "z" };
+  f = fn() -> vector<integer> { [for q in GS { q.a * p.a }] };
+  v = f();
+  assert("{v}" == "[7,14]", "g4 {v}");
+}
+fn test_g5_text_global() {
+  k = 3;
+  f = fn() -> vector<text> { [for s in GT { "{s}{k}" }] };
+  v = f();
+  assert(v.len() == 2 && v[0] == "u3" && v[1] == "vw3", "g5 {v}");
+}
+fn test_g6_many_calls() {
+  k = 10;
+  f = fn() -> vector<integer> { [for x in G { x + k }] };
+  s = 0;
+  for _ in 0..50 { v = f(); for x in v { s += x; } }
+  assert(s == 50 * 36, "g6 {s}");
+}
+fn test_g7_filter() {
+  k = 1;
+  f = fn() -> vector<integer> { [for x in G if x > k { x * 100 }] };
+  v = f();
+  assert("{v}" == "[200,300]", "g7 {v}");
+}
+fn test_g8_struct_field_text() {
+  sep = "-";
+  f = fn() -> vector<text> { [for q in GS { "{q.t}{sep}{q.a}" }] };
+  v = f();
+  assert(v.len() == 2 && v[0] == "x-1" && v[1] == "y-2", "g8 {v}");
+}
+fn test_g9_capture_a_struct_field_vector() {
+  p = P { a: 2, t: "q" };
+  ws = [5, 6];
+  f = fn() -> vector<integer> { [for x in G { x * p.a + ws[0] }] };
+  v1 = f();
+  v2 = f();
+  assert("{v1}" == "[7,9,11]" && "{v2}" == "[7,9,11]", "g9 {v1} {v2}");
+}
+
+// A `main` that calls every cell, so the leak channel can fire under `--interpret`.
+fn main() {
+  test_g1_scalar();
+  test_g2_collection();
+  test_g3_text();
+  test_g4_struct_over_struct_global();
+  test_g5_text_global();
+  test_g6_many_calls();
+  test_g7_filter();
+  test_g8_struct_field_text();
+  test_g9_capture_a_struct_field_vector();
+}
