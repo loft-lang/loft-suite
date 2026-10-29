@@ -6,10 +6,11 @@
 // around it, the result bound to a temporary), and `--native` wrote that sequence inside the
 // cast a boolean block's tail takes, `(stmt; let …; expr) as u8`, which rustc refuses: the
 // program did not build where `--interpret` ran it.  Reached from a value `if` whose arm ends
-// in such a call, and from a match guard that makes one, which `@FR-M-Once` folds into its
-// arm's condition as a value block.
+// in such a call.  (A match guard that makes such a call on its subject is refused since
+// `@FR-M-Fixed`: `rules/matching/M-Fixed/`.)
 //
-// @falsified-at: ec098768e — native exit 1 -> 0 (every cell: the compile fails on main);
+// @falsified-at: ec098768e — native exit 1 -> 0 (every cell: the compile fails on main;
+//   measured with a fourth cell, a match guard making the call, since moved to M-Fixed);
 //   interpret INERT (it always ran these).
 //   CHANNEL: exit — the native compile.
 //   WITNESS: on main, `--native` stops with `error: expected expression, found 'let'
@@ -33,16 +34,6 @@ fn in_condition(s: S, c: integer) -> integer {
   if (if c > 0 { t = c + 1; flip(s) } else { false }) { 1 } else { 2 }
 }
 
-// The guard calls with the subject's `&`: it rebinds `s` to a Q and fails, so the next arm is
-// tried; as the lowering reads the tag per arm today, that arm sees the Q and answers its 7.
-fn guarded(s: S) -> integer {
-  match s {
-    P { x } if flip(s) => x,
-    Q { y } => y,
-    _ => 0,
-  }
-}
-
 // The value `if` in a loop: flip answers false each time, so every pass counts.
 fn looped(n: integer) -> integer {
   hits = 0;
@@ -62,10 +53,6 @@ fn test_a_value_if_whose_arm_ends_in_the_call_is_assigned() {
 
 fn test_a_value_if_whose_arm_ends_in_the_call_is_a_condition() {
   assert("{in_condition(P { x: 3 }, 1)} {in_condition(P { x: 3 }, 0)}" == "2 2", "in_condition");
-}
-
-fn test_a_match_guard_that_makes_the_call() {
-  assert(guarded(P { x: 3 }) == 7, "guarded: {guarded(P { x: 3 })}");
 }
 
 fn test_the_value_if_in_a_loop() {

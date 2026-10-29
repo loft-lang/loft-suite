@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-M-Fixed` — what stays legal beside the refusal: a guard that reads the subject (also
+// through a callee that only reads its parameter), the selected arm's body writing the subject
+// once the tests are over, a nested match whose guard reads the outer subject, and a guard that
+// writes a COPY of the subject.  Values by hand.
+//
+// @falsified-at: none — the cells a correct refusal must not reject; a refusal too wide fails
+//   them at compile time.
+// CHANNEL: value, and the compile.
+// ARMED: no instrument.
+// WITNESS: none on a build before the rule (these always ran).
+// HOLDS: every cell passes on both backends.
+
+enum S { P { x: integer }, Q { y: integer }, R }
+
+fn big(s: S) -> boolean {
+  match s { P { x } => x > 2, _ => false }
+}
+
+fn flip(s: &S) -> boolean {
+  s = Q { y: 7 };
+  false
+}
+
+// 3 passes both tests; 1 fails `x > 2` and takes the next arm, -1.
+fn reads(s: S) -> integer {
+  match s {
+    P { x } if x > 2 && big(s) => x,
+    P { x } => -x,
+    _ => 0,
+  }
+}
+
+// The arm's body rebinds the subject after the tests: 1, then the new Q's 20.
+fn body_writes(s: S) -> integer {
+  r = 0;
+  match s {
+    P { x } if x > 0 => { s = Q { y: x * 10 }; r = 1; }
+    _ => {}
+  }
+  r + match s { Q { y } => y, _ => 0 }
+}
+
+// The inner guard reads the outer subject's binding: 5 - 1 = 4.
+fn nested(a: S, b: S) -> integer {
+  match a {
+    P { x } => match b {
+      Q { y } if y > x => y - x,
+      _ => 0,
+    },
+    _ => -1,
+  }
+}
+
+// The guard rebinds a copy of the subject, not the subject: the P arm's guard fails and the
+// `_` arm answers 0 — the copy's Q is never what the match tests.
+fn copied(s: S) -> integer {
+  c = s;
+  match s {
+    P { x } if flip(c) => x,
+    Q { y } => y,
+    _ => 0,
+  }
+}
+
+fn test_the_admitted_guards_answer_by_hand() {
+  assert("{reads(P { x: 3 })} {reads(P { x: 1 })}" == "3 -1", "reads");
+  assert(body_writes(P { x: 2 }) == 21, "body_writes: {body_writes(P { x: 2 })}");
+  assert(nested(P { x: 1 }, Q { y: 5 }) == 4, "nested");
+  assert(copied(P { x: 3 }) == 0, "copied: {copied(P { x: 3 })}");
+}
