@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PARAMETER IS TRUSTED ONLY WHERE EVERY CALL PROVES IT (`@FR-R-NonSentinelParam`).  A scalar
+// parameter counts as non-null when every direct call passes a proven value; and the C calls a
+// specialised twin from a call site whose arguments prove more than the program-wide fact.
+// Trusting a parameter some caller hands a null would compile `v % 32` as the plain operator,
+// which answers 0 for the null sentinel where the language answers null.  Each cell calls the
+// same function with a proven value and with a null: directly, through a chain of two
+// functions, with a division, and with an argument built by `+` and `*` (which the
+// release-pass probe closes over).  The parameters are `integer?`, the type that admits a null
+// caller; `?? -1` turns a null answer into -1, so a wrongly trusted
+// parameter reads 0.
+//
+// Values hand-computed:
+//   rem(70) = 70 % 32 = 6;          rem(null) = null → -1
+//   outer(77) = rem(77) = 13;       outer(null) → -1
+//   quot(70) = 70 / 8 = 8;          quot(null) → -1
+//   rem(3 * 5 + 40) = 55 % 32 = 23; rem(none()) → -1
+
+fn rem(v: integer?) -> integer? {
+  v % 32
+}
+
+fn outer(v: integer?) -> integer? {
+  rem(v)
+}
+
+fn quot(v: integer?) -> integer? {
+  v / 8
+}
+
+fn none() -> integer? {
+  n: integer? = null;
+  n
+}
+
+struct Box { b: integer? }
+
+fn test_a_null_caller_keeps_the_remainder_null() {
+  assert(rem(70) == 6, "rem 70 {rem(70)}");
+  assert((rem(none()) ?? -1) == -1, "rem null {rem(none()) ?? -1}");
+}
+
+fn test_a_chain_keeps_the_null() {
+  assert(outer(77) == 13, "outer 77 {outer(77)}");
+  bx = Box { b: null };
+  assert((outer(bx.b) ?? -1) == -1, "outer null {outer(bx.b) ?? -1}");
+}
+
+fn test_a_division_keeps_the_null() {
+  assert(quot(70) == 8, "quot 70 {quot(70)}");
+  assert((quot(none()) ?? -1) == -1, "quot null {quot(none()) ?? -1}");
+}
+
+fn test_an_argument_built_by_arithmetic() {
+  a = 3;
+  b = 5;
+  assert(rem(a * b + 40) == 23, "rem 55 {rem(a * b + 40)}");
+  assert((rem(none()) ?? -1) == -1, "rem null again");
+}
