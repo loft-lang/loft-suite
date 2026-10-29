@@ -1,0 +1,190 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `match at { Leaf {…} => …, Call { args } => { at = pick(args[0]); len(args) } }` read a
+// released store: `len(args)` answered 0 on both backends, quietly, and under `--interpret`
+// the rebind's own `args[0]` read null.  The same arm written FIRST answered right.
+//
+// `@FR-B-Disturb` is the rule: reassigning `at` ends the place `args` names, so a view still
+// used across that reassignment MATERIALISES (`@FR-B-View`: it is given its own copy).  The
+// scope pass's view walk decides which views do, and it walked a `match` arm in source order
+// only when the arm was the `if` chain's THEN side; every later arm sits in an `else if`, which
+// the walk read whole, so the bind, the reassignment and the use were one step and nothing was
+// condemned.  Found by the @PLN91 loft interpreter, whose projection walk is this loop.
+//
+// A second defect sat behind the first: the copy's buffer was made at the bind, so a `return`
+// the scope pass had already placed — an EARLIER arm's — did not free it, and it leaked once
+// per call (visible under `LOFT_STRICT_STORES=1`).  The early-return cells keep that honest.
+//
+// The arm-order cells pair each later-arm shape with its first-arm twin, which was already
+// right and says the fix restored an ordering rather than invented one.  `pick` returns a local
+// bound to its parameter, so the rebind copies; `id` returns the parameter itself.
+//
+// @falsified-at: ec098768e — interpret exit 1 -> 0, native exit 1 -> 0.  On main, `--interpret`
+//   fails the walk, the use-after and the single-step cells (a null element, caught by the
+//   `?? panic`); `--native` fails the use-after cell (its second argument reads null); every
+//   first-arm twin and the three spellings that were already right pass on both trees.  The
+//   leak half has no control there: main never materialised a later arm, so its buffer was
+//   never made — `LOFT_STRICT_STORES=1` on this tree is what shows it freed.
+
+enum N {
+  Leaf { n: integer },
+  Call { name: text, args: vector<N> },
+}
+
+struct Tree { v: integer, kids: vector<Tree> }
+
+fn pick(n: N) -> N {
+  at = n;
+  at
+}
+
+fn id(n: N) -> N {
+  n
+}
+
+fn pick_tree(t: Tree) -> Tree {
+  at = t;
+  at
+}
+
+fn two() -> N {
+  Call { name: "f", args: [Call { name: "g", args: [Leaf { n: 71 }, Leaf { n: 72 }] }, Leaf { n: 73 }] }
+}
+
+fn leaf_n(x: N) -> integer {
+  match x {
+    Leaf { n } => n,
+    _ => -9,
+  }
+}
+
+// The walk down each first argument, with the Call arm SECOND and an earlier arm returning:
+// f → g → 71.  The early return is the leak cell.
+fn walk_later_arm(x: N) -> integer {
+  at = x;
+  while true {
+    match at {
+      Leaf { n } => { return n; },
+      Call { name: _, args } => { at = pick(args[0] ?? panic("an argument")); },
+    }
+  }
+  -1
+}
+
+// The same walk with the Call arm FIRST, the return after it.
+fn walk_first_arm(x: N) -> integer {
+  at = x;
+  while true {
+    match at {
+      Call { name: _, args } => { at = pick(args[0] ?? panic("an argument")); },
+      Leaf { n } => { return n; },
+    }
+  }
+  -1
+}
+
+fn test_a_walk_down_a_later_arm_reads_each_level() {
+  assert(walk_later_arm(two()) == 71, "two levels: {walk_later_arm(two())}");
+  assert(walk_later_arm(Call { name: "f", args: [Leaf { n: 61 }] }) == 61, "one level");
+  assert(walk_later_arm(Leaf { n: 5 }) == 5, "no level");
+  assert(walk_first_arm(two()) == 71, "the first-arm twin");
+}
+
+// The view used AFTER the rebind, in a later arm: len 2, the second argument 62, then `at` is
+// the first argument's leaf, 61.  On main this answered "0 -8 61" natively and "0 -8 -9"
+// interpreted — no diagnostic.
+fn used_after(later: boolean) -> text {
+  at = Call { name: "f", args: [Leaf { n: 61 }, Leaf { n: 62 }] };
+  after_len = -1;
+  second = -1;
+  if later {
+    match at {
+      Leaf { n: _ } => {},
+      Call { name: _, args } => {
+        at = pick(args[0] ?? panic("an argument"));
+        after_len = len(args);
+        second = leaf_n(args[1] ?? panic("a second argument"));
+      },
+    }
+  } else {
+    match at {
+      Call { name: _, args } => {
+        at = pick(args[0] ?? panic("an argument"));
+        after_len = len(args);
+        second = leaf_n(args[1] ?? panic("a second argument"));
+      },
+      Leaf { n: _ } => {},
+    }
+  }
+  "{after_len} {second} {leaf_n(at)}"
+}
+
+fn test_a_view_used_after_the_rebind_in_a_later_arm_keeps_its_value() {
+  assert(used_after(true) == "2 62 61", "a later arm: {used_after(true)}");
+  assert(used_after(false) == "2 62 61", "the first-arm twin: {used_after(false)}");
+}
+
+// The rebind once, outside a loop, in a later arm: the second argument, 62.
+fn test_one_step_in_a_later_arm_reads_the_binding() {
+  at = Call { name: "f", args: [Leaf { n: 61 }, Leaf { n: 62 }] };
+  match at {
+    Leaf { n: _ } => {},
+    Call { name: _, args } => { at = pick(args[1] ?? panic("an argument")); },
+  }
+  assert(leaf_n(at) == 62, "the second argument: {leaf_n(at)}");
+}
+
+// A view variable that is not a match binding (`k` depends on `at`): two steps down, 71.
+fn test_a_plain_view_variable_is_read_before_the_rebind() {
+  at = two();
+  for _ in 0..2 {
+    match at {
+      Leaf { n: _ } => {},
+      Call { name: _, args } => {
+        k = args;
+        at = pick(k[0] ?? panic("an argument"));
+      },
+    }
+  }
+  assert(leaf_n(at) == 71, "two steps down: {leaf_n(at)}");
+}
+
+// A struct holding a vector of itself, walked through its first child: 1 → 2 → 3.  The value
+// names `t` itself, so this was right before the fix.
+fn test_a_struct_walks_down_its_own_children() {
+  t = Tree { v: 1, kids: [Tree { v: 2, kids: [Tree { v: 3, kids: [] }] }, Tree { v: 9, kids: [] }] };
+  sum = 0;
+  while true {
+    sum = sum * 10 + t.v;
+    if len(t.kids) == 0 {
+      break;
+    }
+    t = pick_tree(t.kids[0]);
+  }
+  assert(sum == 123, "the first-child path: {sum}");
+}
+
+// Spellings that were right before the fix: a callee that returns its parameter, and the
+// call's result bound to a temporary first — both in a later arm.
+fn test_the_spellings_that_were_already_right() {
+  at = two();
+  for _ in 0..2 {
+    match at {
+      Leaf { n: _ } => {},
+      Call { name: _, args } => { at = id(args[0] ?? panic("an argument")); },
+    }
+  }
+  assert(leaf_n(at) == 71, "through id: {leaf_n(at)}");
+  b = two();
+  for _ in 0..2 {
+    match b {
+      Leaf { n: _ } => {},
+      Call { name: _, args } => {
+        tmp = pick(args[0] ?? panic("an argument"));
+        b = tmp;
+      },
+    }
+  }
+  assert(leaf_n(b) == 71, "through a temporary: {leaf_n(b)}");
+}
