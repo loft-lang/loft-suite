@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Block` — a block ending in an expression yields that expression wherever the block
+// stands.  A call with a `&` argument writes out as statements (the store-protect bracket
+// around it, the result bound to a temporary), and `--native` wrote that sequence inside the
+// cast a boolean block's tail takes, `(stmt; let …; expr) as u8`, which rustc refuses: the
+// program did not build where `--interpret` ran it.  Reached from a value `if` whose arm ends
+// in such a call, and from a match guard that makes one, which `@FR-M-Once` folds into its
+// arm's condition as a value block.
+//
+// @falsified-at: ec098768e — native exit 1 -> 0 (every cell: the compile fails on main);
+//   interpret INERT (it always ran these).
+//   CHANNEL: exit — the native compile.
+//   WITNESS: on main, `--native` stops with `error: expected expression, found 'let'
+//   statement` in the generated Rust.
+//   HOLDS: every value below is equal on both backends; leak and panic clean.
+
+enum S { P { x: integer }, Q { y: integer }, R }
+
+// Rebinds the subject through its `&` and answers false.
+fn flip(s: &S) -> boolean {
+  s = Q { y: 7 };
+  false
+}
+
+fn assigned(s: S, c: integer) -> integer {
+  r = if c > 0 { t = c + 1; flip(s) } else { false };
+  if r { 1 } else { 2 }
+}
+
+fn in_condition(s: S, c: integer) -> integer {
+  if (if c > 0 { t = c + 1; flip(s) } else { false }) { 1 } else { 2 }
+}
+
+// The guard calls with the subject's `&`: it rebinds `s` to a Q and fails, so the next arm is
+// tried; as the lowering reads the tag per arm today, that arm sees the Q and answers its 7.
+fn guarded(s: S) -> integer {
+  match s {
+    P { x } if flip(s) => x,
+    Q { y } => y,
+    _ => 0,
+  }
+}
+
+// The value `if` in a loop: flip answers false each time, so every pass counts.
+fn looped(n: integer) -> integer {
+  hits = 0;
+  for i in 0..n {
+    s: S = P { x: i };
+    ok = if i >= 0 { t = i; flip(s) } else { true };
+    if !ok {
+      hits += 1;
+    }
+  }
+  hits
+}
+
+fn test_a_value_if_whose_arm_ends_in_the_call_is_assigned() {
+  assert("{assigned(P { x: 3 }, 1)} {assigned(P { x: 3 }, 0)}" == "2 2", "assigned");
+}
+
+fn test_a_value_if_whose_arm_ends_in_the_call_is_a_condition() {
+  assert("{in_condition(P { x: 3 }, 1)} {in_condition(P { x: 3 }, 0)}" == "2 2", "in_condition");
+}
+
+fn test_a_match_guard_that_makes_the_call() {
+  assert(guarded(P { x: 3 }) == 7, "guarded: {guarded(P { x: 3 })}");
+}
+
+fn test_the_value_if_in_a_loop() {
+  assert(looped(3) == 3, "looped: {looped(3)}");
+}
