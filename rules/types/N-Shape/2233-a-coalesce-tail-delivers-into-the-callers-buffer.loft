@@ -1,0 +1,140 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Shape` — a nullable vector local cannot BE the return buffer, and a `??` subject is
+// such a local whatever its type says: it holds the subject's answer, which may be null.
+// loft#2233: `fn w(s) -> vector<integer> { f(s) ?? [] }` renamed the `??` temp onto the caller's
+// buffer, so its bind `__ncc = f(s, __ref)` handed `f` a buffer of its own and rebound the
+// caller's handle to it.  On a present answer `w` returned the store it minted and one store
+// leaked per call; on a null answer the default arm wrote into the null sentinel, so
+// `f(s) ?? [7, 8]` answered `[]` (C) or panicked (interpreter), and an append to the result
+// was lost.  The spelling `r = f(s); r ?? d` was always right: it copies into the buffer.
+//
+// @falsified-at: 23bc61e4 — interpret exit 101 -> 0, interpret panicked -> clean, native exit 1 -> 0, native panicked -> clean
+//   The panic is `test_a_default_literal_is_delivered` and hides the later channels; run one
+//   cell at a time on that build and every cell leaks ten stores, and the append cell answers
+//   5185.
+// CHANNEL: the VALUE (sum + length over ten calls, hand-computed) and the LEAK (ten calls in a
+//   loop, so a per-call leak is ten stores, not one).
+// ARMED: no instrument.  Ordinary assertions on both backends.
+// HOLDS: every cell, on both backends.
+
+fn f(s: text) -> vector<integer>? {
+  if len(s) == 0 { return null; }
+  out: vector<integer> = [];
+  for i in 0..len(s) { out += [i * 10 + 1]; }
+  out
+}
+
+fn fb(s: text) -> vector<u8>? {
+  if len(s) == 0 { return null; }
+  out: vector<u8> = [];
+  for i in 0..len(s) { out += [(i + 5) & 255]; }
+  out
+}
+
+fn g(s: text) -> vector<integer>? {
+  out: vector<integer> = [];
+  for i in 0..len(s) { out += [i + 2]; }
+  out
+}
+
+fn w(s: text) -> vector<integer> { f(s) ?? [] }
+fn w78(s: text) -> vector<integer> { f(s) ?? [7, 8] }
+fn wb(s: text) -> vector<u8> { fb(s) ?? [] }
+fn wg(s: text) -> vector<integer> { g(s) ?? [99] }
+fn ww(s: text) -> vector<integer> { w(s) }
+fn wn(s: text) -> vector<integer> { f(s) ?? g("xy") }
+fn wq(s: text) -> vector<integer> { f(s) ?? f(s) ?? [5] }
+fn wr(s: text) -> vector<integer> { if len(s) > 50 { return [1]; } return f(s) ?? [6]; }
+
+fn tot(v: vector<integer>) -> integer {
+  t = 0;
+  for x in v { t += x; }
+  t + len(v)
+}
+
+// Even calls answer present (`f("abc")` = [1, 11, 21]: 33 + 3 = 36), odd calls answer null.
+fn arg(k: integer) -> text { if k % 2 == 0 { "abc" } else { "" } }
+
+fn test_the_present_arm_is_delivered() {
+  r = 0;
+  for _ in 0..10 { r += tot(w("abc")); }
+  assert(r == 360, "ten present answers: got {r}, want 360");
+}
+
+fn test_both_arms_with_an_empty_default() {
+  r = 0;
+  for k in 0..10 { r += tot(w(arg(k))); }
+  assert(r == 180, "five present, five []: got {r}, want 180");
+}
+
+fn test_a_default_literal_is_delivered() {
+  r = 0;
+  for k in 0..10 { r += tot(w78(arg(k))); }
+  assert(r == 265, "five present, five [7, 8] (17): got {r}, want 265");
+}
+
+fn test_a_byte_vector() {
+  r = 0;
+  for k in 0..10 {
+    v = wb(arg(k));
+    for x in v { r += x; }
+    r += len(v);
+  }
+  assert(r == 105, "five [5, 6, 7] (21), five []: got {r}, want 105");
+}
+
+fn test_a_wrapper_that_chains_the_result() {
+  r = 0;
+  for k in 0..10 { r += tot(ww(arg(k))); }
+  assert(r == 180, "through a forwarding wrapper: got {r}, want 180");
+}
+
+fn test_the_result_takes_an_append_on_the_null_arm() {
+  r = 0;
+  for k in 0..10 {
+    v = w(arg(k));
+    v += [1000];
+    r += tot(v);
+  }
+  assert(r == 10190, "five [1, 11, 21, 1000] (1037), five [1000] (1001): got {r}, want 10190");
+}
+
+fn test_a_subject_that_never_answers_null() {
+  r = 0;
+  for k in 0..10 { r += tot(wg(arg(k))); }
+  assert(r == 60, "five [2, 3, 4] (12), five []: got {r}, want 60");
+}
+
+fn test_a_call_as_the_default() {
+  r = 0;
+  for k in 0..10 { r += tot(wn(arg(k))); }
+  assert(r == 215, "five present, five g(\"xy\") = [2, 3] (7): got {r}, want 215");
+}
+
+fn test_a_chained_coalesce() {
+  r = 0;
+  for k in 0..10 { r += tot(wq(arg(k))); }
+  assert(r == 210, "five present, five [5] (6): got {r}, want 210");
+}
+
+fn test_an_explicit_return_of_a_coalesce() {
+  r = 0;
+  for k in 0..10 { r += tot(wr(arg(k))); }
+  assert(r == 215, "five present, five [6] (7): got {r}, want 215");
+}
+
+// A `main` that calls every cell, so the leak channel can fire under `--interpret`.
+fn main() {
+  test_the_present_arm_is_delivered();
+  test_both_arms_with_an_empty_default();
+  test_a_default_literal_is_delivered();
+  test_a_byte_vector();
+  test_a_wrapper_that_chains_the_result();
+  test_the_result_takes_an_append_on_the_null_arm();
+  test_a_subject_that_never_answers_null();
+  test_a_call_as_the_default();
+  test_a_chained_coalesce();
+  test_an_explicit_return_of_a_coalesce();
+}
