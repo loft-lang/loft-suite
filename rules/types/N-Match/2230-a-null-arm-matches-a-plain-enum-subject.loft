@@ -1,0 +1,117 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-N-Match — `match e { null => …, … }` eliminates `t?` for every t.  loft#1417 gave the
+// `null` arm to a heap subject (`1417-a-null-arm-matches-a-heap-subject.loft`); a PLAIN enum
+// — a value enum, no payload variants — still went to the arm-head parser, which reads a
+// variant name, so `null` stopped the arm loop and the file was refused with
+// "Expect token }" (loft#2230).
+//
+// A plain enum is one discriminant byte, and its absence is that byte: 255 for a written
+// null, 0 for a field never set.  No variant takes either value, so the `null` arm asks the
+// one absence test (`null_test`, `OpConvBoolFromEnum`), and a variant arm, which compares
+// the byte against its own number, never matches a null.  Both encodings are cells below.
+//
+// Like the heap arm, the `null` arm covers no variant: a match without `_` must still name
+// every variant (`2230-a-null-arm-covers-no-variant.loft`, a file of its own because a refused
+// file runs none of its cells), and a match with no `null` arm still answers null for an
+// absent subject.
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, native exit 1 -> 0.  The control refuses
+//   the file on the first `null` arm, so no cell runs there; the ten value assertions are what
+//   make a pass here mean more than "it parsed".
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+
+enum C { A, B, D }
+struct H { c: C?, k: integer }
+
+fn first(e: C?) -> text { match e { null => "n", A => "a", B => "b", D => "d" } }
+fn last(e: C?) -> text { match e { A => "a", B => "b", D => "d", null => "n" } }
+fn mk(i: integer) -> C? { if i == 0 { null } else if i == 1 { A } else { D } }
+
+fn a_null_arm_matches_an_absent_vector_element() {
+  v: vector<C?> = [null, B, null, A, D];
+  out = "";
+  for e in v {
+    out += match e { null => "n", A => "1", B => "2", D => "3" };
+  }
+  assert_eq(out, "n2n13", "each null element takes the null arm, each variant its own");
+}
+
+fn the_null_arm_may_come_last() {
+  assert_eq("{last(null)}{last(B)}{last(D)}", "nbd", "a null arm after the variants");
+}
+
+fn a_null_arm_beside_a_wildcard() {
+  r = "";
+  ev: vector<C?> = [null, B, A];
+  for x in ev {
+    r += match x { null => "n", B => "b", _ => "w" };
+  }
+  assert_eq(r, "nbw", "null is not swallowed by the wildcard");
+}
+
+// The two absent bytes: a field never written (0) and one written null (255).
+fn both_absent_encodings_take_the_null_arm() {
+  h = H { k: 7 };
+  assert_eq(first(h.c), "n", "a field never set");
+  h.c = null;
+  assert_eq(first(h.c), "n", "a field set to null");
+  h.c = B;
+  assert_eq(first(h.c), "b", "a field set to a variant");
+}
+
+fn a_call_result_subject() {
+  s = "";
+  for i in 0..3 {
+    s += match mk(i) { null => "n", A => "a", _ => "o" };
+  }
+  assert_eq(s, "nao", "null, A, then D through the wildcard");
+}
+
+fn a_binding_and_a_guard_beside_the_null_arm() {
+  b = "";
+  ev: vector<C?> = [null, B];
+  for x in ev {
+    b += match x { null => "n", y: _ => "x{y}" };
+  }
+  assert_eq(b, "nxB", "the binding arm binds the present value");
+  g = "";
+  ev: vector<C?> = [A, null, D];
+  for x in ev {
+    g += match x { null => "n", A if len(g) == 0 => "ag", A => "a", _ => "o" };
+  }
+  assert_eq(g, "agno", "the guard is asked only for a present A");
+}
+
+fn an_integer_result() {
+  t = 0;
+  ev: vector<C?> = [null, B];
+  for x in ev {
+    t += match x { null => 100, A => 1, B => 2, D => 3 };
+  }
+  assert_eq(t, 102, "null arm and a variant arm, summed");
+}
+
+fn a_statement_match() {
+  st = "";
+  e: C? = null;
+  match e { null => st += "S", A => st += "T", _ => st += "U" }
+  assert_eq(st, "S", "the null arm runs as a statement");
+}
+
+// A subject that cannot be absent accepts the arm and never takes it, as a scalar does.
+fn a_non_nullable_subject() {
+  r = "";
+  ev: vector<C> = [A, B];
+  for x in ev {
+    r += match x { null => "n", A => "a", B => "b", D => "d" };
+  }
+  assert_eq(r, "ab", "the null arm is never taken");
+}
+
+fn a_match_without_a_null_arm_is_unchanged() {
+  absent: C? = null;
+  m = match absent { A => 1, B => 2, D => 3 };
+  assert_eq("{m ?? -1}", "-1", "an absent subject still answers null");
+}
