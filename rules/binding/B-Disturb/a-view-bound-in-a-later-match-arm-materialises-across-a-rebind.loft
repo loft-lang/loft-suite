@@ -20,12 +20,20 @@
 // right and says the fix restored an ordering rather than invented one.  `pick` returns a local
 // bound to its parameter, so the rebind copies; `id` returns the parameter itself.
 //
-// @falsified-at: ec098768e — interpret exit 1 -> 0, native exit 1 -> 0.  On main, `--interpret`
-//   fails the walk, the use-after and the single-step cells (a null element, caught by the
-//   `?? panic`); `--native` fails the use-after cell (its second argument reads null); every
-//   first-arm twin and the three spellings that were already right pass on both trees.  The
-//   leak half has no control there: main never materialised a later arm, so its buffer was
-//   never made — `LOFT_STRICT_STORES=1` on this tree is what shows it freed.
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: ec098768e — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: exit — a null element reached through the stale view panics at the cells' own
+//   `?? panic` (written so the wrong answer cannot pass quietly), on both backends.
+//   ARMED: `LOFT_STRICT_STORES=1`, for the early-return cell's half: the copy's buffer leaked
+//   once per call on this tree before its second fix, and only the strict-store check shows
+//   it.  Main has no control for that half — it never materialised a later arm, so it never
+//   made the buffer.
+//   WITNESS: on main, `--interpret` fails `test_a_walk_down_a_later_arm_reads_each_level`,
+//   `test_a_view_used_after_the_rebind_in_a_later_arm_keeps_its_value` and
+//   `test_one_step_in_a_later_arm_reads_the_binding` (a null element); `--native` fails the
+//   use-after cell (its second argument reads null).
+//   HOLDS: every first-arm twin and the three spellings that were already right pass on both
+//   trees; no other cell moves.
 
 enum N {
   Leaf { n: integer },
