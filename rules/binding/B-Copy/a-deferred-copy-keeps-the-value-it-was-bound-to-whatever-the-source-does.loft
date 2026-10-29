@@ -33,12 +33,24 @@
 //              sum += op.a * 10 + op.b + prog.k, the first then writing ps[1] = mk(9)
 //              → 21 + 21 = 42 (the view read on the second pass is the copy's)
 //   live:      prog = copy of callee (ps[1]); ps[1] = mk(7); prog.k 10, callee.k 70 → 1070
+// A source the function builds and returns beside (`-> R`, so the vector lives in the return
+// buffer's store) against a caller's record handed in:
+//   plain:     no pointer field in `h`, so a write through it reaches none of `ps`'s records:
+//              prog = copy of ps[1] (k 10); grow_plain sets h.n = 99 → 10 * 100 + 99 = 1099
+//   linked:    `h.link` points INTO ps[1], stored before the bind: poke(h) writes ps[1].k = 55,
+//              which the copy must not see → 10 * 100 + 55 = 1055.  Fails on loft 69b3e2ced's
+//              C, which proved `h` apart by store and read 55 (a stored pointer crosses stores)
+//   place:     a call writes ps[1].ops through its destination: prog keeps ops[0].a 1 and
+//              three ops → 1 * 10 + 3 = 13
 //   outlives:  prog = copy of ps[1]; o = prog.ops[2] (a 1, b 3); ps[1] = mk(7); prog rebound to
 //              ps[0] (k 0) before any read, o read after → 1 * 10 + 3 + 0 = 13.  The rebind of
 //              `prog` while `o` is live makes `o` its own copy at the bind (`@FR-B-View`), so
 //              this cell pins the values, not the copy point.
 struct Op { a: integer, b: integer }
 struct P { ops: vector<Op>, k: integer }
+struct Plain { n: integer, tags: vector<integer> }
+struct Linked { link: reference<P>, n: integer }
+struct R { v: integer }
 
 fn mk(i: integer) -> P { P { ops: [Op { a: i, b: 1 }, Op { a: i, b: 2 }, Op { a: i, b: 3 }], k: 10 * i } }
 
@@ -174,6 +186,42 @@ fn outlives(ps: vector<P>) -> integer {
   o.a * 10 + o.b + prog.k
 }
 
+fn grow_plain(h: Plain) { h.tags += [7]; h.n = 99; }
+
+fn poke(h: Linked) { h.link.k = 55; }
+
+fn mkops() -> vector<Op> { [Op { a: 9, b: 9 }] }
+
+fn plain_arg(h: Plain) -> R {
+  ps: vector<P> = [mk(0), mk(1)];
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  grow_plain(h);
+  ps[1] = mk(7);
+  R { v: prog.k * 100 + h.n }
+}
+
+fn linked_arg(h: Linked) -> R {
+  ps: vector<P> = [mk(0), mk(1)];
+  h.link = &ps[1];
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  poke(h);
+  R { v: prog.k * 100 + (ps[1] ?? panic("in range")).k }
+}
+
+fn place_in_source() -> R {
+  ps: vector<P> = [mk(0), mk(1)];
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[1].ops = mkops();
+  o = prog.ops[0] ?? panic("in range");
+  R { v: o.a * 10 + len(prog.ops) }
+}
+
 fn test_an_overwrite_of_the_source_element() {
   assert(overwrite(mks()) == 1013, "overwrite {overwrite(mks())}");
 }
@@ -220,4 +268,19 @@ fn test_a_source_still_read_after_the_bind() {
 
 fn test_a_view_still_read_after_its_local_is_rebound() {
   assert(outlives(mks()) == 13, "outlives {outlives(mks())}");
+}
+
+fn test_a_plain_argument_is_apart_from_a_placed_source() {
+  r = plain_arg(Plain { n: 1, tags: [] });
+  assert(r.v == 1099, "plain {r.v}");
+}
+
+fn test_an_argument_with_a_pointer_into_the_source_is_not() {
+  r = linked_arg(Linked { link: mk(9), n: 0 });
+  assert(r.v == 1055, "linked {r.v}");
+}
+
+fn test_a_call_writing_a_field_of_the_viewed_element() {
+  r = place_in_source();
+  assert(r.v == 13, "place {r.v}");
 }
