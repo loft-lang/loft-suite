@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-Escape` — a closure is a value: stored into a field of a struct the caller handed in,
+// it outlives the callee and answers from its captures when the caller calls it; built into a
+// struct a callee returns, it is called straight off the call.  The other cells hold the struct
+// in a local literal; this file moves its PROVENANCE (a parameter, a callee's return) and the
+// kind of capture: a scalar and a text are copied at the build (`@FR-L-CapScalar`), a vector and
+// a comprehension's result are SHARED (`@FR-L-CapHeap`), so a later mutation of the source is
+// what the closure reads.  A field overwritten twice inside one callee keeps the last closure,
+// and the first one's captures are released (`@FR-L-CapOwn`, the leak check).
+// A fn-ref COPIED out of such a field is loft#2273, not this file.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the VALUE each closure answers, hand-computed, and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct EsH { tag: integer, f: fn() -> integer }
+struct EsT { g: fn() -> text }
+
+fn es_zero() -> integer { 0 }
+
+fn install(h: EsH, n: integer) { h.f = fn() -> integer { n * 2 }; }
+fn install_text(t: EsT, s: text) { t.g = fn() -> text { "<{s}>" }; }
+fn install_vec(h: EsH, v: vector<integer>) { h.f = fn() -> integer { len(v) * 10 + v[0] }; }
+fn install_twice(h: EsH, s: text) {
+  h.f = fn() -> integer { len(s) };
+  h.f = fn() -> integer { len(s) + 1000 };
+}
+fn made(n: integer) -> EsH { EsH { tag: 1, f: fn() -> integer { n + 100 } } }
+
+fn test_a_closure_stored_into_a_parameter_outlives_the_callee() {
+  h = EsH { tag: 0, f: es_zero };
+  install(h, 21);
+  assert(h.f() == 42, "scalar: {h.f()}");
+  t = EsT { g: fn() -> text { "" } };
+  w = "abc";
+  install_text(t, w);
+  w += "Z";
+  // A text is copied at the build: the later append is not seen.
+  assert(t.g() == "<abc>", "text: {t.g()}");
+}
+
+fn test_a_vector_capture_is_shared() {
+  h = EsH { tag: 0, f: es_zero };
+  v = [7, 8];
+  install_vec(h, v);
+  v += [9];
+  v[0] = 1;
+  // len 3, first element 1: 3 * 10 + 1
+  assert(h.f() == 31, "vector: {h.f()}");
+  xs = [for i in 0..4 { i * 3 }];
+  f = fn() -> integer { len(xs) * 100 + xs[3] };
+  xs += [1];
+  // len 5, xs[3] = 9
+  assert(f() == 509, "comprehension: {f()}");
+}
+
+fn test_a_field_overwritten_twice_keeps_the_last_closure() {
+  h = EsH { tag: 0, f: es_zero };
+  install_twice(h, "hello");
+  assert(h.f() == 1005, "twice: {h.f()}");
+}
+
+fn test_a_closure_is_called_off_a_callee_that_returns_its_struct() {
+  assert(made(3).f() == 103, "off the call: {made(3).f()}");
+  h = made(5);
+  assert(h.f() == 105, "bound: {h.f()}");
+  for i in 0..3 {
+    assert(made(i).f() == 100 + i, "in a loop: {made(i).f()}");
+  }
+}
