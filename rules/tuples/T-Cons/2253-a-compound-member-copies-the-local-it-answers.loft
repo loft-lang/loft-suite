@@ -1,0 +1,114 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2253, `@FR-T-Cons` — a tuple member is COPIED in whatever expression spells it.  A member
+// written as an `if`, a `match`, a block or a `??` whose arm answered a heap LOCAL was a second
+// name for that local: a write through the member reached it, on every backend, while a plain
+// bind, a struct field and a vector-literal element of the same spelling copied.
+//
+// Axes it MOVES: the member's spelling (`c ?? v`, a chained `??`, `?? h.v`, `if`, `match`, a
+// block, and a bare local as the CONTROL), the heap kind (a flat and a nested vector, a struct,
+// a hash), how the write arrives (an append, a nested append, a field write, a keyed insert), the
+// tuple's route (a literal, a member write, a destructure, a return), the member position, and
+// the evaluation count (a loop whose rounds alternate a fresh arm and a local arm).
+// Every value is hand-computed: the source keeps what it was built with.
+//
+// @falsified-at: 23bc61e4 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the VALUE (the source after the write) and the LEAK (`main` runs every cell).
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct P2253 { x: integer, tags: vector<integer> }
+struct K2253 { k: integer, n: integer }
+struct H2253 { v: vector<vector<integer>> }
+
+fn pv2253(i: integer) -> vector<integer>? { if i == 0 { [0] } else { null } }
+fn pvv2253(i: integer) -> vector<vector<integer>>? { if i == 0 { [[0]] } else { null } }
+fn pp2253(i: integer) -> P2253? { if i == 0 { P2253 { x: 0, tags: [] } } else { null } }
+fn mk2253(i: integer) -> vector<integer> { [i, i] }
+fn ret2253(v: vector<integer>, k: integer) -> (vector<integer>, integer) { (if k == 1 { v } else { mk2253(k) }, k) }
+
+fn test_every_spelling_of_a_vector_member() {
+  v: vector<integer> = [1];
+  w: vector<integer> = [9];
+  k = 1;
+  a = (pv2253(1) ?? v, 8);
+  a.0 += [6];
+  b = (pv2253(1) ?? pv2253(1) ?? v, 8);
+  b.0 += [6];
+  c = (8, pv2253(1) ?? v);
+  c.1 += [6];
+  d = (if k == 1 { v } else { w }, 8);
+  d.0 += [6];
+  e = (match k { 1 => v, _ => w }, 8);
+  e.0 += [6];
+  f = ({ v }, 8);
+  f.0 += [6];
+  g = (v, 8);
+  g.0 += [6];
+  assert("{v} {w}" == "[1] [9]", "the sources: {v} {w}");
+  assert("{a.0} {b.0} {c.1} {d.0} {e.0} {f.0} {g.0}" == "[1,6] [1,6] [1,6] [1,6] [1,6] [1,6] [1,6]", "the members");
+  h = (pv2253(0) ?? v, 8);
+  h.0 += [6];
+  assert("{v} {h.0}" == "[1] [0,6]", "the present arm: {v} {h.0}");
+}
+
+fn test_a_nested_vector_and_a_field_default() {
+  vv: vector<vector<integer>> = [[1], [2]];
+  a = (pvv2253(1) ?? vv, 8);
+  a.0[0] += [6];
+  b = (pvv2253(1) ?? vv, 8);
+  b.0 += [[6]];
+  hv = H2253 { v: [[1], [2]] };
+  c = (pvv2253(1) ?? hv.v, 8);
+  c.0[0] += [6];
+  assert("{vv} {hv.v}" == "[[1],[2]] [[1],[2]]", "the sources: {vv} {hv.v}");
+  assert("{a.0} {b.0} {c.0}" == "[[1,6],[2]] [[1],[2],[6]] [[1,6],[2]]", "the members: {a.0} {b.0} {c.0}");
+}
+
+fn test_a_struct_and_a_hash_member() {
+  p = P2253 { x: 1, tags: [1] };
+  a = (pp2253(1) ?? p, 2);
+  a.0.tags += [6];
+  a.0.x = 50;
+  h: hash<K2253[k]> = [K2253 { k: 1, n: 1 }];
+  k = 1;
+  b = (if k == 1 { h } else { h }, 2);
+  b.0 += [K2253 { k: 2, n: 2 }];
+  assert("{p.x} {p.tags} {len(h)}" == "1 [1] 1", "the sources: {p.x} {p.tags} {len(h)}");
+  assert("{a.0.x} {a.0.tags} {len(b.0)}" == "50 [1,6] 2", "the members: {a.0.x} {a.0.tags} {len(b.0)}");
+}
+
+fn test_a_member_write_a_destructure_and_a_return() {
+  w: vector<integer> = [1];
+  t = ([0], 0);
+  t.0 = pv2253(1) ?? w;
+  t.0 += [6];
+  (x, y) = (pv2253(1) ?? w, 3);
+  x += [7];
+  q = ret2253(w, 1);
+  q.0 += [5];
+  assert("{w}" == "[1]", "the source: {w}");
+  assert("{t.0} {x} {y} {q.0}" == "[1,6] [1,7] 3 [1,5]", "the copies: {t.0} {x} {q.0}");
+}
+
+fn test_a_loop_alternating_a_fresh_arm_and_a_local() {
+  v: vector<integer> = [1];
+  r = "";
+  for i in 0..10 {
+    a = (if i % 2 == 0 { mk2253(i) } else { v }, i);
+    a.0 += [9];
+    b = (pv2253(i % 2) ?? mk2253(i), i);
+    b.0 += [8];
+    r = "{a.0} {b.0}";
+  }
+  assert("{v} {r}" == "[1] [1,9] [9,9,8]", "after ten rounds: {v} {r}");
+}
+
+fn main() {
+  test_every_spelling_of_a_vector_member();
+  test_a_nested_vector_and_a_field_default();
+  test_a_struct_and_a_hash_member();
+  test_a_member_write_a_destructure_and_a_return();
+  test_a_loop_alternating_a_fresh_arm_and_a_local();
+}
