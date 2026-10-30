@@ -1,0 +1,112 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2275 — `@FR-I-RangeFrom`: `a..` stops after the type's MAXIMUM — the start's own type,
+// so a `u8` start yields 255 last, an `i8` 127, a `u16` 65535.  `@FR-I-Range` with `@FR-I-Join`:
+// a bounded range's variable holds every value from the start to the end, so its type is the
+// UNION of the bounds' types — `u8..300` is an `integer` range, `i8..u8` covers both — unless
+// the end the range yields already fits the start's type (`u8..=255`).  The variable took the
+// start's type alone: a `u8` loop variable counted 256, 257, … and passed the narrowing check
+// into a `u8` local, which then held 256.
+// A wide `integer` start keeps `i64::MAX` as its open end, and `I-Range`'s other cells are
+// untouched.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0,
+//   native exit 1 -> 0, native 2 assertion failures -> 0.
+// WITNESS: on main the `u8` open range answers `253 254 255 256 257 258 259`, each value
+//   stored into a `u8` local.
+// CHANNEL: the VALUES each range yields, hand-computed (the last one its type's maximum).
+// ARMED: no instrument.
+// HOLDS: every cell, on every backend.
+
+fn open_end(start: u8) -> text {
+  s = "";
+  c = 0;
+  for x in start.. {
+    b: u8 = 0;
+    b = x;
+    s += "{b} ";
+    c += 1;
+    if c > 6 { break; }
+  }
+  s
+}
+
+fn open_i8() -> text {
+  a: i8 = 125;
+  s = "";
+  c = 0;
+  for x in a.. {
+    s += "{x} ";
+    c += 1;
+    if c > 6 { break; }
+  }
+  s
+}
+
+fn open_u16() -> integer {
+  a: u16 = 65530;
+  c = 0;
+  for x in a.. { c += 1; }
+  c
+}
+
+fn open_i32() -> text {
+  a: i32 = 2147483646;
+  c = 0;
+  last = 0;
+  for x in a.. {
+    c += 1;
+    last = x;
+  }
+  "{c} {last}"
+}
+
+fn open_wide() -> integer {
+  hi = 9223372036854775807;
+  c = 0;
+  for x in hi - 1.. { c += 1; }
+  c
+}
+
+// The end is wider than the start: the values run past 255, so the variable is an `integer`.
+fn wider_end() -> text {
+  a: u8 = 254;
+  s = "";
+  for x in a..258 { s += "{x} "; }
+  s
+}
+
+fn mixed_narrow() -> text {
+  a: u8 = 130;
+  b: i8 = 126;
+  s = "";
+  for y in b..a { if y > 127 { s += "{y} "; } }
+  s
+}
+
+// The end fits the start's type: still a `u8` range, its variable stored into a `u8`.
+fn end_fits() -> text {
+  a: u8 = 253;
+  s = "";
+  for x in a..=255 {
+    y: u8 = x;
+    s += "{y} ";
+  }
+  s
+}
+
+fn test_an_open_range_stops_at_its_types_maximum() {
+  assert(open_end(253) == "253 254 255 ", "u8: {open_end(253)}");
+  assert(open_end(255) == "255 ", "u8 at max: {open_end(255)}");
+  assert(open_i8() == "125 126 127 ", "i8: {open_i8()}");
+  assert(open_u16() == 6, "u16: {open_u16()}");
+  assert(open_i32() == "2 2147483647", "i32: {open_i32()}");
+  assert(open_wide() == 2, "integer: {open_wide()}");
+}
+
+fn test_a_bounded_range_holds_both_bounds() {
+  assert(wider_end() == "254 255 256 257 ", "wider end: {wider_end()}");
+  assert(mixed_narrow() == "128 129 ", "i8..u8: {mixed_narrow()}");
+  assert(end_fits() == "253 254 255 ", "end fits: {end_fits()}");
+}
