@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-M-Fixed` — while a match's arms are tested the subject is not written, so a guard that
+// can write it is a static error: one that rebinds it through a `&`, hands it to a callee that
+// writes its parameter, or writes a view of it a pattern bound.  A reader of a `match` may
+// assume its subject is tested and not modified.  One function per shape; the shapes that stay
+// legal are `a-guard-that-only-reads-the-subject-is-admitted.loft` beside it.
+//
+// @falsified-at: none — the rule is new; on a build before it every one of these compiles
+//   and runs, and the later arms test whatever the guard left.
+// CHANNEL: expect — each function's diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build admitting one of these compiles it and answers by its lowering.
+// HOLDS: the admitted file beside it.
+
+enum S { P { x: integer }, Q { y: integer }, R }
+struct Pt { x: integer, y: integer }
+enum H { Bx { p: Pt }, Em }
+struct Op { code: S, n: integer }
+
+fn flip(s: &S) -> boolean {
+  s = Q { y: 7 };
+  false
+}
+
+fn grow(v: vector<integer>) -> boolean {
+  v += [9];
+  false
+}
+
+fn zero(p: Pt) -> boolean {
+  p.x = 0;
+  false
+}
+
+fn bump(n: &integer) -> boolean {
+  n += 1;
+  false
+}
+
+fn reset(o: Op) -> boolean {
+  o.n = 0;
+  false
+}
+
+// @EXPECT_ERROR: a match guard cannot change 's'
+fn test_a_guard_rebinds_the_subject_through_a_reference() {
+  s: S = P { x: 3 };
+  r = match s { P { x } if flip(s) => x, Q { y } => y, _ => 0 };
+  assert(r == 0, "unreachable");
+}
+
+// @EXPECT_ERROR: a match guard cannot change 'v'
+fn test_a_guard_hands_the_subject_to_a_callee_that_writes_it() {
+  v = [1, 2];
+  r = match v { [a, ..rest] if grow(v) => a, _ => len(v) };
+  assert(r == 2, "unreachable");
+}
+
+// @EXPECT_ERROR: a match guard cannot change 'h'
+fn test_a_guard_writes_a_view_the_pattern_bound() {
+  h: H = Bx { p: Pt { x: 3, y: 4 } };
+  r = match h { Bx { p } if zero(p) => p.x, Bx { p } => p.x + p.y, _ => 0 };
+  assert(r == 7, "unreachable");
+}
+
+// @EXPECT_ERROR: a match guard cannot change 'n'
+fn test_a_guard_writes_a_scalar_subject() {
+  n = 1;
+  r = match n { 1 if bump(n) => 10, _ => n };
+  assert(r == 1, "unreachable");
+}
+
+// @EXPECT_ERROR: a match guard cannot change 'o'
+fn test_a_guard_writes_the_record_a_field_subject_reads() {
+  o = Op { code: P { x: 3 }, n: 5 };
+  r = match o.code { P { x } if reset(o) => x, _ => o.n };
+  assert(r == 5, "unreachable");
+}
