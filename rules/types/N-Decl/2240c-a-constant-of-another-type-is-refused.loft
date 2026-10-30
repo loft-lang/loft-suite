@@ -1,0 +1,17 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-N-Decl — a constant whose value is not of its declared type is refused at the
+// declaration, naming the constant (loft#2240).
+//
+// @EXPECT_ERROR: constant 'CT' is declared text but its value is integer
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
+//   native exit 1 -> 0, native expectations FAIL/1 -> 0/1: the control accepted `CT: text = 5`.
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+
+CT: text = 5;
+
+fn main() {
+  println("{CT}");
+}

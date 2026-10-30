@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-N-Decl — a declared slot `x: τ` is a commitment, and a file-scope constant is one.
+// Its annotation was parsed and DISCARDED, so the literal's own type stood: `CV: vector<u8>
+// = [1, 2]` was a `vector<integer>`.  A use that checks the type refused it (a `vector<u8>`
+// parameter, a `vector<u8>` field), and a COPY took the literal's type and accepted what
+// the declared one refuses: `v = CV; v += [300]` answered [1,2,300] (loft#2240).
+//
+// Built at a narrow element type, a vector constant needs the constant store to hold
+// narrow elements, nullable ones included; a struct table with narrow fields used to be
+// refused outright for the same reason.  The refusals the declared type implies are in
+// the companion files 2240b-2240d.
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, native exit 1 -> 0.  The control refuses
+//   the file (the struct table with narrow fields could not be pre-built there), so no cell
+//   runs on it; the value assertions are what make a pass here mean more than "it parsed".
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+
+CV: vector<u8> = [1, 2, 255];
+CW: vector<i16> = [-3, 4, -32768, 32767];
+CU: vector<u16> = [0, 65535];
+CQ: vector<u8?> = [1, null, 254];
+CR: vector<i16?> = [null, -32767, 32767];
+CF: float = 1;
+CVF: vector<float> = [1, 2];
+CI = [7, 8];
+
+struct B { b: vector<u8> }
+struct R { a: u8, b: integer, c: i16 }
+struct N { a: u8?, b: integer }
+T = [R { a: 1, b: 2, c: -5 }, R { a: 250, b: 7, c: 300 }];
+TN = [N { a: null, b: 1 }, N { a: 9, b: 2 }];
+
+fn sum_u8(v: vector<u8>) -> integer {
+  t = 0;
+  for x in v { t += x; }
+  t
+}
+
+fn a_narrow_constant_reaches_a_narrow_parameter_and_field() {
+  assert_eq(sum_u8(CV), 258, "1 + 2 + 255 through a vector<u8> parameter");
+  b = B { b: CV };
+  assert_eq("{b.b}", "[1,2,255]", "into a vector<u8> field");
+  assert_eq("{CV} {len(CV)} {CV[2]}", "[1,2,255] 3 255", "the constant itself");
+}
+
+fn a_copy_keeps_the_declared_type() {
+  v = CV;
+  v += [9];
+  assert_eq("{v} {CV}", "[1,2,255,9] [1,2,255]", "the copy grows, the constant does not");
+}
+
+fn sixteen_bit_constants_hold_their_edges() {
+  assert_eq("{CW} {CW[0] + 1}", "[-3,4,-32768,32767] -2", "i16 at both ends");
+  assert_eq("{CU} {len(CU)}", "[0,65535] 2", "u16 at both ends");
+}
+
+fn nullable_narrow_constants_hold_their_nulls() {
+  c = 0;
+  for x in CQ { if x == null { c += 100; } else { c += x; } }
+  assert_eq(c, 355, "1 + null as 100 + 254");
+  assert_eq("{CQ[1] == null} {CR[0] == null} {CR[1] + 1}", "true true -32766", "the nulls stay null");
+}
+
+fn a_struct_table_with_narrow_fields() {
+  t = 0;
+  for r in T { t += r.a + r.b + r.c; }
+  assert_eq(t, 555, "(1 + 2 - 5) + (250 + 7 + 300)");
+  n = 0;
+  for x in TN { n += (x.a ?? 50) + x.b; }
+  assert_eq(n, 62, "(50 + 1) + (9 + 2), the null read as absent");
+}
+
+fn other_declared_constants_are_unchanged() {
+  f: float = 1;
+  assert_eq("{CF} {f}", "1 1", "a float constant renders as its local twin");
+  assert_eq("{CVF[0] + 0.5}", "1.5", "a vector<float> constant holds floats");
+  assert_eq("{CI}", "[7,8]", "an unannotated constant");
+}
