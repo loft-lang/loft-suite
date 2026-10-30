@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapHeap` / `@FR-L-CapScalar` — a lambda reads its captures by value inside a
+// comprehension, whatever the captured value is.  The corpus put a capture inside a
+// comprehension only as an integer, a collection or a struct (`scripts/matrix_axes.py cross A10
+// A7`, `A10 A4`, `A10 A6`, `A1 A10`, `A1 A4`); this file reaches the rest of those pairs: a
+// narrow integer, a float, an enum, a nested vector, a text, a tuple and a spatial index, read
+// in the comprehension's body, in a `??` subject and default, and as a call argument.  A
+// spatial lookup, and a whole spatial index, also stand as a `??` default outside any lambda.  Every value is
+// hand-computed, every lambda runs ten times, and `main` runs it all for the leak check.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the VALUE (hand-computed) and the LEAK.
+
+enum CapCol { Red, Green, Blue }
+struct CapP { x: integer, y: integer }
+struct CapPt { x: integer, y: integer, n: integer }
+
+fn cap_pick(i: integer) -> integer? { if i % 2 == 0 { i } else { null } }
+fn cap_pv(i: integer) -> vector<integer>? { if i % 2 == 0 { [i] } else { null } }
+fn cap_g(a: integer, b: integer) -> integer { a * 10 + b }
+fn cap_tot(v: vector<integer>) -> integer { t = 0; for x in v { t += x; } t }
+fn cap_cn(c: CapCol) -> integer { match c { Red => 1, Green => 2, Blue => 3 } }
+fn cap_maybe(i: integer) -> CapPt? { if i == 0 { CapPt { x: 0, y: 0, n: 99 } } else { null } }
+fn cap_nsp(i: integer) -> spatial<CapPt[x, y]>? { if i == 0 { [CapPt { x: 9, y: 9, n: 99 }] } else { null } }
+
+fn test_every_capture_type_through_a_comprehension() {
+  b: u8 = 7;
+  f1 = fn(n: integer) -> vector<integer> { [for i in 0..n { i + b }] };
+  fl = 1.5;
+  f2 = fn(n: integer) -> vector<float> { [for i in 0..n { fl * (i as float) }] };
+  c = CapCol.Blue;
+  f3 = fn(n: integer) -> vector<integer> { [for i in 0..n { cap_cn(c) + i }] };
+  vv: vector<vector<integer>> = [[1, 2], [30, 40]];
+  f4 = fn(n: integer) -> vector<integer> { [for i in 0..n { vv[i % 2][1] ?? -1 }] };
+  p = CapP { x: 5, y: 9 };
+  f5 = fn(n: integer) -> vector<integer> { [for i in 0..n { p.x * i + p.y }] };
+  d = 100;
+  f6 = fn(n: integer) -> vector<integer> { [for i in 0..n { cap_pick(i) ?? d }] };
+  w = [3, 4];
+  f7 = fn(n: integer) -> vector<integer> { [for i in 0..n { cap_tot(cap_pv(i) ?? w) }] };
+  k = 6;
+  f8 = fn(n: integer) -> vector<integer> { [for i in 0..n { cap_g(k, i) }] };
+  t = "ab";
+  f9 = fn(n: integer) -> vector<text> { [for i in 0..n { "{t}{i}" }] };
+  tp = (10, "t");
+  f10 = fn(n: integer) -> vector<integer> { [for i in 0..n { tp.0 + i }] };
+  r = "";
+  for _ in 0..10 {
+    r = "{f1(3)} {f2(3)} {f3(3)} {f4(3)} {f5(3)} {f6(4)} {f7(4)} {f8(3)} {f9(2)} {f10(3)}";
+  }
+  assert(r == "[7,8,9] [0,1.5,3] [3,4,5] [2,40,2] [9,14,19] [0,100,2,100] [0,7,2,7] [60,61,62] [\"ab0\",\"ab1\"] [10,11,12]", "captures: {r}");
+  assert("{b} {fl} {cap_cn(c)} {vv} {p.x},{p.y} {d} {w} {k} {t} {tp.0}" == "7 1.5 3 [[1,2],[30,40]] 5,9 100 [3,4] 6 ab 10", "the captured values are untouched");
+}
+
+fn test_a_spatial_capture_and_a_spatial_default() {
+  sp: spatial<CapPt[x, y]> = [CapPt { x: 1, y: 2, n: 12 }, CapPt { x: 3, y: 4, n: 34 }, CapPt { x: -5, y: 6, n: 56 }];
+  got = "{(cap_maybe(0) ?? sp[1, 2]).n} {(cap_maybe(1) ?? sp[3, 4]).n} {(sp[7, 7] ?? sp[-5, 6]).n} {sp[7, 7].n ?? -1}";
+  assert(got == "99 34 56 -1", "spatial as a default: {got}");
+  f = fn(k: integer) -> vector<integer> { [for i in 0..k { (sp[2 * i + 1, 2 * i + 2] ?? CapPt { x: 0, y: 0, n: -1 }).n }] };
+  r = "";
+  for _ in 0..10 { r = "{f(3)}"; }
+  assert(r == "[12,34,-1]" && len(sp) == 3, "a captured spatial: {r} len {len(sp)}");
+  // A whole spatial as the default: the odd rounds take `sp` (12 + 34 + 56 over 3 records).
+  all = "";
+  for i in 0..4 {
+    s2 = cap_nsp(i % 2) ?? sp;
+    t = 0;
+    for q in s2 { t += q.n; }
+    all += "{len(s2)}:{t},";
+  }
+  s3 = cap_nsp(1) ?? sp;
+  s3 += [CapPt { x: 5, y: 5, n: 55 }];
+  assert(all == "1:99,3:102,1:99,3:102," && len(sp) == 3 && len(s3) == 4, "a spatial default: {all} sp {len(sp)} s3 {len(s3)}");
+  s4 = cap_nsp(1) ?? cap_nsp(0) ?? sp;
+  assert(len(s4) == 1 && (s4[9, 9].n ?? -1) == 99, "a call as the spatial default: {len(s4)}");
+}
+
+fn main() {
+  test_every_capture_type_through_a_comprehension();
+  test_a_spatial_capture_and_a_spatial_default();
+}
