@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-N-Decl — a narrow constant that does not fit its declared width is refused, as the
+// typed local `l: u8 = 300` is (loft#2240).
+//
+// @EXPECT_ERROR: cannot implicitly narrow integer to u8
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
+//   native exit 1 -> 0, native expectations FAIL/1 -> 0/1: the control accepted `CU: u8 = 300`
+//   as the integer 300.
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+
+CU: u8 = 300;
+
+fn main() {
+  println("{CU}");
+}

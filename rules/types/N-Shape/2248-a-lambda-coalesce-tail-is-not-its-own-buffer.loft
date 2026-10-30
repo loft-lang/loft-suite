@@ -1,0 +1,139 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Shape`: a nullable vector local cannot BE the return buffer, and that holds in a
+// LAMBDA too.  loft#2248: a lambda has no `__retbuf` on its first pass, so a tail `f(s) ?? d`
+// (or `v: vector<T>? = ...; v ?? d`) GREW the arity by making the nullable local itself the
+// hidden buffer argument.  That is the rename loft#2233 refused for a named function.  The
+// subject's call then rebound the caller's handle, and the default arm wrote into the null
+// sentinel: a panic on both Rust backends, `null` from a non-null lambda on C, and one leaked
+// store per lambda with a call default.
+//
+// @falsified-at: 23bc61e4 — interpret exit 101 -> 0, interpret panicked -> clean, native exit 1 -> 0, native panicked -> clean
+// CHANNEL: the VALUE (hand-computed sums over ten calls, half present, half null) and the LEAK
+//   (`main` runs every cell, so `--interpret`'s leak check sees a per-lambda store).
+// ARMED: no instrument.  Ordinary assertions on both backends.
+// HOLDS: every cell, on both backends.  An explicit `return f(s) ?? d;` and a `?? []`
+//   default never took the broken path and stay here as controls.
+
+struct P { x: integer, t: text }
+
+fn f(s: text) -> vector<integer>? {
+  if len(s) == 0 { return null; }
+  out: vector<integer> = [];
+  for i in 0..len(s) { out += [i * 10 + 1]; }
+  out
+}
+fn fb(s: text) -> vector<u8>? {
+  if len(s) == 0 { return null; }
+  out: vector<u8> = [];
+  for i in 0..len(s) { out += [(i + 5) & 255]; }
+  out
+}
+fn ft(s: text) -> vector<text>? {
+  if len(s) == 0 { return null; }
+  out: vector<text> = [];
+  for i in 0..len(s) { out += ["{s}{i}"]; }
+  out
+}
+fn fp(s: text) -> vector<P>? {
+  if len(s) == 0 { return null; }
+  out: vector<P> = [];
+  for i in 0..len(s) { out += [P { x: i + 1, t: "p{i}" }]; }
+  out
+}
+fn pick(i: integer) -> vector<integer>? { if i < 0 { null } else { [i] } }
+fn mk(n: integer) -> vector<integer> { [n * 100] }
+fn g(s: text) -> vector<integer> { [len(s) + 2, 3] }
+fn tot(v: vector<integer>) -> integer { t = 0; for x in v { t += x; } t + len(v) }
+fn arg(k: integer) -> text { if k % 2 == 0 { "abc" } else { "" } }
+fn run(h: fn(text) -> vector<integer>) -> integer { r = 0; for k in 0..10 { r += tot(h(arg(k))); } r }
+
+fn test_a_literal_default() {
+  h = fn(s: text) -> vector<integer> { f(s) ?? [7, 8] };
+  r = 0;
+  for k in 0..10 { r += tot(h(arg(k))); }
+  assert(r == 265, "five 36, five [7, 8] (17): got {r}, want 265");
+}
+fn test_a_call_default() {
+  h = fn(s: text) -> vector<integer> { f(s) ?? g("xy") };
+  r = 0;
+  for k in 0..10 { r += tot(h(arg(k))); }
+  assert(r == 225, "five 36, five [4, 3] (9): got {r}, want 225");
+}
+fn test_a_call_default_over_an_integer_subject() {
+  h = fn(i: integer) -> vector<integer> { pick(i) ?? mk(3) };
+  r = 0;
+  for k in 0..10 { r += tot(h(k % 2 - 1)); }
+  assert(r == 1510, "five mk(3) = [300] (301), five [0] (1): got {r}, want 1510");
+}
+fn test_a_capture_in_the_default() {
+  c = 40;
+  h = fn(s: text) -> vector<integer> { f(s) ?? [c, c + 1] };
+  r = 0;
+  for k in 0..10 { r += tot(h(arg(k))); }
+  assert(r == 595, "five 36, five [40, 41] (83): got {r}, want 595");
+}
+fn test_a_chained_coalesce() {
+  h = fn(s: text) -> vector<integer> { f(s) ?? f(s) ?? [5] };
+  r = 0;
+  for k in 0..10 { r += tot(h(arg(k))); }
+  assert(r == 210, "five 36, five [5] (6): got {r}, want 210");
+}
+fn test_an_explicit_return() {
+  h = fn(s: text) -> vector<integer> { return f(s) ?? [6]; };
+  r = 0;
+  for k in 0..10 { r += tot(h(arg(k))); }
+  assert(r == 215, "five 36, five [6] (7): got {r}, want 215");
+}
+fn test_a_declared_nullable_local() {
+  h = fn(s: text) -> vector<integer> { v: vector<integer>? = f(s); v ?? [9] };
+  r = 0;
+  for k in 0..10 { r += tot(h(arg(k))); }
+  assert(r == 230, "five 36, five [9] (10): got {r}, want 230");
+}
+fn test_through_a_function_parameter() {
+  r = run(fn(s: text) -> vector<integer> { f(s) ?? [7, 8] });
+  assert(r == 265, "five 36, five [7, 8] (17): got {r}, want 265");
+}
+fn test_the_result_takes_an_append() {
+  h = fn(s: text) -> vector<integer> { f(s) ?? [] };
+  r = 0;
+  for k in 0..10 { v = h(arg(k)); v += [1000]; r += tot(v); }
+  assert(r == 10190, "five 1037, five 1001: got {r}, want 10190");
+}
+fn test_a_byte_vector() {
+  h = fn(s: text) -> vector<u8> { fb(s) ?? [2] };
+  r = 0;
+  for k in 0..10 { v = h(arg(k)); for x in v { r += x; } r += len(v); }
+  assert(r == 120, "five [5, 6, 7] (21), five [2] (3): got {r}, want 120");
+}
+fn test_a_text_vector() {
+  h = fn(s: text) -> vector<text> { ft(s) ?? ["zz"] };
+  r = "";
+  for k in 0..4 { for x in h(arg(k)) { r += x + ";"; } }
+  assert(r == "abc0;abc1;abc2;zz;abc0;abc1;abc2;zz;", "got {r}");
+}
+fn test_a_record_vector() {
+  h = fn(s: text) -> vector<P> { fp(s) ?? [P { x: 50, t: "d" }] };
+  r = 0;
+  t = "";
+  for k in 0..4 { for p in h(arg(k)) { r += p.x; t += p.t; } }
+  assert(r == 112, "two 6, two 50: got {r}, want 112");
+  assert(t == "p0p1p2dp0p1p2d", "got {t}");
+}
+
+fn main() {
+  test_a_literal_default();
+  test_a_call_default();
+  test_a_call_default_over_an_integer_subject();
+  test_a_capture_in_the_default();
+  test_a_chained_coalesce();
+  test_an_explicit_return();
+  test_a_declared_nullable_local();
+  test_through_a_function_parameter();
+  test_the_result_takes_an_append();
+  test_a_byte_vector();
+  test_a_text_vector();
+  test_a_record_vector();
+}
