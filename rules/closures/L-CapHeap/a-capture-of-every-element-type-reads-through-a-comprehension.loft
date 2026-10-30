@@ -12,6 +12,8 @@
 //
 // @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
 // CHANNEL: the VALUE (hand-computed) and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
 
 enum CapCol { Red, Green, Blue }
 struct CapP { x: integer, y: integer }

@@ -21,6 +21,8 @@
 //   in loft#2241's matrix, on main, every backend; `tests/scripts/2241-*.loft` reads an image
 //   that build wrote.
 // CHANNEL: the VALUE (lookups, walks, prefixes, lengths) and the LEAK (`main` runs every cell).
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend; the image cell leaves no file behind.
 
 struct W2241 { w: text?, v: integer }
 
