@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Block` — a block yields a call whose `&` argument is any PLACE, wherever the block
+// stands, and the call's write lands in that place.  The guard beside this one passes a plain
+// local; this file moves the argument's spelling (a struct field, a vector element, a field
+// reached through a field, an element indexed by the loop's counter) and where the block stands
+// (assigned, an `if` condition, a `??` subject, a loop body).  A non-scalar TUPLE member is not
+// here: a `&` link to one is refused (loft#2263).  Every value is hand-computed.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the VALUE (each call's answer and the place it wrote) and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+enum FbS { P { x: integer }, Q { y: integer }, R }
+struct FbW { s: FbS, n: integer }
+struct FbO { w: FbW }
+
+fn fb_flip(s: &FbS) -> boolean { s = Q { y: 7 }; false }
+fn fb_flipq(s: &FbS) -> boolean? { s = Q { y: 8 }; null }
+fn fb_tag(s: FbS) -> text { match s { P { x } => "P{x}", Q { y } => "Q{y}", R => "R" } }
+
+fn test_every_place_spelling() {
+  w = FbW { s: P { x: 1 }, n: 0 };
+  a = if w.n == 0 { t = 1; fb_flip(w.s) } else { true };
+  v: vector<FbS> = [P { x: 2 }, P { x: 3 }];
+  b = if a == false { fb_flip(v[1]) } else { true };
+  o = FbO { w: FbW { s: P { x: 6 }, n: 0 } };
+  d = if (if o.w.n == 0 { fb_flip(o.w.s) } else { true }) { 1 } else { 2 };
+  w2 = FbW { s: P { x: 9 }, n: 0 };
+  e = (if w2.n == 0 { fb_flipq(w2.s) } else { true }) ?? false;
+  hits = 0;
+  vv: vector<FbS> = [P { x: 0 }, P { x: 0 }, P { x: 0 }];
+  for i in 0..3 { ok = if i >= 0 { fb_flip(vv[i]) } else { true }; if !ok { hits += 1; } }
+  got = "{a} {fb_tag(w.s)} | {b} {fb_tag(v[1])} {fb_tag(v[0])} | {d} {fb_tag(o.w.s)} | {e} {fb_tag(w2.s)} | {hits} {fb_tag(vv[0])}{fb_tag(vv[2])}";
+  assert(got == "false Q7 | false Q7 P2 | 2 Q7 | false Q8 | 3 Q7Q7", "places: {got}");
+}
+
+fn main() {
+  test_every_place_spelling();
+}
