@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2273, `@FR-L-CapKeep`, `@FR-B-Copy` — A FN-REF COPIED OUT OF A FIELD IS A COPY.
+//
+// `g = h.f` and a returned `h.f` name the closure record the field holds.  `(B-View)` makes only
+// a struct-typed projection a view, so the bind is a copy, and `(L-CapKeep)` says a name that
+// still holds a record goes on answering from that record's captures.  The copy used to be the
+// field's own child record: an overwrite of the field rebuilt it under `g` (`null`, or the new
+// closure's answer), and a release of the host freed it.
+//
+// The copy SHARES every capture (`(L-CapHeap)`, `(L-CapWrite)`): a write through either reaches
+// the other and the frame.  A store the field's record OWNS is released by the last holder, so a
+// copy that outlives an overwrite, a rebind or the host keeps reading it.
+//
+// Every expected value is hand-computed.  The `k` cells are controls that must answer what they
+// answered before the fix (a capture's writes reach the frame).
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: assertion failures, both backends.
+// HOLDS: clean under `LOFT_STRICT_STORES=1` and `LOFT_POISON=1`.
+
+struct H { tag: integer, f: fn() -> integer }
+struct C { n: integer }
+
+fn zero() -> integer { 0 }
+fn install(h: H, n: integer) { h.f = fn() -> integer { n * 2 }; }
+fn get(h: H) -> fn() -> integer { h.f }
+fn mkh() -> H { v = [1, 2, 3]; H { tag: 0, f: fn() -> integer { v += [9]; len(v) } } }
+fn mk() -> fn() -> integer { a = 4; h = H { tag: 0, f: fn() -> integer { a * 2 } }; h.f }
+
+// The issue's five shapes: the field overwritten after the copy.
+fn f1() -> text { a = 4; h = H { tag: 0, f: fn() -> integer { a * 2 } }; g = h.f; b = 50; h.f = fn() -> integer { b * 2 }; "{g()} {h.f()}" }
+fn f2() -> text { a = 4; h = H { tag: 0, f: fn() -> integer { a * 2 } }; g = get(h); b = 50; h.f = fn() -> integer { b * 2 }; "{g()} {h.f()}" }
+fn f3() -> text { h = H { tag: 0, f: zero }; install(h, 4); g = h.f; install(h, 50); "{g()} {h.f()}" }
+fn f4() -> text { h = H { tag: 0, f: zero }; install(h, 4); g = get(h); install(h, 50); "{g()} {h.f()}" }
+fn f5() -> text { s = "abc"; h = H { tag: 0, f: fn() -> integer { len(s) } }; g = h.f; h.f = fn() -> integer { 7 }; "{g()} {h.f()}" }
+
+// The host goes before the copy: returned out of a frame that releases it, rebound whole.
+fn c5() -> text { g = mk(); "{g()}" }
+fn c6() -> text { a = 4; h = H { tag: 0, f: fn() -> integer { a * 2 } }; g = h.f; b = 9; h = H { tag: 1, f: fn() -> integer { b } }; "{g()} {h.f()}" }
+// A copy kept across loop passes while each pass resets the field: pass 1 keeps the first
+// closure (0), pass 2 copies pass 1's (10), pass 3 still holds that copy.
+fn c8() -> text { h = H { tag: 0, f: fn() -> integer { 0 } }; g = h.f; r = ""; for i in 1..4 { if i == 2 { g = h.f; } k = i * 10; h.f = fn() -> integer { k }; r += "{g()},"; } r }
+
+// An OWNED capture (the vector the factory's frame no longer has), shared by the copies.
+fn d3() -> text { h = mkh(); g = h.f; h.f = fn() -> integer { 7 }; "{g()} {g()} {h.f()}" }
+fn n1() -> text { h = mkh(); g1 = h.f; g2 = h.f; h.f = fn() -> integer { 0 }; "{g1()} {g2()} {g1()}" }
+fn n2() -> text { h = mkh(); g = h.f; r = ""; for _ in 0..3 { g = h.f; r += "{g()},"; } "{r} {h.f()}" }
+fn n3() -> text { g = get(mkh()); a = g(); { h = mkh(); g = h.f; } "{a} {g()} {g()}" }
+fn n4() -> text { h = mkh(); g = get(h); a = g(); b = h.f(); h.f = fn() -> integer { 0 }; "{a} {b} {g() + 1}" }
+fn n7() -> text { h = mkh(); g = h.f; k = g; g = get(h); "{k()} {g()}" }
+
+// Controls: the copy shares what the frame still reads.
+fn k1() -> text { count = 0; h = H { tag: 0, f: fn() -> integer { count += 1; count } }; g = h.f; a = g(); b = h.f(); "{a} {b} {count}" }
+fn k2() -> text { v = [1]; h = H { tag: 0, f: fn() -> integer { v += [2]; len(v) } }; g = h.f; a = g(); b = h.f(); "{a} {b} {len(v)}" }
+fn k3() -> text { c = C { n: 10 }; h = H { tag: 0, f: fn() -> integer { c.n += 1; c.n } }; g = h.f; a = g(); b = h.f(); "{a} {b} {c.n}" }
+fn k4() -> text { a = 4; h = H { tag: 0, f: fn() -> integer { a * 2 } }; g = h.f; "{g()} {h.f()}" }
+
+fn main() {
+  assert(f1() == "8 100", "f1 {f1()}");
+  assert(f2() == "8 100", "f2 {f2()}");
+  assert(f3() == "8 100", "f3 {f3()}");
+  assert(f4() == "8 100", "f4 {f4()}");
+  assert(f5() == "3 7", "f5 {f5()}");
+  assert(c5() == "8", "c5 {c5()}");
+  assert(c6() == "8 9", "c6 {c6()}");
+  assert(c8() == "0,10,10,", "c8 {c8()}");
+  assert(d3() == "4 5 7", "d3 {d3()}");
+  assert(n1() == "4 5 6", "n1 {n1()}");
+  assert(n2() == "4,5,6, 7", "n2 {n2()}");
+  assert(n3() == "4 4 5", "n3 {n3()}");
+  assert(n4() == "4 5 7", "n4 {n4()}");
+  assert(n7() == "4 5", "n7 {n7()}");
+  assert(k1() == "1 2 2", "k1 {k1()}");
+  assert(k2() == "2 3 3", "k2 {k2()}");
+  assert(k3() == "11 12 12", "k3 {k3()}");
+  assert(k4() == "8 8", "k4 {k4()}");
+}
