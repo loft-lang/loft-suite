@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2269 — `@FR-G-Mono`: `[T ↦ C]` replaces T and nothing else, so a generic with two type
+// variables gives each its own operators (`@FR-Op-Bound`).  Substituting `T ↦ S` rewrote EVERY
+// bound `<` to `S`'s `operator compare` and marked every bound `==` as `S`'s content equality,
+// including those over `K`: `sort_by<T, K>` compared its keys with the element's compare (an
+// interpreter panic, a `--native` compile error), and a `K == K` over integers read them as
+// records.
+// `S`'s compare is deliberately REVERSED (`S { n: 1 } < S { n: 2 }` is false), so a `<` that
+// reaches the wrong type answers visibly wrong.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, native exit 1 -> 0
+// WITNESS: on main the interpreter panics in `src/database/allocation.rs` and `--native` stops
+//   with `error[E0308]` at `t_1S_compare(cell, …)` over the two keys.
+// CHANNEL: the VALUE of each comparison, hand-computed, and the run itself.
+// ARMED: no instrument.
+// HOLDS: every cell, on every backend.
+
+struct S { n: integer, s: text }
+operator compare(self: S, other: S) -> Ordering { other.n.compare(self.n) }
+
+fn lt2 < T: Ordered, K: Ordered > (a: T, b: T, x: K, y: K) -> text { "{a < b} {x < y}" }
+fn eq2 < T: Equatable, K: Equatable > (a: T, b: T, x: K, y: K) -> text { "{a == b} {x == y}" }
+
+fn by_int_key() -> text {
+  v = [S { n: 3, s: "c" }, S { n: 1, s: "a" }, S { n: 2, s: "b" }];
+  v.sort_by(fn(e: S) -> integer { 0 - e.n });
+  "{v[0].s}{v[1].s}{v[2].s}"
+}
+
+fn by_text_key() -> text {
+  v = [S { n: 1, s: "b" }, S { n: 2, s: "c" }, S { n: 3, s: "a" }];
+  v.sort_by(fn(e: S) -> text { e.s });
+  "{v[0].n}{v[1].n}{v[2].n}"
+}
+
+// `sort` itself still orders by the element's (reversed) compare.
+fn by_compare() -> text {
+  v = [S { n: 1, s: "a" }, S { n: 3, s: "c" }, S { n: 2, s: "b" }];
+  v.sort();
+  "{v[0].n}{v[1].n}{v[2].n}"
+}
+
+fn test_sort_by_compares_the_keys_by_the_key_type() {
+  // keys -3, -1, -2 ascending: n = 3, 2, 1
+  assert(by_int_key() == "cba", "int key: {by_int_key()}");
+  assert(by_text_key() == "312", "text key: {by_text_key()}");
+  assert(by_compare() == "321", "compare: {by_compare()}");
+}
+
+fn test_each_type_variable_keeps_its_own_order() {
+  assert(lt2(S { n: 1, s: "" }, S { n: 2, s: "" }, 1, 2) == "false true", "T struct: {lt2(S { n: 1, s: "" }, S { n: 2, s: "" }, 1, 2)}");
+  assert(lt2(1, 2, S { n: 1, s: "" }, S { n: 2, s: "" }) == "true false", "K struct: {lt2(1, 2, S { n: 1, s: "" }, S { n: 2, s: "" })}");
+}
+
+fn test_each_type_variable_keeps_its_own_equality() {
+  assert(eq2(S { n: 1, s: "x" }, S { n: 1, s: "x" }, 3, 4) == "true false", "T struct: {eq2(S { n: 1, s: "x" }, S { n: 1, s: "x" }, 3, 4)}");
+  assert(eq2(3, 3, S { n: 1, s: "x" }, S { n: 1, s: "y" }) == "true false", "K struct: {eq2(3, 3, S { n: 1, s: "x" }, S { n: 1, s: "y" })}");
+}
