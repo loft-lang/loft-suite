@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2282, `@FR-L-CapOwn` — A FRAME ANSWERING TEXT RELEASES THE CLOSURE IT HOLDS.
+//
+// `g = one()` takes over a closure that LEFT `one`, so `g`'s frame owns the record and its
+// capture, and releases both when `g` goes.  In a function that answers TEXT it never did: the
+// sweep read the declared return's deps, which number ATTRIBUTES, as frame variables, and the
+// hidden text buffer's attribute index named a local.  Where that local was the fn-ref, the
+// fn-ref read as the returned value and was never released.  One record and its capture leaked
+// per call, quietly.  Each capture here has a drop hook, so a missed release shows as a missing
+// `D` in the trace.
+//
+// Every expected value is hand-computed.  `k1` and `k2` are controls: shapes that were right
+// before.
+//
+// CHANNEL: assertion failures (the trace), every backend.
+// HOLDS: clean under `LOFT_STRICT_STORES=1` on all three backends.
+
+struct H { id: integer }
+
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mkh(id: integer) -> H { note("M{id}"); H { id: id } }
+
+fn trace_path() -> text { return "loft_2282_text_trace.tmp"; }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn ok(nm: text, got: text, want: text) {
+  assert(got == want, "{nm}: {got}, want {want}");
+}
+
+fn one(id: integer) -> fn() -> integer { e = mkh(id); fn() -> integer { 3 + e.id } }
+
+// The issue's shape: the fn-ref is the frame's first local.
+fn c1() -> text { g = one(2); v = g(); "{v}" }
+// Called inside the text it answers.
+fn c2() -> text { g = one(3); "{g()}" }
+// An explicit `return` in a branch, and the tail.
+fn c3(big: boolean) -> text {
+  g = one(4);
+  if big { return "big {g()}"; }
+  "small"
+}
+// A `text?` answer: the same buffer.
+fn c4(none: boolean) -> text? {
+  g = one(5);
+  if none { return null; }
+  "{g()}"
+}
+// A parameter before the fn-ref.
+fn c5(n: integer) -> text { g = one(6); "{g() + n}" }
+
+// Controls: an integer answer, and the fn-ref not the first local.
+fn k1() -> integer { g = one(7); g() }
+fn k2() -> text { z = 1; g = one(8); "{g() + z}" }
+
+fn main() {
+  drain();
+  ok("c1 value          ", c1(), "5");
+  ok("c1 released       ", drain(), "M2,D2");
+  ok("c2 value          ", c2(), "6");
+  ok("c2 released       ", drain(), "M3,D3");
+  ok("c3 return value   ", c3(true), "big 7");
+  ok("c3 return released", drain(), "M4,D4");
+  ok("c3 tail value     ", c3(false), "small");
+  ok("c3 tail released  ", drain(), "M4,D4");
+  ok("c4 text value     ", c4(false) ?? "none", "8");
+  ok("c4 text released  ", drain(), "M5,D5");
+  ok("c4 null value     ", c4(true) ?? "none", "none");
+  ok("c4 null released  ", drain(), "M5,D5");
+  ok("c5 value          ", c5(10), "19");
+  ok("c5 released       ", drain(), "M6,D6");
+  ok("k1 value          ", "{k1()}", "10");
+  ok("k1 released       ", drain(), "M7,D7");
+  ok("k2 value          ", k2(), "12");
+  ok("k2 released       ", drain(), "M8,D8");
+  delete(trace_path());
+  println("a frame answering text releases the closure it holds: every cell holds");
+}
