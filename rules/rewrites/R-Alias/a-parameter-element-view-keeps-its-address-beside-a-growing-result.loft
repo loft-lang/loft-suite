@@ -24,6 +24,22 @@
 // appends.
 //
 // @falsified-by: tests/falsified/a-parameter-element-view-keeps-its-address-beside-a-growing-result.patch — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard — only one side can move)
+//   CHANNEL: the VALUE channel, native only — the patch calls two different roots apart
+//   without the run-time test, so `tally` keeps `a`'s record address across the growth of
+//   `out` in the points' own store, and `crossings` drops its distinct-store test.
+//   ARMED: LOFT_POISON=1 — the growth moves the store and frees the old block, and a plain
+//   run reads the old bytes until the allocator reuses it: plain, the patched build answers
+//   right as soon as an unrelated change moves the allocation order, so the poison that
+//   overwrites the freed block is what makes the stale read visible.  The header line below
+//   arms it on every run.
+//   WITNESS: under the patch and the poison native exits 1 at `assert(t == 20020, …)`;
+//   `LOFT_TRACE_RECPTR=1` prints "n_tally keeps `a` beside a growth of another store" under
+//   the patch and "n_tally declines `a`: the remainder may grow a store" without it, and
+//   `LOFT_HOIST_VERIFY=1` stops the patched build with `record view address is stale`.
+//   HOLDS: the interpreter is exact on both trees, poisoned or not; leak, panic and
+//   free-refusal are clean on both — only native's `tally` value moves.
+//
+// @ARMED: LOFT_POISON=1
 
 struct P { px: integer, py: integer }
 struct Shape { pts: vector<P>, xs: vector<integer> }

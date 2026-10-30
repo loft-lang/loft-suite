@@ -6,8 +6,9 @@
 // Admitted: c1 and c2 (a cursor match: element 0's variant tested by four arms), c3 (a plain
 // match in a loop, its subject a different vector each pass, an empty one among them), c4
 // (scalar elements tested against literals), c5 (narrow elements), c6 (guarded arms),
-// c8 (a match inside an arm's body).  c7's guard grows the vector it matches: the tests that
-// run after a failed guard are the plain ones, inside the guarded arm.  A read is bound under
+// c8 (a match inside an arm's body).  c7 — a guard that grew the vector it matched — is
+// refused since `@FR-M-Fixed` (`rules/matching/M-Fixed/`): the subject holds still while the
+// arms are tested.  A read is bound under
 // its own length test, so a subject shorter than a pattern reads nothing past its end.
 //
 // @falsified-by: tests/falsified/a-slice-match-reads-its-subject-once.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0
@@ -64,20 +65,6 @@ fn gd(v: vector<Tok>) -> integer {
   }
 }
 
-fn grow(v: vector<integer>) -> boolean {
-  v += [9];
-  false
-}
-
-fn gw(v: vector<integer>) -> integer {
-  match v {
-    [1] if grow(v) => 0,
-    [1, x] => 10 + x,
-    [1] => 1,
-    _ => 2,
-  }
-}
-
 fn nest(v: vector<Tok>, w: vector<integer>) -> integer {
   match v {
     [A { n }, ..] => match w { [1, x] => n * 100 + x, [1] => n * 10, _ => n },
@@ -131,9 +118,6 @@ fn main() {
   c6 += "{gd([A { n: 7 }, B { w: "ab" }])},{gd([B { w: "x" }])}";
   assert(c6 == "1009,22,3,1007,-1", "c6 {c6}");
 
-  // c7 — the guard appends 9 to the subject and fails, so the arms after it see [1, 9]: 19.
-  g: vector<integer> = [1];
-  assert(gw(g) == 19, "c7 {gw([1])}");
 
   // c8 — a match in an arm's body: [A4]+[1,7] 407, [A4]+[1] 40, [A4]+[2] 4, [Bxyz] 3, [] -1.
   c8 = "{nest([A { n: 4 }], [1, 7])},{nest([A { n: 4 }], [1])},{nest([A { n: 4 }], [2])},";

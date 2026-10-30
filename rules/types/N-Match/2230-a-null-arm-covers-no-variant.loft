@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+//
+// @FR-N-Match — the `null` arm of a plain enum match covers no variant: absence is not a
+// variant of anything, so a match without `_` still names every variant it leaves out
+// (loft#2230; the value cells are `2230-a-null-arm-matches-a-plain-enum-subject.loft`).
+//
+// @EXPECT_ERROR: missing: B
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
+//   native exit 1 -> 0, native expectations FAIL/1 -> 0/1.  The control refuses the file on
+//   `Expect token }` at the `null` arm, not on the missing variant, so what this cell holds is
+//   the over-reach: a fix that let the `null` arm cover a variant would make it pass the match.
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+
+enum C { A, B, D }
+
+fn main() {
+  e: C? = A;
+  r = match e { null => "n", A => "a", D => "d" };
+  println(r);
+}

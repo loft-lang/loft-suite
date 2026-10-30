@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TAIL SELF-CALL THE FRAME CANNOT JUMP STAYS A CALL, WITH A WARNING (`@FR-R-TailSelf`'s
+// ordinary-call clause, @C155).  A self-call in tail position is a jump that reuses the frame;
+// where the frame cannot be reused — an argument for a store-held parameter that MAKES a value
+// (a literal) or names a local the jump releases, a text parameter handed anything but itself (a
+// text's assignment owns, so it has no pointer move), a parameter the body REBINDS (the frame
+// then owns its store, and the epilogue would free it under the temporary that read it) — the
+// call stays an ordinary call, and `warning[tail-call-not-jumped]` says so at the call, naming
+// the variable, the cost (it stops at 10 000 frames) and the cure.  A generic is warned per
+// INSTANCE: `swap<text>` where `swap<S>` jumps.  The values are the calls' own: each function
+// still answers what it computes.  A self-call that is an operand is not in tail position and
+// draws no warning (the limits cell).
+//
+// Expected, by hand: `swap(1, Rec 1, Rec 2).n` 2, `swap(1, "a", "b")` b, `fresh_arg(2, "")` 2,
+// `literal_arg([1], 2)` 1, `local_arg([1], 2)` 1, `rebound(Rec 0, 3)` 3.
+//
+// @falsified-at: loft 6f31a726b (main) — the file fails, as parse errors: each function is refused.
+// CHANNEL: expect — each function's warning; the control renders an error in its place.
+// ARMED: no instrument.
+// WITNESS: on the control the file FAILS with parse errors — each function an error where
+//   the warning is expected, so no `@EXPECT_WARNING` matches.
+// HOLDS: `a-parameter-passed-through-is-the-pointer-the-call-binds` — the arguments the clause
+//   takes; `a-result-held-in-a-store-is-delivered-as-the-call-would` — the results it delivers.
+
+struct Rec { n: integer }
+
+// @EXPECT_WARNING: `swap<text>` calls itself in tail position, but this call stays an ordinary call
+fn swap<T>(n: integer, a: T, b: T) -> T { if n == 0 { a } else { swap(n - 1, b, a) } }
+
+// @EXPECT_WARNING: parameter `acc` (a `text`) can only be passed through as itself
+fn fresh_arg(n: integer, acc: text) -> integer { if n == 0 { len(acc) } else { fresh_arg(n - 1, acc + "x") } }
+
+// @EXPECT_WARNING: argument for parameter `v` (a `vector<integer>`) makes a value
+fn literal_arg(v: vector<integer>, n: integer) -> integer { if n == 0 { len(v) } else { literal_arg([n], n - 1) } }
+
+// @EXPECT_WARNING: argument for parameter `v` (a `vector<integer>`) makes a value
+fn local_arg(v: vector<integer>, n: integer) -> integer { w = [n]; if n == 0 { len(v) } else { local_arg(w, n - 1) } }
+
+// @EXPECT_WARNING: parameter `p` (a `Rec`) is rebound in the body
+fn rebound(p: Rec, n: integer) -> integer { if n == 0 { p.n } else { p = Rec { n: p.n + 1 }; rebound(p, n - 1) } }
+
+fn main() {
+  got = "{swap(1, Rec { n: 1 }, Rec { n: 2 }).n} {swap(1, \"a\", \"b\")} {fresh_arg(2, \"\")} {literal_arg([1], 2)} {local_arg([1], 2)} {rebound(Rec { n: 0 }, 3)}";
+  assert(got == "2 b 2 1 1 3", "the calls' own values: {got}");
+}

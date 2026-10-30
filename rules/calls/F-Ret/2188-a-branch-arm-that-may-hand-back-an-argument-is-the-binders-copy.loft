@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BRANCH ARM THAT MAY HAND BACK AN ARGUMENT IS THE BINDER'S COPY (`@FR-F-Ret`, `@FR-B-Copy`,
+// loft#2188).  `r = if c { h(q, w, k) } else { … }`, where `h` may answer its parameter or a
+// store it made, bound the arm's answer as it was: `r` read as a borrow of `q` and was never
+// freed, while on every run `h` answered a store it made (its buffer, or its copy of `a`) — one
+// leaked record per call, on both backends.  A direct bind of the same call is right, because
+// it decides copy-or-adopt per run.  And because a binding takes its type from pass 1, an arm
+// that reads as a borrow there — the call itself, or a local bound from one (`{ t = mk(w); t }`)
+// — made `r` a borrow whichever arm RAN, so a sibling arm's fresh store leaked instead.
+//
+// Axes it MOVES: the callee (a named borrow-or-fresh function, a pure borrow, a fresh named
+// function, an always-fresh generic), the arm's spelling (the call,
+// a local bound from it), the branch (`if`/`else`, an `else if` chain, a bare `match` arm, the
+// first arm or a later one), the other arm (a literal, a fresh call, the same kind), the path
+// the callee takes, and a loop.  Each cell writes through `r` and reads both arguments back.
+// Values hand-computed: `q` is 5, `w` is 9, `mint` adds 2, `hl` adds 1 to `b`, a literal is 1.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: fdd915061 — interpret leaked kt=101 Pt×37 -> clean, native leaked kt=101 Pt×21 -> clean
+// CHANNEL: the leak report.  Every value here was already right on the control, so no assert
+//   stops the run before the exit report — the borrow-or-fresh GENERIC beside such an arm is
+//   the loft#2179 cell's, whose channel is the asserts.
+// ARMED: the exit leak check (`--interpret`; `LOFT_NATIVE_LEAK_CHECK=1` on `--native`).
+// WITNESS: on the control the exit report names the leaked records (`Pt×…`).
+// HOLDS: two arms of one kind that both deliver a fresh store were leak-clean on the control.
+
+struct Pt { x: integer, s: text }
+
+fn mk<T>(b: T) -> T { y: T = b; y }
+fn h(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } y: Pt = b; y }
+fn hl(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } r = Pt { x: b.x + 1, s: "h" }; r }
+fn hb(a: Pt, b: Pt, n: integer) -> Pt { if n == 0 { return a; } r = mk(b); r }
+fn keep(a: Pt) -> Pt { a }
+fn mint(a: Pt) -> Pt { Pt { x: a.x + 2, s: "m" } }
+enum Pick { L, R }
+
+// r.x after the +100, then q's and w's x: a copy leaves q at 5 and w at 9
+fn c_if(c: boolean, k: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if c { h(q, w, k) } else { Pt { x: 1, s: "l" } }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_both(c: boolean, k: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if c { hl(q, w, k) } else { hl(w, q, k) }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_keep(c: boolean) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if c { keep(q) } else { keep(w) }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_match(p: Pick, k: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = match p { L => h(q, w, k), R => h(w, q, k) }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_beside_fresh(s: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { mint(q) } else { hb(q, w, 0) }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_beside_generic(s: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { mk(q) } else { hb(q, w, 0) }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_chain(s: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { mk(q) } else if s == 1 { hb(q, w, 0) } else { Pt { x: 1, s: "l" } }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_local_tail(s: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { mk(q) } else if s == 1 { t = mk(w); t } else { Pt { x: 1, s: "l" } }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_local_call(s: integer) -> integer { q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; r = if s == 0 { mk(q) } else { t = hb(q, w, 1); t }; r.x += 100; r.x * 1000 + q.x * 10 + w.x }
+fn c_loop() -> integer {
+  q = Pt { x: 5, s: "q" }; w = Pt { x: 9, s: "w" }; s = 0;
+  for i in 0..50 { r = if i % 2 == 0 { h(q, w, i % 3) } else { Pt { x: 1, s: "l" } }; s += r.x; }
+  s * 100 + q.x * 10 + w.x
+}
+
+fn test_a_call_arm_that_may_hand_back_an_argument() {
+  assert(c_if(true, 0) == 105059 && c_if(true, 1) == 109059 && c_if(false, 0) == 101059, "if: {c_if(true, 0)} {c_if(true, 1)} {c_if(false, 0)}");
+  assert(c_both(true, 0) == 105059 && c_both(true, 1) == 110059 && c_both(false, 1) == 106059, "both arms: {c_both(true, 1)} {c_both(false, 1)}");
+  assert(c_keep(true) == 105059 && c_keep(false) == 109059, "a pure borrow: {c_keep(true)} {c_keep(false)}");
+  assert(c_match(L, 0) == 105059 && c_match(R, 1) == 105059, "match: {c_match(L, 0)} {c_match(R, 1)}");
+}
+
+fn test_beside_an_arm_that_makes_its_own_store() {
+  assert(c_beside_fresh(0) == 107059 && c_beside_fresh(1) == 105059, "beside a fresh call: {c_beside_fresh(0)} {c_beside_fresh(1)}");
+  assert(c_beside_generic(0) == 105059 && c_beside_generic(1) == 105059, "beside a generic: {c_beside_generic(0)} {c_beside_generic(1)}");
+  assert(c_chain(0) == 105059 && c_chain(1) == 105059 && c_chain(2) == 101059, "chain: {c_chain(0)} {c_chain(1)} {c_chain(2)}");
+}
+
+fn test_an_arm_that_ends_in_a_local_bound_from_a_call() {
+  assert(c_local_tail(0) == 105059 && c_local_tail(1) == 109059 && c_local_tail(2) == 101059, "local tail: {c_local_tail(0)} {c_local_tail(1)}");
+  assert(c_local_call(0) == 105059 && c_local_call(1) == 109059, "local call: {c_local_call(0)} {c_local_call(1)}");
+}
+
+// i even: h(q, w, i % 3) answers q (5) where i % 3 == 0 and w (9) otherwise; i odd: 1.
+// Over 0..50: nine even i with i % 3 == 0 -> 45, sixteen other even i -> 144, 25 odd -> 25.
+fn test_in_a_loop() {
+  assert(c_loop() == 21459, "loop: {c_loop()}");
+}
+
+fn main() {
+  test_a_call_arm_that_may_hand_back_an_argument();
+  test_beside_an_arm_that_makes_its_own_store();
+  test_an_arm_that_ends_in_a_local_bound_from_a_call();
+  test_in_a_loop();
+}

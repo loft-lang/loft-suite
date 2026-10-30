@@ -20,7 +20,7 @@
 // CHANNEL: exit — the depth fault; the asserts for the values; the leak gate for the pointers.
 // ARMED: no instrument.
 // WITNESS: each message prints the value.
-// HOLDS: `a-tail-self-call-the-frame-cannot-jump-is-refused` — the arguments the clause declines.
+// HOLDS: `a-tail-self-call-the-frame-cannot-jump-warns` — the arguments the clause declines.
 
 struct Rec { n: integer, next: reference<Rec> }
 

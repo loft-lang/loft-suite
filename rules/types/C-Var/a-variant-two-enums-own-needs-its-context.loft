@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-C-Var` with @C157 — a bare variant two visible enums own, with nothing in its context to pick one, is
+// refused and the refusal names both enums.  Its counterpart, where one owner or a sibling arm
+// decides: a-bare-variant-takes-the-enum-that-owns-it.loft.
+//
+// @falsified-at: none — main refused this line before @C157 too; the cell keeps the refusal.
+// @falsified-by: tests/falsified/a-variant-two-enums-own-needs-its-context.patch — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches)
+//   CHANNEL: the expectation — with the patch, a shared name takes its first owner silently,
+//   the program compiles, and the pinned refusal is never met.
+//   WITNESS: `x = Red` compiling to Hue's Red.
+//   ARMED: nothing.
+//   HOLDS: the program never runs on this tree (the cell is a refusal), so value, leak and
+//   panic cannot move.
+enum Hue { Red, Green, Blue }
+enum Light { Red, Amber }
+
+// @EXPECT_ERROR: ambiguous variant 'Red' (a variant of Hue, Light) — qualify it
+fn test_a_shared_name_alone_is_refused() {
+  x = Red;
+  assert(x == Hue.Red, "unreached");
+}

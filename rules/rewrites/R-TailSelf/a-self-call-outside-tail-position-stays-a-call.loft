@@ -5,8 +5,8 @@
 // that is an operand (`fib`), or sits inside the tail call's own argument (`nested`), is not in
 // tail position and keeps its frame — and draws no refusal; a mutual recursion is not a
 // SELF-call (`is_even`/`is_odd`).  Each answers the recursion's value at a depth a call
-// reaches.  A tail self-call whose frame cannot be reused is REFUSED, never left a call
-// (`a-tail-self-call-the-frame-cannot-jump-is-refused` beside this one).
+// reaches.  A tail self-call whose frame cannot be reused stays a call with a warning, never silently
+// (`a-tail-self-call-the-frame-cannot-jump-warns` beside this one).
 //
 // @falsified-at: none — the limit cells of a rule that holds: every shape here is a call on
 //   every build, and the values pin that the pass leaves them right.

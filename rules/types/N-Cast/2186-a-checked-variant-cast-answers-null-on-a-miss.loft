@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHECKED VARIANT CAST ANSWERS NULL ON A MISS (`@FR-N-Cast`, `(N-Cast?)`; @C131).  `s as V?`
+// is the checked cast to one of an enum's variants: the variant on a hit, null on a miss, and
+// its type is `V?` whatever holds it — a local declared `V?`, a function returning `V?`, a
+// projection's subject.  On `--native` the miss built store 0 / record 0 where the null test
+// reads the canonical null (`store_nr == u16::MAX`), so a miss held in a `V?` was not null.
+//
+// @falsified-at: fdd915061 (the installed main, hand-measured): --native 2 assertion failures
+//   -> 0 (test_a_miss_in_a_declared_local_is_null, test_a_returned_miss_is_null); --interpret
+//   unchanged.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the shape.
+// HOLDS: every cell on --interpret on both trees; leak, panic and free-refusal on both.
+
+enum Node { Lit { v: integer }, Bin { op: integer, l: integer, r: integer } }
+
+fn pick(n: Node) -> Bin? { n as Bin? }
+
+fn test_a_miss_in_a_declared_local_is_null() {
+  n: Node = Lit { v: 1 };
+  c: Bin? = n as Bin?;
+  assert(c == null, "declared Bin?: a miss is null");
+  assert(!c, "declared Bin?: a miss is falsy");
+}
+
+fn test_a_hit_is_the_variant() {
+  m: Node = Bin { op: 1, l: 7, r: 8 };
+  d: Bin? = m as Bin?;
+  assert(d != null, "declared Bin?: a hit is present");
+  assert(d.l + d.r == 15, "a hit reads its fields: 7 + 8");
+}
+
+fn test_a_returned_miss_is_null() {
+  a = pick(Lit { v: 1 });
+  b = pick(Bin { op: 2, l: 4, r: 5 });
+  assert(a == null, "-> Bin?: a miss is null");
+  assert(b.l * b.r == 20, "-> Bin?: a hit reads 4 * 5");
+}
+
+fn test_a_projection_subject() {
+  v: vector<Node> = [Lit { v: 1 }, Bin { op: 3, l: 6, r: 9 }];
+  a = v[0] as Bin?;
+  b = v[1] as Bin?;
+  assert(a == null, "v[0] as Bin?: a miss is null");
+  assert(b.r - b.l == 3, "v[1] as Bin?: a hit reads 9 - 6");
+}
+
+fn test_a_discharged_miss_takes_the_default() {
+  n: Node = Lit { v: 1 };
+  x = (n as Bin?)?;
+  assert(x != null, "the discharge answers a present Bin");
+  assert(x.l == 0 && x.r == 0, "with every field at its default");
+}

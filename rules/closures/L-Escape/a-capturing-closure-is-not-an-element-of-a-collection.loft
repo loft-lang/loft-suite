@@ -8,6 +8,8 @@
 // field, or a non-capturing fn reading its state from a field (the dispatch table
 // `L-FnRef/a-keyed-collection-of-fn-refs-dispatches-by-name` builds).  The OCaml bar's B1.
 //
+// Each capturing element is refused on its own, so the two below answer two expectations.
+// @EXPECT_ERROR: a capturing closure cannot be stored in a collection
 // @EXPECT_ERROR: a capturing closure cannot be stored in a collection
 //
 // @falsified-at: none — a conformance guard; the refusal fires on 9121f1b50, interpret and native.

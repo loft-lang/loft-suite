@@ -40,18 +40,6 @@ fn test_digit_separator_after_hex_prefix() {
   assert(x == 15, "unreached");
 }
 
-// ── @PLN22 Phase 1 — a bare variant defining an untyped variable is an error ──
-enum PLN22Dir {
-  PLN22North,
-  PLN22South,
-}
-
-// @EXPECT_ERROR: bare variant 'PLN22North' has no type here
-fn test_pln22_bare_variant_no_context() {
-  d = PLN22North; // no type context — must write `PLN22Dir.PLN22North`
-  assert(d is PLN22North, "unreachable");
-}
-
 // ── @PLN22 Phase 2 — prelude shadowing allows `enum E` etc., but a built-in
 // type-keyword (`integer`, `vector`, …) is NEVER shadowable: it stays a hard
 // error so the language's own types can't be silently re-pointed. ──
