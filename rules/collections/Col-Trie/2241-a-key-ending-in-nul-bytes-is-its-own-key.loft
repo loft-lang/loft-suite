@@ -1,0 +1,130 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2241, `@FR-Col-Trie` / `@FR-Col-Order` — every text is its own trie key, and an absent
+// key orders first.  The tree ends a key with a `00` byte and pads with zeros, so a data NUL read
+// raw looked like the end: ANY two keys that differed only by trailing NULs collided — the
+// shorter answered absent, and the walk put the longer first.  A null text reads as `"\0"`, so a
+// null key collided with `""` the same way.  Keys now file `0x00` as `01 01` and `0x01` as
+// `01 02`, and a null key lives in a slot ahead of the tree: first in a walk, found by an exact
+// lookup, in no prefix slice.
+//
+// Axes it MOVES: the pair of keys (null/"", "a"/"a\0", "\0\0"/"", "\0\0"/null, "ab"/"ab\0\0",
+// "a\x01"/"a\0", "a\x01"/"a\x02", "\x01"/"\0z", and "b"/"a" as the CONTROL), the insert order
+// (both), what is asked (both lookups, len, walk order, prefix slices, removal, a struct copy),
+// and where the trie lives (resident, an image read whole, an image read by page).
+// Every value is hand-computed from byte order: null < "" < "\0…" < "\x01…" < "\x02…".
+//
+// @falsified-at: 23bc61e4 — interpret exit 1 -> 0, native exit 1 -> 0
+//   On that build the `text?` key is itself refused (a trie admitted no absent key), so the
+//   control stops at the declaration.  The collision is measured with a `text` key holding null
+//   in loft#2241's matrix, on main, every backend; `tests/scripts/2241-*.loft` reads an image
+//   that build wrote.
+// CHANNEL: the VALUE (lookups, walks, prefixes, lengths) and the LEAK (`main` runs every cell).
+
+struct W2241 { w: text?, v: integer }
+
+fn show2241(t: trie<W2241[w]>, k: text?) -> text { "{t[k].v ?? -1}" }
+
+fn walk2241(t: trie<W2241[w]>) -> text {
+  s = "";
+  for e in t { s += "{e.v},"; }
+  s
+}
+
+fn pair2241(a: text?, b: text?, walk: text) {
+  x: trie<W2241[w]> = [W2241 { w: a, v: 1 }, W2241 { w: b, v: 2 }];
+  y: trie<W2241[w]> = [W2241 { w: b, v: 2 }, W2241 { w: a, v: 1 }];
+  got = "{show2241(x, a)} {show2241(x, b)} {show2241(y, a)} {show2241(y, b)} {len(x)} {len(y)} {walk2241(x)} {walk2241(y)}";
+  assert(got == "1 2 1 2 2 2 {walk} {walk}", "pair walk {walk}: {got}");
+}
+
+fn test_keys_that_differ_only_by_trailing_nuls() {
+  nt: text? = null;
+  pair2241(nt, "", "1,2,");
+  pair2241("a", "a\0", "1,2,");
+  pair2241("\0\0", "", "2,1,");
+  pair2241("\0\0", nt, "2,1,");
+  pair2241("ab", "ab\0\0", "1,2,");
+}
+
+fn test_the_two_escaped_bytes_keep_byte_order() {
+  pair2241("a\x01", "a\0", "2,1,");
+  pair2241("a\x01", "a\x02", "1,2,");
+  pair2241("\x01", "\0z", "2,1,");
+  pair2241("b", "a", "2,1,");
+}
+
+fn five2241() -> trie<W2241[w]> {
+  nt: text? = null;
+  [W2241 { w: "a\0", v: 4 }, W2241 { w: "ab", v: 5 }, W2241 { w: nt, v: 1 }, W2241 { w: "a", v: 3 }, W2241 { w: "", v: 2 }]
+}
+
+fn prefix2241(t: trie<W2241[w]>, p: text) -> text {
+  s = "";
+  for e in t[p..] { s += "{e.v},"; }
+  s
+}
+
+fn test_a_prefix_slice_never_holds_the_null_key() {
+  t = five2241();
+  assert(walk2241(t) == "1,2,3,4,5,", "walk: {walk2241(t)}");
+  assert(prefix2241(t, "") == "2,3,4,5,", "prefix \"\": {prefix2241(t, "")}");
+  assert(prefix2241(t, "a") == "3,4,5,", "prefix a: {prefix2241(t, "a")}");
+  assert(prefix2241(t, "a\0") == "4,", "prefix a NUL: {prefix2241(t, "a\0")}");
+}
+
+fn test_removal_and_replacement_of_the_null_key() {
+  nt: text? = null;
+  t = five2241();
+  t += [W2241 { w: nt, v: 9 }];
+  assert(len(t) == 5 && show2241(t, nt) == "9" && walk2241(t) == "9,2,3,4,5,", "replace null: {len(t)} {walk2241(t)}");
+  t[nt] = null;
+  assert(len(t) == 4 && show2241(t, nt) == "-1" && show2241(t, "") == "2", "remove null: {len(t)} {walk2241(t)}");
+  t["a"] = null;
+  assert(len(t) == 3 && show2241(t, "a\0") == "4" && walk2241(t) == "2,4,5,", "remove a: {len(t)} {walk2241(t)}");
+}
+
+struct H2241 { t: trie<W2241[w]>, n: integer }
+
+fn test_a_copy_keeps_the_null_key() {
+  nt: text? = null;
+  h = H2241 { t: five2241(), n: 7 };
+  c = h;
+  c.t[nt] = null;
+  assert(walk2241(h.t) == "1,2,3,4,5," && walk2241(c.t) == "2,3,4,5,", "copy: {walk2241(h.t)} / {walk2241(c.t)}");
+}
+
+fn test_an_image_read_whole_and_by_page() {
+  nt: text? = null;
+  dir = "{temp_dir() ?? "/tmp"}/loft_2241_{now()}_{ticks()}";
+  assert(mkdir(dir) == FileResult.Ok, "make {dir}");
+  path = "{dir}/t.store";
+  src = five2241();
+  assert(store_persist_copy(src, path), "write the image");
+  whole: trie<W2241[w]> = [];
+  assert(store_load(whole, path), "load whole");
+  assert(walk2241(whole) == "1,2,3,4,5," && show2241(whole, nt) == "1" && show2241(whole, "a") == "3", "whole: {walk2241(whole)}");
+  for k in [nt, "", "a", "a\0", "ab"] {
+    one: trie<W2241[w]> = [];
+    assert(store_load_key_text(one, path, k ?? "\0"), "paged key loads");
+    assert(len(one) == 1 && show2241(one, k) == show2241(src, k), "paged key: {show2241(one, k)}");
+  }
+  pre: trie<W2241[w]> = [];
+  got = store_load_prefix(pre, path, "a", -1);
+  assert(got == 3 && walk2241(pre) == "3,4,5,", "paged prefix a: {got} {walk2241(pre)}");
+  all: trie<W2241[w]> = [];
+  got_all = store_load_prefix(all, path, "", -1);
+  assert(got_all == 4 && walk2241(all) == "2,3,4,5,", "paged prefix \"\": {got_all} {walk2241(all)}");
+  for f in list_dir(dir) ?? [] { assert(delete("{dir}/{f}") == FileResult.Ok, "remove {f}"); }
+  assert(rmdir(dir) == FileResult.Ok && !is_dir(dir), "remove {dir}");
+}
+
+fn main() {
+  test_keys_that_differ_only_by_trailing_nuls();
+  test_the_two_escaped_bytes_keep_byte_order();
+  test_a_prefix_slice_never_holds_the_null_key();
+  test_removal_and_replacement_of_the_null_key();
+  test_a_copy_keeps_the_null_key();
+  test_an_image_read_whole_and_by_page();
+}

@@ -16,6 +16,7 @@
 //   * `spatial<P[x, y]>` with `x: integer?` was accepted the same way;
 //   * `trie<T[k]>` with `k: text?` was refused with advice for a field that is NOT a text —
 //     *"use `spatial<…>` for coordinates, or `sorted<…>` / `index<…>` to order on a number"*.
+//     (Since loft#2241 a trie holds an absent key, so that cell is now accepted.)
 //
 // Axes this file MOVES:  the kind (`trie` · `spatial`), the key's base type (`text` ·
 //                        `integer`), and whether the `?` or the KIND is what refuses it.
@@ -43,8 +44,9 @@ struct Sx1429 { x: integer?, y: integer, n: integer }
 struct Td1429 { k: integer, n: integer }
 struct Sd1429 { w: text, n: integer }
 
-// The `?` on a trie's key: the kind is right and absence is what it cannot hold.
-// @EXPECT_ERROR: `k` is `text?` — an absent text has no bytes to walk
+// The `?` on a trie's key is ADMITTED since loft#2241: the trie files an absent key in a slot
+// ahead of its tree (`(Col-Trie)`), first in a walk and in no prefix slice.  Kept as the cell
+// that shows the trie and the spatial now part ways on the `?`.
 fn trie_nullable_text() -> integer { t: trie<Tk1429[k]> = []; 1 }
 
 // The `?` on a spatial axis that is a text — refused for the `?` first, since a `text?` axis
