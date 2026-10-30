@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapHeap` — a captured heap value is SHARED, never the closure's to free.  A lambda whose
+// body RETURNS a comprehension over a captured collection (`fn() { [for x in ys { … }] }`) freed
+// that capture's store on its first call: the comprehension's subject temp kept pass 1's type,
+// without the `__closure` dep pass 2 gives a capture read, so scope analysis read it as an
+// OWNER.  The second call answered `[]`, and every later reader of `ys` — the caller included —
+// met a freed store: empty on the interpreter, garbage on native (`44349813112` for a sum of
+// three).  A loop, an index read and `len` over the same capture were always right.
+//
+// Every cell calls the lambda TWICE and then reads the capture, the two reads the bug broke;
+// one cell has a second lambda over the same capture.
+//
+// @falsified-at: 23bc61e4 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   (`main` stops at its first failing cell; under `--tests` seven of the eight cells fail on
+//   main, on both backends — the second call answers `[]` or garbage.)
+// CHANNEL: the VALUE of both calls and of the capture afterwards, hand-computed, and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on both backends.
+// HOLDS: every cell, on the interpreter, --native and --native-c.
+
+struct P { a: integer, t: text }
+
+fn test_integers() {
+  ys = [5, 6, 7];
+  f = fn() -> vector<integer> { [for x in ys { x + 1 }] };
+  a = f();
+  b = f();
+  assert("{a}" == "[6,7,8]" && "{b}" == "[6,7,8]", "calls {a} {b}");
+  assert("{ys}" == "[5,6,7]", "the capture {ys}");
+}
+
+fn test_narrow_ints() {
+  bs: vector<u8> = [250, 5];
+  f = fn() -> vector<integer> { [for x in bs { x + 10 }] };
+  a = f();
+  b = f();
+  assert("{a}" == "[260,15]" && "{b}" == "[260,15]", "calls {a} {b}");
+  assert(bs.len() == 2 && bs[0] == 250, "the capture {bs}");
+}
+
+fn test_floats() {
+  fs = [0.5, 1.5];
+  f = fn() -> vector<float> { [for x in fs { x * 2.0 }] };
+  a = f();
+  b = f();
+  assert(a.len() == 2 && b.len() == 2 && b[1] == 3.0, "calls {a} {b}");
+  assert(fs.len() == 2 && fs[1] == 1.5, "the capture {fs}");
+}
+
+fn test_texts() {
+  ts = ["ab", "c"];
+  f = fn() -> vector<integer> { [for t in ts { len(t) }] };
+  a = f();
+  b = f();
+  assert("{a}" == "[2,1]" && "{b}" == "[2,1]", "calls {a} {b}");
+  assert(ts.len() == 2 && ts[0] == "ab", "the capture {ts}");
+}
+
+fn test_structs() {
+  ps = [P { a: 1, t: "x" }, P { a: 2, t: "yz" }];
+  f = fn() -> vector<text> { [for p in ps { "{p.t}{p.a}" }] };
+  a = f();
+  b = f();
+  assert(b.len() == 2 && b[0] == "x1" && b[1] == "yz2", "calls {a} {b}");
+  assert(ps.len() == 2 && ps[1].t == "yz", "the capture {ps[1].t}");
+}
+
+fn test_nested_vectors() {
+  vv = [[1], [2, 3]];
+  f = fn() -> vector<integer> { [for v in vv { v.len() * 10 + v[0] }] };
+  a = f();
+  b = f();
+  assert("{a}" == "[11,22]" && "{b}" == "[11,22]", "calls {a} {b}");
+  assert("{vv}" == "[[1],[2,3]]", "the capture {vv}");
+}
+
+fn test_a_second_lambda_over_the_same_capture() {
+  ys = [5, 6, 7];
+  f = fn() -> vector<integer> { [for x in ys { x + 1 }] };
+  g = fn() -> integer { t = 0; for x in ys { t += x; } t };
+  a = f();
+  assert("{a}" == "[6,7,8]", "f {a}");
+  assert(g() == 18 && g() == 18, "g {g()}");
+}
+
+fn test_fifty_calls() {
+  ys = [5, 6, 7];
+  f = fn() -> vector<integer> { [for x in ys { x + 1 }] };
+  t = 0;
+  for _ in 0..50 { t += f().len(); }
+  assert(t == 150, "50 × 3: {t}");
+  assert("{ys}" == "[5,6,7]", "the capture {ys}");
+}
+
+// A `main` that calls every cell, so the leak channel can fire under `--interpret`.
+fn main() {
+  test_integers();
+  test_narrow_ints();
+  test_floats();
+  test_texts();
+  test_structs();
+  test_nested_vectors();
+  test_a_second_lambda_over_the_same_capture();
+  test_fifty_calls();
+}
