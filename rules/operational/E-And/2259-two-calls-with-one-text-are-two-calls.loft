@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2259, `@FR-E-And` / `@FR-E-Left` — `e₁ && e₂` evaluates `e₂` when `e₁` is true, so two
+// calls written with the same text are two calls: both run, each with its side effect, each
+// answering for itself.  On `--native`, inside an `assert` with a plain-text message, the second
+// of two such calls was the FIRST call's binding (`let _pre_43 = _pre_42;`): it never ran, so a
+// counter moved once and an assert that must fail passed.  The native writer substituted its
+// hoisted calls by TEXT, which cannot tell one call from another with the same text.
+//
+// Axes it MOVES: the call's result type (an enum, an integer, a text), the number of identical
+// calls (two, three), the connective (`&&`, `||`, a negated `&&`), where the condition stands
+// (an `assert` with a plain or a formatted message, a local, a nested `if`) and identical calls
+// as two arguments of one call.  Every count is hand-computed from the side effects.
+//
+// @falsified-at: 23bc61e4
+// CHANNEL: the VALUE (the counter after each condition) and the assertions themselves.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+enum Step2259 { Blocked, Walked, Dipped }
+struct Hero2259 { x: integer }
+
+fn walk2259(h: Hero2259, dx: integer) -> Step2259 {
+  h.x += dx;
+  if h.x == 1 { return Step2259.Walked; }
+  if h.x == 2 { return Step2259.Dipped; }
+  Step2259.Blocked
+}
+fn tick2259(h: Hero2259) -> integer { h.x += 1; h.x }
+fn tag2259(h: Hero2259) -> text { h.x += 1; "t{h.x}" }
+fn both2259(a: integer, b: integer) -> integer { a * 10 + b }
+
+fn test_identical_calls_each_run() {
+  h = Hero2259 { x: 0 };
+  assert(walk2259(h, 1) == Step2259.Walked && walk2259(h, 1) == Step2259.Dipped, "walked then dipped");
+  r = "{h.x}";
+  h.x = 0;
+  assert(tick2259(h) == 1 && tick2259(h) == 2 && tick2259(h) == 3, "three ticks");
+  r += " {h.x}";
+  h.x = 0;
+  assert(tag2259(h) == "t1" && tag2259(h) == "t2", "two tags");
+  r += " {h.x}";
+  h.x = 0;
+  assert(walk2259(h, 1) == Step2259.Dipped || walk2259(h, 1) == Step2259.Dipped, "or: the second");
+  r += " {h.x}";
+  h.x = 0;
+  assert(walk2259(h, 1) == Step2259.Walked && walk2259(h, 1) == Step2259.Dipped, "formatted {h.x}");
+  r += " {h.x}";
+  h.x = 0;
+  ok = walk2259(h, 1) == Step2259.Walked && walk2259(h, 1) == Step2259.Dipped;
+  r += " {ok}:{h.x}";
+  h.x = 0;
+  r += " {both2259(tick2259(h), tick2259(h))}:{h.x}";
+  h.x = 0;
+  if walk2259(h, 1) == Step2259.Walked { if walk2259(h, 1) == Step2259.Dipped { r += " nested:{h.x}"; } }
+  h.x = 0;
+  assert(!(walk2259(h, 1) == Step2259.Walked && walk2259(h, 1) == Step2259.Walked), "the second answers Dipped");
+  r += " {h.x}";
+  assert(r == "2 3 2 2 2 true:2 12:2 nested:2 2", "counters: {r}");
+}
+
+fn main() {
+  test_identical_calls_each_run();
+}
