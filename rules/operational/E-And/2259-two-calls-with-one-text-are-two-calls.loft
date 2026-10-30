@@ -13,7 +13,10 @@
 // (an `assert` with a plain or a formatted message, a local, a nested `if`) and identical calls
 // as two arguments of one call.  Every count is hand-computed from the side effects.
 //
-// @falsified-at: 23bc61e4
+// @falsified-at: 23bc61e47 — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT
+//   (expected for a backend-divergence guard — only one side can move).
+// WITNESS: on the control, `--native` stops at the first assert ("walked then dipped"): its
+//   second `walk` was the first call's binding, so the counter read 1 and the call answered Walked.
 // CHANNEL: the VALUE (the counter after each condition) and the assertions themselves.
 // ARMED: no instrument.  Ordinary assertions on every backend.
 // HOLDS: every cell, on every backend.
