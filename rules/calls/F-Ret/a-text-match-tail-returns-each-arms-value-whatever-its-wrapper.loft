@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Ret` — a function returning text from a `match` answers each arm's value, whatever
+// wrapper the match's lowering puts around its arms.  A text tail whose arms all yield is
+// written arm by arm into the caller's buffer (the per-arm accumulator); the pass that decides
+// that looked through the scalar and slice matches' wrappers by name, not through the enum
+// match's own `match` block (a computed subject's binding) nor the struct match's.  There, a
+// tail whose arms return a pattern BINDING and a BUILT local had both promoted onto hidden
+// buffers: the interpreter answered the built arm as "" — `c1` and `c4` below — and `--native`
+// refused the program.  Every value by hand; c2, c3, c5 and c6 are the shapes that were right.
+//
+// @falsified-at: ec098768e — interpret exit 139 -> 0, native exit 1 -> 0.
+//   CHANNEL: exit — on the interpreter a plain run answers the built arm as "" (`c1` "|k|",
+//   `c4` "w||") and this file under the test runner ends in SIGSEGV; on native the compile.
+//   WITNESS: interpret exit 139 on main; `--native` stops at E0308/E0597.
+//   HOLDS: c2, c3, c5 and c6 pass on both trees.
+
+enum Val {
+  VInt { value: integer },
+  VText { value: text },
+  VList { items: vector<Val> },
+  VNone,
+}
+enum K { A, B, C }
+struct W { tag: integer, name: text }
+
+fn id(v: Val) -> Val { v }
+
+fn c1(v: Val) -> text {
+  match id(v) {
+    VText { value } => value,
+    VList { items } => { s = ""; for x in items { s += c1(x); } s },
+    _ => ""
+  }
+}
+
+fn c2(v: Val) -> text {
+  match id(v) {
+    VText { value } => value,
+    _ => "z"
+  }
+}
+
+fn c3(t: text, n: integer, sel: integer) -> text {
+  match (sel, t) {
+    (0, x) => x,
+    (1, _) => { s = ""; for j in 0..n { s += "b"; } s },
+    _ => ""
+  }
+}
+
+fn c4(w: W, n: integer) -> text {
+  match w {
+    W { tag: 0, name } => name,
+    W { tag: 1, name: _ } => { s = ""; for j in 0..n { s += "b"; } s },
+    _ => ""
+  }
+}
+
+fn c5(k: K, n: integer) -> text {
+  match k {
+    A => "a",
+    B => { s = ""; for i in 0..n { s += "b"; } s },
+    _ => ""
+  }
+}
+
+fn c6(v: Val) -> text {
+  match v {
+    VText { value } => value,
+    VList { items } => { s = ""; for x in items { s += c6(x); } s },
+    _ => ""
+  }
+}
+
+fn test_a_computed_subject_returns_a_binding_or_a_built_local() {
+  l = VList { items: [VText { value: "hij" }, VInt { value: 42 }] };
+  assert("{c1(l)}|{c1(VText { value: "k" })}|" == "hij|k|", "c1: {c1(l)}");
+}
+
+fn test_a_computed_subject_returns_a_binding_or_a_literal() {
+  assert("{c2(VText { value: "k" })}|{c2(VInt { value: 1 })}|" == "k|z|", "c2");
+}
+
+fn test_a_tuple_match_returns_a_capture_or_a_built_local() {
+  assert("{c3("t", 2, 0)}|{c3("t", 2, 1)}|" == "t|bb|", "c3");
+}
+
+fn test_a_struct_match_returns_a_field_or_a_built_local() {
+  assert("{c4(W { tag: 0, name: "w" }, 2)}|{c4(W { tag: 1, name: "w" }, 2)}|" == "w|bb|", "c4: {c4(W { tag: 1, name: "w" }, 2)}");
+}
+
+fn test_a_plain_enum_returns_a_literal_or_a_built_local() {
+  assert("{c5(A, 2)}|{c5(B, 3)}|" == "a|bbb|", "c5");
+}
+
+fn test_a_place_subject_returns_a_binding_or_a_built_local() {
+  l = VList { items: [VText { value: "hij" }, VInt { value: 42 }] };
+  assert("{c6(l)}|{c6(VText { value: "k" })}|" == "hij|k|", "c6: {c6(l)}");
+}
