@@ -3,7 +3,7 @@
 //
 // `@FR-F-Render-Child` — an out-of-line field renders as the value it holds, in the plain form
 // and as JSON, and the text parse reads that form back into an equal value.  A chain renders as
-// a loop: 100 000 links render, copy and compare without taking stack per link.
+// a loop: 100 000 links render, copy, compare and read back without taking stack per link.
 
 struct Tree { key: integer, left: Tree?, right: Tree? }
 struct List { v: integer, next: List? }
@@ -41,4 +41,16 @@ fn test_a_long_chain_is_a_loop() {
   assert(c != h, "and differs after a write");
   s = "{h:j}";
   assert(len(s) == 1888894, "every link rendered: {len(s)}");
+  back = s as List?;
+  assert(back == h, "and read back equal");
+}
+
+fn test_a_long_enum_chain_reads_back() {
+  n = 100000;
+  s = "";
+  for _ in 0..n { s += "{{\"Neg\":{{\"e\":"; }
+  s += "{{\"Num\":{{\"v\":1}}}}";
+  for _ in 0..n { s += "}}}}"; }
+  e = s as Expr?;
+  assert("{e:j}" == s, "100 000 nested variants render back to the same text");
 }
