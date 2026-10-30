@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A repeat literal `[v; n]` takes its count from a function declared further down the file
+// (`@FR-Col-Vec`, loft#2278).  The first pass meets the call before the function's declaration
+// and has no type for it yet; the count was refused for that ("Expect a number as the object
+// multiplier"), so the program's declaration order decided whether it compiled.
+//
+// Each count comes from a function below: a local bound to the call, the call itself, a narrow
+// `i32` result, and a byte element.  Lengths and contents hand-computed.
+//
+// @falsified-at: the installed loft 2026.10.0, scored by hand (main c3122aa5a's release build
+//   refused the same repros before the fix) — interpret, native and C: the control refuses to
+//   compile ("Expect a number as the object multiplier") -> exit 0.
+
+fn sized_by_a_local() -> vector<integer> {
+  k = three();
+  [7; k]
+}
+
+fn sized_by_the_call() -> vector<integer> {
+  [8; three()]
+}
+
+fn sized_by_a_narrow() -> vector<integer> {
+  [9; four_i32()]
+}
+
+fn bytes() -> vector<u8> {
+  n = three();
+  [0 as u8; n]
+}
+
+fn three() -> integer {
+  3
+}
+
+fn four_i32() -> i32 {
+  4
+}
+
+fn main() {
+  a = sized_by_a_local();
+  assert(len(a) == 3 && a[0] == 7 && a[2] == 7, "a local count: {a}");
+  b = sized_by_the_call();
+  assert(len(b) == 3 && b[1] == 8, "the call as the count: {b}");
+  c = sized_by_a_narrow();
+  assert(len(c) == 4 && c[3] == 9, "a narrow count: {c}");
+  d = bytes();
+  assert(len(d) == 3 && d[0] == 0 as u8, "a byte element: {len(d)}");
+}
