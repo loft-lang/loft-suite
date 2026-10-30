@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C159 / `@FR-L-OutOfLine` — a record holding a child is an element of `sorted`, `index` and
+// `hash` like any record: keyed on a scalar field, its child reads back through a lookup, and a
+// removal releases it.  (A child as a KEY is refused by the key rule: a key is an immutable
+// value, and a struct is not.)
+
+struct N { k: integer, kid: N? }
+
+fn test_keyed_collections_of_trees() {
+  s: sorted<N[k]> = [];
+  s += [N { k: 2, kid: N { k: 9 } }, N { k: 1 }];
+  assert(s[2].kid.k == 9 && !s[1].kid, "sorted: a lookup reads the child");
+  i: index<N[k]> = [];
+  i += [N { k: 5, kid: N { k: 6 } }, N { k: 3 }];
+  total = 0;
+  for n in i { total += n.k + (n.kid.k ?? 0); }
+  assert(total == 14, "index: 3 + 5 + 6 = {total}");
+  h: hash<N[k]> = [];
+  h += [N { k: 7, kid: N { k: 8, kid: N { k: 9 } } }];
+  assert(h[7].kid.kid.k == 9, "hash: two levels down");
+  h[7] = null;
+  assert(!h[7], "a removal takes the tree with it");
+}
