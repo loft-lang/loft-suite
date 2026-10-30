@@ -1,0 +1,17 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-OutOfLine`, `@FR-B-Ref-Write` — `&t.left` links the child itself: a write through the
+// link lands in the tree, and an overwrite of the field, which keeps the child's record, is
+// read through the link.
+
+struct Tree { key: integer, left: Tree?, right: Tree? }
+
+fn test_a_link_to_a_child() {
+  t = Tree { key: 1, left: Tree { key: 2 } };
+  l = &t.left;
+  l.key = 7;
+  assert(t.left.key == 7, "the write through the link lands in the tree");
+  t.left = Tree { key: 9 };
+  assert(l.key == 9, "and the link reads the overwrite: {l.key}");
+}

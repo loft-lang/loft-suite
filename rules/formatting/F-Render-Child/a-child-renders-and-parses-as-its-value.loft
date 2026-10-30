@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Render-Child` — an out-of-line field renders as the value it holds, in the plain form
+// and as JSON, and the text parse reads that form back into an equal value.  A chain renders as
+// a loop: 100 000 links render, copy and compare without taking stack per link.
+
+struct Tree { key: integer, left: Tree?, right: Tree? }
+struct List { v: integer, next: List? }
+
+enum Expr {
+  Num { v: integer },
+  Add { l: Expr, r: Expr },
+  Neg { e: Expr },
+}
+
+fn test_a_tree_renders_and_reads_back() {
+  t = Tree { key: 5, left: Tree { key: 3 }, right: Tree { key: 8, left: Tree { key: 7 } } };
+  assert("{t}" == "{{key:5,left:{{key:3,left:null,right:null}},right:{{key:8,left:{{key:7,left:null,right:null}},right:null}}}}", "plain: {t}");
+  s = "{t:j}";
+  assert(s == "{{\"key\":5,\"left\":{{\"key\":3,\"left\":null,\"right\":null}},\"right\":{{\"key\":8,\"left\":{{\"key\":7,\"left\":null,\"right\":null}},\"right\":null}}}}", "json: {s}");
+  u = Tree.parse(s);
+  assert(u == t, "read back: {u}");
+}
+
+fn test_an_expression_renders_and_reads_back() {
+  e: Expr = Add { l: Num { v: 1 }, r: Neg { e: Num { v: 2 } } };
+  assert("{e:j}" == "{{\"Add\":{{\"l\":{{\"Num\":{{\"v\":1}}}},\"r\":{{\"Neg\":{{\"e\":{{\"Num\":{{\"v\":2}}}}}}}}}}}}", "json: {e:j}");
+  f = "{e:j}" as Expr?;
+  assert(f == e, "read back: {f}");
+}
+
+fn test_a_long_chain_is_a_loop() {
+  n = 100000;
+  h = List { v: 0, next: List { v: 1 } };
+  t = h.next;
+  for i in 2..n { t.next = List { v: i }; t = t.next; }
+  c = h;
+  assert(c == h, "a copy of 100 000 links compares equal");
+  c.v = -1;
+  assert(c != h, "and differs after a write");
+  s = "{h:j}";
+  assert(len(s) == 1888894, "every link rendered: {len(s)}");
+}
