@@ -12,14 +12,17 @@
 // Every value is worked out by hand, or (the eight-arm half) by the model written beside it.
 //
 // @ARMED: LOFT_STRICT_STORES=1
-// @falsified-at: none — the copying lowering answers the same values, so these cells cannot falsify
-//   it; they are the VALUE half of the change, and `tests/match_once.rs` its SIZE half, which
+// @falsified-at: b0d867b4e — interpret exit 134 -> 0; native INERT (expected: the slot it
+//   names is the interpreter's).  The control is the folded lowering before its bindings were
+//   pre-initialised on every path: the last cell (`sub2` then `shared2`) aborts there in a free of
+//   a slot the earlier call left a text in.  The other cells are the VALUE half of the change —
+//   the copying lowering answers the same values — and `tests/match_once.rs` its SIZE half, which
 //   reads 191 subject tests on the copying lowering where it wants 8.
-//   CHANNEL: value — every assertion, on both backends.
+//   CHANNEL: exit — the interpreter's abort; value — every assertion, on both backends.
 //   ARMED: `LOFT_STRICT_STORES=1`, because the folded lowering first writes a binding inside a
 //   condition, and a binding released before its body reads it shows only there.
-//   WITNESS: none on the control (the values are equal there by design).
-//   HOLDS: every cell passes on both trees and both backends; leak and panic clean.
+//   WITNESS: interpret exit 134 at b0d867b4e.
+//   HOLDS: every cell passes here on both backends; leak and panic clean.
 
 enum C { A, B, D, E, F }
 enum S { P { x: integer }, Q { y: integer }, R }
@@ -220,4 +223,22 @@ fn test_eight_arms_with_3_guards() {
 fn test_eight_arms_with_6_guards() {
   got = "{e6(V0, -1)} {e6(V0, 3)} {e6(V0, 9)} {e6(V1, -1)} {e6(V1, 3)} {e6(V1, 9)} {e6(V2, -1)} {e6(V2, 3)} {e6(V2, 9)} {e6(V3, -1)} {e6(V3, 3)} {e6(V3, 9)} {e6(V4, -1)} {e6(V4, 3)} {e6(V4, 9)} {e6(V5, -1)} {e6(V5, 3)} {e6(V5, 9)} {e6(V6, -1)} {e6(V6, 3)} {e6(V6, 9)} {e6(V7, -1)} {e6(V7, 3)} {e6(V7, 9)}";
   assert(got == "88 0 0 88 1 1 88 2 2 99 99 3 99 99 4 99 99 5 6 6 6 7 7 7", "e6: {got}");
+}
+
+// A multi-pattern arm whose second pattern binds a text through a field sub-pattern, which the
+// folded lowering writes inside the arm's condition: the binding's slot must be initialised on
+// the first pattern's path too, or the free at the match's end releases whatever an earlier
+// call left in that slot.  The earlier call is `sub2`, a match of the same subject type whose
+// own bindings occupy those slots.  Values by hand.
+enum Sub2 { Sp2 { x: integer }, Sq2 { y: text } }
+enum Rec2 { Ra2 { u: integer }, Rs2 { i: Sub2, k: integer }, Ry2 { y: text } }
+
+fn sub2(r: Rec2) -> text { match r { Ra2 { u }, Rs2 { i: Sp2 { x }, k } => "{u ?? -1}:{x ?? -2}:{k ?? -3}", _ => "o" } }
+fn shared2(r: Rec2) -> text { match r { Ry2 { y }, Rs2 { i: Sq2 { y } } => "[{y}]", _ => "o" } }
+
+fn test_a_text_bound_in_a_folded_condition_is_initialised_on_every_path() {
+  a = "{sub2(Ra2 { u: 3 })}";
+  b = "{shared2(Ry2 { y: "a" })}";
+  c = "{shared2(Rs2 { i: Sq2 { y: "b" }, k: 0 })} {shared2(Ra2 { u: 1 })}";
+  assert("{a} {b} {c}" == "3:-2:-3 [a] [b] o", "got {a} {b} {c}");
 }
