@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `par` WORKER RETURNS A TREE INTO A FRESH DESTINATION (`@FR-L-OutOfLine`).  A struct return
+// travels through a hidden destination the caller makes; a callee handed a present one reuses
+// it as made, so the literal it builds reads the slots it fills — an out-of-line child's old
+// record first (`OpSetChildRec`).  On the main thread the caller's `OpDatabase` writes the
+// type's defaults; the interpreter's `par` runner handed each worker a vector-shaped buffer in
+// a reused store slot instead, whose child slot held bytes nobody wrote, and the worker freed
+// a record id read off them.  The cells move what the existing par cell holds fixed: one
+// worker (every row reuses its destination), a list of one node (no child at all), and many
+// workers over short and long lists.  Every sum is worked out by hand: a list built for `n`
+// holds 0..n-1, so it sums to n·(n-1)/2.
+//
+// @falsified-at: ae81ae2d4 — interpret exit 1 -> 0: the many-workers cell panics in every run
+//   (`Store access out of bounds … the reference is corrupt`); the one-worker and one-node
+//   shapes do the same as whole programs, and pass here only because the cells before them
+//   leave the reused slots clean.
+// CHANNEL: the interpreter's exit — a panic inside the worker.
+// ARMED: no instrument.
+// HOLDS: the C answers the same on both trees; every sum is the same where both answer.
+
+struct List { v: integer, next: List? }
+struct Job { n: integer }
+
+fn build(j: const Job) -> List {
+  h = List { v: 0 };
+  for i in 1..j.n {
+    h = List { v: i, next: h };
+  }
+  h
+}
+
+fn total(l: List?) -> integer {
+  if !l { return 0; }
+  l.v + total(l.next)
+}
+
+fn sums(jobs: vector<Job>, workers: integer) -> text {
+  s = "";
+  for jb in jobs par(l = build(jb), workers) {
+    s += "{total(l)},";
+  }
+  s
+}
+
+fn test_one_worker_reuses_its_destination_for_every_row() {
+  jobs = [Job { n: 3 }, Job { n: 5 }, Job { n: 10 }, Job { n: 1 }];
+  assert(sums(jobs, 1) == "3,10,45,0,", "one worker: {sums(jobs, 1)}");
+}
+
+fn test_a_list_of_one_node_has_no_child_to_release() {
+  jobs = [Job { n: 1 }, Job { n: 1 }, Job { n: 1 }, Job { n: 1 }];
+  assert(sums(jobs, 4) == "0,0,0,0,", "one node each: {sums(jobs, 4)}");
+}
+
+fn test_many_workers_over_short_and_long_lists() {
+  jobs = [Job { n: 300 }, Job { n: 2 }, Job { n: 100 }, Job { n: 1 }, Job { n: 50 }];
+  assert(sums(jobs, 3) == "44850,1,4950,0,1225,", "mixed: {sums(jobs, 3)}");
+}
