@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A local bound to a call whose tail is a JOIN — an arm projecting into the callee's
+// temporary, another arm a fresh record — releases what it holds when it is rebound, on
+// every backend.
+//
+// @FR-O-Witness: a rebound local frees the value it held; @FR-F-Ret: the callee hands back
+// a fresh value.  `pc` answered the projecting arm as a view of its freed temporary
+// (loft#2289), so the call read to the ownership oracle as one of several stores with no
+// nameable base: `--native`'s rebind tracker learned no owner and `dr = CInt { value: 7 }`
+// left the first result behind (`kt=102 CInt×1`, loft#2290).  With the projection copied
+// into the caller's buffer the callee answers one store and the rebind releases it.
+//
+// Axes this file MOVES:  the rebind's source (a literal, the same call); the field type (a
+//                        record enum, a struct).
+// Axes it HOLDS FIXED:   the arm that RAN is the fresh one — the projecting arm's value is
+//                        the F-Ret/2289 cell's channel, kept out of this one so a wrong value
+//                        cannot stop the run before the leak report; a dense return; a
+//                        straight-line rebind.
+//
+// The channel is the suite's leak check (`LOFT_LEAK_CHECK=1`, both lanes): a store left at
+// exit fails the cell; the printed values are the control.
+//
+// @falsified-at: a0106bd01 — native exit 0 -> 0 with `1 stores not freed at program exit:
+// kt=102 CInt×1` -> clean, scored by hand with a build carrying the defect; interpret clean
+// on both trees (the interpreter always freed it).
+enum CV { CNull, CInt { value: integer }, CText { value: text } }
+struct In { a: integer, t: text }
+struct Dec { const value: CV, const next: integer, inn: In }
+fn decode(n: integer) -> Dec { Dec { value: CInt { value: n }, next: 1, inn: In { a: n, t: "i{n}" } } }
+fn pc(n: integer) -> CV { if n > 0 { decode(n).value } else { CInt { value: 9 } } }
+fn pi(n: integer) -> In { if n > 0 { decode(n).inn } else { In { a: 9, t: "z" } } }
+fn v(c: CV) -> integer { match c { CInt { value } => value, _ => -1 } }
+fn main() {
+  dr = pc(0); a = v(dr); dr = CInt { value: 7 };
+  f = pc(0); c = v(f); f = pc(0);
+  g = pi(0); d = g.a; g = In { a: 6, t: "y" };
+  assert("{a} {v(dr)} {c} {v(f)} {d} {g.a}" == "9 7 9 9 9 6", "the values");
+  print("2290 a rebound local releases a branch-joined call result ok\n");
+}
