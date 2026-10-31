@@ -59,7 +59,8 @@ raise.  A cell's expected value is hand-computed; two backends agreeing is not a
 ```
 loft-suite run                                 every rule cell, interpreter, 8 at a time
 loft-suite run @FR-B-Copy                      one rule (refinements B-Copy-* included; --exact)
-loft-suite run --chapter ownership --mode both both backends, one chapter
+loft-suite run --chapter ownership --mode both-c  interpreter + C, one chapter
+loft-suite run --mode all                      interpreter, C and rustc-native (the nightly)
 loft-suite run --attic --junit out.xml         the inherited corpus too (the nightly)
 loft-suite list @FR-L-Null                     the cells a selection names
 loft-suite attic --unclaimed                   attic programs no rule has claimed
@@ -81,7 +82,9 @@ inside loft's own build job.  One process per cell, no inner pool.
 loft pins the suite's commit the way it pins a library: `tests/loft-suite.pin` in the loft
 repository names the commit its CI checks out.  A behaviour change is a loft PR plus a
 suite PR, and the loft PR bumps the pin.  From a loft checkout with this repository beside
-it, `make suite ARGS="@FR-B-Copy --mode both"` runs a selection against that tree's binary.
+it, `make suite ARGS="@FR-B-Copy --mode both-c"` runs a selection against that tree's binary.
+A change is checked on the interpreter and the C backend (`both-c`); the rustc-native
+backend (`native`, inside `both` and `all`) runs nightly.
 
 ## The attic
 

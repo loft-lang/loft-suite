@@ -152,6 +152,8 @@ def run_cell(loft, cell, mode, timeout):
     cmd = [loft, "--tests"]
     if mode == "native":
         cmd.append("--native")
+    elif mode == "c":
+        cmd.append("--native-c")
     # No `--deny-warnings`: a warning the cell does not claim is printed, not failed, the
     # contract the corpus runner in loft held (`tests/wrap.rs::check_diagnostics`, "other
     # warnings are not fatal").  141 of the 711 seed cells carry an unclaimed warning —
@@ -210,7 +212,13 @@ def cmd_run(a):
             sys.exit(f"loft-suite: no loft binary at {loft}")
     elif shutil.which(loft) is None:
         sys.exit(f"loft-suite: no `{loft}` on PATH (--loft <binary>, or $LOFT)")
-    modes = ["interpret", "native"] if a.mode == "both" else [a.mode]
+    # `both-c` is the per-change run: the interpreter and the C backend.  `both` keeps the
+    # rustc-native backend beside the interpreter, and `all` runs the three — the nightly's.
+    modes = {
+        "both": ["interpret", "native"],
+        "both-c": ["interpret", "c"],
+        "all": ["interpret", "c", "native"],
+    }.get(a.mode, [a.mode])
     jobs = [(c, m) for m in modes for c in cells]
     print(f"loft-suite: {len(cells)} cell(s) × {len(modes)} mode(s) with {loft}, {a.jobs} at a time")
     t0 = time.monotonic()
@@ -288,7 +296,9 @@ def main():
     p = sub.add_parser("run", help="run a selection")
     selection(p)
     p.add_argument("--loft", help="the loft binary (default: $LOFT, else `loft` on PATH)")
-    p.add_argument("--mode", choices=["interpret", "native", "both"], default="interpret")
+    p.add_argument("--mode", choices=["interpret", "native", "c", "both", "both-c", "all"],
+                   default="interpret",
+                   help="both-c (interpreter + C) per change; both or all bring in rustc-native")
     p.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     p.add_argument("--timeout", type=int, default=300, help="per cell, seconds (LOFT_TIMEOUT)")
     p.add_argument("--junit", help="write a JUnit report here")
