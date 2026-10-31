@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2314 — `(O-Proxy)`: a dependency on the binding's OWN mint (a vector's `__vdb_N` backing)
+// says it owns a store; a dependency on any other local says it borrows.  A `match` over a
+// subject the function OWNS — a call's result delivered into a fresh buffer — binds its arm's
+// vector field as a part of that subject.  Returned, the binding must be COPIED into the
+// caller's buffer: renamed onto it, the caller got a view of the subject the function frees on
+// its way out, and the next calls recycled the store under it.  The `churn` between the call
+// and the reads is what makes the recycling visible.
+enum Node { Nil, Var { n: integer }, Call { d: integer, args: vector<Node> }, Set { v: integer, inner: Node }, Span { inner: Node } }
+
+// Returns a LOCAL: its result is delivered into the caller's fresh buffer, an owned subject.
+fn unspan(n: Node) -> Node {
+  at = n;
+  while at is Span {
+    match at {
+      Span { inner } => { at = inner; }
+      _ => {}
+    }
+  }
+  at
+}
+
+fn call_args(n: Node, want: integer) -> vector<Node>? {
+  match unspan(n) {
+    Call { d, args } => if d == want { args } else { null },
+    _ => null,
+  }
+}
+
+fn set_value(n: Node) -> Node {
+  match unspan(n) {
+    Set { v: _, inner } => unspan(inner),
+    _ => Nil,
+  }
+}
+
+fn var_value(n: Node) -> integer? {
+  match unspan(n) {
+    Var { n: v } => v,
+    _ => null,
+  }
+}
+
+fn main() {
+  ops: vector<Node> = [
+    Set { v: 1, inner: Span { inner: Call { d: 7, args: [Var { n: 3 }, Var { n: 4 }] } } },
+    Set { v: 2, inner: Var { n: 9 } },
+    Set { v: 5, inner: Call { d: 8, args: [Var { n: 11 }, Var { n: 12 }, Var { n: 13 }] } },
+  ];
+  a = call_args(set_value(ops[0]!), 7);
+  x = var_value(set_value(ops[1]!));
+  y = call_args(set_value(ops[2]!), 8);
+  assert(a != null && len(a!) == 2, "the arm's vector is returned whole");
+  first = var_value(a![0]!);
+  assert(first == 3, "first element after the subject's store was recycled: {first}");
+  assert(var_value(a![1]!) == 4, "second element");
+  assert(x == 9 && len(y!) == 3, "the calls in between answer their own values");
+  println("2314 OK");
+}
