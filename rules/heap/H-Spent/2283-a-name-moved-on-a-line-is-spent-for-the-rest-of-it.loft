@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A name whose value moved is spent from the end of the STATEMENT that moved it, whether
+// the next statement starts on a new line or on the same one.
+//
+// @FR-H-Spent, @FR-H-Move: `h2 = h`, where `h` is a local bound to a fresh value, moves it,
+// and a later read of `h` is refused.  The walk that finds those reads grouped operators
+// into statements by their LINE marker, because a construction is written as sibling
+// operators; a function written on one line was then one statement, and nothing moved in
+// it was ever spent — `fn d() -> text { h = mkh(); h2 = h; "{h.f()} {h2.f()}" }` shared one
+// captured vector between the two names on both backends (loft#2283).  A whole-value bind
+// to a name the author wrote now ends its statement.
+//
+// The type owns a droppable through its fn field (the closure record owns the captured
+// vector), the shape loft#2283 was filed on; the refusal is the same for any droppable.
+//
+// Axes this file MOVES:  the later read (a field, a fn-field call, a fn field read out); the
+//                        layout (one line, several lines — the control that always refused).
+// Axes it HOLDS FIXED:   the move is a plain whole-value bind; the controls that must stay
+//                        accepted are the _ok functions below, run by main.
+//
+// @EXPECT_ERROR: `h` is read after its value moved at line 35
+// @EXPECT_ERROR: `h` is read after its value moved at line 36
+// @EXPECT_ERROR: `h` is read after its value moved at line 37
+// @EXPECT_ERROR: `h` is read after its value moved at line 40
+//
+// @falsified-at: 9e6425727 — the expected errors raised 1 -> 4 (main raised only the
+// multi-line one, line 40), so the cell fails on main and passes here; scored by hand with
+// a dev build of main.  native INERT: the refusal is the front end's, before either backend.
+struct H { tag: integer, f: fn() -> integer }
+struct N { h: H, label: integer }
+fn mkh() -> H { v = [1, 2, 3]; H { tag: 7, f: fn() -> integer { v += [9]; len(v) } } }
+
+fn a_field() -> text { h = mkh(); h2 = h; "{h.tag} {h2.tag}" }
+fn a_call() -> text { h = mkh(); h2 = h; "{h.f()} {h2.f()}" }
+fn read_out() -> text { h = mkh(); h2 = h; g = h.f; "{g()} {h2.tag}" }
+fn multi_line() -> text {
+  h = mkh();
+  h2 = h;
+  "{h.tag} {h2.tag}"
+}
+fn inside_ok() -> text { h = mkh(); n = N { h: h, label: h.tag }; "{n.label} {n.h.tag}" }
+fn refilled_ok() -> text { h = mkh(); h2 = h; h = mkh(); "{h.tag} {h2.tag}" }
+fn before_ok() -> text { h = mkh(); x = h.tag; h2 = h; "{x} {h2.tag}" }
+fn main() { print("{inside_ok()} {refilled_ok()} {before_ok()}\n"); }
