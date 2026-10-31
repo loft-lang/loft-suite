@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `par` worker that returns text keeps its work buffer under a deep call.  `@FR-R-StackBase`.
+//
+// A `-> text` function entered from Rust — a `par` worker, a host call — gets its hidden text
+// work buffer from the runtime rather than from a caller's frame.  It sits at the foot of the
+// stack record, where an ordinary caller keeps one: the stack is the only record of its store,
+// and a frame is bounded by the store, so a buffer kept beside the stack was run over by the
+// frames of a call chain about 100 deep — the callee's locals and the returned text then wrote
+// over each other (loft#2271).
+//
+// Each worker recurses `v` frames deep, each frame holding a text local, and answers
+// "v<v>!" — the accumulator it was handed, plus "!".  Depths 10 to 3000, with two and three
+// workers, and a depth-0 worker beside deep ones.
+//
+// @falsified-at: 485a98050 (main c3122aa5a's runtime), scored by hand — interpret SIGSEGV
+//   (exit 139) -> exit 0; native exit 0 -> 0 and C exit 0 -> 0, INERT as expected: the
+//   compiled backends run a worker on its own thread and stack, not on the stack store.
+// CHANNEL: exit status, the interpreter.
+// WITNESS: `SIGSEGV` (exit 139) on the control.
+// HOLDS: native and C exit 0 on the control and on the fix — neither runs the worker on the
+//   stack store.
+
+fn deep(n: integer, acc: text) -> text {
+  if n == 0 {
+    return acc + "!";
+  }
+  pad = "frame {n} {acc}";
+  r = deep(n - 1, acc);
+  if len(pad) < 0 {
+    return pad;
+  }
+  r
+}
+
+fn work(x: integer) -> text {
+  deep(x, "v{x}")
+}
+
+fn main() {
+  n = 0;
+  for v in [100, 100] par(r = work(v), 2) {
+    assert(r == "v{v}!", "two workers, depth {v}: {r}");
+    assert(len(r) == len("{v}") + 2, "two workers, depth {v}: length {len(r)}");
+    n += 1;
+  }
+  for v in [10, 1000, 3000, 0, 500] par(r = work(v), 3) {
+    assert(r == "v{v}!", "three workers, depth {v}: {r}");
+    n += 1;
+  }
+  assert(n == 7, "every worker answered: {n}");
+}

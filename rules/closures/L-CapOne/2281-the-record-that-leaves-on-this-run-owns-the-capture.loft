@@ -1,0 +1,231 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2281, `@FR-L-CapOne` — THE RECORD THAT LEAVES ON THIS RUN OWNS THE CAPTURE.
+//
+// `h = |…| e.id; if q { h = |…| e.id; } h` builds two records over one store that can both
+// exist, so exactly one owns it: the one that leaves the frame.  WHICH one leaves depends on
+// `q`.  The frame used to decide it from the text (the last binding), so on the run that
+// returned the first record the frame freed `e` and the caller read whatever took its store
+// (`103` for `5`, every backend, no diagnostic).  Now every record adopts, a record left behind
+// lets go of the capture before its release, and the one that leaves keeps it.
+//
+// Every expected value is hand-computed.  Each trace reads M (made), V (the value the caller
+// read, after a record of its own took any freed store) and D (released): a capture freed too
+// early shows as D before V, a lost one as no D, a doubled one as two.  `E`, `F` and `G` are
+// controls that were right before.
+//
+// CHANNEL: assertion failures (the value and the trace), every backend.
+// HOLDS: clean under `LOFT_STRICT_STORES=1` on all three backends.
+
+struct H { id: integer }
+struct P { pv: integer }
+
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mkh(id: integer) -> H { note("M{id}"); H { id: id } }
+
+fn trace_path() -> text { return "loft_2281_owner_trace.tmp"; }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn ok(nm: text, got: text, want: text) {
+  assert(got == want, "{nm}: {got}, want {want}");
+}
+
+// The caller makes a record of its own before it calls, so a freed capture is reused.
+fn run(g: fn() -> integer) -> integer {
+  x = P { pv: 100 };
+  v = g();
+  note("V{v}");
+  assert(x.pv == 100, "caller record");
+  v
+}
+
+// A — the issue's shape: a build, then a rebind under a condition.
+fn a(q: boolean) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  if q { h = fn() -> integer { 5 + e.id }; }
+  h
+}
+// A literal capture, the issue's spelling.
+fn al(q: boolean) -> fn() -> integer {
+  note("M2");
+  e = H { id: 2 };
+  h = fn() -> integer { 3 + e.id };
+  if q { h = fn() -> integer { 5 + e.id }; }
+  h
+}
+// D — three builds, two conditional rebinds.
+fn d(p: boolean, q: boolean) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  if p { h = fn() -> integer { 5 + e.id }; }
+  if q { h = fn() -> integer { 7 + e.id }; }
+  h
+}
+// H — an early `return` in the branch: two returns, each its own sweep.
+fn hr(q: boolean) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  if q { return h; }
+  h = fn() -> integer { 5 + e.id };
+  h
+}
+// I — handed out through a copy.
+fn ic(q: boolean) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  if q { h = fn() -> integer { 5 + e.id }; }
+  k = h;
+  k
+}
+// J — the rebind inside a loop.
+fn jl(n: integer) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  for i in 0..n { if i == 1 { h = fn() -> integer { 5 + e.id }; } }
+  h
+}
+// K — two captures in each record.
+fn k2(q: boolean) -> fn() -> integer {
+  e = mkh(2);
+  f = mkh(4);
+  h = fn() -> integer { 3 + e.id * f.id };
+  if q { h = fn() -> integer { 5 + e.id + f.id }; }
+  h
+}
+// L — a captured vector.
+fn lv(q: boolean) -> fn() -> integer {
+  w = [10, 20];
+  h = fn() -> integer { 3 + w[0] };
+  if q { h = fn() -> integer { 5 + w[1] }; }
+  h
+}
+// M — returned through a value `if` whose arms both name the fn-ref.
+fn mv(q: boolean, p: boolean) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  if q { h = fn() -> integer { 5 + e.id }; }
+  if p { h } else { h }
+}
+// Controls.  E: an unconditional rebind.  F: nothing leaves.  G: two holders, one returned.
+fn e1() -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  note("H{h()}");
+  h = fn() -> integer { 5 + e.id };
+  h
+}
+fn f1(q: boolean) -> integer {
+  e = mkh(2);
+  h = fn() -> integer { 3 + e.id };
+  if q { h = fn() -> integer { 5 + e.id }; }
+  v = h();
+  note("V{v}");
+  v
+}
+fn g1() -> fn() -> integer {
+  e = mkh(2);
+  g = fn() -> integer { 3 + e.id };
+  h = fn() -> integer { 5 + e.id };
+  note("H{h()}");
+  g
+}
+
+// One wrapper per check: the closure is a local there, released when the wrapper returns.
+fn w1() -> integer { g = a(false); run(g) }
+fn w2() -> integer { g = a(true); run(g) }
+fn w3() -> integer { g = al(false); run(g) }
+fn w4() -> integer { g = al(true); run(g) }
+fn w5() -> integer { g = d(false, false); run(g) }
+fn w6() -> integer { g = d(true, false); run(g) }
+fn w7() -> integer { g = d(false, true); run(g) }
+fn w8() -> integer { g = d(true, true); run(g) }
+fn w9() -> integer { g = hr(true); run(g) }
+fn w10() -> integer { g = hr(false); run(g) }
+fn w11() -> integer { g = ic(false); run(g) }
+fn w12() -> integer { g = ic(true); run(g) }
+fn w13() -> integer { g = jl(1); run(g) }
+fn w14() -> integer { g = jl(3); run(g) }
+fn w15() -> integer { g = k2(false); run(g) }
+fn w16() -> integer { g = k2(true); run(g) }
+fn w17() -> integer { g = lv(false); run(g) }
+fn w18() -> integer { g = lv(true); run(g) }
+fn w19() -> integer { g = e1(); run(g) }
+fn w20() -> integer { g = g1(); run(g) }
+
+fn wm1() -> integer { g = mv(false, false); run(g) }
+fn wm2() -> integer { g = mv(true, false); run(g) }
+fn wm3() -> integer { g = mv(false, true); run(g) }
+
+fn main() {
+  drain();
+  v = w1();
+  ok("A first ", "{v} {drain()}", "5 M2,V5,D2");
+  v = w2();
+  ok("A second", "{v} {drain()}", "7 M2,V7,D2");
+  v = w3();
+  ok("A literal first ", "{v} {drain()}", "5 M2,V5,D2");
+  v = w4();
+  ok("A literal second", "{v} {drain()}", "7 M2,V7,D2");
+  v = w5();
+  ok("D ff", "{v} {drain()}", "5 M2,V5,D2");
+  v = w6();
+  ok("D tf", "{v} {drain()}", "7 M2,V7,D2");
+  v = w7();
+  ok("D ft", "{v} {drain()}", "9 M2,V9,D2");
+  v = w8();
+  ok("D tt", "{v} {drain()}", "9 M2,V9,D2");
+  v = w9();
+  ok("H early ", "{v} {drain()}", "5 M2,V5,D2");
+  v = w10();
+  ok("H tail  ", "{v} {drain()}", "7 M2,V7,D2");
+  v = w11();
+  ok("I first ", "{v} {drain()}", "5 M2,V5,D2");
+  v = w12();
+  ok("I second", "{v} {drain()}", "7 M2,V7,D2");
+  v = w13();
+  ok("J one pass   ", "{v} {drain()}", "5 M2,V5,D2");
+  v = w14();
+  ok("J three passes", "{v} {drain()}", "7 M2,V7,D2");
+  v = w15();
+  ok("K first ", "{v} {drain()}", "11 M2,M4,V11,D4,D2");
+  v = w16();
+  ok("K second", "{v} {drain()}", "11 M2,M4,V11,D4,D2");
+  v = w17();
+  ok("L first ", "{v} {drain()}", "13 V13");
+  v = w18();
+  ok("L second", "{v} {drain()}", "25 V25");
+  v = w19();
+  ok("E rebind", "{v} {drain()}", "7 M2,H5,V7,D2");
+  v = f1(false);
+  ok("F first ", "{v} {drain()}", "5 M2,V5,D2");
+  v = f1(true);
+  ok("F second", "{v} {drain()}", "7 M2,V7,D2");
+  v = w20();
+  ok("G two holders", "{v} {drain()}", "5 M2,H7,V5,D2");
+  v = wm1();
+  ok("M first, else ", "{v} {drain()}", "5 M2,V5,D2");
+  v = wm2();
+  ok("M second, else", "{v} {drain()}", "7 M2,V7,D2");
+  v = wm3();
+  ok("M first, then ", "{v} {drain()}", "5 M2,V5,D2");
+  delete(trace_path());
+  println("the record that leaves on this run owns the capture: every cell holds");
+}

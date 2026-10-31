@@ -1,0 +1,139 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2272, `@FR-L-CapKeep` — A FN-REF BOUND IN EVERY ARM KEEPS THE ARM THAT RAN.
+//
+// `h` is assigned a capturing closure in each arm of one branch, and the frame returns it.  Each
+// arm builds its own record, so which record `h` holds is a per-run fact.  `h`'s type carries ONE
+// borrow list for the whole function, and each assignment replaced it, so the list named only
+// the LAST arm's record: the frame freed the first arm's record and its capture on return, the
+// caller's next records took the freed numbers, and `g()` read them (`null` for `5`, on every
+// backend, with no diagnostic).  `(L-CapKeep)` decides a record's release by store identity when
+// a name lets go, never by which binding the program text shows last, so a fn-ref bound to two
+// or more records is decided that way.
+//
+// Every expected value is hand-computed.  The trace cells check the capture is released ONCE, by
+// the caller, after its last use.  `k1` is a control: the shape that was right before.
+// A rebind under a condition, where both records coexist, is loft#2281 and not in this file.
+//
+// @falsified-at: c3122aa5a — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: assertion failures, every backend (`c1 first arm: null, want 5` on main, C included).
+// HOLDS: clean under `LOFT_STRICT_STORES=1` on all three backends.
+
+struct E { a: integer }
+struct H { id: integer }
+enum W { One, Two, Three }
+
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mkh(id: integer) -> H { note("M{id}"); H { id: id } }
+
+fn trace_path() -> text { return "loft_2272_arm_trace.tmp"; }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn ok(nm: text, got: text, want: text) {
+  assert(got == want, "{nm}: {got}, want {want}");
+}
+
+// The issue's shape: each arm binds `h` and hands it back.
+fn mk(p: boolean) -> fn() -> integer {
+  e: E = E { a: 2 };
+  if p { h = fn() -> integer { 3 + e.a }; h } else { h = fn() -> integer { 5 + e.a }; h }
+}
+
+// Three arms: the middle one is neither the first nor the last binding.
+fn mk3(n: integer) -> fn() -> integer {
+  e: E = E { a: 2 };
+  if n == 0 {
+    h = fn() -> integer { 3 + e.a };
+    h
+  } else if n == 1 {
+    h = fn() -> integer { 4 + e.a };
+    h
+  } else {
+    h = fn() -> integer { 5 + e.a };
+    h
+  }
+}
+
+// The same question spelled as a `match`.
+fn mkm(w: W) -> fn() -> integer {
+  e: E = E { a: 2 };
+  match w {
+    One => { h = fn() -> integer { 8 + e.a }; h },
+    Two => { h = fn() -> integer { 10 + e.a }; h },
+    Three => { h = fn() -> integer { 12 + e.a }; h }
+  }
+}
+
+// A capture with a drop hook, so its release shows in the trace.
+fn mkd(p: boolean) -> fn() -> integer {
+  e = mkh(2);
+  if p { h = fn() -> integer { 3 + e.id }; h } else { h = fn() -> integer { 5 + e.id }; h }
+}
+
+// Records made after the call take any number the frame freed.  The callers answer an integer:
+// a fn-ref held by a caller that answers TEXT leaks (loft#2282), a separate defect.
+fn rec(nm: text, x: E, want: integer) { assert(x.a == want, "{nm} record: {x.a}, want {want}"); }
+fn c1() -> integer { g = mk(true); x = E { a: 100 }; y = E { a: 200 }; rec("c1", x, 100); rec("c1", y, 200); g() }
+fn c2() -> integer { g = mk(false); x = E { a: 100 }; y = E { a: 200 }; rec("c2", x, 100); rec("c2", y, 200); g() }
+fn c3() -> integer {
+  a = mk3(0);
+  b = mk3(1);
+  c = mk3(2);
+  x = E { a: 100 };
+  rec("c3", x, 100);
+  a() * 10000 + b() * 100 + c()
+}
+fn c4() -> integer {
+  a = mkm(One);
+  b = mkm(Two);
+  c = mkm(Three);
+  x = E { a: 100 };
+  rec("c4", x, 100);
+  a() * 10000 + b() * 100 + c()
+}
+// Both arms' records alive at once, from two calls.
+fn c5() -> integer { g = mk(true); h = mk(false); x = E { a: 100 }; rec("c5", x, 100); g() * 100 + h() }
+fn c6() { g = mkd(true); v = g(); note("V{v}"); }
+fn c7() { g = mkd(false); v = g(); note("V{v}"); }
+
+// Control: each arm's VALUE is the closure, with no shared local.
+fn k1() -> integer {
+  e: E = E { a: 2 };
+  g = if true { fn() -> integer { 3 + e.a } } else { fn() -> integer { 5 + e.a } };
+  x = E { a: 100 };
+  rec("k1", x, 100);
+  g()
+}
+
+fn main() {
+  drain();
+  ok("c1 first arm      ", "{c1()}", "5");
+  ok("c2 second arm     ", "{c2()}", "7");
+  ok("c3 three arms     ", "{c3()}", "50607");
+  ok("c4 a match        ", "{c4()}", "101214");
+  ok("c5 both, two calls", "{c5()}", "507");
+  c6();
+  ok("c6 first, released", drain(), "M2,V5,D2");
+  c7();
+  ok("c7 second, release", drain(), "M2,V7,D2");
+  ok("k1 arm values     ", "{k1()}", "5");
+  delete(trace_path());
+  println("a fn-ref bound in every arm keeps the arm that ran: every cell holds");
+}

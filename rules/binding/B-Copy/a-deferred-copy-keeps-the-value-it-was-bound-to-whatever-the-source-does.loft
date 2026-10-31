@@ -1,0 +1,286 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DEFERRED COPY KEEPS THE VALUE IT WAS BOUND TO, WHATEVER THE SOURCE DOES (`@FR-B-Copy`,
+// `@FR-B-DeferredCopy`).  `prog = callee` copies the record: a later write to the source must
+// not reach `prog`, nor any view taken out of `prog`.  The C takes that copy at the first
+// statement that may write the source's store instead of at the bind; these cells write the
+// source every way a program can while the copy is live — an overwrite of the very element it
+// was copied from (read after through the local and through a view derived from it), a growth
+// of its vector, a write by a callee, a clear — and a loop that rebinds by copy every pass while
+// a DIFFERENT element is written now and then (the interpreter's shape).
+//
+// Values hand-computed (mk(i) = P { ops: [Op{i, 1}, Op{i, 2}, Op{i, 3}], k: 10 * i }):
+//   overwrite: prog = copy of ps[1] (k 10, ops a 1); ps[1] = mk(7); then prog.k 10, op = prog.ops[2]
+//              → op.a 1, op.b 3 (the view was taken BEFORE the write) → 10 * 100 + 1 * 10 + 3 = 1013
+//   grow:      prog = copy of ps[2] (k 20); 40 appends; prog.k 20, prog.ops[0].b 1 → 20 * 10 + 1 = 201
+//   callee:    prog = copy of ps[0] (k 0); helper sets ps[0].k = 55; prog.k 0, ps[0].k 55 → 55
+//   clear:     prog = copy of ps[1]; ps cleared; prog.k 10 + len(prog.ops) 3 → 13
+//   walk:      ps = mk(0..2); step 0..5, cur 0: o = prog.ops[step % 3].b; next = (cur + 1) % 3;
+//              the first visit of 2 writes ps[2] = mk(9) (k 90); prog = copy of ps[next]; add o + prog.k
+//              step 0: o 1, next 1, k 10 → 11;   step 1: o 2, next 2 (written: k 90) → 92;
+//              step 2: o 3, next 0, k 0 → 3;     step 3: o 1, next 1, k 10 → 11;
+//              step 4: o 2, next 2, k 90 → 92;   → 11 + 92 + 3 + 11 + 92 = 209
+// The guard at a write compares the written element with the viewed one (`@FR-R-DeferredCopy`):
+//   other:     prog = copy of ps[1] (k 10); ps[2] = mk(7) (k 70) → 10 * 100 + 70 = 1070
+//   from_end:  prog = copy of ps[2] (k 20); op = prog.ops[1] (a 2, b 2); ps[-1] = mk(7) is ps[2]
+//              → 20 * 100 + 2 * 10 + 2 = 2022
+//   fields:    prog = copy of ps[1]; ps[1].ops[0].a = 9 (the nested write first, so it alone must
+//              take the copy); ps[1].k = 55; prog.k 10, prog.ops[0].a 1
+//              → 10 * 100 + 1 * 10 + 55 = 1065
+//   moved:     i = 1; prog = copy of ps[1]; i = 2; ps[2] = mk(7); i = 1; ps[1] = mk(8) → prog.k 10
+//   carried:   prog = copy of ps[1]; op = prog.ops[0] (a 1, b 1); two passes of
+//              sum += op.a * 10 + op.b + prog.k, the first then writing ps[1] = mk(9)
+//              → 21 + 21 = 42 (the view read on the second pass is the copy's)
+//   live:      prog = copy of callee (ps[1]); ps[1] = mk(7); prog.k 10, callee.k 70 → 1070
+// A source the function builds and returns beside (`-> R`, so the vector lives in the return
+// buffer's store) against a caller's record handed in:
+//   plain:     no pointer field in `h`, so a write through it reaches none of `ps`'s records:
+//              prog = copy of ps[1] (k 10); grow_plain sets h.n = 99 → 10 * 100 + 99 = 1099
+//   linked:    `h.link` points INTO ps[1], stored before the bind: poke(h) writes ps[1].k = 55,
+//              which the copy must not see → 10 * 100 + 55 = 1055.  Fails on loft 69b3e2ced's
+//              C, which proved `h` apart by store and read 55 (a stored pointer crosses stores)
+//   place:     a call writes ps[1].ops through its destination: prog keeps ops[0].a 1 and
+//              three ops → 1 * 10 + 3 = 13
+//   outlives:  prog = copy of ps[1]; o = prog.ops[2] (a 1, b 3); ps[1] = mk(7); prog rebound to
+//              ps[0] (k 0) before any read, o read after → 1 * 10 + 3 + 0 = 13.  The rebind of
+//              `prog` while `o` is live makes `o` its own copy at the bind (`@FR-B-View`), so
+//              this cell pins the values, not the copy point.
+struct Op { a: integer, b: integer }
+struct P { ops: vector<Op>, k: integer }
+struct Plain { n: integer, tags: vector<integer> }
+struct Linked { link: reference<P>, n: integer }
+struct R { v: integer }
+
+fn mk(i: integer) -> P { P { ops: [Op { a: i, b: 1 }, Op { a: i, b: 2 }, Op { a: i, b: 3 }], k: 10 * i } }
+
+fn mks() -> vector<P> { [mk(0), mk(1), mk(2)] }
+
+fn set_k(ps: vector<P>, i: integer, k: integer) {
+  ps[i].k = k;
+}
+
+fn overwrite(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[2] ?? panic("in range");
+  ps[1] = mk(7);
+  prog.k * 100 + op.a * 10 + op.b
+}
+
+fn grow(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[2] ?? panic("in range");
+  prog = callee;
+  for i in 0..40 { ps += [mk(i)]; }
+  op = prog.ops[0] ?? panic("in range");
+  prog.k * 10 + op.b
+}
+
+fn callee_writes(ps: vector<P>) -> integer {
+  prog = ps[1] ?? panic("in range");
+  callee = ps[0] ?? panic("in range");
+  prog = callee;
+  set_k(ps, 0, 55);
+  prog.k + (ps[0] ?? panic("in range")).k
+}
+
+fn cleared(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps.clear();
+  prog.k + len(prog.ops)
+}
+
+fn walk(ps: vector<P>, n: integer) -> integer {
+  written: vector<boolean> = [false, false, false];
+  prog = ps[0] ?? panic("in range");
+  cur = 0;
+  sum = 0;
+  for step in 0..n {
+    o = prog.ops[step % 3] ?? panic("in range");
+    next = (cur + 1) % 3;
+    if next == 2 && !(written[2] ?? true) {
+      ps[2] = mk(9);
+      written[2] = true;
+    }
+    callee = ps[next] ?? panic("in range");
+    prog = callee;
+    sum += o.b + prog.k;
+    cur = next;
+  }
+  sum
+}
+
+fn other(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[2] = mk(7);
+  prog.k * 100 + (ps[2] ?? panic("in range")).k
+}
+
+fn from_end(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[2] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[1] ?? panic("in range");
+  ps[-1] = mk(7);
+  prog.k * 100 + op.a * 10 + op.b
+}
+
+fn fields(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[1].ops[0].a = 9;
+  ps[1].k = 55;
+  o = prog.ops[0] ?? panic("in range");
+  prog.k * 100 + o.a * 10 + (ps[1] ?? panic("in range")).k
+}
+
+fn moved(ps: vector<P>) -> integer {
+  i = 1;
+  prog = ps[0] ?? panic("in range");
+  callee = ps[i] ?? panic("in range");
+  prog = callee;
+  i = 2;
+  ps[i] = mk(7);
+  i = 1;
+  ps[i] = mk(8);
+  prog.k
+}
+
+fn carried(ps: vector<P>, n: integer) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[0] ?? panic("in range");
+  sum = 0;
+  for step in 0..n {
+    sum += op.a * 10 + op.b + prog.k;
+    if step == 0 {
+      ps[1] = mk(9);
+    }
+  }
+  sum
+}
+
+fn live(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[1] = mk(7);
+  prog.k * 100 + callee.k
+}
+
+fn outlives(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  o = prog.ops[2] ?? panic("in range");
+  ps[1] = mk(7);
+  prog = ps[0] ?? panic("in range");
+  o.a * 10 + o.b + prog.k
+}
+
+fn grow_plain(h: Plain) { h.tags += [7]; h.n = 99; }
+
+fn poke(h: Linked) { h.link.k = 55; }
+
+fn mkops() -> vector<Op> { [Op { a: 9, b: 9 }] }
+
+fn plain_arg(h: Plain) -> R {
+  ps: vector<P> = [mk(0), mk(1)];
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  grow_plain(h);
+  ps[1] = mk(7);
+  R { v: prog.k * 100 + h.n }
+}
+
+fn linked_arg(h: Linked) -> R {
+  ps: vector<P> = [mk(0), mk(1)];
+  h.link = &ps[1];
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  poke(h);
+  R { v: prog.k * 100 + (ps[1] ?? panic("in range")).k }
+}
+
+fn place_in_source() -> R {
+  ps: vector<P> = [mk(0), mk(1)];
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[1].ops = mkops();
+  o = prog.ops[0] ?? panic("in range");
+  R { v: o.a * 10 + len(prog.ops) }
+}
+
+fn test_an_overwrite_of_the_source_element() {
+  assert(overwrite(mks()) == 1013, "overwrite {overwrite(mks())}");
+}
+
+fn test_a_growth_of_the_source_vector() {
+  assert(grow(mks()) == 201, "grow {grow(mks())}");
+}
+
+fn test_a_callee_writing_the_source() {
+  assert(callee_writes(mks()) == 55, "callee {callee_writes(mks())}");
+}
+
+fn test_a_clear_of_the_source_vector() {
+  assert(cleared(mks()) == 13, "cleared {cleared(mks())}");
+}
+
+fn test_a_loop_rebinding_by_copy_beside_a_rare_write() {
+  assert(walk(mks(), 5) == 209, "walk {walk(mks(), 5)}");
+}
+
+fn test_a_write_to_another_element() {
+  assert(other(mks()) == 1070, "other {other(mks())}");
+}
+
+fn test_a_write_through_an_index_counted_from_the_end() {
+  assert(from_end(mks()) == 2022, "from_end {from_end(mks())}");
+}
+
+fn test_field_writes_inside_the_viewed_element() {
+  assert(fields(mks()) == 1065, "fields {fields(mks())}");
+}
+
+fn test_an_index_variable_that_moves_between_the_bind_and_the_write() {
+  assert(moved(mks()) == 10, "moved {moved(mks())}");
+}
+
+fn test_a_view_carried_round_a_loop_past_the_write() {
+  assert(carried(mks(), 2) == 42, "carried {carried(mks(), 2)}");
+}
+
+fn test_a_source_still_read_after_the_bind() {
+  assert(live(mks()) == 1070, "live {live(mks())}");
+}
+
+fn test_a_view_still_read_after_its_local_is_rebound() {
+  assert(outlives(mks()) == 13, "outlives {outlives(mks())}");
+}
+
+fn test_a_plain_argument_is_apart_from_a_placed_source() {
+  r = plain_arg(Plain { n: 1, tags: [] });
+  assert(r.v == 1099, "plain {r.v}");
+}
+
+fn test_an_argument_with_a_pointer_into_the_source_is_not() {
+  r = linked_arg(Linked { link: mk(9), n: 0 });
+  assert(r.v == 1055, "linked {r.v}");
+}
+
+fn test_a_call_writing_a_field_of_the_viewed_element() {
+  r = place_in_source();
+  assert(r.v == 13, "place {r.v}");
+}

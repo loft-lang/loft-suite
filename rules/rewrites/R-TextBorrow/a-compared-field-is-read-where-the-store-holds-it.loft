@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT FIELD READ BY A TEXT VALUE OP IS READ WHERE THE STORE HOLDS IT (`@FR-R-TextBorrow`'s
+// text VALUE op: one whose operands are scalars and texts, whose result is one or nothing, and
+// which writes no store).  A comparison, an append, a format and a print read their operands at
+// once, so a field operand needs no copy of its own — native's operand is a `&str` of the store,
+// and the C reads `loft_get_text(r, f)` in place — PROVIDED nothing evaluated after the field
+// read can change it.  An operand to its right that may write (a call, a block) keeps the copy:
+// the field's value is the one it had when it was read, in program order (`@FR-E-Left`).
+//
+// Values hand-computed:
+//   c1  palette ["sea","sand","rock","road"]: index_of "rock" 2, "road" 3, "lava" -1;
+//       over 1000 lookups cycling those three: 334·2 + 333·3 + 333·(-1) = 668 + 999 - 333 = 1334
+//   c2  rs[0].name "alpha"; `rs[0].name == rename(w)` reads "alpha" FIRST, then rename writes
+//       "omega" and answers "omega": "alpha" == "omega" → false; the field is "omega" after
+//   c3  `rename2(w) == rs[0].name`: the call runs first ("delta"), then the read → true
+//   c4  `rs[1].name < rs[2].name`: "beta" < "gamma" → true; `<=` reversed → false
+//   c5  `pick(w, 2).name == "gamma"` → true; pick counts its calls: 1
+//   c6  s = "<"; s += rs[1].name; s += ">" → "<beta>"; then `s += rs[1].name + grow(w)` where
+//       grow pushes 500 records and answers "!": "<beta>beta!"; len(rs) 3 + 500 = 503
+//   c7  "{rs[2].name:>7}|" → "  gamma|"
+//   c8  a callee that writes no store takes a field as its text argument: rs[1].name set to
+//       "rock" → index_of 2; rs[2].name "gamma" → -1; 2·10 + (-1) = 19
+//
+// @falsified-at: none — the C reading and this guard land together; the planted defect is
+//   recorded in the loft commit that adds the reading (`text_reads` ignoring a later writing
+//   operand: c2 reads the renamed field and answers true).
+
+struct R { name: text, n: integer }
+struct W { rs: vector<R>, picks: integer }
+
+fn index_of(pal: vector<R>, name: text) -> integer {
+  for p in pal {
+    if p.name == name { return p#index; }
+  }
+  -1
+}
+
+fn rename(w: W) -> text {
+  w.rs[0].name = "omega";
+  "omega"
+}
+
+fn rename2(w: W) -> text {
+  w.rs[0].name = "delta";
+  "delta"
+}
+
+fn pick(w: W, i: integer) -> R {
+  w.picks += 1;
+  w.rs[i]?
+}
+
+fn grow(w: W) -> text {
+  for i in 0..500 { w.rs += [R { name: "padding-padding-padding-{i}", n: i }]; }
+  "!"
+}
+
+fn main() {
+  pal = [R { name: "sea", n: 0 }, R { name: "sand", n: 1 }, R { name: "rock", n: 2 }, R { name: "road", n: 3 }];
+  assert(index_of(pal, "rock") == 2 && index_of(pal, "road") == 3 && index_of(pal, "lava") == -1, "c1 one");
+  names = ["rock", "road", "lava"];
+  acc = 0;
+  for k in 0..1000 { acc += index_of(pal, names[k % 3]?); }
+  assert(acc == 1334, "c1: {acc}");
+
+  w = W { rs: [R { name: "alpha", n: 0 }, R { name: "beta", n: 1 }, R { name: "gamma", n: 2 }], picks: 0 };
+  c2 = w.rs[0].name == rename(w);
+  assert(!c2 && w.rs[0].name == "omega", "c2: {c2} {w.rs[0].name}");
+
+  c3 = rename2(w) == w.rs[0].name;
+  assert(c3 && w.rs[0].name == "delta", "c3: {c3}");
+
+  assert(w.rs[1].name < w.rs[2].name, "c4 <");
+  assert(!(w.rs[2].name <= w.rs[1].name), "c4 <=");
+
+  assert(pick(w, 2).name == "gamma" && w.picks == 1, "c5: {w.picks}");
+
+  s = "<";
+  s += w.rs[1].name;
+  s += ">";
+  assert(s == "<beta>", "c6 one: {s}");
+  s += w.rs[1].name + grow(w);
+  assert(s == "<beta>beta!" && len(w.rs) == 503, "c6: {s} {len(w.rs)}");
+
+  c7 = "{w.rs[2].name:>7}|";
+  assert(c7 == "  gamma|", "c7: {c7}");
+
+  w.rs[1].name = "rock";
+  c8 = index_of(pal, w.rs[1].name) * 10 + index_of(pal, w.rs[2].name);
+  assert(c8 == 19, "c8: {c8}");
+  println(w.rs[2].name);
+}

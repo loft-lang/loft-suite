@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VARIANT LITERAL WRITES EVERY BYTE ANY VARIANT READS (`@FR-R-CompleteWrite`).  A vector of a
+// struct-enum whose variants put fields of one width at the same positions is built without
+// the default prefill: whichever variant a literal builds, it writes every position some
+// variant reads.  The cells fill the vector with one variant, empty it and refill the same
+// room with the other, so a byte the literal failed to write would still hold the first
+// variant's value:
+//
+//   c1  300 × A { a1: i, a2: 2i, a3: 3i }       → Σ (a1 + a2 + a3) = 6 · Σ i = 269100
+//   c2  then 300 × B { b1: i + 1, b2: 0, b3: -i } → Σ (b1 + b2 + b3) = 300, and no A left
+//
+// @falsified-at: none — a conformance guard for the clause's coverage condition.
+// CHANNEL: the asserts, and the suite's leak gate.
+// HOLDS: every cell on both backends.
+
+enum Ed {
+  A { a1: integer, a2: integer, a3: integer },
+  B { b1: integer, b2: integer, b3: integer }
+}
+
+fn sums(v: vector<Ed>) -> text {
+  na = 0;
+  nb = 0;
+  s = 0;
+  for e in v {
+    match e {
+      A { a1, a2, a3 } => { na += 1; s += a1 + a2 + a3; },
+      B { b1, b2, b3 } => { nb += 1; s += b1 + b2 + b3; }
+    }
+  }
+  "{na} {nb} {s}"
+}
+
+fn test_a_variant_refills_the_room_another_left() {
+  v: vector<Ed> = [];
+  for i in 0..300 { v += [A { a1: i, a2: i * 2, a3: i * 3 }]; }
+  assert(sums(v) == "300 0 269100", "c1: {sums(v)}");
+  v = [];
+  for i in 0..300 { v += [B { b1: i + 1, b2: 0, b3: -i }]; }
+  assert(sums(v) == "0 300 300", "c2: {sums(v)}");
+}

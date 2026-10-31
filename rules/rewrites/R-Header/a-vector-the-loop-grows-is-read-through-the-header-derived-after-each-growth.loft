@@ -1,0 +1,126 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR THE LOOP GROWS IS READ THROUGH THE HEADER DERIVED AFTER EACH GROWTH
+// (`@FR-R-Header`'s growth half).  The C holds a header — record, length, element base — for a
+// vector this activation owns alone that the loop GROWS, by an append or by handing it to a loft
+// function (an interpreter's value stack pushed through `put`), and derives it again right after
+// every such statement.  A header kept across a growth reads the OLD vector: the old length
+// answers null for the new element, the old base reads memory the growth moved.  Each cell grows
+// its vector far past its first capacity, so the store's memory moves, and reads after every
+// growth: through a helper, by a direct append, by a helper inside a nested loop, under an `if`
+// arm, an append whose value reads the vector itself, and an early return out of the loop.
+//
+// Values hand-computed (n = 300):
+//   via_callee:  st[sp - 1] = 7i, st[0] = 0 → total 7·(0+…+299) = 313950; len 300 → 313950300
+//   direct:      fd[i] = i, len(fd) = i + 1 → Σ i + Σ (i + 1) = 44850 + 45150 = 90000
+//   nested:      three puts of i per pass, st[sp-1] + st[sp-3] = 2i → 2·44850 = 89700; len 900
+//                → 89700900
+//   arms:        even i appends i, odd i puts 10·i at the end; the last element each pass:
+//                Σ even i = 22350, Σ odd 10·i = 225000 → 247350; len 300 → 247350300
+//   self_read:   v = [1]; v += [v[i] + 1] makes v[i] = i + 1; the last read is i + 2
+//                → Σ (i + 2) = 44850 + 600 = 45450
+//   early:       put(v, i, i) until v[i] == 250 → 250 · 1000 + len 251 = 250251
+
+fn put(s: vector<integer>, sp: integer, v: integer) {
+  if sp < len(s) {
+    s[sp] = v;
+  } else {
+    s += [v];
+  }
+}
+
+fn via_callee(n: integer) -> integer {
+  st: vector<integer> = [];
+  sp = 0;
+  total = 0;
+  for i in 0..n {
+    put(st, sp, i * 7);
+    sp += 1;
+    total += (st[sp - 1] ?? -100000) + (st[0] ?? -100000);
+  }
+  total * 1000 + len(st)
+}
+
+fn direct(n: integer) -> integer {
+  fd: vector<integer> = [];
+  total = 0;
+  for i in 0..n {
+    fd += [i];
+    total += (fd[i] ?? -100000) + len(fd);
+  }
+  total
+}
+
+fn nested(n: integer) -> integer {
+  st: vector<integer> = [];
+  sp = 0;
+  total = 0;
+  for i in 0..n {
+    for _ in 0..3 {
+      put(st, sp, i);
+      sp += 1;
+    }
+    total += (st[sp - 1] ?? -100000) + (st[sp - 3] ?? -100000);
+  }
+  total * 1000 + len(st)
+}
+
+fn arms(n: integer) -> integer {
+  v: vector<integer> = [];
+  total = 0;
+  for i in 0..n {
+    if i % 2 == 0 {
+      v += [i];
+    } else {
+      put(v, len(v), i * 10);
+    }
+    total += v[len(v) - 1] ?? -100000;
+  }
+  total * 1000 + len(v)
+}
+
+fn self_read(n: integer) -> integer {
+  v: vector<integer> = [1];
+  total = 0;
+  for i in 0..n {
+    v += [(v[i] ?? -100000) + 1];
+    total += v[len(v) - 1] ?? -100000;
+  }
+  total
+}
+
+fn early(n: integer) -> integer {
+  v: vector<integer> = [];
+  for i in 0..n {
+    put(v, i, i);
+    if (v[i] ?? -1) == 250 {
+      return (v[i] ?? -1) * 1000 + len(v);
+    }
+  }
+  -1
+}
+
+fn test_a_vector_grown_through_a_helper_reads_its_new_elements() {
+  assert(via_callee(300) == 313950300, "via_callee {via_callee(300)}");
+}
+
+fn test_a_vector_grown_by_an_append_reads_its_new_elements() {
+  assert(direct(300) == 90000, "direct {direct(300)}");
+}
+
+fn test_a_vector_grown_in_a_nested_loop_reads_its_new_elements() {
+  assert(nested(300) == 89700900, "nested {nested(300)}");
+}
+
+fn test_a_vector_grown_under_an_if_arm_reads_its_new_elements() {
+  assert(arms(300) == 247350300, "arms {arms(300)}");
+}
+
+fn test_an_append_that_reads_the_vector_reads_it_after_the_reservation() {
+  assert(self_read(300) == 45450, "self_read {self_read(300)}");
+}
+
+fn test_a_vector_grown_before_an_early_return_reads_its_new_elements() {
+  assert(early(300) == 250251, "early {early(300)}");
+}

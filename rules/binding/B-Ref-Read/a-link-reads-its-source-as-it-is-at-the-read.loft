@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Read` — reading a `&τ` variable yields the source's CURRENT value: the value at
+// the read, not at the bind.  Every cell writes the SOURCE after the link is taken and reads
+// through the LINK afterwards, so a link that copied its source at the bind reads the old
+// value and fails.  Shapes: each scalar kind, a text, a record's field and the whole record
+// rebound, a vector grown, a link to a FIELD of a record (the store kind, `@FR-B-Ref-Lvalue`),
+// the source written by a callee through a `&` parameter, and a read inside a loop that
+// writes the source every pass.
+//
+// Values hand-computed:
+//   scalar   a = 3; b = &a; a = 5 → 5; a += 1 → 6
+//   float    f = 1.5; g = &f; f = 2.5 → 2.5        boolean  x = false; y = &x; x = true → true
+//   text     c = "ab"; t = &c; c = "xyz" → "xyz", len 3; c += "!" → "xyz!"
+//   record   d = S{n:1}; p = &d; d.n = 7 → 7; d = S{n:9} → 9
+//   vector   v = [1]; w = &v; v += [2] → len 2, w[1] 2
+//   field    o = O{s:"a", k:1}; t = &o.s; o.s = "bc" → "bc"; m = &o.k; o.k = 4 → 4
+//   callee   a = 1; l = &a; set_seven(a) → 7
+//   loop     a = 0; l = &a; three passes of a = i * 10; sum += l → 0 + 10 + 20 = 30
+//
+// @falsified-at: none — the rule held when this cell measured it (interpreter, --native, C).
+// CHANNEL: assertion values.
+// ARMED: no instrument.
+// HOLDS: every cell, interpreter, `--native` and the C sweep.
+struct S { n: integer }
+struct O { s: text, k: integer }
+
+fn set_seven(a: &integer) {
+  a = 7;
+}
+
+fn test_a_scalar_link_reads_the_current_value() {
+  a = 3;
+  b = &a;
+  a = 5;
+  assert(b == 5, "after a = 5: {b}");
+  a += 1;
+  assert(b == 6, "after a += 1: {b}");
+  f = 1.5;
+  g = &f;
+  f = 2.5;
+  assert(g == 2.5, "float: {g}");
+  x = false;
+  y = &x;
+  x = true;
+  assert(y, "boolean: {y}");
+}
+
+fn test_a_text_link_reads_the_current_value() {
+  c = "ab";
+  t = &c;
+  c = "xyz";
+  assert(t == "xyz" && len(t) == 3, "after c = \"xyz\": {t}");
+  c += "!";
+  assert(t == "xyz!", "after c += \"!\": {t}");
+}
+
+fn test_a_record_link_reads_the_current_value() {
+  d = S { n: 1 };
+  p = &d;
+  d.n = 7;
+  assert(p.n == 7, "after d.n = 7: {p.n}");
+  d = S { n: 9 };
+  assert(p.n == 9, "after d is rebound: {p.n}");
+}
+
+fn test_a_vector_link_reads_the_current_value() {
+  v = [1];
+  w = &v;
+  v += [2];
+  assert(len(w) == 2 && (w[1] ?? -1) == 2, "after v += [2]: len {len(w)}");
+}
+
+fn test_a_field_link_reads_the_current_value() {
+  o = O { s: "a", k: 1 };
+  t = &o.s;
+  o.s = "bc";
+  assert(t == "bc", "text field: {t}");
+  m = &o.k;
+  o.k = 4;
+  assert(m == 4, "integer field: {m}");
+}
+
+fn test_a_write_by_a_callee_is_read_through_the_link() {
+  a = 1;
+  l = &a;
+  set_seven(a);
+  assert(l == 7, "after set_seven: {l}");
+}
+
+fn test_a_read_in_a_loop_that_writes_the_source() {
+  a = 0;
+  l = &a;
+  sum = 0;
+  for i in 0..3 {
+    a = i * 10;
+    sum += l;
+  }
+  assert(sum == 30, "sum {sum}");
+}

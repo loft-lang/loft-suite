@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A READ-ONLY RECORD PARAMETER READS THE CALLER'S VALUE AT THE CALL (`@FR-R-ValueRecord`'s
+// pointer clause).  A value record of three or more fields that a callee only reads goes to it
+// as a `const` pointer to the caller's struct instead of a stack copy.  What must hold is the
+// record's own semantics, which are a REFERENCE's: the callee reads the caller's record, a field
+// write through a parameter lands in the caller's record, and two parameters bound to one local
+// are one record.  The pointer may only be taken where the callee never writes the parameter —
+// a writer keeps the record — and where nothing the call runs can change the struct it points
+// at.  The cells vary the callee (a reader, a writer of its parameter, a forwarder down a chain),
+// the argument (a local, a call's result, an element read out of a vector) and a call that hands
+// the same local to a value parameter and to a `&` one.
+//
+// Values hand-computed (p = P3 { a: 1, b: 2, c: 3 }):
+//   sum3(p)           = 100 + 20 + 3          = 123
+//   bump(p)           = (1 + 5) + 2 + 3       = 11, and p.a is 6 afterwards (the write lands)
+//   outer(p)          = sum3(p) + p.c         = 126
+//   sum3(mk(4, 5, 6)) = 400 + 50 + 6          = 456
+//   sum3(ps[1])       = sum3({7, 8, 9})       = 789
+//   both(q, q)        = v and r name one record: r.a = 9, then v.a is 9 too: 9 * 1000 + 9 = 9009,
+//                       and q.a is 9 afterwards
+struct P3 { a: integer, b: integer, c: integer }
+
+fn sum3(p: P3) -> integer { p.a * 100 + p.b * 10 + p.c }
+
+fn bump(p: P3) -> integer {
+  p.a = p.a + 5;
+  p.a + p.b + p.c
+}
+
+fn outer(p: P3) -> integer { sum3(p) + p.c }
+
+fn mk(a: integer, b: integer, c: integer) -> P3 { P3 { a: a, b: b, c: c } }
+
+fn both(v: P3, r: &P3) -> integer {
+  r.a = 9;
+  v.a * 1000 + r.a
+}
+
+fn test_a_reader_sees_the_callers_value() {
+  p = P3 { a: 1, b: 2, c: 3 };
+  assert(sum3(p) == 123, "reader {sum3(p)}");
+  assert(outer(p) == 126, "forwarder {outer(p)}");
+}
+
+fn test_a_writer_keeps_its_write() {
+  p = P3 { a: 1, b: 2, c: 3 };
+  assert(bump(p) == 11, "writer {bump(p)}");
+  assert(p.a == 6, "the caller's record after a writer: {p.a}");
+}
+
+fn test_a_built_and_an_element_argument() {
+  assert(sum3(mk(4, 5, 6)) == 456, "built {sum3(mk(4, 5, 6))}");
+  ps = [P3 { a: 1, b: 1, c: 1 }, P3 { a: 7, b: 8, c: 9 }];
+  assert(sum3(ps[1]) == 789, "element {sum3(ps[1])}");
+}
+
+fn test_a_value_and_a_link_of_one_local() {
+  q = P3 { a: 1, b: 2, c: 3 };
+  got = both(q, q);
+  assert(got == 9009, "value and link {got}");
+  assert(q.a == 9, "the link's write {q.a}");
+}
