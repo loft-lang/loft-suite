@@ -132,7 +132,7 @@ struct PENode {
   next: PENode,
 }
 
-// @EXPECT_ERROR: contains itself
+// @EXPECT_ERROR: `PENode.next: PENode` makes every PENode contain another PENode
 fn test_type_cycle_self() {
   _n = PENode { val: 1 };
 }
@@ -146,26 +146,24 @@ struct PECycB {
   a: PECycA,
 }
 
-// @EXPECT_ERROR: 'PECycA' contains itself
-// @EXPECT_ERROR: 'PECycB' contains itself
+// @EXPECT_ERROR: `PECycA.b: PECycB` makes every PECycA contain another PECycA
+// @EXPECT_ERROR: `PECycB.a: PECycA` makes every PECycB contain another PECycB
 fn test_type_cycle_indirect() {
   _a = PECycA { val: 1 };
 }
 
-// The walk reaches every INLINE route, not just a bare embedded field.  `(L-Null-Tag)` names
-// them — an embedded field, a tuple member, and a variant payload, which is inline for the
-// same reason.  Each shape below reached the record BUILDER instead of this diagnostic while
-// the walk matched a bare `Reference`: an optional field printed the layout validator's
-// `field 'next' has no position (u16::MAX)`, and a tuple member had no finite size at all, so
-// the offset accumulator overflowed and the reader met an internal compiler error.  Here
-// rather than only in `tests/parse_errors.rs` because these run on BOTH backends.
+// The walk reaches every route a type can contain its host by: an embedded field, a tuple
+// member, a variant payload.  `@FR-L-OutOfLine` keeps a field on such a cycle OUT OF LINE —
+// a child record's number in the host's store — so an optional self field and a variant
+// payload are legal types now and build no error here; a cycle through a tuple member has no
+// field to hold the number and stays refused.  Here rather than only in
+// `tests/parse_errors.rs` because these run on BOTH backends.
 
 struct PEOptNode {
   val: integer,
   next: PEOptNode?,
 }
 
-// @EXPECT_ERROR: 'PEOptNode' contains itself
 fn test_type_cycle_through_an_optional_field() {
   _n = PEOptNode { val: 1 };
 }
@@ -185,7 +183,6 @@ enum PECycEnum {
   Branch { n: PECycEnum },
 }
 
-// @EXPECT_ERROR: 'PECycEnum' contains itself
 fn test_type_cycle_through_an_enum_variant_payload() {
   _e = 1;
 }
