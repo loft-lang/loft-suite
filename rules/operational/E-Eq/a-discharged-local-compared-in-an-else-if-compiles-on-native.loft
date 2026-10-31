@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DISCHARGED LOCAL COMPARED IN AN `else if` COMPILES ON NATIVE (loft#2298).  `(E-Eq)` compares
+// a struct-enum by content through `Stores::eq_content`, and `--native` emits that as the
+// template `stores.eq_content(&@v1, &@v2, @tp)`.  A discharge of a LOCAL (`fixed ?? panic(…)`,
+// or `fixed!`) lowers to a block that declares its null-check local, and the generator writes
+// that declaration as `let mut var_x = stores.null_named(…)` plus a record copy — a mutable
+// borrow of the store inside the template's shared one (rustc E0502).  In an `if` arm,
+// pre-evaluation cannot lift it out, so the template's own argument hoist has to.  Values are
+// hand-computed.
+//
+// @falsified-at: 9e6425727 — interpret leaked kt=100 Own×2 -> clean, native exit 1 -> 0
+// CHANNEL: native compilation (exit and refusal); the assertions on both backends.
+// HOLDS: the interpreter answers the same on both trees.
+
+enum Own {
+  Owned,
+  Unknown,
+  Borrowed { base: integer },
+}
+
+fn not_yet() -> Own {
+  Borrowed { base: 65534 }
+}
+
+fn step(i: integer) -> Own {
+  if i < 2 { Borrowed { base: 65534 } } else { Owned }
+}
+
+fn settle(n: integer) -> Own {
+  fixed: Own? = null;
+  for i in 0..n {
+    fixed = step(i);
+  }
+  class = if fixed == null {
+    Owned
+  } else if (fixed ?? panic("fixed is null")) == not_yet() {
+    Unknown
+  } else {
+    fixed ?? panic("fixed is null")
+  };
+  class
+}
+
+fn show(o: Own) -> text {
+  match o {
+    Owned => "Owned",
+    Unknown => "Unknown",
+    Borrowed { base } => "B{base}",
+  }
+}
+
+fn main() {
+  // No step: `fixed` stays null.
+  assert(show(settle(0)) == "Owned", "settle(0) = {show(settle(0))}");
+  // One step, `Borrowed(65534)`, which IS `not_yet()`: Unknown.
+  assert(show(settle(1)) == "Unknown", "settle(1) = {show(settle(1))}");
+  // Three steps end on `Owned`, which is not `not_yet()`: the value itself.
+  assert(show(settle(3)) == "Owned", "settle(3) = {show(settle(3))}");
+  println("discharged comparison ok");
+}
