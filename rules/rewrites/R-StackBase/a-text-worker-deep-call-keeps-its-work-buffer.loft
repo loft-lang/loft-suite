@@ -17,6 +17,10 @@
 // @falsified-at: 485a98050 (main c3122aa5a's runtime), scored by hand — interpret SIGSEGV
 //   (exit 139) -> exit 0; native exit 0 -> 0 and C exit 0 -> 0, INERT as expected: the
 //   compiled backends run a worker on its own thread and stack, not on the stack store.
+// CHANNEL: exit status, the interpreter.
+// WITNESS: `SIGSEGV` (exit 139) on the control.
+// HOLDS: native and C exit 0 on the control and on the fix — neither runs the worker on the
+//   stack store.
 
 fn deep(n: integer, acc: text) -> text {
   if n == 0 {
