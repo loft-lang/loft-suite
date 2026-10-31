@@ -21,6 +21,7 @@ fn tweak(self: P) -> integer {
   x.v = 999;
   x.name = "LOCAL";
   x.nums = [42];
+  assert("{x.name}" == "LOCAL" && len(x.nums) == 1, "the local copy holds its own writes");
   x.v
 }
 

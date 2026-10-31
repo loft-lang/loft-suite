@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-OutOfLine`, `@FR-B-Disturb` — a write to an out-of-line field that may be null releases
+// the child, which DISTURBS the field: a view of the child still used after it is copied out at
+// its bind, so it keeps the value it named — never the record that reused the slot.  A stored
+// `reference<T>` to the released child reads null (`@FR-H-Removed`).
+
+struct Tree { key: integer, name: text, left: Tree?, right: Tree? }
+struct Link { to: reference<Tree>? }
+
+fn test_a_view_keeps_its_value() {
+  t = Tree { key: 1, name: "root", left: Tree { key: 2, name: "two" } };
+  l = t.left;
+  t.left = null;
+  t.right = Tree { key: 3, name: "three" };
+  assert(l.key == 2 && l.name == "two", "the view kept its value: {l}");
+  assert(!t.left, "and the field is absent");
+}
+
+fn test_a_link_to_a_released_child_reads_null() {
+  u = Tree { key: 1, name: "u", left: Tree { key: 5, name: "five" } };
+  k = Link { to: u.left };
+  assert(k.to.key == 5, "the link names the child");
+  u.left = null;
+  u.right = Tree { key: 6, name: "six" };
+  assert(!k.to, "after the release it reads null");
+}

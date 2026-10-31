@@ -1,0 +1,15 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C159 / `@FR-L-OutOfLine` — binary file I/O writes fixed-width records, and a child record
+// has no fixed width (it is as deep as the data), so writing or reading a type that holds one
+// is refused where it is written, naming the field and the text form that round-trips it.
+//
+// @EXPECT_ERROR: write_file: 'Tree' holds a field of its own type, 'left'
+
+struct Tree { key: integer, left: Tree? }
+
+fn main() {
+  f = file("tree.bin");
+  f += Tree { key: 1, left: Tree { key: 2 } };
+}

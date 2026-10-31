@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C159 / `@FR-L-OutOfLine` — a struct or struct-enum field whose type would contain its host
+// is laid out out of line: a child record in the host's store, read and written as the value it
+// holds.  One cell per route a type can return to itself: a nullable self field, a variant field
+// of its own enum, two structs through each other, a generic struct (as its hand-written twin),
+// a generic pair declared in forward order, and a struct and an enum through each other.
+
+struct Tree { key: integer, left: Tree?, right: Tree? }
+
+enum Expr {
+  Num { v: integer },
+  Add { l: Expr, r: Expr },
+  Neg { e: Expr },
+}
+
+struct A { n: integer, b: B? }
+struct B { s: text, a: A? }
+
+struct Node<T> { v: T, next: Node<T>? }
+struct P<T> { v: T, q: Q<T>? }
+struct Q<T> { w: T, p: P<T>? }
+
+enum Shape { Dot, Group { inner: Holder } }
+struct Holder { name: text, shape: Shape }
+
+fn eval(e: Expr) -> integer {
+  match e {
+    Num { v } => v,
+    Add { l, r } => eval(l) + eval(r),
+    Neg { e } => -eval(e),
+  }
+}
+
+fn total(n: Node<integer>) -> integer {
+  s = n.v;
+  rest = n.next;
+  if rest { s += total(rest ?? Node { v: 0 }); }
+  s
+}
+
+fn test_a_nullable_self_field() {
+  t = Tree { key: 5, left: Tree { key: 3 } };
+  assert(t.left.key == 3, "the child reads back");
+  assert(!t.right, "an absent child is null");
+  assert(!t.left.left, "and so is its absent child");
+}
+
+fn test_a_variant_field_of_its_own_enum() {
+  e = Add { l: Num { v: 1 }, r: Neg { e: Num { v: 2 } } };
+  assert(eval(e) == -1, "1 + -2: {eval(e)}");
+}
+
+fn test_two_structs_through_each_other() {
+  x = A { n: 1, b: B { s: "b1", a: A { n: 2 } } };
+  assert(x.b.a.n == 2 && x.b.s == "b1", "three levels");
+  x.b.a.b = B { s: "b2" };
+  assert(x.b.a.b.s == "b2", "a write four levels down");
+}
+
+fn test_a_generic_struct_as_its_twin() {
+  n = Node { v: 1, next: Node { v: 2, next: Node { v: 3 } } };
+  assert(total(n) == 6, "1 + 2 + 3: {total(n)}");
+}
+
+fn test_a_generic_pair_declared_in_forward_order() {
+  p = P { v: "a", q: Q { w: "b", p: P { v: "c" } } };
+  assert(p.q.w == "b" && p.q.p.v == "c", "each level reads back: {p}");
+}
+
+fn test_a_struct_and_an_enum_through_each_other() {
+  h = Holder { name: "outer", shape: Group { inner: Holder { name: "inner", shape: Dot } } };
+  s = match h.shape {
+    Group { inner } => inner.name,
+    Dot => "dot",
+  };
+  assert(s == "inner", "the variant's child reads back: {s}");
+}

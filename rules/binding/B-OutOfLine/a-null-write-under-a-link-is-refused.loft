@@ -1,0 +1,16 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-OutOfLine`, `@FR-B-Ref-Reshape` — a write that may be null releases the child, so while
+// a `&` link to the child is still used it is refused, as any reshape under a live link is.
+//
+// @EXPECT_ERROR: cannot write a value that may be null into a field of `t` while `l` references a place inside it
+
+struct Tree { key: integer, left: Tree?, right: Tree? }
+
+fn main() {
+  t = Tree { key: 1, left: Tree { key: 2 } };
+  l = &t.left;
+  t.left = null;
+  println("{l}");
+}

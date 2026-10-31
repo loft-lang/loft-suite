@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DISCHARGED LOCAL CONSUMED IN PLACE LEAKS NO COPY (loft#2300).  `x ?? panic(…)` answers `x`
+// or leaves; on a record or struct-enum LOCAL it bound `x` to a temp typed with no dep, so the
+// temp read as an owner and `@FR-B-Copy` copied the record into it.  Bound to a local first,
+// the copy became that local's store; consumed in place — a call argument, a comparison
+// operand — nothing freed it, one record per discharge.  A plain variable is now tested and
+// answered as itself.  Values are hand-computed; the exit leak check is the channel.
+//
+// @falsified-at: 9e6425727 — interpret leaked kt=100 Own×4, kt=103 Pt×1 -> clean, native exit 1 -> 0, native leaked kt=100 Own×4, kt=103 Pt×1 -> clean
+// CHANNEL: the leak — the exit check's `stores not freed` line.
+// ARMED: nothing — the interpreter's default exit leak check prints it.
+// HOLDS: the values are equal on both trees and both backends.
+
+enum Own {
+  Owned,
+  Borrowed { base: integer },
+}
+
+struct Pt { x: integer, y: integer }
+
+fn pick(c: integer) -> Own? {
+  if c == 0 { null } else { Borrowed { base: c } }
+}
+
+fn pt(c: integer) -> Pt? {
+  if c == 0 { null } else { Pt { x: c, y: c * 2 } }
+}
+
+fn show(o: Own) -> text {
+  match o {
+    Owned => "Owned",
+    Borrowed { base } => "B{base}",
+  }
+}
+
+fn total(p: Pt) -> integer {
+  p.x + p.y
+}
+
+fn main() {
+  f = pick(3);
+  p = pt(4);
+  // A call argument.
+  assert(show(f ?? panic("f")) == "B3", "show = {show(f ?? panic("f"))}");
+  // A comparison operand, twice.
+  assert((f ?? panic("f")) == (f ?? panic("f")), "f equals itself");
+  assert((f ?? panic("f")) != Owned, "B3 is not Owned");
+  // A plain struct as a call argument: 4 + 8.
+  assert(total(p ?? panic("p")) == 12, "total = {total(p ?? panic("p"))}");
+  // Bound first: the bind's own copy is the local's, as before.
+  h = f ?? panic("f");
+  assert(show(h) == "B3", "h = {show(h)}");
+  println("discharge in place ok");
+}

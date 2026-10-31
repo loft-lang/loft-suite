@@ -1,0 +1,15 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C160 / `@FR-N-Present` — `!` on an operand that cannot be null can never halt, and the
+// compiler says so: it reads as an author expecting a null where there is none.
+//
+// @EXPECT_WARNING: Redundant `!`
+
+struct P { x: integer limit(0, 9) }
+
+fn main() {
+  p = P { x: 3 };
+  y = p.x!;
+  assert(y == 3, "the value passes through");
+}

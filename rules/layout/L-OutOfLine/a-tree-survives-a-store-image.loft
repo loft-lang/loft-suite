@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C159 / `@FR-L-OutOfLine` (S7) — a store image holds a child record as the record it is: a
+// tree saved with `store_persist_copy` loads back equal, its absent children still absent.
+
+struct Node { k: integer, name: text, next: Node? }
+
+fn test_a_tree_round_trips_an_image() {
+  path = "{temp_dir()}/loft-suite-out-of-line.store";
+  h: hash<Node[k]> = [];
+  h += [Node { k: 1, name: "a", next: Node { k: 9, name: "nine", next: Node { k: 10, name: "ten" } } }];
+  h += [Node { k: 2, name: "b" }];
+  assert(store_persist_copy(h, path), "saved");
+  back: hash<Node[k]> = [];
+  assert(store_load(back, path), "loaded");
+  assert(back[1].next.next.name == "ten" && !back[2].next, "the children read back");
+  assert(back[1] == h[1] && back[2] == h[2], "equal content");
+}

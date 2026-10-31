@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C160 / `@FR-N-Present` — `e!` is the value of a present `e` and a halt when `e` is absent,
+// the halt's message quoting `e`'s source.  It needs no default, so it reaches a reference and a
+// bare enum; it chains (`v[i]!.f`); `x != y` and a prefix `!x` are unchanged.
+
+struct P { x: integer, name: text }
+struct H { link: reference<P>? }
+enum Shape { Dot, Circle { r: integer } }
+
+fn find(v: vector<P>, n: text) -> P? {
+  for p in v { if p.name == n { return p; } }
+  null
+}
+
+fn test_present_values() {
+  v = [P { x: 1, name: "a" }, P { x: 2, name: "b" }];
+  assert(v[1]!.x == 2, "an element, chained");
+  assert(find(v, "a")!.x == 1, "a call result");
+  h = H { link: v[0] };
+  assert(h.link!.name == "a", "a reference field, which `?` cannot discharge");
+  shapes: vector<Shape> = [Dot, Circle { r: 3 }];
+  assert(shapes[1]! is Circle, "a bare enum, which `?` cannot discharge");
+  n: integer? = 7;
+  assert(n! + 1 == 8, "an integer");
+}
+
+fn test_the_neighbouring_spellings_are_unchanged() {
+  a = 3;
+  b = 4;
+  f = false;
+  assert(a != b && a!=b, "`!=` is a comparison, spaced or not");
+  assert(!f, "a prefix `!` negates");
+}
+
+// @EXPECT_FAIL: find(v, "zz") is null
+fn test_an_absent_value_halts_naming_it() {
+  v = [P { x: 1, name: "a" }];
+  m = find(v, "zz")!;
+  assert(m.x == -1, "unreachable");
+}

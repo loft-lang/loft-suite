@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-T-Recursive` — the refusal is exact: a cycle with ONE nullable field on it, or an enum
+// whose other variants end it, has finite values and is accepted, even where a field on the
+// cycle is non-null.
+
+struct A { val: integer, b: B }
+struct B { val: integer, a: A? }
+
+enum List { End, Cons { head: integer, tail: List } }
+
+fn len(l: List) -> integer {
+  match l {
+    End => 0,
+    Cons { head: _, tail } => 1 + len(tail),
+  }
+}
+
+fn test_a_non_null_field_on_a_cycle_with_a_nullable_hop() {
+  x = A { val: 1, b: B { val: 2, a: A { val: 3, b: B { val: 4 } } } };
+  assert(x.b.a.b.val == 4 && !x.b.a.b.a, "an A always holds a B, and the B may end it");
+}
+
+fn test_an_enum_whose_other_variant_ends_it() {
+  l = Cons { head: 1, tail: Cons { head: 2, tail: End } };
+  assert(len(l) == 2, "two cells: {len(l)}");
+}

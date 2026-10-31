@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-OutOfLine` — an out-of-line field binds as an inline field does: a write copies the
+// value into the host's store (in place over a present child, so a view of it reads the new
+// value), the value is read before the old content is released (an overlapping write is
+// defined), a copy of the host is independent, and `==` compares content.
+
+struct Tree { key: integer, name: text, left: Tree?, right: Tree? }
+
+fn leaf(k: integer) -> Tree { Tree { key: k, name: "n{k}" } }
+
+fn test_a_view_sees_an_overwrite_in_place() {
+  t = Tree { key: 1, name: "root", left: leaf(2) };
+  l = t.left;
+  t.left = Tree { key: 7, name: "seven" };
+  assert(l.key == 7 && l.name == "seven", "the view reads the new value: {l.key} {l.name}");
+}
+
+fn test_an_overlapping_write() {
+  t = Tree { key: 1, name: "root", left: Tree { key: 3, name: "three", left: leaf(4), right: leaf(5) } };
+  t.left = t.left.left;
+  assert(t.left.key == 4 && t.left.name == "n4", "the grandchild moved up: {t.left.key}");
+  assert(!t.left.left, "with its own (absent) children");
+}
+
+fn test_a_host_copied_into_its_own_child() {
+  t = Tree { key: 1, name: "root", left: leaf(4) };
+  t.right = leaf(6);
+  t.right.left = t;
+  assert(t.right.left.key == 1 && t.right.left.left.key == 4, "a snapshot of the host");
+  assert(!t.right.left.right.left, "taken before the write: its right child has no left");
+}
+
+fn test_a_copy_is_independent_and_compares_by_content() {
+  t = Tree { key: 1, name: "root", left: leaf(4) };
+  c = t;
+  c.left.key = 40;
+  assert(t.left.key == 4 && c.left.key == 40, "the copy moves on its own");
+  assert(c != t, "different content");
+  c.left.key = 4;
+  assert(c == t, "equal content, two records");
+}
+
+fn test_a_call_result_into_a_field() {
+  t = Tree { key: 1, name: "root" };
+  t.left = leaf(8);
+  t.right = t.left;
+  t.right.key = 9;
+  assert(t.left.key == 8 && t.right.key == 9 && t.right.name == "n8", "two independent children");
+}
+
+fn test_a_null_write_releases_the_child() {
+  t = Tree { key: 1, name: "root", left: leaf(2) };
+  t.left = null;
+  assert(!t.left, "the field is absent");
+  t.left = leaf(3);
+  assert(t.left.key == 3, "and takes a new child");
+}

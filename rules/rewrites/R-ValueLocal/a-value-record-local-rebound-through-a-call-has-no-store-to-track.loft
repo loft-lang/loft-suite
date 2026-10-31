@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VALUE-RECORD LOCAL REBOUND THROUGH A CALL HAS NO STORE TO TRACK (loft#2293).  `round` binds
+// `class` from a struct literal — a value record on `--native` (`(R-ValueLocal)`: a tuple of its
+// fields, no store) — and rebinds it in a loop through `pick`, which may answer either argument.
+// That rebind made `class` a witnessed owner too, and the generator declared its tracker
+// `_own_store_class: DbRef` and assigned it the tuple: rustc E0308, the program did not compile.
+// A value record has nothing to track, so it is never a witness.  Values are hand-computed.
+//
+// @falsified-at: 9e6425727 — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: native compilation (exit); the assertions on every backend.
+// HOLDS: the interpreter answers the same on both trees.
+
+struct Pt { kind: integer, base: integer }
+
+fn pick(a: Pt, c: Pt) -> Pt {
+  if a.kind == 1 {
+    return c;
+  }
+  a
+}
+
+fn sites(n: integer) -> vector<Pt> {
+  r: vector<Pt> = [];
+  for i in 0..n {
+    r += [Pt { kind: 2, base: i + 20 }];
+  }
+  r
+}
+
+fn round(n: integer, start: integer) -> Pt {
+  class = Pt { kind: start, base: 7 };
+  for c in sites(n) {
+    class = pick(class, c);
+  }
+  class
+}
+
+fn main() {
+  // No iteration: the literal.
+  a = round(0, 2);
+  assert(a.kind == 2 && a.base == 7, "round(0, 2) = {a.kind} {a.base}");
+  // kind 2 keeps itself through both elements.
+  b = round(2, 2);
+  assert(b.kind == 2 && b.base == 7, "round(2, 2) = {b.kind} {b.base}");
+  // kind 1 takes the first element, base 20, and keeps it.
+  c = round(2, 1);
+  assert(c.kind == 2 && c.base == 20, "round(2, 1) = {c.kind} {c.base}");
+  println("value-record rebind ok");
+}

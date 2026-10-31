@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @C159 / `@FR-L-OutOfLine` (S7) — a `par` worker that builds a list returns it whole: the
+// result is copied into the caller's store with every child claimed afresh there, so it reads
+// back and outlives the worker that built it.
+
+struct List { v: integer, next: List? }
+struct Job { n: integer }
+
+fn build(j: const Job) -> List {
+  h = List { v: 0 };
+  for i in 1..j.n {
+    h = List { v: i, next: h };
+  }
+  h
+}
+
+fn total(l: List?) -> integer {
+  if !l { return 0; }
+  l.v + total(l.next)
+}
+
+fn test_workers_return_lists() {
+  jobs = [Job { n: 3 }, Job { n: 5 }, Job { n: 10 }, Job { n: 1 }];
+  sums = "";
+  kept: vector<List> = [];
+  for jb in jobs par(l = build(jb), 4) {
+    sums += "{total(l)},";
+    kept += [l];
+  }
+  assert(sums == "3,10,45,0,", "each worker's list, summed: {sums}");
+  assert(total(kept[2]) == 45 && kept[2].next.next.v == 7, "a worker's list outlives the worker");
+}

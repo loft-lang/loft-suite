@@ -1,0 +1,104 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL ARGUMENT A RECURSIVE JOIN ANSWERS IS NOT FREED BEFORE THE RETURN (loft#2295).
+// `classify` answers `join(classify(t), classify(f))`, and `join` may answer its first
+// argument (`-> Own["a"]`).  The scope pass hoists the two recursive calls into `__lift_N`
+// temps, so the value `classify` returns may BE `__lift_1`'s store — and the frame, whose
+// promoted block-arm local `r` sends its return through the rebound-parameter leg, freed every
+// lift unconditionally before `return`.  The caller then read a released store: right by luck
+// on the interpreter and `--native` (nothing reused it first), `J2` for `B2` on the C runtime,
+// and `null` everywhere under `LOFT_POISON`.  `(O-Derived)`: a local is freed only when it does
+// not transfer its store out, and a record-typed local's store may be the one returned, so the
+// free is guarded by store identity against the returned value.  Values are hand-computed.
+//
+// @falsified-at: 9e6425727 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   (LOFT_STRICT_STORES=1 LOFT_POISON=1 make falsify; the nightly poison sweep runs it armed)
+// @ARMED: LOFT_POISON=1
+// CHANNEL: the assertions — under LOFT_POISON on every backend, and plainly on the C backend,
+//   whose allocator reuses the released store first.
+// HOLDS: the shapes that answer through no hoisted argument are equal on both trees.
+
+enum Own {
+  Owned,
+  Unknown,
+  Borrowed { base: integer },
+  Join { base: integer },
+}
+
+enum Node {
+  NLeaf { b: integer },
+  NOwned,
+  NIf { t: vector<Node>, f: vector<Node> },
+  NBlock { ops: vector<Node> },
+}
+
+const MAX = 65535;
+
+fn show(o: Own) -> text {
+  match o {
+    Owned => "Owned",
+    Unknown => "Unknown",
+    Borrowed { base } => "B{base}",
+    Join { base } => "J{base}",
+  }
+}
+
+fn is_borrowed(o: Own) -> boolean {
+  match o {
+    Borrowed { base: _ } => true,
+    _ => false,
+  }
+}
+
+fn base_of(o: Own) -> integer? {
+  match o {
+    Borrowed { base } => base,
+    Join { base } => base,
+    _ => null,
+  }
+}
+
+fn join(a: Own, c: Own) -> Own {
+  if (a == Owned || a == Unknown) && (c == Owned || c == Unknown) {
+    return Owned;
+  }
+  if is_borrowed(a) && is_borrowed(c) {
+    if a == c {
+      return a;
+    }
+    return Borrowed { base: MAX };
+  }
+  Join { base: base_of(a) ?? base_of(c) ?? MAX }
+}
+
+fn classify(n: Node) -> Own {
+  match n {
+    NLeaf { b } => Borrowed { base: b },
+    NIf { t, f } => join(classify((t[0] ?? NOwned)), classify((f[0] ?? NOwned))),
+    NBlock { ops } => {
+      if len(ops) == 0 {
+        return Owned;
+      }
+      r = classify((ops[len(ops) - 1] ?? NOwned));
+      r
+    }
+    _ => Owned,
+  }
+}
+
+fn main() {
+  a = NIf { t: [NLeaf { b: 1 }], f: [NLeaf { b: 1 }] };
+  b = NBlock { ops: [NOwned, NIf { t: [NBlock { ops: [NLeaf { b: 3 }] }], f: [NLeaf { b: 3 }] }] };
+  c = NIf { t: [NLeaf { b: 1 }], f: [NOwned] };
+  d = NIf { t: [NIf { t: [NLeaf { b: 2 }], f: [NLeaf { b: 2 }] }], f: [NBlock { ops: [NLeaf { b: 2 }] }] };
+  // Two equal borrows join into the first argument itself.
+  assert(show(classify(a)) == "B1", "a = {show(classify(a))}");
+  // A block's last op: a join of a block answer and an equal borrow.
+  assert(show(classify(b)) == "B3", "b = {show(classify(b))}");
+  // A borrow and an owned arm: a fresh Join.
+  assert(show(classify(c)) == "J1", "c = {show(classify(c))}");
+  // A nested join's answer (the inner frame's `__lift_1`) joined with a block's: B2.
+  assert(show(classify(d)) == "B2", "d = {show(classify(d))}");
+  println("recursive join ok");
+}
