@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FIELD of an inline call's result, answered by an ARM of a function's tail, is copied
+// into the caller's buffer before the call's temporary is freed — whatever the other arm is.
+//
+// @FR-F-Ret: a returned whole heap value is owned, never a view of a store the frame frees.
+// `if n > 0 { decode(n).value } else { CInt { value: 9 } }` lifts `decode(n)` into a frame
+// temporary and the arm reads a field of it.  A buffered join is copied arm by arm only
+// through the copy leg a non-empty dep list reaches; the lifted temporary publishes no dep,
+// so the tail was handed back AS IS and the temporary freed under it: `-1` for the enum
+// field on every backend, the stale bytes of a freed store for a struct field (loft#2289).
+//
+// Axes this file MOVES:  the field's type (a record enum, a struct, a vector element); the
+//                        other arm (a literal, a call that mints, the same projection, a
+//                        bound local); the join (`if`, `else if`, `match`); which arm runs;
+//                        a loop of calls (the freed store re-used under the view).
+// Axes it HOLDS FIXED:   a DENSE return with a buffer — the nullable return already copied
+//                        per arm (loft#1337), and is the control `nullable`.
+//
+// Controls: the arm that binds a local first (`d = decode(n); d.value`, copied before the
+// fix), the explicit `return`, the nullable return.  Two records are built between each
+// call and its read, as the filed program does: they re-use the freed store, so a view of
+// it reads their bytes instead of passing on stale ones (the loop is the same channel).
+//
+// @falsified-at: a0106bd01 — interpret exit 1 -> 0, native exit 1 -> 0; scored by hand
+// against a build carrying the defect (the first cell answers -1 on both).
+//   HOLDS: the cell is clean on every channel with the fix, `LOFT_STRICT_STORES=1` included.
+enum CV { CNull, CInt { value: integer }, CText { value: text } }
+struct P { pv: integer }
+struct In { a: integer, t: text }
+struct Dec { const value: CV, const next: integer, inn: In, items: vector<In> }
+fn decode(n: integer) -> Dec {
+  Dec { value: CInt { value: n }, next: 1, inn: In { a: n * 10, t: "t{n}" }, items: [In { a: n * 100, t: "e{n}" }] }
+}
+fn mk(n: integer) -> CV { CInt { value: n + 50 } }
+fn v(c: CV) -> integer { match c { CInt { value } => value, _ => -1 } }
+fn sp(i: In) -> text { "{i.a}/{i.t}" }
+fn lit(n: integer) -> CV { if n > 0 { decode(n).value } else { CInt { value: 9 } } }
+fn same(n: integer) -> CV { if n > 0 { decode(n).value } else { decode(n + 7).value } }
+fn mint(n: integer) -> CV { if n > 0 { decode(n).value } else { mk(n) } }
+fn second(n: integer) -> CV { if n > 0 { CInt { value: 9 } } else { decode(n - 2).value } }
+fn matched(n: integer) -> CV { match n { 0 => CInt { value: 9 }, _ => decode(n).value } }
+fn mixed(n: integer) -> CV { if n > 0 { d = decode(n); d.value } else { decode(n + 30).value } }
+fn bound(n: integer) -> CV { if n > 0 { d = decode(n); d.value } else { CInt { value: 9 } } }
+fn early(n: integer) -> CV { if n > 0 { return decode(n).value; } CInt { value: 9 } }
+fn nullable(n: integer) -> CV? { if n > 0 { decode(n).value } else { null } }
+fn rec(n: integer) -> In { if n > 0 { decode(n).inn } else { In { a: 9, t: "z" } } }
+fn elm(n: integer) -> In { if n > 0 { decode(n).items[0] } else { In { a: 9, t: "z" } } }
+fn chain(n: integer) -> In {
+  if n > 0 { decode(n).inn } else if n < -5 { decode(1).inn } else { In { a: 9, t: "z" } }
+}
+fn main() {
+  r1 = lit(3); x1 = P { pv: 100 }; y1 = P { pv: 101 };
+  assert(v(r1) == 3 && x1.pv + y1.pv == 201, "a literal other arm, the projecting arm runs: {v(r1)}");
+  r2 = lit(0); x2 = P { pv: 200 }; y2 = P { pv: 201 };
+  assert(v(r2) == 9 && x2.pv + y2.pv == 401, "a literal other arm, the literal runs: {v(r2)}");
+  r3 = same(0); x3 = P { pv: 300 }; y3 = P { pv: 301 };
+  assert(v(r3) == 7 && x3.pv + y3.pv == 601, "both arms project: {v(r3)}");
+  r4 = mint(4); x4 = P { pv: 400 }; y4 = P { pv: 401 };
+  assert(v(r4) == 4 && x4.pv + y4.pv == 801, "the other arm is a minting call: {v(r4)}");
+  r5 = second(0); x5 = P { pv: 500 }; y5 = P { pv: 501 };
+  assert(v(r5) == -2 && x5.pv + y5.pv == 1001, "the projecting arm is the second: {v(r5)}");
+  r6 = matched(5); x6 = P { pv: 600 }; y6 = P { pv: 601 };
+  assert(v(r6) == 5 && x6.pv + y6.pv == 1201, "a match arm projects: {v(r6)}");
+  r7 = mixed(0); x7 = P { pv: 700 }; y7 = P { pv: 701 };
+  assert(v(r7) == 30 && x7.pv + y7.pv == 1401, "the other arm binds a local: {v(r7)}");
+  r8 = bound(3); x8 = P { pv: 800 }; y8 = P { pv: 801 };
+  assert(v(r8) == 3 && x8.pv + y8.pv == 1601, "control, the arm binds a local first: {v(r8)}");
+  r9 = early(3); x9 = P { pv: 900 }; y9 = P { pv: 901 };
+  assert(v(r9) == 3 && x9.pv + y9.pv == 1801, "control, an explicit return: {v(r9)}");
+  r10 = nullable(3); x10 = P { pv: 1000 }; y10 = P { pv: 1001 };
+  assert(v(r10 ?? CNull) == 3 && x10.pv + y10.pv == 2001, "control, the nullable return: {v(r10 ?? CNull)}");
+  r11 = rec(6); x11 = P { pv: 1100 }; y11 = P { pv: 1101 };
+  assert(sp(r11) == "60/t6" && x11.pv + y11.pv == 2201, "a struct field: {sp(r11)}");
+  r12 = elm(2); x12 = P { pv: 1200 }; y12 = P { pv: 1201 };
+  assert(sp(r12) == "200/e2" && x12.pv + y12.pv == 2401, "a vector element: {sp(r12)}");
+  r13 = chain(-9); x13 = P { pv: 1300 }; y13 = P { pv: 1301 };
+  assert(sp(r13) == "10/t1" && x13.pv + y13.pv == 2601, "an else-if arm: {sp(r13)}");
+  s = "";
+  for i in 0..4 { r = rec(i); s += "{sp(r)},"; }
+  assert(s == "9/z,10/t1,20/t2,30/t3,", "a loop of calls reads no re-used store: {s}");
+  print("2289 a field of a call temporary answered by an arm ok\n");
+}
