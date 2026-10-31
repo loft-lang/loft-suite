@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2260 — `(C-Never)`: `Never ⤳ τ`.  A call that never returns (`panic`, `exit`) fits
+// wherever a value is wanted, as `?? panic(…)` always read it.  Everywhere else it was typed
+// `void`: an `else`, a then arm, a value `match` arm bound to a local and a function's tail were
+// refused ("expected integer, got void"), and a `match` tail with a halt arm compiled on the
+// interpreter while `--native` and `--native-c` refused it.  One cell per position, each
+// result type a different kind; the halting arm is never taken, so every value is by hand.
+// @falsified-at: 9e6425727 — interpret exit 1 -> 0, native exit 1 -> 0 (refused, then compiled)
+enum N { Leaf { v: integer }, Other }
+struct P { x: integer }
+
+fn match_tail(n: N) -> integer { match n { Leaf { v } => v, _ => panic("no") } }
+fn halt_first(n: N) -> integer { match n { Other => panic("no"), Leaf { v } => v + 1 } }
+fn block_halt(n: N) -> integer { match n { Other => { println("bad"); panic("no") }, Leaf { v } => v + 2 } }
+fn else_halt(c: integer) -> integer { if c > 0 { c * 2 } else { panic("no") } }
+fn then_halt(c: integer) -> integer { if c <= 0 { panic("no") } else { c * 7 } }
+fn bound(n: N) -> integer { x = match n { Leaf { v } => v, _ => panic("no") }; x + 1 }
+fn tail_halt(c: integer) -> integer { if c > 0 { return c * 3; } panic("no") }
+fn as_float(n: N) -> float { match n { Leaf { v } => v as float, _ => panic("no") } }
+fn as_record(n: N) -> P { match n { Leaf { v } => P { x: v }, _ => panic("no") } }
+fn as_bool(n: N) -> boolean { match n { Leaf { v } => v > 2, _ => panic("no") } }
+fn as_text(c: integer) -> text { if c > 0 { "yes" } else { exit(3) } }
+fn as_vector(c: integer) -> vector<integer> { if c > 0 { [c, c] } else { panic("no") } }
+fn chain(c: integer) -> integer { if c > 5 { 1 } else if c > 0 { 2 } else { panic("neg") } }
+fn vec_match(v: vector<integer>) -> integer { match v { [a, b] => a + b, _ => panic("shape") } }
+fn argument(c: integer) -> integer { len([1, 2, 3]) + (if c > 0 { c } else { panic("no") }) }
+
+fn test_a_halt_is_a_value_of_any_type() {
+  assert(match_tail(Leaf { v: 4 }) == 4, "match tail: {match_tail(Leaf { v: 4 })}");
+  assert(halt_first(Leaf { v: 4 }) == 5, "halt as the first arm: {halt_first(Leaf { v: 4 })}");
+  assert(block_halt(Leaf { v: 4 }) == 6, "a block arm ending in a halt: {block_halt(Leaf { v: 4 })}");
+  assert(else_halt(3) == 6, "else: {else_halt(3)}");
+  assert(then_halt(2) == 14, "then: {then_halt(2)}");
+  assert(bound(Leaf { v: 4 }) == 5, "a match bound to a local: {bound(Leaf { v: 4 })}");
+  assert(tail_halt(2) == 6, "a function tail: {tail_halt(2)}");
+  assert(as_float(Leaf { v: 4 }) == 4.0, "float: {as_float(Leaf { v: 4 })}");
+  assert(as_record(Leaf { v: 4 }).x == 4, "record");
+  assert(as_bool(Leaf { v: 4 }), "boolean");
+  assert(as_text(2) == "yes", "text: {as_text(2)}");
+  v = as_vector(2);
+  assert(len(v) == 2 && v[0] == 2 && v[1] == 2, "vector: {v}");
+  assert(chain(3) == 2 && chain(9) == 1, "else if: {chain(3)} {chain(9)}");
+  assert(vec_match([3, 4]) == 7, "vector match: {vec_match([3, 4])}");
+  assert(argument(4) == 7, "an argument: {argument(4)}");
+}
