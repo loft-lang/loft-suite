@@ -1,0 +1,114 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LOCAL RENAMED ONTO THE BUFFER KEEPS ITS VALUE WHEN IT IS RETURNED AS A VIEW (loft#2292).
+// Each `round` below returns a local rebound, in a loop, through a call that may hand back one
+// of its own arguments, and the loop reads a vector from a function defined FURTHER DOWN.  Parse
+// pass 1 does not know that function's type yet, sees the tail as the local itself and renames
+// the local onto the hidden return buffer; pass 2 knows the local may be a view of an element
+// and materialises the tail into a work ref — which the buffer binding then substituted BY the
+// buffer var, the local itself: `OpDatabase(class); OpCopyRecord(class, class)`.  The re-mint
+// destroyed the source before the copy read it, so every round answered a zeroed record (`null`
+// for the enum, kind 0 for the struct) on every backend.  `@FR-O-Buffer`: the promoted local
+// IS the caller's buffer, and a value copied into it is never read back from it;
+// `@FR-H-CopySelf` makes only the copy a no-op, not the re-mint in front of it.  The defining
+// order is the trigger: the same functions with `sites` above `round` were right.  Values are
+// hand-computed; the view cells return an element of the vector the frame frees, so a return
+// that skipped the copy would answer a freed record.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions, on every backend.
+// HOLDS: the cells that define `sites` above `round` answer the same on both trees.
+
+enum Own {
+  Owned,
+  NotYet,
+  Borrowed { base: integer },
+}
+
+struct Pt { kind: integer, base: integer }
+
+fn show(o: Own) -> text {
+  match o {
+    Owned => "Owned",
+    NotYet => "NotYet",
+    Borrowed { base } => "Borrowed({base})",
+  }
+}
+
+// Hands back `c` when `a` is still NotYet, else `a` itself.
+fn pick(a: Own, c: Own) -> Own {
+  if a == NotYet {
+    return c;
+  }
+  a
+}
+
+fn pick_pt(a: Pt, c: Pt) -> Pt {
+  if a.kind == 1 {
+    return c;
+  }
+  a
+}
+
+// The loop reads `sites`, defined below: pass 1 renames `class` onto the buffer.
+fn round(n: integer, start: integer) -> Own {
+  class = if start == 0 { Owned } else { NotYet };
+  for c in sites(n) {
+    class = pick(class, c);
+  }
+  class
+}
+
+// The vector held in a local first: the same rename, the same copy.
+fn round_local(n: integer) -> Own {
+  class = NotYet;
+  v = sites(n);
+  for c in v {
+    class = pick(class, c);
+  }
+  class
+}
+
+fn round_pt(n: integer, start: integer) -> Pt {
+  class = Pt { kind: start, base: 7 };
+  for c in sites_pt(n) {
+    class = pick_pt(class, c);
+  }
+  class
+}
+
+fn sites(n: integer) -> vector<Own> {
+  r: vector<Own> = [];
+  for i in 0..n {
+    r += [Borrowed { base: i + 10 }];
+  }
+  r
+}
+
+fn sites_pt(n: integer) -> vector<Pt> {
+  r: vector<Pt> = [];
+  for i in 0..n {
+    r += [Pt { kind: 2, base: i + 20 }];
+  }
+  r
+}
+
+fn main() {
+  // No iteration: the literal the round started from.
+  assert(show(round(0, 0)) == "Owned", "round(0, Owned) = {show(round(0, 0))}");
+  // `pick(Owned, c)` keeps `Owned` through both elements.
+  assert(show(round(2, 0)) == "Owned", "round(2, Owned) = {show(round(2, 0))}");
+  // NotYet takes the first element, a VIEW of `sites`' vector, and keeps it: Borrowed(10).
+  assert(show(round(2, 1)) == "Borrowed(10)", "round(2, NotYet) = {show(round(2, 1))}");
+  // No element: NotYet stays.
+  assert(show(round(0, 1)) == "NotYet", "round(0, NotYet) = {show(round(0, 1))}");
+  assert(show(round_local(3)) == "Borrowed(10)", "round_local(3) = {show(round_local(3))}");
+  // The struct keeps its own value: kind 2, base 7, never the zeroed record.
+  p = round_pt(2, 2);
+  assert(p.kind == 2 && p.base == 7, "round_pt(2, 2) = {p.kind} {p.base}");
+  // kind 1 takes the first element, base 20 — a view of the frame's vector, copied out.
+  q = round_pt(2, 1);
+  assert(q.kind == 2 && q.base == 20, "round_pt(2, 1) = {q.kind} {q.base}");
+  println("renamed-buffer view return ok");
+}
