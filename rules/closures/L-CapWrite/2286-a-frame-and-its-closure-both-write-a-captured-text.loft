@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A closure that writes a captured `text`, and a frame that writes the same text after the
+// call, both reach it — and the frame's formatted result is delivered through the ONE
+// return buffer its signature published.
+//
+// @FR-L-CapWrite: a captured write is shared in both directions.  The interpreter crashed
+// (SIGSEGV in `OpAppendStackText`) on `s = "a"; f = fn() -> text { s = "{s}b"; s };
+// a = f(); s = "{s}c"; "{a} {s}"` while `--native` answered `ab abc`: the tail's pooled
+// work text was `__work_4` on pass 1 and `__work_3` on pass 2 (the capture changes which
+// buffers are free), and pass 2 promoted it as a SECOND hidden `&text` parameter, so the
+// attribute and variable orders crossed and the result was written through a corrupted
+// buffer (loft#2286).  Pass 2 now delivers into the buffer pass 1 published.
+//
+// Axes this file MOVES:  where the closure lives (a local, a struct's fn field, a field read
+//                        into a local and called twice); calls before and after the frame
+//                        write, and in a loop; what the closure answers (the capture, a
+//                        derived text); a second captured text; the tail (a format, an `if`,
+//                        an explicit `return`); the caller (one function called twice).
+// Axes it HOLDS FIXED:   the captured value is a `text` (a heap capture is L-CapHeap's).
+//
+// The channel is the value; the old build crashed on every cell but the `if` tail.
+//
+// @falsified-at: 279e26c8c — interpret exit 139 -> 0 (SIGSEGV), native exit 1 -> 0 (the
+// fn-ref dispatch of `twice` did not compile, E0308: `local`'s stale second buffer); scored
+// by hand against a build carrying the defect.
+//   HOLDS: clean under `LOFT_POISON=1` and the leak check, both backends.
+struct B { tag: integer, f: fn() -> text }
+fn local() -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; "{a} {s}" }
+fn field() -> text {
+  s = "a"; b = B { tag: 1, f: fn() -> text { s = "{s}b"; s } }; a = b.f(); s = "{s}c"; "{a} {s}"
+}
+fn twice() -> text {
+  s = "a"; b = B { tag: 1, f: fn() -> text { s = "{s}b"; s } }; g = b.f; a = g(); a2 = g();
+  s = "{s}c"; "{a} {a2} {s}"
+}
+fn looped() -> text {
+  s = "a"; f = fn() -> text { s = "{s}b"; s }; a = ""; for i in 0..3 { a = f(); } s = "{s}c"; "{a} {s}"
+}
+fn after() -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; a2 = f(); "{a} {a2} {s}" }
+fn derived() -> text { s = "a"; f = fn() -> text { s = "{s}b"; "k{len(s)}" }; a = f(); s = "{s}c"; "{a} {s}" }
+fn branch() -> text {
+  s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; if len(s) > 2 { "{a}+{s}" } else { "no" }
+}
+fn early() -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; return "{a} {s}"; }
+fn two() -> text {
+  s = "a"; u = "x"; f = fn() -> text { s = "{s}b"; u = "{u}y"; "{s}{u}" }; a = f(); s = "{s}c"; u = "{u}z";
+  "{a} {s} {u}"
+}
+fn w(n: integer) -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}{n}"; "{a} {s}" }
+fn main() {
+  assert(local() == "ab abc", "a local closure: {local()}");
+  assert(field() == "ab abc", "a fn field: {field()}");
+  assert(twice() == "ab abb abbc", "a fn field read into a local, called twice: {twice()}");
+  assert(looped() == "abbb abbbc", "called in a loop: {looped()}");
+  assert(after() == "ab abcb abcb", "called after the frame write: {after()}");
+  assert(derived() == "k2 abc", "the closure answers a derived text: {derived()}");
+  assert(branch() == "ab+abc", "an if tail: {branch()}");
+  assert(early() == "ab abc", "an explicit return: {early()}");
+  assert(two() == "abxy abc xyz", "two captured texts: {two()}");
+  assert("{w(1)}|{w(2)}" == "ab ab1|ab ab2", "one function called twice: {w(1)}|{w(2)}");
+  print("2286 a frame and its closure both write a captured text ok\n");
+}
