@@ -12,6 +12,7 @@
 //
 // @falsified-at: 9e6425727 — interpret leaked kt=100 Own×2 -> clean, native exit 1 -> 0
 // CHANNEL: native compilation (exit and refusal); the assertions on both backends.
+// ARMED: LOFT_LEAK_CHECK=1 — the suite runner arms it on every run.
 // HOLDS: the interpreter answers the same on both trees.
 
 enum Own {

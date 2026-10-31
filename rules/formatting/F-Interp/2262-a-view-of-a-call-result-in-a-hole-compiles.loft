@@ -18,6 +18,7 @@
 //
 // @falsified-at: 9e6425727 — native exit 1 -> 0 (E0716 at the first hole), interpret clean
 // on both; scored by hand with a dev build of main.
+// HOLDS: the interpreter answers the same on both trees.
 fn f(n: integer) -> text { "  hi {n}  " }
 struct W { s: text }
 fn w(n: integer) -> W { W { s: "  w{n} " } }

@@ -19,6 +19,8 @@
 //
 // @falsified-at: 9e6425727 — native exit 1 -> 0 (E0425 `var_c` in four cells), C leak
 // 1 store -> 0; interpret clean on both; scored by hand with a dev build of main.
+// ARMED: LOFT_LEAK_CHECK=1 — the suite runner arms it on every run.
+// HOLDS: the interpreter answers the same on both trees.
 struct Pt { x: integer, y: integer }
 struct Roll { cells: vector<(integer, integer)>, pts: vector<Pt> }
 struct Lv { rolls: vector<Roll> }

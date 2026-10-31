@@ -25,6 +25,7 @@
 // @falsified-at: a0106bd01 — native exit 0 -> 0 with `1 stores not freed at program exit:
 // kt=102 CInt×1` -> clean, scored by hand with a build carrying the defect; interpret clean
 // on both trees (the interpreter always freed it).
+// HOLDS: the interpreter is clean on both trees, and the answers are equal everywhere.
 enum CV { CNull, CInt { value: integer }, CText { value: text } }
 struct In { a: integer, t: text }
 struct Dec { const value: CV, const next: integer, inn: In }

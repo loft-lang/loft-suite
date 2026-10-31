@@ -28,6 +28,7 @@
 // @falsified-at: 9e6425727 — the expected errors raised 1 -> 4 (main raised only the
 // multi-line one, line 40), so the cell fails on main and passes here; scored by hand with
 // a dev build of main.  native INERT: the refusal is the front end's, before either backend.
+// HOLDS: no backend runs on either tree — the program is refused before one would.
 struct H { tag: integer, f: fn() -> integer }
 struct N { h: H, label: integer }
 fn mkh() -> H { v = [1, 2, 3]; H { tag: 7, f: fn() -> integer { v += [9]; len(v) } } }
