@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A hole holding a method that answers a VIEW of its receiver (`trim(self) -> text[self]`),
+// applied to a CALL's result, evaluates like any other hole — on every backend.
+//
+// @FR-F-Interp: each hole is an expression, evaluated left to right.  `--native` hoisted the
+// view into its own `let` ahead of the format write while the call's result it borrows
+// stayed an inline temporary, so rustc refused the program (E0716, "temporary value dropped
+// while borrowed"); the interpreter and C ran it (loft#2262).  A template whose result
+// borrows an argument now gives a call argument a binding of its own.
+//
+// Axes this file MOVES:  the view method (`trim`, `trim_start`, `trim_end`); the receiver
+//                        (a call, a field of a call's record); the position (a hole, two
+//                        holes, an appended hole in a loop, a comparison, a `len` argument);
+//                        a bound local (the control).
+// Axes it HOLDS FIXED:   the receiver's text is the callee's own (a fresh `text`).
+//
+// @falsified-at: 9e6425727 — native exit 1 -> 0 (E0716 at the first hole), interpret clean
+// on both; scored by hand with a dev build of main.
+fn f(n: integer) -> text { "  hi {n}  " }
+struct W { s: text }
+fn w(n: integer) -> W { W { s: "  w{n} " } }
+fn main() {
+  assert("[{f(1).trim()}]" == "[hi 1]", "a hole: {f(1).trim()}");
+  assert("[{f(2).trim_start()}|{f(3).trim_end()}]" == "[hi 2  |  hi 3]", "trim_start and trim_end");
+  t = f(4).trim();
+  assert("[{t}]" == "[hi 4]", "control, bound first: {t}");
+  assert("[{f(5).trim()}{f(6).trim()}]" == "[hi 5hi 6]", "two holes");
+  s = "";
+  for i in 0..3 { s += "{f(i).trim()},"; }
+  assert(s == "hi 0,hi 1,hi 2,", "appended in a loop: {s}");
+  assert("[{w(7).s.trim()}]" == "[w7]", "a field of a call's record");
+  assert(f(8).trim() == "hi 8", "a comparison");
+  assert(len(f(9).trim()) == 4, "a len argument");
+  print("2262 a view of a call result in a hole ok\n");
+}

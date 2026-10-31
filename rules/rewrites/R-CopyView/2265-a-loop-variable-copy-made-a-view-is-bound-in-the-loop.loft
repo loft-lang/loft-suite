@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A copy the copy-view rewrite turns into a view is the view at its BIND, inside the loop
+// that binds its source — never at the null-init the scope pass declares at function scope.
+//
+// @FR-R-CopyView: `t = a` of a record nothing disturbs becomes `t = OpGetField(a, 0)`.  The
+// rewrite took the FIRST `Set` of `t` in walk order, which for the work-ref a tuple element
+// is unboxed through (`for c in r.cells { cells += [c]; }`, `r` an element of a parameter's
+// vector) is its null-init at function scope: the projection of the loop variable landed
+// ahead of the loop, `--native` refused it (E0425 `var_c`), and the C kept the copy's store
+// (one store never freed) (loft#2265).
+//
+// Axes this file MOVES:  the loop's source (an element bound to a local, a direct path);
+//                        the element (a tuple, a struct); what reads the copy (an append, a
+//                        conditional append, a second loop, a field read); nesting.
+// Axes it HOLDS FIXED:   the root is a by-value parameter (in `main` the copy was never
+//                        rewritten, which is why the same lines compiled there).
+//
+// @falsified-at: 9e6425727 — native exit 1 -> 0 (E0425 `var_c` in four cells), C leak
+// 1 store -> 0; interpret clean on both; scored by hand with a dev build of main.
+struct Pt { x: integer, y: integer }
+struct Roll { cells: vector<(integer, integer)>, pts: vector<Pt> }
+struct Lv { rolls: vector<Roll> }
+fn mk() -> Lv {
+  Lv { rolls: [Roll { cells: [(1, 10), (2, 20)], pts: [Pt { x: 3, y: 30 }, Pt { x: 4, y: 40 }] }] }
+}
+fn local_elem(l: Lv) -> integer {
+  r = l.rolls[0]; cells: vector<(integer, integer)> = []; for c in r.cells { cells += [c]; } len(cells)
+}
+fn direct(l: Lv) -> integer {
+  cells: vector<(integer, integer)> = []; for c in l.rolls[0].cells { cells += [c]; } len(cells)
+}
+fn again(l: Lv) -> integer {
+  r = l.rolls[0]; cells: vector<(integer, integer)> = []; for c in r.cells { cells += [c]; }
+  s = 0; for c in cells { s += c.1; } s
+}
+fn structs(l: Lv) -> integer {
+  r = l.rolls[0]; out: vector<Pt> = []; for p in r.pts { out += [p]; } out[1].y + len(out)
+}
+fn bound(l: Lv) -> integer { s = 0; for p in l.rolls[0].pts { q = p; s += q.x * 10 + q.y; } s }
+fn nested(l: Lv) -> integer { s = 0; for r in l.rolls { for c in r.cells { s += c.0 + c.1; } } s }
+fn guarded(l: Lv) -> integer {
+  r = l.rolls[0]; cells: vector<(integer, integer)> = []; for c in r.cells { if c.0 > 1 { cells += [c]; } }
+  cells[0].1
+}
+fn main() {
+  l = mk();
+  assert(local_elem(l) == 2, "an element bound to a local");
+  assert(direct(l) == 2, "a direct path");
+  assert(again(l) == 30, "read again by a second loop");
+  assert(structs(l) == 42, "a struct element");
+  assert(bound(l) == 140, "a bound copy of a struct element");
+  assert(nested(l) == 33, "nested loops");
+  assert(guarded(l) == 20, "a conditional append");
+  assert(len(l.rolls[0].cells) == 2, "the parameter's vector is untouched");
+  print("2265 a loop variable copy made a view ok\n");
+}
