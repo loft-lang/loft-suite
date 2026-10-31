@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A DISCHARGED LOCAL COMPARED IN AN `else if` COMPILES ON NATIVE (loft#2298).  `(E-Eq)` compares
+// A DISCHARGED LOCAL COMPARED IN AN `else if` COMPILES ON NATIVE (`@FR-E-Eq`, loft#2298).  `(E-Eq)` compares
 // a struct-enum by content through `Stores::eq_content`, and `--native` emits that as the
 // template `stores.eq_content(&@v1, &@v2, @tp)`.  A discharge of a LOCAL (`fixed ?? panic(…)`,
 // or `fixed!`) lowers to a block that declares its null-check local, and the generator writes

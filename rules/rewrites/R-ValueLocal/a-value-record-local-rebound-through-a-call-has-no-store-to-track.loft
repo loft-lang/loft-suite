@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A VALUE-RECORD LOCAL REBOUND THROUGH A CALL HAS NO STORE TO TRACK (loft#2293).  `round` binds
+// A VALUE-RECORD LOCAL REBOUND THROUGH A CALL HAS NO STORE TO TRACK (`@FR-R-ValueLocal`, loft#2293).  `round` binds
 // `class` from a struct literal — a value record on `--native` (`(R-ValueLocal)`: a tuple of its
 // fields, no store) — and rebinds it in a loop through `pick`, which may answer either argument.
 // That rebind made `class` a witnessed owner too, and the generator declared its tracker
