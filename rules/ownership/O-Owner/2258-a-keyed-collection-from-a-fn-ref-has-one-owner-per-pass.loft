@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Owner` — a collection a fn-ref call answers is owned once, by the local that takes it,
+// so a loop of such calls holds one store per pass.  The corpus reached this rule only with a
+// vector and a tuple (`make rule-depth`, A1); this file moves the kind across `hash`, `sorted`,
+// `index`, `spatial` and `trie`, the fn-ref across a named function and a lambda, and adds the
+// owner's other routes: a local rebound from a call over its own value, a conditional rebind, and
+// a `??` whose default is a call.  loft#2258: on `--native` a fn-ref answering a `spatial` or a
+// `trie` did not compile — the dispatch's fallback arm answered `()` for those two kinds.
+//
+// @falsified-at: 23bc61e4 — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move): native refused it with E0308.
+// CHANNEL: the VALUE (hand-computed totals) and the LEAK (`main` runs every cell).
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct OoH { k: integer, n: integer }
+struct OoS { k: integer, n: integer }
+struct OoI { k: integer, n: integer }
+struct OoP { x: integer, y: integer, n: integer }
+struct OoW { w: text, v: integer }
+
+fn oo_h(n: integer) -> hash<OoH[k]> { r: hash<OoH[k]> = []; for j in 0..n { r += [OoH { k: j, n: j }]; } r }
+fn oo_s(n: integer) -> sorted<OoS[k]> { r: sorted<OoS[k]> = []; for j in 0..n { r += [OoS { k: j, n: j }]; } r }
+fn oo_i(n: integer) -> index<OoI[k]> { r: index<OoI[k]> = []; for j in 0..n { r += [OoI { k: j, n: j }]; } r }
+fn oo_p(n: integer) -> spatial<OoP[x, y]> { r: spatial<OoP[x, y]> = []; for j in 0..n { r += [OoP { x: j, y: j, n: j }]; } r }
+fn oo_t(n: integer) -> trie<OoW[w]> { r: trie<OoW[w]> = []; for j in 0..n { r += [OoW { w: "w{j}", v: j }]; } r }
+fn oo_grow(h: hash<OoH[k]>, n: integer) -> hash<OoH[k]> {
+  r: hash<OoH[k]> = [];
+  for e in h { r += [OoH { k: e.k, n: e.n }]; }
+  r += [OoH { k: 100 + n, n: 0 }];
+  r
+}
+fn oo_maybe(i: integer) -> hash<OoH[k]>? { if i % 2 == 0 { oo_h(2) } else { null } }
+
+fn test_every_keyed_kind_through_a_fn_ref() {
+  fh = fn(n: integer) -> hash<OoH[k]> { oo_h(n) };
+  fs = fn(n: integer) -> sorted<OoS[k]> { oo_s(n) };
+  fi = oo_i;
+  fp = fn(n: integer) -> spatial<OoP[x, y]> { oo_p(n) };
+  fq = oo_p;
+  ft = oo_t;
+  t = 0;
+  for _ in 0..10 {
+    t += len(fh(3)) + len(fs(2)) + len(fi(4)) + len(fp(1)) + len(fq(2)) + len(ft(3)) + (ft(4)["w3"].v ?? -1);
+  }
+  // Per pass: 3 + 2 + 4 + 1 + 2 + 3 + 3 = 18.
+  assert(t == 180, "ten passes: {t}");
+}
+
+fn test_a_rebound_owner_and_a_coalesce_default() {
+  acc = oo_h(1);
+  t = 0;
+  for r in 0..10 {
+    acc = oo_grow(acc, r);
+    e = oo_h(1);
+    if r % 3 == 0 { e = oo_h(5); }
+    g = oo_maybe(r) ?? oo_h(4);
+    t += len(e) + len(g);
+  }
+  // e: four passes of 5 (r = 0, 3, 6, 9) and six of 1 = 26; g: five of 2 and five of 4 = 30.
+  assert(len(acc) == 11 && t == 56, "acc {len(acc)} t {t}");
+}
+
+fn main() {
+  test_every_keyed_kind_through_a_fn_ref();
+  test_a_rebound_owner_and_a_coalesce_default();
+}

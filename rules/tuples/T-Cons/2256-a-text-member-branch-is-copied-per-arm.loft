@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2256, `@FR-T-Cons` — a tuple's TEXT member is its own copy whatever spells it, and that
+// copy compiles on every backend.  Written as a branch (`if`, `match`) or a plain block that
+// answers a text local, the copy was one native expression whose arms were a `String` and a
+// `&str` (E0308), or whose local arm MOVED the local out (E0382) — so `--native` refused the
+// program while the interpreter and C answered.  A member WRITE of a branch failed the same way.
+//
+// Axes it MOVES: the spelling (`if`, `match` with a call arm, `??`, a block, a nested `if` with a
+// format-string arm, a second-member `if`, a member write, a destructure), the arm taken (each
+// one over four rounds), and the evaluation count (a loop, which is what exposes the move).
+// Every value is hand-computed; `s` grows one `!` per round.
+//
+// @falsified-at: 23bc61e4 — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move): native refused it with E0308.
+// CHANNEL: the native COMPILE, then the VALUE (hand-computed) and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+fn pt2256(i: integer) -> text? { if i == 0 { "p0" } else { null } }
+fn mk2256(i: integer) -> text { "m{i}" }
+
+fn test_every_spelling_of_a_text_member() {
+  s = "abc";
+  r = "";
+  for k in 0..4 {
+    a = (if k == 1 { s } else { "zz" }, 1);
+    b = (match k { 0 => s, 1 => "one", _ => mk2256(k) }, 2);
+    c = (pt2256(k) ?? s, 3);
+    d = ({ s }, 4);
+    e = (if k == 0 { if k == 0 { s } else { "x" } } else { "{s}{k}" }, 5);
+    f = (2, if k > 1 { mk2256(k) } else { s });
+    t = ("", 0);
+    t.0 = if k == 2 { s } else { "w" };
+    (x, y) = (if k == 3 { s } else { "q" }, 6);
+    r += "{a.0},{b.0},{c.0},{d.0},{e.0},{f.1},{t.0},{x};";
+    s += "!";
+  }
+  assert(r == "zz,abc,p0,abc,abc,abc,w,q;abc!,one,abc!,abc!,abc!1,abc!,w,q;zz,m2,abc!!,abc!!,abc!!2,m2,abc!!,q;zz,m3,abc!!!,abc!!!,abc!!!3,m3,w,abc!!!;", "members: {r}");
+  assert(s == "abc!!!!", "the source grew on its own: {s}");
+}
+
+fn main() {
+  test_every_spelling_of_a_text_member();
+}

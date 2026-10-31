@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A CALL ARGUMENT A RECURSIVE JOIN ANSWERS IS NOT FREED BEFORE THE RETURN (loft#2295).
+// A CALL ARGUMENT A RECURSIVE JOIN ANSWERS IS NOT FREED BEFORE THE RETURN (`@FR-O-Derived`, loft#2295).
 // `classify` answers `join(classify(t), classify(f))`, and `join` may answer its first
 // argument (`-> Own["a"]`).  The scope pass hoists the two recursive calls into `__lift_N`
 // temps, so the value `classify` returns may BE `__lift_1`'s store — and the frame, whose

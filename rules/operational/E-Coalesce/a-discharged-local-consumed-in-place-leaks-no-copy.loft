@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A DISCHARGED LOCAL CONSUMED IN PLACE LEAKS NO COPY (loft#2300).  `x ?? panic(…)` answers `x`
+// A DISCHARGED LOCAL CONSUMED IN PLACE LEAKS NO COPY (`@FR-E-Coalesce`, loft#2300).  `x ?? panic(…)` answers `x`
 // or leaves; on a record or struct-enum LOCAL it bound `x` to a temp typed with no dep, so the
 // temp read as an owner and `@FR-B-Copy` copied the record into it.  Bound to a local first,
 // the copy became that local's store; consumed in place — a call argument, a comparison

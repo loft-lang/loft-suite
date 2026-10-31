@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2261, `@FR-O-Detach` — a tuple rebuilt from its own members reads them before anything
+// is cleared, on every pass of a loop.  A tuple literal's member copies and fresh member builds
+// land in stores the literal SITE reuses on every evaluation, and from the second pass the store
+// the old member lives in IS that store: it was cleared before the member was read, so the
+// member came out empty, or the two members of a swap both came out as one of them, silently
+// and on every backend.  A struct and a vector rebuilt the same way were right.
+//
+// Axes it MOVES: the spelling of the rebuilt member (the member itself, a comprehension over it,
+// a call over it, the other member — a swap, a member WRITE over it), the member kind (a vector,
+// a text beside a vector, a struct with a vector field, a hash, a nested tuple), and the number
+// of passes (one to four — the defect needs two).  A plain vector and a struct are CONTROLS.
+// Every value is hand-computed.
+//
+// @falsified-at: 23bc61e4 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0
+// CHANNEL: the VALUE (hand-computed per pass count) and the LEAK (`main` runs every cell).
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct OdP { x: integer, tags: vector<integer> }
+struct OdK { k: integer, n: integer }
+struct OdS { a: vector<integer>, b: vector<integer>, n: integer }
+
+fn od_inc(v: vector<integer>) -> vector<integer> { [for x in v { x + 1 }] }
+
+fn od_spellings(n: integer) -> text {
+  c = ([1, 2], 7);
+  k = ([1, 2], 7);
+  s = ([1, 2], 7);
+  w = ([1, 2], [5]);
+  m = ([1, 2], 7);
+  for _ in 0..n {
+    c = ([for x in c.0 { x + 1 }], c.1 + 1);
+    k = (od_inc(k.0), k.1 + 1);
+    s = (s.0, s.1 + 1);
+    w = (w.1, w.0);
+    m.0 = [for q in m.0 { q + 1 }];
+  }
+  "{c.0} {c.1}|{k.0} {k.1}|{s.0} {s.1}|{w.0} {w.1}|{m.0} {m.1}"
+}
+
+fn test_every_spelling_over_one_to_three_passes() {
+  assert(od_spellings(1) == "[2,3] 8|[2,3] 8|[1,2] 8|[5] [1,2]|[2,3] 7", "one pass: {od_spellings(1)}");
+  assert(od_spellings(2) == "[3,4] 9|[3,4] 9|[1,2] 9|[1,2] [5]|[3,4] 7", "two passes: {od_spellings(2)}");
+  assert(od_spellings(3) == "[4,5] 10|[4,5] 10|[1,2] 10|[5] [1,2]|[4,5] 7", "three passes: {od_spellings(3)}");
+}
+
+fn test_every_member_kind_over_four_passes() {
+  a = ("ab", [1], 0);
+  b = (OdP { x: 1, tags: [1] }, 0);
+  h: hash<OdK[k]> = [OdK { k: 1, n: 1 }];
+  c = (h, 0);
+  d = (([1], 2), [5]);
+  for _ in 0..4 {
+    a = ("{a.0}c", [for q in a.1 { q + 1 }], a.2 + 1);
+    b = (OdP { x: b.0.x + 1, tags: [for q in b.0.tags { q * 2 }] }, b.1 + 1);
+    c = (c.0, c.1 + len(c.0));
+    d = ((d.1, d.0.1 + 1), d.0.0);
+  }
+  got = "{a.0} {a.1} {a.2} | {b.0.x} {b.0.tags} {b.1} | {len(c.0)} {c.1} | {d.0.0} {d.0.1} {d.1}";
+  assert(got == "abcccc [5] 4 | 5 [16] 4 | 1 4 | [1] 6 [5]", "four passes: {got}");
+}
+
+fn test_a_struct_and_a_vector_rebuilt_the_same_way() {
+  s = OdS { a: [1, 2], b: [5], n: 7 };
+  v = [[1, 2], [5]];
+  for _ in 0..3 {
+    s = OdS { a: s.b, b: s.a, n: s.n + 1 };
+    v = [v[1], v[0]];
+  }
+  assert("{s.a} {s.b} {s.n} {v}" == "[5] [1,2] 10 [[5],[1,2]]", "controls: {s.a} {s.b} {v}");
+}
+
+fn main() {
+  test_every_spelling_over_one_to_three_passes();
+  test_every_member_kind_over_four_passes();
+  test_a_struct_and_a_vector_rebuilt_the_same_way();
+}

@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2270 — `@FR-G-Mono` with `@FR-N-Shape`: a `τ?` element has `τ`'s slot, so a generic's
+// `self[i] = x` at a nullable scalar writes the scalar as the concrete `v[i] = x` does, the
+// null included.  The instance kept the template's record copy for `float?`, `integer?`,
+// `single?` and `boolean?`: the scalar was read as a record position (an interpreter panic, a
+// `--native` compile error, a C refusal).  `sort`'s loft body, which sorts a `vector<float?>`,
+// writes its elements back this way.
+// Each cell compares the generic write with the concrete one, and with the hand-written value.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, native exit 1 -> 0
+// WITNESS: on main the interpreter stops with `BUG (#796): refused to walk a record (position)
+//   edge of float` and `--native` with `error[E0308]` at `OpCopyRecord`.  `sorted_floats` held on
+//   main, whose `sort` rebuilt the vector by appending.
+// CHANNEL: the VALUE written, null included, and the run itself.
+// ARMED: no instrument.
+// HOLDS: every cell, on every backend.
+
+fn put < T > (self: vector<T>, src: vector<T>) {
+  at = 0;
+  for e in src {
+    self[at] = e;
+    at += 1;
+  }
+}
+
+fn floats() -> text {
+  s: vector<float?> = [7.5, null];
+  v: vector<float?> = [1.5, 2.5];
+  v.put(s);
+  w: vector<float?> = [1.5, 2.5];
+  w[0] = s[0];
+  w[1] = s[1];
+  "{v} {w}"
+}
+
+fn integers() -> text {
+  s: vector<integer?> = [null, 6];
+  v: vector<integer?> = [1, 2];
+  v.put(s);
+  "{v}"
+}
+
+fn singles() -> text {
+  s: vector<single?> = [null, 3.5f];
+  v: vector<single?> = [1.5f, 2.5f];
+  v.put(s);
+  "{v}"
+}
+
+fn booleans() -> text {
+  s: vector<boolean?> = [false, null];
+  v: vector<boolean?> = [true, true];
+  v.put(s);
+  w: vector<boolean?> = [true, true];
+  w[0] = s[0];
+  w[1] = s[1];
+  "{v} {w}"
+}
+
+fn sorted_floats() -> text {
+  v: vector<float?> = [2.5, null, 1.5, -0.5];
+  v.sort();
+  "{v}"
+}
+
+fn test_a_nullable_scalar_is_written_as_its_scalar() {
+  assert(floats() == "[7.5,null] [7.5,null]", "float?: {floats()}");
+  assert(integers() == "[null,6]", "integer?: {integers()}");
+  assert(singles() == "[null,3.5]", "single?: {singles()}");
+  assert(booleans() == "[false,null] [false,null]", "boolean?: {booleans()}");
+}
+
+fn test_sort_writes_a_nullable_vector_back() {
+  assert(sorted_floats() == "[null,-0.5,1.5,2.5]", "sort: {sorted_floats()}");
+}

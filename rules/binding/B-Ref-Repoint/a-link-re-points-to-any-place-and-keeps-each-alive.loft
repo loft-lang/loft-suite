@@ -1,0 +1,169 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Repoint` — `p = &q` on a `&` link re-points it, and from then on reads and
+// writes through `p` reach `q` and nothing else.  The other cells re-point between two
+// locals; this file varies WHAT the link is re-pointed to (a vector element, a struct field,
+// a tuple element, another link) and WHERE the re-point stands (an `if` arm, a `match` arm,
+// a loop body, an inner block, a callee holding a `&` parameter).  A link must not outlive
+// its source (`@FR-O-Borrow`), so a link re-pointed to a block's local keeps that local
+// alive: read after the block, it answers what the local held, for a scalar, a text, a
+// record and a vector alike.  A nullable link is read through `??` with a literal, a
+// variable and a call as the default.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the VALUE (every source after the write, hand-computed) and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct RpP { n: integer }
+struct RpO { a: RpP, b: RpP }
+struct RpS { n: integer, s: text }
+
+fn to_element() -> text { v = [1, 2, 3]; p = &v[0]; p += 0; p = &v[2]; p = 9; "{v}" }
+
+fn to_record_element() -> text {
+  v = [RpP { n: 1 }, RpP { n: 2 }];
+  p = &v[0];
+  p.n += 0;
+  p = &v[1];
+  p.n = 9;
+  "{v[0].n} {v[1].n}"
+}
+
+fn to_field() -> text {
+  o = RpO { a: RpP { n: 1 }, b: RpP { n: 2 } };
+  q = RpO { a: RpP { n: 3 }, b: RpP { n: 4 } };
+  p = &o.a;
+  p.n += 0;
+  p = &q.b;
+  p.n = 9;
+  "{o.a.n} {o.b.n} {q.a.n} {q.b.n}"
+}
+
+fn to_tuple_element() -> text { t = (1, 2); a = 0; p = &a; p += 0; p = &t.1; p = 9; "{a} {t.0} {t.1}" }
+
+// `r` links `b`; re-pointing `p` to `r` reaches `b`.
+fn to_link() -> text { a = 1; b = 2; r = &b; p = &a; p += 0; p = &r; p = 9; "{a} {b} {r}" }
+
+fn in_if_arm(c: boolean) -> text { a = 1; b = 2; p = &a; if c { p = &b; } p = 7; "{a} {b}" }
+
+fn in_match_arm(c: integer) -> text {
+  a = 1;
+  b = 2;
+  d = 3;
+  p = &a;
+  match c {
+    0 => { p = &b; },
+    _ => { p = &d; }
+  }
+  p = 9;
+  "{a} {b} {d}"
+}
+
+// Each pass re-points to the next element; the first source is never written.
+fn in_loop() -> text { v = [1, 2, 3]; s = 0; p = &s; for i in 0..3 { p = &v[i]; p += 10; } "{v} {s}" }
+
+fn text_element() -> text { v = ["a", "b"]; t = &v[0]; t += ""; t = &v[1]; t += "x"; "{v}" }
+
+// Re-pointed inside the callee, the link stops reaching the caller's variable.
+fn repoint_inside(p: &integer) { p += 0; x = 5; p = &x; p = 7; }
+
+fn in_callee() -> integer { a = 1; repoint_inside(a); a }
+
+fn nullable() -> text {
+  a: integer? = null;
+  b: integer? = 4;
+  p = &a;
+  p += 0;
+  p = &b;
+  p = 6;
+  "{a} {b}"
+}
+
+fn fallback() -> integer { 30 }
+
+// The link names an absent source, then a present one: each `??` default answers only for the
+// absent read.
+fn nullable_default() -> integer {
+  a: integer? = null;
+  b: integer? = 4;
+  d = 20;
+  p = &a;
+  s = (p ?? 10) + (p ?? d) + (p ?? fallback());
+  p = &b;
+  s * 100 + (p ?? 10) + (p ?? d) + (p ?? fallback())
+}
+
+fn outlives_scalar() -> integer { a = 1; p = &a; p += 0; { x = 5; p = &x; } q = 6; p * 10 + q }
+
+fn outlives_text() -> text {
+  a = "aa";
+  p = &a;
+  p += "";
+  {
+    x = "x{len(a)}yz";
+    p = &x;
+  }
+  q = "other{len(a)}";
+  "{p} {q}"
+}
+
+fn outlives_record() -> text {
+  a = RpS { n: 1, s: "a" };
+  p = &a;
+  p.n += 0;
+  {
+    x = RpS { n: 5, s: "x{len(a.s)}" };
+    p = &x;
+  }
+  q = RpS { n: 6, s: "q" };
+  "{p.n} {p.s} {q.n}"
+}
+
+fn outlives_vector() -> text {
+  a: vector<integer> = [1];
+  p = &a;
+  p += [];
+  {
+    x: vector<integer> = [7, 8];
+    p = &x;
+  }
+  q: vector<integer> = [9, 9, 9];
+  "{p} {q}"
+}
+
+// Each pass binds a new `x`; the link names the last one.
+fn outlives_loop() -> text { a = "aa"; p = &a; p += ""; for i in 0..3 { x = "it{i}"; p = &x; } "{p} {a}" }
+
+fn test_a_link_re_points_to_an_element_a_field_a_tuple_element_and_a_link() {
+  assert(to_element() == "[1,2,9]", "element: {to_element()}");
+  assert(to_record_element() == "1 9", "record element: {to_record_element()}");
+  assert(to_field() == "1 2 3 9", "field: {to_field()}");
+  assert(to_tuple_element() == "0 1 9", "tuple element: {to_tuple_element()}");
+  assert(to_link() == "1 9 9", "link: {to_link()}");
+  assert(text_element() == "[\"a\",\"bx\"]", "text element: {text_element()}");
+}
+
+fn test_a_re_point_in_an_arm_a_loop_or_a_callee_reaches_only_its_target() {
+  assert(in_if_arm(true) == "1 7", "if taken: {in_if_arm(true)}");
+  assert(in_if_arm(false) == "7 2", "if not taken: {in_if_arm(false)}");
+  assert(in_match_arm(0) == "1 9 3", "match 0: {in_match_arm(0)}");
+  assert(in_match_arm(1) == "1 2 9", "match 1: {in_match_arm(1)}");
+  assert(in_loop() == "[11,12,13] 0", "loop: {in_loop()}");
+  assert(in_callee() == 1, "callee: {in_callee()}");
+}
+
+fn test_a_nullable_link_re_points_and_reads_through_a_default() {
+  assert(nullable() == "null 6", "nullable: {nullable()}");
+  // absent: 10 + 20 + 30 = 60; present: 4 + 4 + 4 = 12
+  assert(nullable_default() == 6012, "default: {nullable_default()}");
+}
+
+fn test_a_link_re_pointed_to_a_block_local_keeps_it_alive() {
+  assert(outlives_scalar() == 56, "scalar: {outlives_scalar()}");
+  assert(outlives_text() == "x2yz other2", "text: {outlives_text()}");
+  assert(outlives_record() == "5 x1 6", "record: {outlives_record()}");
+  assert(outlives_vector() == "[7,8] [9,9,9]", "vector: {outlives_vector()}");
+  assert(outlives_loop() == "it2 aa", "loop: {outlives_loop()}");
+}

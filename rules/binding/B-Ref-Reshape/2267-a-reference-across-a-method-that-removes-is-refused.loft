@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2267 — A REFERENCE ACROSS A METHOD THAT REMOVES FROM ITS CONTAINER IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A method is a callee like any free function: `b.drop_first()` removes the element `c` names, and the next element moves into its place.  The disturbance summary read only `n_` functions, so the write through `c` landed on the element that moved in.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// WITNESS: main compiled the program and ran the write through the stale reference.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the free-function spelling was refused already; the plain bind is copied out —
+//   `rules/binding/B-Disturb/2267-a-clear-or-a-method-ends-the-views-into-a-vector.loft`.
+// @EXPECT_ERROR: cannot call `drop_first` while `c` references a place inside `b`
+
+struct S { n: integer }
+struct Bag { items: vector<S> }
+
+fn drop_first(self: Bag) { self.items.remove(0); }
+
+fn main() {
+  b = Bag { items: [S { n: 1 }, S { n: 2 }] };
+  c = &b.items[0];
+  b.drop_first();
+  c.n = 9;
+  println("{b.items[0].n} {len(b.items)}");
+}

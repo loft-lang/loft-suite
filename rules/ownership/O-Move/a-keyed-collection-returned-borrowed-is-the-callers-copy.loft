@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Move` — a returned collection is the CALLER's: a fresh one moves across, and one that
+// borrows a parameter (the parameter itself, a field of it, either arm of an `if`, the default
+// of a `??`) is copied by the caller, so a write to the result never reaches the argument.  The
+// corpus measured this only for a vector and a tuple (`make rule-depth`, A1); this file moves the
+// kind across `hash`, `sorted`, `index` and `spatial`, the route across identity, field, `if`,
+// `??`, a chain of two calls and a struct field filled from the call, and runs it ten times.
+// Each field holds its own element type: two keyed fields of ONE element type in a struct are a
+// linked group (`(Col-Group)`) that shares its records, which is a different rule.
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the VALUE (the argument's length after the write, hand-computed) and the LEAK.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct OmH { k: integer, n: integer }
+struct OmS { k: integer, n: integer }
+struct OmI { k: integer, n: integer }
+struct OmP { x: integer, y: integer, n: integer }
+struct OmB { h: hash<OmH[k]>, s: sorted<OmS[k]>, i: index<OmI[k]>, p: spatial<OmP[x, y]> }
+struct OmHold { h: hash<OmH[k]>, i: index<OmI[k]> }
+
+fn om_mk() -> OmB {
+  OmB { h: [OmH { k: 1, n: 1 }], s: [OmS { k: 2, n: 2 }], i: [OmI { k: 3, n: 3 }], p: [OmP { x: 1, y: 1, n: 4 }] }
+}
+fn om_fresh(n: integer) -> hash<OmH[k]> { r: hash<OmH[k]> = []; for j in 0..n { r += [OmH { k: j, n: j }]; } r }
+fn om_h(h: hash<OmH[k]>) -> hash<OmH[k]> { h }
+fn om_s(s: sorted<OmS[k]>) -> sorted<OmS[k]> { s }
+fn om_i(i: index<OmI[k]>) -> index<OmI[k]> { i }
+fn om_p(p: spatial<OmP[x, y]>) -> spatial<OmP[x, y]> { p }
+fn om_fs(b: OmB) -> sorted<OmS[k]> { b.s }
+fn om_fp(b: OmB) -> spatial<OmP[x, y]> { b.p }
+fn om_pick(a: index<OmI[k]>, b: index<OmI[k]>, c: boolean) -> index<OmI[k]> { if c { a } else { b } }
+fn om_or(a: hash<OmH[k]>?, b: hash<OmH[k]>) -> hash<OmH[k]> { a ?? b }
+fn om_none(i: integer) -> hash<OmH[k]>? { if i == 0 { om_fresh(1) } else { null } }
+
+fn test_a_borrowed_return_of_every_keyed_kind_is_a_copy() {
+  b = om_mk();
+  fresh = 0;
+  last = "";
+  for r in 0..10 {
+    fresh += len(om_fresh(3));
+    h = om_h(b.h);  h += [OmH { k: 50 + r, n: 0 }];
+    s = om_s(b.s);  s += [OmS { k: 60 + r, n: 0 }];
+    i = om_i(b.i);  i += [OmI { k: 70 + r, n: 0 }];
+    p = om_p(b.p);  p += [OmP { x: 9, y: r, n: 0 }];
+    s2 = om_fs(b);  s2 += [OmS { k: 80, n: 0 }];
+    p2 = om_fp(b);  p2 += [OmP { x: 8, y: 8, n: 0 }];
+    i2 = om_pick(b.i, b.i, r % 2 == 0);  i2 += [OmI { k: 90, n: 0 }];
+    h2 = om_or(om_none(r % 2), b.h);  h2 += [OmH { k: 95, n: 0 }];
+    h3 = om_h(om_h(b.h));  h3 += [OmH { k: 96, n: 0 }];
+    hd = OmHold { h: om_h(b.h), i: om_i(b.i) };
+    hd.h += [OmH { k: 97, n: 0 }];
+    hd.i += [OmI { k: 98, n: 0 }];
+    last = "{len(h)} {len(s)} {len(i)} {len(p)} {len(s2)} {len(p2)} {len(i2)} {len(h2)} {len(h3)} {len(hd.h)} {len(hd.i)}";
+  }
+  assert(fresh == 30, "fresh returns: {fresh}");
+  // r = 9 is odd: `om_none(1)` is null, so `h2` is a copy of `b.h` plus k95 (2 records).
+  assert(last == "2 2 2 2 2 2 2 2 2 2 2", "the copies: {last}");
+  assert("{len(b.h)} {len(b.s)} {len(b.i)} {len(b.p)}" == "1 1 1 1", "the argument: {len(b.h)} {len(b.s)} {len(b.i)} {len(b.p)}");
+}
+
+fn main() {
+  test_a_borrowed_return_of_every_keyed_kind_is_a_copy();
+}

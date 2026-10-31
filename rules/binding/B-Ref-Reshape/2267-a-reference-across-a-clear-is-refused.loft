@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2267 — A REFERENCE INTO A VECTOR ACROSS ITS CLEAR IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A clear removes every element, so the place `c` names is gone; `v.clear()` is a call to the `vector.clear` method, and the disturbance summary read only `n_` functions, so it saw no disturbance and the write landed in the cleared vector.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// WITNESS: main compiled the program and ran the write through the stale reference.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling is copied out instead —
+//   `rules/binding/B-Disturb/2267-a-clear-or-a-method-ends-the-views-into-a-vector.loft`.
+// @EXPECT_ERROR: cannot call `clear` while `c` references a place inside `v`
+
+struct S { n: integer, s: text }
+
+fn main() {
+  v = [S { n: 1, s: "one" }];
+  c = &v[0];
+  v.clear();
+  c.s += "-tail";
+  v += [S { n: 2, s: "two" }];
+  println("{v[0].n} {v[0].s}");
+}
