@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2338 — `@FR-O-Borrow`: a borrower must not outlive its source, and the source's source is
+// a source.  `ops = block[0].operators` through a capture `block` of a `match` subject is a view
+// (`@FR-B-View-Depth`) of the capture, which views the subject.  The scope pass reserved the
+// capture at `ops`'s scope but left the subject — a call's result — in the `match` block, freed
+// at its end: the next allocation took the slot and `ops` read it, `len 0` on both backends.
+//
+// Every value by hand: `mkn(k)` holds the operators `k` and `k + 1`; `first` reads the first.
+//
+// Axes this file MOVES:  the subject (a call returning a parameter's copy, a fresh record), the
+//                        form (`match`, `is`), once or in a loop, reassigned on every pass or
+//                        not, the view read after a second match or a churn, backends.
+// Axes it HOLDS FIXED:   the capture a struct-enum payload vector; the view a nested field.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — `ops` read the slot the next allocation reused.
+
+struct Bl { name: text, operators: vector<Nd> }
+enum Nd { NA, NV { n: integer }, NB { block: vector<Bl> } }
+
+fn ident(x: Nd) -> Nd { x }
+fn mkn(k: integer) -> Nd { NB { block: [Bl { name: "F", operators: [NV { n: k }, NV { n: k + 1 }] }] } }
+fn first(ops: vector<Nd>) -> integer { match ops[0] ?? NA { NV { n } => n, _ => -1 } }
+fn churn() -> integer { x = mkn(70); match ident(x) { NB { block } => len(block), _ => 0 } }
+
+fn once() -> integer {
+  c = mkn(3);
+  ops: vector<Nd> = [];
+  match ident(c) { NB { block } => { ops = block[0].operators; }, _ => {} }
+  match ident(c) { NV { n } => { assert(n > 0, "n"); }, _ => {} }
+  churn();
+  assert(len(ops) == 2, "once len {len(ops)}");
+  first(ops)
+}
+
+fn by_is() -> integer {
+  ops: vector<Nd> = [];
+  if ident(mkn(5)) is NB { block } { ops = block[0].operators; }
+  churn();
+  assert(len(ops) == 2, "is len {len(ops)}");
+  first(ops)
+}
+
+fn looped() -> integer {
+  ops: vector<Nd> = [];
+  for i in 0..3 {
+    if i < 2 {
+      match ident(mkn(i * 10)) { NB { block } => { ops = block[0].operators; }, _ => {} }
+    } else {
+      x = ident(mkn(99));
+      assert(first([x]) == -1, "x");
+    }
+  }
+  churn();
+  assert(len(ops) == 2, "loop len {len(ops)}");
+  first(ops)
+}
+
+fn main() {
+  assert(once() == 3, "once");
+  assert(by_is() == 5, "is");
+  assert(looped() == 10, "looped");
+}
