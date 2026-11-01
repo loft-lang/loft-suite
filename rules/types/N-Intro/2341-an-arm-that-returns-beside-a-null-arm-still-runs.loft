@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2341 — `@FR-N-Intro`, `@FR-C-Never`: an `if` or `match` used as the value of a function
+// returning `τ?`, whose other arms never finish (`return`) and whose remaining arm is `null`,
+// joins to `null`; the conversion to `τ?` is the null arm's, and the expression still runs.  It
+// replaced the whole expression with the typed null, so the arms that return were never reached
+// and every call answered null.
+//
+// Every value by hand: each function returns its argument (or a value made from it) on the
+// path the condition picks, and null on the other.
+//
+// Axes this file MOVES:  the former (`if`, `if`/`else if`, `match` on an integer, on a text, on
+//                        a struct-enum), which arm returns (then, else, several), the result
+//                        (integer?, text?, a struct ?, a struct-enum ?), the use (tail, a
+//                        declared local read after), backends.
+// Axes it HOLDS FIXED:   the null arm is the literal `null`; the returning arms are `return`.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 2 -> 0
+// CHANNEL: the assertions, identically on both backends.
+
+struct S { k: integer }
+enum N { NA { v: integer }, NB { w: integer } }
+
+fn then_int(c: boolean, x: integer) -> integer? { if c { return x; } else { null } }
+fn else_int(c: boolean, x: integer) -> integer? { if c { null } else { return x + 1; } }
+fn chain_text(c: integer, a: text) -> text? {
+  if c == 1 { return a; } else if c == 2 { return "{a}{a}"; } else { null }
+}
+fn match_int(c: integer, x: integer) -> integer? {
+  match c { 1 => { return x; }, 2 => { return x * 10; }, _ => null }
+}
+fn match_text(t: text) -> S? {
+  match t { "a" => { return S { k: 1 }; }, "b" => { return S { k: 2 }; }, _ => null }
+}
+fn match_enum(n: N, s: S) -> S? {
+  match n { NB { w } => { return S { k: w + s.k }; }, _ => null }
+}
+fn enum_back(n: N) -> N? {
+  match n { NB { w } => { return n; }, _ => null }
+}
+fn local_then(c: boolean, x: integer) -> integer? {
+  y: integer? = if c { return x; } else { null };
+  y
+}
+
+fn k_of(s: S?) -> integer { if s == null { -1 } else { s.k } }
+fn w_of(n: N?) -> integer { match n { NB { w } => w, NA { v } => -v, _ => -1 } }
+
+fn main() {
+  assert(then_int(true, 5) == 5 && then_int(false, 5) == null, "then {then_int(true, 5)}");
+  assert(else_int(false, 5) == 6 && else_int(true, 5) == null, "else {else_int(false, 5)}");
+  assert(chain_text(1, "q") == "q" && chain_text(2, "q") == "qq" && chain_text(3, "q") == null,
+    "chain {chain_text(1, "q")} {chain_text(2, "q")}");
+  assert(match_int(1, 4) == 4 && match_int(2, 4) == 40 && match_int(3, 4) == null,
+    "match {match_int(1, 4)} {match_int(2, 4)}");
+  assert(k_of(match_text("a")) == 1 && k_of(match_text("b")) == 2 && k_of(match_text("c")) == -1,
+    "text {k_of(match_text("a"))} {k_of(match_text("b"))}");
+  base = S { k: 100 };
+  assert(k_of(match_enum(NB { w: 7 }, base)) == 107 && k_of(match_enum(NA { v: 7 }, base)) == -1,
+    "enum {k_of(match_enum(NB { w: 7 }, base))}");
+  assert(w_of(enum_back(NB { w: 9 })) == 9 && w_of(enum_back(NA { v: 9 })) == -1,
+    "back {w_of(enum_back(NB { w: 9 }))}");
+  assert(local_then(true, 3) == 3 && local_then(false, 3) == null, "local {local_then(true, 3)}");
+}
