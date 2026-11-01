@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Rule` × `@FR-WF-Term` × `@FR-P-Atomic` — a sub-rule element `name: rule` may sit
+// anywhere in a cursor pattern: the elements before it are read from the match's start, the
+// rule runs from where they end, and the elements after it are read from where the rule left
+// the cursor.  An arm that fails after a rule moved the cursor puts it back.  A grammar that
+// recurses through a CONSUMED token (`primary := '(' expr ')'`) is admitted; it was refused as
+// left recursion, and a sub-rule had to be the whole pattern ("mixing a sub-rule with fixed
+// elements is deferred").
+//
+// Axes this file MOVES:  where the rule sits (first, between fixed elements, last, twice); what
+//                        follows it (a variant, a bare name, a run, nothing); the rule's answer
+//                        type (a record, an arena index); which element fails (before the rule,
+//                        the rule, after it); the arm form (one pattern, a multi-pattern arm);
+//                        recursion depth (none, through parentheses); the cursor's farthest mark.
+// Axes it HOLDS FIXED:   unit and field variants as tokens; no guard (a cursor arm takes none).
+enum Tok { Num { v: integer }, LP, RP, Plus, Comma, End }
+struct Cur { src: vector<Tok>, pos: integer }
+struct N { v: integer }
+
+fn num(c: Cur) -> N? { match c { [Num { v }] => N { v: v }, _ => null } }
+fn paren(c: Cur) -> N? { match c { [LP, x: num, RP] => x, _ => null } }
+fn pair(c: Cur) -> integer {
+  match c {
+    [LP, a: num, Comma, b: num, RP, t] => a.v * 100 + b.v * 10 + (if t is End { 1 } else { 2 }),
+    [LP, a: num, RP] => a.v,
+    _ => -1
+  }
+}
+
+// An expression grammar over an arena: a rule answers the index of the node it built.
+struct Node { op: integer, a: integer, b: integer }
+struct P { src: vector<Tok>, pos: integer, farthest: integer, nodes: vector<Node> }
+fn leaf(p: P, v: integer) -> integer { p.nodes += [Node { op: 0, a: v, b: -1 }]; len(p.nodes) - 1 }
+fn bin(p: P, a: integer, b: integer) -> integer { p.nodes += [Node { op: 1, a: a, b: b }]; len(p.nodes) - 1 }
+fn primary(p: P) -> integer? {
+  match p {
+    [Num { v }] => leaf(p, v),
+    [LP, e: adds, RP] => e,
+    _ => null
+  }
+}
+fn adds(p: P) -> integer? {
+  match p {
+    [l: primary, Plus, r: adds] => bin(p, l, r),
+    [l: primary] => l,
+    _ => null
+  }
+}
+fn eval(p: P, n: integer) -> integer {
+  nd = p.nodes[n];
+  if nd.op == 0 { nd.a ?? 0 } else { eval(p, nd.a ?? 0) + eval(p, nd.b ?? 0) }
+}
+fn opt_paren(p: P) -> integer? {
+  match p {
+    [LP, x: primary, RP] | [x: primary] => x,
+    _ => null
+  }
+}
+fn run_after(p: P) -> integer {
+  match p {
+    [x: primary, (ns: Num)*] => len(ns) * 1000 + eval(p, x),
+    _ => -1
+  }
+}
+
+fn test_a_rule_between_fixed_elements() {
+  c = Cur { src: [LP, Num { v: 2 }, RP, End], pos: 0 };
+  r = paren(c);
+  assert(r != null && r.v == 2 && c.pos == 3, "c1 matched: at {c.pos}");
+  d = Cur { src: [LP, Num { v: 2 }, Plus, End], pos: 0 };
+  assert(paren(d) == null && d.pos == 0, "c2 fails after the rule ran, pos back: {d.pos}");
+  e = Cur { src: [LP, LP], pos: 0 };
+  assert(paren(e) == null && e.pos == 0, "c3 the rule fails: {e.pos}");
+  f = Cur { src: [RP, Num { v: 2 }, RP], pos: 0 };
+  assert(paren(f) == null && f.pos == 0, "c4 fails before the rule: {f.pos}");
+}
+
+fn test_two_rules_and_a_bare_name_and_the_next_arm() {
+  e = Cur { src: [LP, Num { v: 3 }, Comma, Num { v: 4 }, RP, End], pos: 0 };
+  r = pair(e);
+  assert(r == 341 && e.pos == 6, "c5 two rules: {r} at {e.pos}");
+  f = Cur { src: [LP, Num { v: 3 }, RP, End], pos: 0 };
+  r2 = pair(f);
+  assert(r2 == 3 && f.pos == 3, "c6 first arm fails at Comma, second arm reads from the start: {r2} at {f.pos}");
+  g = Cur { src: [LP, Num { v: 3 }, Comma, Plus], pos: 0 };
+  r3 = pair(g);
+  assert(r3 == -1 && g.pos == 0, "c7 second rule fails, no arm: {r3} at {g.pos}");
+}
+
+fn test_recursion_through_a_consumed_token() {
+  p = P { src: [Num { v: 1 }, Plus, LP, Num { v: 2 }, Plus, Num { v: 3 }, RP, Plus, Num { v: 4 }, End], pos: 0, farthest: 0, nodes: [] };
+  r = adds(p);
+  assert(r != null && eval(p, r ?? 0) == 10 && p.pos == 9 && p.farthest == 9, "c8 1+(2+3)+4: at {p.pos} far {p.farthest}");
+  q = P { src: [LP, Num { v: 1 }, Plus, Comma], pos: 0, farthest: 0, nodes: [] };
+  assert(adds(q) == null && q.pos == 0 && q.farthest == 2, "c9 a failed parse: at {q.pos} far {q.farthest}");
+}
+
+fn test_a_rule_in_a_multi_pattern_arm_and_before_a_run() {
+  o = P { src: [LP, Num { v: 6 }, RP, Num { v: 7 }, End], pos: 0, farthest: 0, nodes: [] };
+  a = opt_paren(o);
+  b = opt_paren(o);
+  assert(eval(o, a ?? 0) == 6 && eval(o, b ?? 0) == 7 && o.pos == 4, "c10 both patterns: at {o.pos}");
+  l = P { src: [Num { v: 5 }, Num { v: 1 }, Num { v: 2 }, End], pos: 0, farthest: 0, nodes: [] };
+  r = run_after(l);
+  assert(r == 2005 && l.pos == 3, "c11 a run after a rule: {r} at {l.pos}");
+}
