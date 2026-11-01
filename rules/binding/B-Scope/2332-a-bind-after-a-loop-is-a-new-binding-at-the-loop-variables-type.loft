@@ -1,0 +1,139 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2332 — `@FR-B-Scope`: a loop variable ends with its loop, so a bind of its spelling after
+// the loop starts a NEW binding — also at the SAME type.  The bind reused the loop's variable,
+// which views an element of the walked collection: the new value was built through that view into
+// the collection (`top` answered t=3 for 6, the second element overwritten), inside an enclosing
+// loop the view became an owner that freed the walked store every pass (`nested`, a use after free
+// under LOFT_STRICT_STORES), and rebound in a later loop the interpreter hung (`later_loop`).
+//
+// Every value by hand.
+//
+// Axes this file MOVES:  where the later bind sits (the function's block, an enclosing loop's
+//                        body, a later loop's body), its form (plain, declared), whether pass 1
+//                        knows the value's type (a function declared before, after), the loop
+//                        variable's kind (a record view, text, integer, destructured binders),
+//                        backends.
+// Axes it HOLDS FIXED:   one loop over one collection before the bind; the collection a field.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — main answers `top 3 3` on both backends.
+
+struct A { n: text, k: integer }
+struct D { attrs: vector<A>, name: text }
+struct E { defs: vector<D>, log: vector<text> }
+
+fn mk(n: text) -> A { A { n: n, k: len(n) } }
+fn def(e: E, d: integer) -> D { e.defs[d]! }
+
+fn ksum(d: D) -> integer {
+  t = 0;
+  for x in d.attrs { t += x.k; }
+  t
+}
+
+// 1: the bind in the function's own block, after a walk of the field it appends to
+fn top() {
+  d = D { attrs: [A { n: "p", k: 1 }, A { n: "qq", k: 2 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  a = mk("rrr");
+  d.attrs += [a];
+  assert(s == 3 && ksum(d) == 6 && len(d.attrs) == 3, "top {s} {ksum(d)}");
+  assert(d.attrs[1].n == "qq" && d.attrs[2].n == "rrr", "top elements");
+}
+
+// 2: inside an enclosing loop, the walk through a call returning the record
+fn add_fields(e: E, d: integer, names: vector<text>) {
+  for fname in names {
+    for a in def(e, d).attrs {
+      if a.n == fname {
+        e.log += ["dup {fname}"];
+      }
+    }
+    a = mk(fname);
+    e.defs[d].attrs += [a];
+  }
+}
+fn nested() {
+  e = E { defs: [D { attrs: [], name: "d" }], log: [] };
+  add_fields(e, 0, ["x", "yy", "x", "zzz"]);
+  assert(len(e.defs[0].attrs) == 4 && ksum(e.defs[0]) == 7, "nested {ksum(e.defs[0])}");
+  assert(len(e.log) == 1 && e.log[0] == "dup x", "nested log {e.log}");
+}
+
+// 3: a declared bind
+fn declared() {
+  d = D { attrs: [A { n: "p", k: 1 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  a: A = mk("rrr");
+  d.attrs += [a];
+  assert(s == 1 && ksum(d) == 4 && d.attrs[0].n == "p", "declared {s} {ksum(d)}");
+}
+
+// 4: the value from a function declared further down, so pass 1 does not know its type
+fn forward() {
+  d = D { attrs: [A { n: "p", k: 1 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  a = mk_late("rrrr");
+  d.attrs += [a];
+  assert(s == 1 && ksum(d) == 5 && d.attrs[0].n == "p", "forward {s} {ksum(d)}");
+}
+
+// 5: the bind in a later loop's body
+fn later_loop() {
+  d = D { attrs: [A { n: "p", k: 1 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  for y in ["uu", "vvv"] {
+    a = mk(y);
+    d.attrs += [a];
+  }
+  assert(s == 1 && ksum(d) == 6 && len(d.attrs) == 3 && d.attrs[0].n == "p", "later {s} {ksum(d)}");
+}
+
+// 6: a text loop variable, then a text bind that grows
+fn text_var() {
+  names = ["ab", "cde"];
+  s = 0;
+  for t in names { s += len(t); }
+  t = "xyzw";
+  t += "!";
+  assert(s == 5 && t == "xyzw!" && names[0] == "ab" && names[1] == "cde", "text {s} {t}");
+}
+
+// 7: an integer loop variable
+fn int_var() {
+  s = 0;
+  for i in 0..3 { s += i; }
+  i = 50;
+  i += 1;
+  assert(s == 3 && i == 51, "int {s} {i}");
+}
+
+// 8: destructured binders
+fn destructured() {
+  v = [(1, "ab"), (2, "cde")];
+  s = 0;
+  for (n, t) in v { s += n + len(t); }
+  t = "xy";
+  t += "z";
+  n = 40;
+  assert(s == 8 && t == "xyz" && n == 40 && v[1].1 == "cde", "destructured {s} {t} {n}");
+}
+
+fn mk_late(n: text) -> A { A { n: n, k: len(n) } }
+
+fn main() {
+  top();
+  nested();
+  declared();
+  forward();
+  later_loop();
+  text_var();
+  int_var();
+  destructured();
+}
