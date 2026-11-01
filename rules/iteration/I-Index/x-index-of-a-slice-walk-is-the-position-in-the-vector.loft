@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// X#INDEX OF A SLICE WALK IS THE POSITION IN THE VECTOR (`@FR-I-Index`).  Over a slice `v[a..b]`,
+// and `rev` of one, `x#index` is the position `x` was read at in `v` — as it is over `v` itself
+// and `rev(v)` — so `v[x#index]` reads `x`.  A slice walk counted with its own range counter and
+// never wrote the loop's `x#index`, so reading it was an internal compiler error (loft#2346).
+// Shapes: a slice from either end, a negative bound, `rev` of a slice, a filter, the whole
+// vector beside them, and a comprehension.
+//
+// Values hand-computed from v = [10, 20, 30].
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 101 -> 0 (main stopped on the
+//   first slice walk that read `x#index`).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message lists value@position.
+// HOLDS: every cell on both backends.
+
+fn walk_tail(v: vector<integer>) -> text {
+  s = "";
+  for x in v[1..] { s += "{x}@{x#index}={v[x#index]} "; }
+  s
+}
+
+fn walk_head(v: vector<integer>) -> text {
+  s = "";
+  for x in v[..-1] { s += "{x}@{x#index} "; }
+  s
+}
+
+fn walk_back(v: vector<integer>) -> text {
+  s = "";
+  for x in rev(v[..-1]) { s += "{x}@{x#index} "; }
+  s
+}
+
+fn walk_filtered(v: vector<integer>) -> text {
+  s = "";
+  for x in v[-2..] if x > 20 { s += "{x}@{x#index} "; }
+  s
+}
+
+fn walk_all(v: vector<integer>) -> text {
+  s = "";
+  for x in rev(v) { s += "{x}@{x#index} "; }
+  s
+}
+
+fn test_a_slice_walk_counts_positions_in_the_vector() {
+  v = [10, 20, 30];
+  assert(walk_tail(v) == "20@1=20 30@2=30 ", "tail: {walk_tail(v)}");
+  assert(walk_head(v) == "10@0 20@1 ", "head: {walk_head(v)}");
+  assert(walk_back(v) == "20@1 10@0 ", "rev of a slice: {walk_back(v)}");
+  assert(walk_filtered(v) == "30@2 ", "a filter over v[-2..]: {walk_filtered(v)}");
+  assert(walk_all(v) == "30@2 20@1 10@0 ", "the whole vector: {walk_all(v)}");
+  a = [for x in v[1..] { x#index }];
+  assert("{a}" == "[1,2]", "a comprehension: {a}");
+}

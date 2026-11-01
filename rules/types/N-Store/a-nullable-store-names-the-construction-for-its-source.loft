@@ -6,7 +6,8 @@
 // better construction is the one it leads with (WARNING_FIXES.md): an unproven index — a shape
 // `(N-Index)` proves, or `!`; a keyed lookup — handle the miss; a branch answering `null` —
 // declare the slot `τ?`, or halt there; a function that may answer null — decide what null
-// means; a nullable local — test it first, or `!`.  It led with `?`, which hides a null that is
+// means; a nullable local — make it non-null where it was given a nullable value (the line is
+// named), or test it here.  It led with `?`, which hides a null that is
 // a bug, for every source alike.
 //
 // @falsified-at: 0e95172cd — interpret and native expectations FAIL/5 -> 0/5 (main's warning
@@ -19,7 +20,7 @@
 // @EXPECT_WARNING: a lookup by key can miss
 // @EXPECT_WARNING: a branch here answers `null`: if that is a real answer, declare the return value `float?`
 // @EXPECT_WARNING: `maybe` may answer null
-// @EXPECT_WARNING: `got` is `integer?`: test it first
+// @EXPECT_WARNING: gives it a value that may be null: make that value non-null there
 
 struct K { id: integer, v: integer }
 struct H { all: hash<K[id]> }

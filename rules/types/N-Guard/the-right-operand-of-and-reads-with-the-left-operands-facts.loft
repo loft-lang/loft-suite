@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE RIGHT OPERAND OF `&&` READS WITH THE LEFT OPERAND'S FACTS (`@FR-N-Guard`, `@FR-N-Index`,
+// `@FR-N-Div`).  `a && b` runs `b` only where `a` holds — `if a`'s THEN side — and `a || b` only
+// where `a` fails — its ELSE side — so `b` reads with what that side proves: an index tested
+// against `len(v)`, a divisor tested non-zero, a name tested present.  `i < len(v) && v[i] > 10`
+// is the guard `if` already trusts, written as one condition, and the nullable-store warning
+// told an author who wrote it to write exactly what they had written.  A left operand that
+// proves nothing about the read (`i > 0`) still leaves it `integer?`.
+//
+// Values hand-computed.
+//
+// @falsified-at: 0e95172cd — under LOFT_DENY_WARNINGS, FAIL (3 unexpected warnings: `y`, `w`
+//   and `q`, the guarded reads) -> ok; `make falsify` reads INERT, as it scores no warning.
+// CHANNEL: the expected warning, and no other (`LOFT_DENY_WARNINGS`).
+// ARMED: no instrument.
+// WITNESS: the warning names `z`, the unguarded local.
+// HOLDS: every cell on both backends.
+// @EXPECT_WARNING: stored into the local `z` of the non-null type `integer`
+
+fn guarded(v: vector<integer>, i: integer) -> boolean {
+  i < len(v) && { y: integer = v[i]; y > 10 }
+}
+
+fn else_side(v: vector<integer>, i: integer) -> boolean {
+  i >= len(v) || { w: integer = v[i]; w == 0 }
+}
+
+fn divided(a: integer, b: integer) -> boolean {
+  b != 0 && { q: integer = a / b; q > 1 }
+}
+
+fn loose(v: vector<integer>, i: integer) -> boolean {
+  i > 0 && { z: integer = v[i]; z > 10 }
+}
+
+fn main() {
+  assert(guarded([5, 20], 1) && !guarded([5], 3), "in bounds 20 > 10; past the end false");
+  assert(else_side([5], 3) && else_side([0], 0) && !else_side([4], 0), "past the end true; 0 == 0");
+  assert(divided(9, 3) && !divided(9, 0), "9 / 3 = 3 > 1; zero divisor false");
+  assert(loose([1, 20], 1) && !loose([1, 2], 0), "20 > 10; i = 0 never reads");
+}
