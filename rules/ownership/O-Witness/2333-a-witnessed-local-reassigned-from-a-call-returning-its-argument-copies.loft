@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2333 — `@FR-O-Witness`: a local whose assignments mix ownership — bound to a VIEW, then
+// reassigned from a call — is COPIED into when the call does not adopt a fresh store, and its
+// witness owns the copy.  With a callee that may answer its argument (`with_deps(t, …)` returning
+// `t` itself), the result is the very store the local viewed: the interpreter bound it without a
+// copy and rustc-native adopted it by store identity, so the witness released the viewed record
+// (`view` answered 312 for 336, the third call reading a reset record); the C build reset the
+// destination before asking whether the result was an argument's store, and freed it after the
+// copy — the viewed record, or the owned copy it came from (`copy`, a use after free).
+//
+// Every value by hand.
+//
+// Axes this file MOVES:  what the local first views (a field chain into a parameter, into an
+//                        owned copy), which arm the callee answers (its argument, a fresh record),
+//                        how often (once, in a loop), the record kind (struct-enum, struct),
+//                        backends.
+// Axes it HOLDS FIXED:   the callee's second argument a fresh vector; one witnessed local.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — main answers `view 312` on both backends.
+
+enum Ty { TInt, TRef { n: integer, dep: vector<integer> } }
+struct Attr { name: text, typedef: vector<Ty> }
+struct Def { name: text, attributes: vector<Attr> }
+struct B { defs: vector<Def> }
+struct S { n: integer, dep: vector<integer> }
+struct SB { items: vector<S> }
+
+fn with_deps(t: Ty, deps: vector<integer>) -> Ty {
+  match t {
+    TRef { n } => TRef { n: n, dep: deps },
+    _ => t
+  }
+}
+fn get(b: B, d: integer) -> Def { b.defs[d] }
+
+// Answers r*100 + attributes*10 + typedef entries, r = 1 for TInt, n for TRef.
+fn view(b: B, extra: vector<integer>) -> integer {
+  df = b.defs[0];
+  t = df.attributes[0].typedef[0] ?? TInt;
+  for on in extra {
+    t = with_deps(t, [on]);
+  }
+  r = match t { TInt => 1, TRef { n } => n };
+  r * 100 + len(df.attributes) * 10 + len(df.attributes[0].typedef)
+}
+fn copy(b: B, extra: vector<integer>) -> integer {
+  df = get(b, 0);
+  t = df.attributes[0].typedef[0] ?? TInt;
+  for on in extra {
+    t = with_deps(t, [on]);
+  }
+  r = match t { TInt => 1, TRef { n } => n };
+  r * 100 + len(df.attributes) * 10 + len(df.attributes[0].typedef)
+}
+fn once(b: B) -> integer {
+  df = get(b, 0);
+  t = df.attributes[0].typedef[0] ?? TInt;
+  t = with_deps(t, [7]);
+  r = match t { TInt => 1, TRef { n } => n };
+  r * 100 + len(df.attributes[0].typedef)
+}
+// A fresh record answered every time: the deps it was given.
+fn minted(b: B) -> integer {
+  df = b.defs[0];
+  t = df.attributes[0].typedef[0] ?? TInt;
+  for on in [5, 6] {
+    t = with_deps(t, [on]);
+  }
+  match t { TInt => -1, TRef { n, dep } => n * 10 + dep[0] ?? 0 }
+}
+
+fn keep(s: S, deps: vector<integer>) -> S {
+  if s.n > 5 { return S { n: s.n, dep: deps }; }
+  s
+}
+fn structs(sb: SB) -> integer {
+  t = sb.items[0];
+  for on in [1, 2] {
+    t = keep(t, [on]);
+  }
+  t.n * 10 + len(sb.items)
+}
+
+fn main() {
+  b = B { defs: [Def { name: "a", attributes: [Attr { name: "x", typedef: [TInt, TInt] }] }] };
+  s = 0;
+  for _ in 0..3 { s += view(b, [1, 2]); }
+  assert(s == 3 * 112, "view {s}");
+  s = 0;
+  for _ in 0..3 { s += copy(b, [1, 2]); }
+  assert(s == 3 * 112, "copy {s}");
+  assert(once(b) == 102 && once(b) == 102, "once {once(b)}");
+  assert(len(b.defs[0].attributes[0].typedef) == 2, "b intact");
+
+  m = B { defs: [Def { name: "m", attributes: [Attr { name: "y", typedef: [TRef { n: 4, dep: [9] }] }] }] };
+  assert(minted(m) == 46 && minted(m) == 46, "minted {minted(m)}");
+  assert(len(m.defs[0].attributes[0].typedef) == 1, "m intact");
+
+  sb = SB { items: [S { n: 3, dep: [] }, S { n: 8, dep: [] }] };
+  assert(structs(sb) == 32 && structs(sb) == 32, "structs {structs(sb)}");
+  assert(sb.items[1].n == 8, "sb intact");
+}
