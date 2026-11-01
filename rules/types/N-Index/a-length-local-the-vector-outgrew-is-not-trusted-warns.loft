@@ -5,7 +5,8 @@
 // shapes beside the trusted ones: the vector written after the length was taken (before the
 // read, after it inside a loop that reads it again, and anywhere in a loop around the length —
 // whose next turn runs it after), the local assigned again, another vector's length, the bare
-// length (always past the end), and another vector's loop counter.  Each read is `integer?`, so storing it undischarged is (N-Store)'s
+// length (always past the end), and another vector's loop counter.  And a local bound from a
+// value that only CONTAINS a trusted read — an `if` whose other arm is null — keeps the `τ?`.  Each read is `integer?`, so storing it undischarged is (N-Store)'s
 // warning, named by its local.
 //
 // @falsified-at: none — a conformance guard: main trusts none of these shapes either, and the
@@ -21,6 +22,7 @@
 // @EXPECT_WARNING: stored into the local `foreign` of the non-null type `integer`
 // @EXPECT_WARNING: stored into the local `past` of the non-null type `integer`
 // @EXPECT_WARNING: stored into the local `counted` of the non-null type `integer`
+// @EXPECT_WARNING: stored into the local `kept` of the non-null type `integer`
 
 fn grows(v: vector<integer>) -> integer {
   n = len(v);
@@ -79,10 +81,18 @@ fn other_counter(v: vector<integer>, w: vector<integer>) -> integer {
   s
 }
 
+fn joined(v: vector<integer>, k: integer) -> integer {
+  n = len(v);
+  maybe = if k > 0 { v[n - 1] } else { null };
+  kept: integer = maybe;
+  kept
+}
+
 fn main() {
   assert(grows([1, 2]) == 2, "the old last: the vector grew past n");
   assert(reassigned([4, 5, 6]) == 5, "n - 1 - 1");
   assert(in_a_loop([3]) == 1, "the last appended: 0, then 1");
   assert(other([1, 2, 3], [0, 0]) == 2, "w's length on v");
   assert(other_counter([5, 6], [0, 0]) == 11, "w's counter on v");
+  assert(joined([4, 5], 1) == 5, "the trusted arm");
 }
