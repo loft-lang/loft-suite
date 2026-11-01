@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2334 — `@FR-B-Copy`: a whole-value bind of a variable copies in every spelling, and a block
+// whose value is a variable is one: an enum literal built in a compiler work-ref (`t = TVoid` is
+// `{OpDatabase(__ref_N); …; __ref_N}`) and an unwrap (`tp = t!`).  Bound into a record local that
+// OWNS its stores (`block`'s `t` is copied out of `x`, `@FR-B-View`'s materialise clause) and is
+// bound more than once, both backends ALIASED the variable's store, so the local and the work-ref
+// both owned it: the local's next rebind freed it as the store it displaced, a `split` took the
+// slot, and the work-ref's next literal re-made it in place, wiping the vector.  `--native-c`
+// died with SIGBUS on every run.
+//
+// Every value by hand: `ex_of(i).tp` is TInt{i} (kind 10+i) for i%3 == 0, TText (kind 101) for
+// i%3 == 1, TNever (kind 2) for i%3 == 2; `block(k)` sums the kinds of the odd steps' `t` times
+// ten, plus the kind `t` ends on — 1, 1, 1011, 1012, 1141 for k = 0..4.
+//
+// Axes this file MOVES:  the block's value (a work-ref literal, an unwrapped local), how the local
+//                        came to own (materialised, a whole-value unwrap), the store that takes
+//                        the freed slot (a `split` result held across iterations), backends.
+// Axes it HOLDS FIXED:   one owning local per function; the binds inside one loop.
+//
+// @falsified-at: 0e95172cd — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: the exit — main's C build dies with SIGBUS; the interpreter's double owner is real
+//   (`LOFT_DOUBLE_FREE=1` counts its re-frees) but no store it frees is handed on in time here.
+
+enum Ty { TVoid, TNever, TInt { min: integer }, TText { dep: vector<integer> } }
+struct Ex { code: integer, tp: Ty }
+
+fn ex_of(i: integer) -> Ex {
+  Ex { code: i, tp: if i % 3 == 0 { TInt { min: i } } else if i % 3 == 1 { TText { dep: [i] } } else { TNever } }
+}
+fn kind(t: Ty) -> integer {
+  match t { TVoid => 1, TNever => 2, TInt { min } => 10 + min, TText { dep } => 100 + len(dep) }
+}
+
+// The answer, plus a million for every time `hold` was found wiped.
+fn block(k: integer) -> integer {
+  t = TVoid;
+  acc = 0;
+  bad = 0;
+  hold = "a1,b1".split(',');
+  x = ex_of(0);
+  for s in 0..k {
+    if len(hold) != 2 || !hold[0].starts_with("a") { bad += 1; }
+    x = ex_of(s);
+    t = x.tp;
+    if s % 2 == 0 {
+      if !(t is TNever) { t = TVoid; }
+      hold = "a{s},b{s}".split(',');
+      continue;
+    }
+    x = ex_of(s + 7);
+    acc += kind(t);
+    t = TVoid;
+    hold = "a{s},b{s}".split(',');
+  }
+  if len(hold) != 2 || !hold[0].starts_with("a") { bad += 1; }
+  bad * 1000000 + acc * 10 + kind(t)
+}
+
+fn pick(s: integer) -> Ty? {
+  if s % 3 == 0 { TInt { min: s } } else if s % 3 == 1 { TText { dep: [s] } } else { TNever }
+}
+// tp = t! then a literal: 60 for s%3 == 0 (TInt{50}), 101 for s%3 == 1, 2 for s%3 == 2.
+fn unwrapped(k: integer) -> integer {
+  acc = 0;
+  hold = "a,b".split(',');
+  for s in 0..k {
+    if len(hold) != 2 || !hold[0].starts_with("a") { acc += 1000000; }
+    t = pick(s);
+    tp = t!;
+    if tp is TInt { tp = TInt { min: 50 }; }
+    hold = "a{s},b".split(',');
+    acc += kind(tp);
+  }
+  acc
+}
+
+fn main() {
+  assert(block(0) == 1 && block(1) == 1 && block(2) == 1011, "block {block(0)} {block(1)} {block(2)}");
+  assert(block(3) == 1012 && block(4) == 1141, "block {block(3)} {block(4)}");
+  bad = 0;
+  for k in 0..30 { bad += block(k) / 1000000; }
+  assert(bad == 0, "hold wiped {bad} times");
+  assert(unwrapped(6) == 326, "unwrapped {unwrapped(6)}");
+  assert(unwrapped(30) == 10 * 163, "unwrapped {unwrapped(30)}");
+}
