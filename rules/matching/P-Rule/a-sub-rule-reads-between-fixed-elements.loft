@@ -15,6 +15,9 @@
 //                        the rule, after it); the arm form (one pattern, a multi-pattern arm);
 //                        recursion depth (none, through parentheses); the cursor's farthest mark.
 // Axes it HOLDS FIXED:   unit and field variants as tokens; no guard (a cursor arm takes none).
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0.  CHANNEL: exit — the
+//   control refused every shape here (a sub-rule had to be the whole pattern, and the
+//   recursion read as left recursion), so no assertion ran on it.
 enum Tok { Num { v: integer }, LP, RP, Plus, Comma, End }
 struct Cur { src: vector<Tok>, pos: integer }
 struct N { v: integer }
