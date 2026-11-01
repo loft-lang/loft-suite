@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Rule` × `@FR-P-Rep` × `@FR-P-Opt` — a sub-rule group in a cursor pattern:
+// `(xs: rule)*` runs the rule while it answers and collects the answers in a fresh vector,
+// `*(Sep)` consumes a separator between two answers and gives it back when no answer follows,
+// `+` asks for one answer, and `(x: rule)?` binds the answer or null with the cursor unmoved.
+// A list rule reads as its grammar: `Id '(' (args: num)*(Comma) ')' (r: ret)?`.
+//
+// Axes this file MOVES:  the quantifier (`*`, `+`, `?`); the run length (0, 1, 3); a separator
+//                        (none, a variant) and a trailing one; what the rule answers (an arena
+//                        index, a record — moved into the run's vector); what follows the group
+//                        (a fixed element, another group, nothing); a failure after the group.
+// Axes it HOLDS FIXED:   unit and field variants as tokens; one rule per group.
+enum Tok { Num { v: integer }, Id { name: text }, LP, RP, Comma, Arrow, Semi, End }
+struct N { v: integer }
+struct P { src: vector<Tok>, pos: integer, nodes: vector<N> }
+
+fn num(p: P) -> integer? { match p { [Num { v }] => { p.nodes += [N { v: v }]; len(p.nodes) - 1 }, _ => null } }
+fn rec(p: P) -> N? { match p { [Num { v }] => N { v: v }, _ => null } }
+fn ret(p: P) -> integer? { match p { [Arrow, n: num] => n, _ => null } }
+
+fn call(p: P) -> integer {
+  match p {
+    [Id { name }, LP, (args: num)*(Comma), RP, (r: ret)?] => {
+      s = 0;
+      for a in args { s = s * 10 + p.nodes[a].v ?? 0; }
+      s * 100 + len(args) * 10 + (if r == null { 0 } else { p.nodes[r ?? 0].v ?? 0 })
+    },
+    _ => -1
+  }
+}
+fn plus(p: P) -> integer { match p { [LP, (xs: rec)+, RP] => { t = 0; for x in xs { t += x.v; } t }, _ => -1 } }
+fn many(p: P) -> integer { match p { [(xs: rec)*, Semi] => len(xs), _ => -1 } }
+
+fn test_a_separated_run_and_an_option() {
+  a = P { src: [Id { name: "f" }, LP, Num { v: 1 }, Comma, Num { v: 2 }, Comma, Num { v: 3 }, RP, Arrow, Num { v: 7 }, End], pos: 0, nodes: [] };
+  r = call(a);
+  assert(r == 12337 && a.pos == 10, "c1 three args and a result: {r} at {a.pos}");
+  b = P { src: [Id { name: "f" }, LP, RP, End], pos: 0, nodes: [] };
+  r2 = call(b);
+  assert(r2 == 0 && b.pos == 3, "c2 no args, no result: {r2} at {b.pos}");
+  c = P { src: [Id { name: "f" }, LP, Num { v: 4 }, Comma, RP, End], pos: 0, nodes: [] };
+  r3 = call(c);
+  assert(r3 == -1 && c.pos == 0, "c3 a trailing separator is given back, `)` then fails: {r3} at {c.pos}");
+}
+
+fn test_one_or_more_records_moved_into_the_run() {
+  d = P { src: [LP, Num { v: 4 }, Num { v: 5 }, RP], pos: 0, nodes: [] };
+  r = plus(d);
+  assert(r == 9 && d.pos == 4, "c4 two records: {r} at {d.pos}");
+  e = P { src: [LP, RP], pos: 0, nodes: [] };
+  r2 = plus(e);
+  assert(r2 == -1 && e.pos == 0, "c5 `+` with none: {r2} at {e.pos}");
+}
+
+fn test_a_run_then_a_fixed_element() {
+  f = P { src: [Num { v: 1 }, Num { v: 2 }, Semi], pos: 0, nodes: [] };
+  r = many(f);
+  assert(r == 2 && f.pos == 3, "c6 run then `;`: {r} at {f.pos}");
+  g = P { src: [Num { v: 1 }, Num { v: 2 }, End], pos: 0, nodes: [] };
+  r2 = many(g);
+  assert(r2 == -1 && g.pos == 0, "c7 run, no `;`, the cursor put back: {r2} at {g.pos}");
+}
