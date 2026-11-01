@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2316 — `@FR-N-Shape`: a test of a type's shape peels its `?`.  An `if` or `while` whose
+// CONDITION is itself an `if` or a `match` answering `boolean?` (here the arms call a text method
+// on a `text?` receiver) was emitted on `--native` in the nullable boolean's storage form, `u8`,
+// where Rust wants a `bool` — the test emitter asked the condition's type for `boolean` without
+// peeling it, so the program did not build (E0308).  The interpreter answered right throughout.
+//
+// Axes this file MOVES:  the condition's form (an `if`, a `match`, under `!`, a `while`
+//                        condition, an `if` over optional records), which arm answers.
+// Axes it HOLDS FIXED:   the arms' boolean comes from a text method on a `text?` local.
+//
+// @falsified-at: 0e95172cd — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move).  Scored with FALSIFY_NATIVE=rust: the
+//   defect is the rustc writer's.
+// CHANNEL: the native build (E0308 on main), then the assertions.
+struct R { k: integer }
+
+fn by_if(a: integer, s: text, v: text) -> integer {
+  t: text? = s;
+  if (if a == 3 { t.starts_with(v) } else { t.ends_with(v) }) { 1 } else { 0 }
+}
+fn by_match(a: integer, s: text, v: text) -> integer {
+  t: text? = s;
+  if (match a { 3 => t.starts_with(v), _ => t.ends_with(v) }) { 10 } else { 20 }
+}
+fn by_while(a: integer, s: text, v: text) -> integer {
+  t: text? = s;
+  n = 0;
+  while (if a > n { t.starts_with(v) } else { false }) {
+    n += 1;
+  }
+  n
+}
+fn by_record(a: integer) -> integer {
+  r: R? = if a > 0 { R { k: a } } else { null };
+  if (if a < 100 { r } else { null }) { 5 } else { 6 }
+}
+fn by_not(a: integer, s: text, v: text) -> integer {
+  t: text? = s;
+  if !(if a == 3 { t.starts_with(v) } else { t.ends_with(v) }) { 1 } else { 0 }
+}
+
+fn main() {
+  // 1: "abc" starts with "ab" (a == 3); ends with "ab" no, with "bc" yes
+  o1 = "{by_if(3, "abc", "ab")} {by_if(4, "abc", "ab")} {by_if(4, "abc", "bc")}";
+  assert(o1 == "1 0 1", "c1 {o1}");
+  // 2
+  o2 = "{by_match(3, "abc", "ab")} {by_match(4, "abc", "ab")}";
+  assert(o2 == "10 20", "c2 {o2}");
+  // 3: four rounds while the prefix holds, none when it does not
+  o3 = "{by_while(4, "abc", "ab")} {by_while(4, "abc", "x")}";
+  assert(o3 == "4 0", "c3 {o3}");
+  // 4: a present record is true, an absent one false
+  o4 = "{by_record(7)} {by_record(0)} {by_record(200)}";
+  assert(o4 == "5 6 6", "c4 {o4}");
+  // 5
+  o5 = "{by_not(3, "abc", "ab")} {by_not(4, "abc", "ab")}";
+  assert(o5 == "0 1", "c5 {o5}");
+  println("ok");
+}
