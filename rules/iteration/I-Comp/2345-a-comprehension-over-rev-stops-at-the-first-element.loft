@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPREHENSION OVER REV STOPS AT THE FIRST ELEMENT (`@FR-I-Comp`).  `[for x in rev(v) { e }]`
+// visits the last element down to the first, once each, as `for x in rev(v)` does.  The reverse
+// step parks its index below zero past the first element, and the comprehension tested only the
+// forward end: it read below zero and appended until the vector's capacity overflowed — a
+// panic on the interpreter, a corrupted store on the C backend (loft#2345).
+//
+// Values hand-computed from v = [10, 20, 30].
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0 (the panic, and the corrupted store).
+// CHANNEL: the asserts, and exit.
+// ARMED: the leak check (the suite arms it).
+// WITNESS: each message prints the built vector.
+// HOLDS: every cell on both backends.
+
+struct R { s: text, n: integer }
+
+fn test_rev_walks_back_once() {
+  v = [10, 20, 30];
+  a = [for x in rev(v) { x }];
+  assert("{a}" == "[30,20,10]", "rev(v): {a}");
+  b = [for x in rev(v) { x#index }];
+  assert("{b}" == "[2,1,0]", "positions: {b}");
+  c = [for x in rev(v) if x > 10 { x * 2 }];
+  assert("{c}" == "[60,40]", "a filter: {c}");
+  d = [for x in rev(v[..-1]) { x }];
+  assert("{d}" == "[20,10]", "rev of a slice: {d}");
+  e: vector<integer> = [];
+  f = [for x in rev(e) { x }];
+  assert(len(f) == 0, "an empty source: {f}");
+}
+
+fn test_rev_of_records_and_texts() {
+  rs = [R { s: "a", n: 1 }, R { s: "b", n: 2 }];
+  t = [for r in rev(rs) { r.s }];
+  assert("{t}" == "[\"b\",\"a\"]", "records: {t}");
+  ws = ["x", "y", "z"];
+  u = [for w in rev(ws) { "{w}{w}" }];
+  assert("{u}" == "[\"zz\",\"yy\",\"xx\"]", "texts: {u}");
+  n = [for row in rev([[1, 2], [3]]) { len(row) }];
+  assert("{n}" == "[1,2]", "vectors of vectors: {n}");
+}
