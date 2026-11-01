@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2321 — `@FR-B-Scope`: a local bound inside a block ends at its `}`, so a loop variable — a
+// `for` statement's or a comprehension's — spelled like it after that block, or in a sibling arm,
+// is a NEW binding, of any type.  It was refused: the statement loop as a shadow ("a loop variable
+// cannot reuse the name of a local still in scope"), the comprehension as a type change reported
+// on the ended local's own bind — the loop's variable kept the spelling after its body, so the
+// second pass met the earlier arm's `t = "a"` with `t` already naming the loop's variable.
+//
+// Every value by hand.
+//
+// Axes this file MOVES:  the loop (statement, comprehension), where the ended local sits (the
+//                        other arm of an `if`, a bare block before, an `if` before), the two
+//                        types (equal, different), the loop variable's kind (integer, text,
+//                        a record), the order (the local first, the loop first), backends.
+// Axes it HOLDS FIXED:   one function per cell; the local a plain statement bind.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the compile — main refuses this file.
+
+struct P { n: integer }
+
+// 1: a text local in the `if` arm, an integer `for` in the `else` arm
+fn arms_for(k: integer) -> text {
+  r = "";
+  if k == 1 { t = "a"; r = t; } else { n = 0; for t in [1, 2] { n += t; } r = "{n}"; }
+  r
+}
+// 2: the same with a comprehension
+fn arms_comp(k: integer) -> text {
+  r = "";
+  if k == 1 { t = "a"; r = t; } else { v = [for t in [1, 2] { t * 2 }]; r = "{len(v)}:{v[1]}"; }
+  r
+}
+// 3: equal types, a statement loop
+fn arms_same(k: integer) -> integer {
+  r = 0;
+  if k == 1 { t = 5; r = t; } else { for t in [1, 2] { r += t; } }
+  r
+}
+// 4: a bare block before a loop over text
+fn block_then_for() -> text {
+  r = "";
+  { t = 7; r = "{t}"; }
+  for t in ["x", "y"] { r += t; }
+  r
+}
+// 5: an `if` before a comprehension over records
+fn if_then_comp(k: integer) -> integer {
+  r = 0;
+  if k > 0 { t = "a"; r = len(t); }
+  v = [for t in [P { n: 3 }, P { n: 4 }] { t.n * 10 }];
+  r + v[0] + v[1]
+}
+// 6: the loop first, the local after (the order that always compiled)
+fn loop_then_local() -> text {
+  n = 0;
+  for t in [1, 2] { n += t; }
+  t = "z";
+  "{n}{t}"
+}
+// 7: the ended local read after the loop is still out of reach; a bind there is a new one
+fn bind_after(k: integer) -> text {
+  r = "";
+  if k == 1 { t = "a"; r = t; }
+  v = [for t in [4] { t }];
+  t = v[0] * 2;
+  "{r}{t}"
+}
+
+fn main() {
+  o1 = "{arms_for(1)}|{arms_for(2)}";
+  assert(o1 == "a|3", "c1 {o1}");
+  o2 = "{arms_comp(1)}|{arms_comp(2)}";
+  assert(o2 == "a|2:4", "c2 {o2}");
+  o3 = "{arms_same(1)}|{arms_same(2)}";
+  assert(o3 == "5|3", "c3 {o3}");
+  o4 = block_then_for();
+  assert(o4 == "7xy", "c4 {o4}");
+  o5 = "{if_then_comp(1)}|{if_then_comp(0)}";
+  assert(o5 == "71|70", "c5 {o5}");
+  o6 = loop_then_local();
+  assert(o6 == "3z", "c6 {o6}");
+  o7 = "{bind_after(1)}|{bind_after(2)}";
+  assert(o7 == "a8|8", "c7 {o7}");
+  println("ok");
+}
