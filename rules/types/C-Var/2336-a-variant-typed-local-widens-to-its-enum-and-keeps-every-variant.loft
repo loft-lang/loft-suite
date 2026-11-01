@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2336 — `@FR-C-Var` runs one way, `Reference(S) ⤳ Enum(E)` for a variant S of E, and an
+// inferred local's type is the join of its binds (`@FR-N-Join`).  A local first bound to a
+// variant literal and later to a value of the enum therefore has the ENUM for its type.  The
+// whole-value bind copied the enum's value in AS THE VARIANT (`Data::copies_as` admitted the
+// reverse direction) and kept the variant's type, so every other variant lost its fields:
+// `capture` read garbage on both backends, `mixed` read null.  A DECLARED variant local is refused
+// the enum's value, as it already was.
+//
+// Every value by hand: `score` is n for TU, max*10+min for TI, 100 + 10*len(dep) + score(inner)
+// for TV.
+//
+// Axes this file MOVES:  the later value (a match capture over a call's result, a call result
+//                        held in a local, a capture read through a local first), which variant
+//                        arrives (smaller, larger, nested), in a loop or once, backends.
+// Axes it HOLDS FIXED:   the first bind a variant literal; an inferred local.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — main reads the enum's value through the variant's layout.
+
+struct Spec { min: integer, max: integer }
+enum Ty { TU { n: integer }, TI { spec: Spec }, TV { inner: Ty, dep: vector<integer> } }
+
+fn base(t: Ty) -> Ty { t }
+fn pick(k: integer) -> Ty {
+  if k == 0 { TU { n: 3 } } else if k == 1 { TI { spec: Spec { min: 1, max: 9 } } } else { TV { inner: TU { n: 4 }, dep: [7, 8] } }
+}
+fn score(t: Ty) -> integer {
+  match t { TU { n } => n, TI { spec } => spec.max * 10 + spec.min, TV { inner, dep } => 100 + len(dep) * 10 + score(inner) }
+}
+
+// The element of a TV, read through a match capture of a call's result.
+fn capture(t: Ty) -> integer {
+  inner = TU { n: 0 };
+  match base(t) {
+    TV { inner: i } => { inner = i; },
+    _ => {}
+  }
+  junk = TV { inner: TI { spec: Spec { min: 5, max: 6 } }, dep: [9, 9, 9] };
+  score(inner) * 10 + len(match junk { TV { dep } => dep, _ => [] })
+}
+
+// The capture held in a local first.
+fn through_local(t: Ty) -> integer {
+  inner = TU { n: 0 };
+  match t {
+    TV { inner: i } => { w = i; inner = w; },
+    _ => {}
+  }
+  score(inner)
+}
+
+fn mixed() -> integer {
+  total = 0;
+  for k in 0..3 {
+    x = TU { n: 0 };
+    y = pick(k);
+    x = y;
+    total = total * 1000 + score(x);
+  }
+  total
+}
+
+fn main() {
+  big = TV { inner: TI { spec: Spec { min: -2147483647, max: 2147483647 } }, dep: [] };
+  assert(capture(big) == 193273528233, "capture {capture(big)}");
+  assert(capture(pick(2)) == 43, "capture small {capture(pick(2))}");
+  assert(through_local(big) == 19327352823, "through_local {through_local(big)}");
+  assert(mixed() == 3091124, "mixed {mixed()}");
+  z = TI { spec: Spec { min: 2, max: 5 } };
+  z = TU { n: 6 };
+  assert(score(z) == 6, "z {score(z)}");
+}
