@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Disturb`, `@FR-B-View`, `@FR-C-Ref` — REASSIGNING a container ends the places inside
+// it, and a view live across that materialises at its bind.  A `&` PARAMETER is a container
+// like a local: `s = fresh()` — inline, or in a callee `s` is passed on to — installs a new
+// store in the caller's slot and releases the one the view names.  The walk named the
+// reassigned variable and then asked `.base()` whether it held a record, which keeps the `&`:
+// a `&S` parameter answered no, the view kept naming the released record, and the read was a
+// use-after-free; in a loop the second turn read the NEW store's value (loft#2358).
+//
+// Axes: the view (a vector field, a record element, a nested record), where the reassignment
+// is (a callee, inline, a callee that only MAY reassign), where the read is (the next
+// statement, the same statement, a later turn of a loop), the container's spelling (the `&`
+// parameter, and the local twin that always worked), with growth and removal one frame down
+// beside them.  Controls: the view dead before the reassignment, and a callee that only writes
+// a field (`(B-Disturb)`: overwriting a place is not disturbing it — the write reaches the view).
+// The "may reassign" cell answers as the LOCAL twin always has: the materialise is static, so
+// the view holds the value at the bind and the callee's field write does not reach it.
+//
+// @ARMED: LOFT_POISON=1 LOFT_STRICT_STORES=1
+// @falsified-at: 0e95172cd (loft#2358) — interpret: `main` reads a poisoned store; native-c:
+//   signal 11 (`main`, and the local twins).  Without the poison both backends answer
+//   `p_loop` 210 and `p_maybe` 105: the `&` parameter alone kept its alias.
+
+struct In { k: integer }
+struct W { inr: In }
+struct N { xs: vector<integer> }
+struct S { nodes: vector<N>, w: W }
+
+fn mk() -> S { S { nodes: [N { xs: [1, 2] }, N { xs: [3, 4] }], w: W { inr: In { k: 7 } } } }
+fn fresh() -> S { S { nodes: [N { xs: [9] }], w: W { inr: In { k: 50 } } } }
+fn reset(s: &S) -> integer { s = fresh(); len(s.nodes) * 100 }
+fn poke(s: &S) -> integer { s.w.inr.k = 5; if len(s.nodes) > 5 { s = fresh(); } 1 }
+fn grow(s: S) -> integer { for k in 0..20 { s.nodes += [N { xs: [100 + k] }]; } len(s.nodes) * 100 }
+fn rm(s: S) -> integer { s.nodes.remove(0); len(s.nodes) * 100 }
+fn set_k(s: S) -> integer { s.w.inr.k = 6; 1 }
+
+// The `&` parameter, reassigned in a callee.
+fn p_field(s: &S) -> integer { xs = s.nodes[0].xs; r = reset(s); r + xs[0] * 10 + xs[1] }
+fn p_elem(s: &S) -> integer { e = s.nodes[0]; r = reset(s); r + e.xs[0] * 10 + e.xs[1] }
+fn p_nested(s: &S) -> integer { k = s.w.inr; r = reset(s); r + k.k }
+fn p_same(s: &S) -> integer { xs = s.nodes[0].xs; reset(s) + xs[0] * 10 + xs[1] }
+fn p_loop(s: &S) -> integer { xs = s.nodes[0].xs; t = 0; for _ in 0..2 { t += reset(s) + xs[0]; } t }
+fn p_maybe(s: &S) -> integer { k = s.w.inr; r = poke(s); r * 100 + k.k }
+// Reassigned inline.
+fn p_inline(s: &S) -> integer { xs = s.nodes[0].xs; s = fresh(); len(s.nodes) * 100 + xs[0] * 10 + xs[1] }
+// Growth and removal one frame down, beside it.
+fn p_grow(s: &S) -> integer { xs = s.nodes[0].xs; r = grow(s); r + xs[0] * 10 + xs[1] }
+fn p_rm(s: &S) -> integer { xs = s.nodes[0].xs; r = rm(s); r + xs[0] * 10 + xs[1] }
+// The local twin.
+fn l_field() -> integer { s = mk(); xs = s.nodes[0].xs; r = reset(s); r + xs[0] * 10 + xs[1] }
+fn l_maybe() -> integer { s = mk(); k = s.w.inr; r = poke(s); r * 100 + k.k }
+// Controls.
+fn c_dead(s: &S) -> integer { xs = s.nodes[0].xs; a = xs[0] * 10 + xs[1]; r = reset(s); r + a }
+fn c_write(s: S) -> integer { k = s.w.inr; r = set_k(s); r * 100 + k.k }
+
+fn main() {
+  s1 = mk(); a = p_field(s1);
+  s2 = mk(); b = p_elem(s2);
+  s3 = mk(); c = p_nested(s3);
+  s4 = mk(); d = p_same(s4);
+  s5 = mk(); e = p_loop(s5);
+  s6 = mk(); f = p_maybe(s6);
+  s7 = mk(); g = p_inline(s7);
+  s8 = mk(); h = p_grow(s8);
+  s9 = mk(); i = p_rm(s9);
+  j = l_field();
+  k = l_maybe();
+  s10 = mk(); l = c_dead(s10);
+  s11 = mk(); m = c_write(s11);
+  t = S { nodes: [N { xs: [70, 80] }], w: W { inr: In { k: 1 } } };
+  r = "{a} {b} {c} {d} {e} {f} {g} {h} {i} {j} {k} {l} {m}";
+  // reset leaves 1 node (100); poke writes k = 5 and does not reassign; grow 22 nodes; rm 1.
+  assert(r == "112 112 107 112 202 107 112 2212 112 112 107 112 106", r);
+  assert("{s1.nodes[0].xs}" == "[9]" && s6.w.inr.k == 5 && "{s7.nodes[0].xs}" == "[9]", "callers");
+  assert(len(t.nodes) == 1 && s11.w.inr.k == 6, "churn");
+}
