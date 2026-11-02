@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapOwn` — a closure record a write to a fn field DISPLACES is bound (`___oldrec_N =
+// OpRefFromChildRec(field)`) so its cascade can release what it captured, right after the bind.
+// When the overwrite sits on one path only, the scope pass also gives `___oldrec_N` a NULL
+// pre-init where it is declared, and the cascade was placed after that `Set(___oldrec_N, null)`
+// as after a real bind.  The interpreter lowers a borrowed reference's null as a stack-frame
+// DbRef (it must be written before any field access), which the cascade's liveness test reads
+// as a record: the cascade ran on stack bytes and freed whatever store they happened to name —
+// after a text-returning call had left them there, the store of the record being returned, so
+// the caller's drop read a released child record (loft#2354).  A null pre-init displaces
+// nothing; its cascade does not run.  The C backend was never affected.
+//
+// Axes: the overwrite on the path not taken and on the one taken; the record returned and kept
+// local; the fn field's record a union widened by another function's capture (`widen`, never
+// called) and the stack left dirty by a text-returning call evaluated as a temporary just before.
+// Every answer is hand-computed; the store checks are the channel for the fault.
+//
+// @ARMED: LOFT_POISON=1 LOFT_STRICT_STORES=1
+// @falsified-at: 0e95172cd (loft#2354) — interpret: a poisoned read in `main` ("Store access out
+//   of bounds: rec=3735928559"), the returned record's store released; native-c: green.
+
+struct H { tag: integer, f: fn() -> integer }
+
+fn kept() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; v += [4]; "{len(v)} {h.f()}" }
+// Never called: its capture of `i` widens the union record every `H.f` closure is built as.
+fn widen() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { h.f = fn() -> integer { len(v) + i }; } v += [4]; "{len(v)} {h.f()}" }
+fn leaves_on_one_path(c: boolean) -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; if c { h.f = fn() -> integer { 7 }; } h }
+fn local_on_one_path(c: boolean) -> integer { v = [1, 2]; h = H { tag: 0, f: fn() -> integer { len(v) } }; if c { h.f = fn() -> integer { 7 }; } h.f() }
+
+fn main() {
+  x = kept() == "4 4";
+  a = leaves_on_one_path(false);
+  b = leaves_on_one_path(true);
+  y = kept() == "4 4";
+  m = local_on_one_path(false);
+  n = local_on_one_path(true);
+  assert(x && y, "kept");
+  assert(a.f() == 3 && b.f() == 7, "returned {a.f()} {b.f()}");
+  assert(m == 2 && n == 7, "local {m} {n}");
+}
