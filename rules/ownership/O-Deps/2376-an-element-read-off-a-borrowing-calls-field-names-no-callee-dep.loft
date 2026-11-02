@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// An element read straight off a field of a call that answers a VIEW of its argument
+// (`view(h, 0).items[1]`) releases the copy the call answers once the read is done.
+//
+// The read must depend on the record it views into, and an inline call has no name, so the
+// parser binds the call to a work-ref first (`{ w = view(h, 0); w }`).  That work-ref was
+// typed with the callee's RETURN type as written in the callee, whose deps are the callee's
+// ATTRIBUTE numbers: `D["h"]` is attribute 0, which in the caller's frame names whatever
+// variable is number 0.  @FR-O-Deps derives every free from the deps, so the work-ref read
+// as a borrow, the block-result hoist that gives it an owner in the enclosing scope declined,
+// and the record copy the bind makes of a borrowing callee's answer (@FR-O-Move) was freed by
+// nobody: one per call, on both backends (loft#2376).  A bound local (`x = view(h, 0).items[1]`)
+// was clean only because the local's dep had already registered the work-ref in its scope.
+//
+// Axes this file MOVES:  the consumer (an operand, a loop, a `return`, a parameter base, a
+//                        field base `w.h`, a call base `mkh()`, two calls in one statement);
+//                        the callee (a pure view, a join of a view and a fresh record).
+// Axes it HOLDS FIXED:   the field read is a vector of records; the element is read for one
+//                        integer.
+//
+// The controls are the shapes that were already clean: the element bound to a local, a `for`
+// over the field, a scalar field, a callee answering a fresh record.
+//
+// The leak gate is the channel: every value below was right before the fix as well.
+//
+// @falsified-at: f6ee9b1a9 — interpret leaked kt=101 D×98 -> clean, native leaked kt=101 D×49 -> clean
+struct A { n: integer }
+struct D { items: vector<A>, tag: integer }
+struct H { ds: vector<D> }
+struct W { h: H }
+
+fn view(h: H, i: integer) -> D { h.ds[i]! }
+fn fresh(k: integer) -> D { D { items: [A { n: k }], tag: k } }
+fn pick(h: H, c: boolean) -> D { if c { h.ds[0]! } else { D { items: [A { n: 55 }], tag: 5 } } }
+fn mkh() -> H { H { ds: [D { items: [A { n: 31 }, A { n: 32 }], tag: 3 }] } }
+fn mk() -> H { H { ds: [D { items: [A { n: 7 }, A { n: 8 }], tag: 1 }, D { items: [A { n: 9 }], tag: 2 }] } }
+
+fn second(h: H) -> A { view(h, 0).items[1] }
+fn second_of_local() -> A { h = mk(); view(h, 0).items[1] }
+fn total(h: H) -> integer { view(h, 1).items[0].n + view(h, 0).items[0].n }
+
+fn test_operand_and_loop() {
+  h = mk();
+  assert(view(h, 1).items[0].n == 9, "operand");
+  t = 0;
+  for _ in 0..50 {
+    t += view(h, 0).items[1].n;
+  }
+  assert(t == 400, "loop {t}");
+}
+
+fn test_returned() {
+  h = mk();
+  t = 0;
+  for _ in 0..40 {
+    t += second(h).n;
+  }
+  assert(t == 320, "returned {t}");
+  assert(second_of_local().n == 8, "returned from a local");
+  assert(total(h) == 16, "a parameter base");
+}
+
+fn test_other_bases() {
+  w = W { h: mk() };
+  assert(view(w.h, 0).items[1].n == 8, "a field base");
+  assert(view(mkh(), 0).items[1].n == 32, "a call base");
+  h = mk();
+  assert(pick(h, true).items[0].n + pick(h, false).items[0].n == 62, "a join callee");
+}
+
+fn test_controls() {
+  h = mk();
+  x = view(h, 0).items[1];
+  assert(x.n == 8, "bound");
+  t = 0;
+  for a in view(h, 0).items {
+    t += a.n;
+  }
+  assert(t == 15, "for {t}");
+  assert(view(h, 1).tag == 2, "scalar field");
+  assert(fresh(4).items[0].n == 4, "fresh callee");
+}
+
+fn main() {
+  test_operand_and_loop();
+  test_returned();
+  test_other_bases();
+  test_controls();
+}
