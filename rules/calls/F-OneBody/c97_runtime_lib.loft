@@ -7,8 +7,10 @@
 // bare name: `vector_sum_int` (what `sum` calls for integers) and `env_variable`.  The cell
 // `2318-a-library-function-under-a-runtime-natives-name-leaves-the-runtimes-call.loft` uses it.
 // Run on its own it is a cell too, the other half of @C97: as a PROGRAM the same definitions are
-// refused, a standard-library name being reserved for the standard library there.
+// refused, a standard-library name being reserved for the standard library there — once for
+// each of the two names.
 //
+// @EXPECT_ERROR: its name is reserved for it
 // @EXPECT_ERROR: its name is reserved for it
 // @falsified-at: none — a conformance guard: the refusal is the rule's, on every build.
 // CHANNEL: the compile.

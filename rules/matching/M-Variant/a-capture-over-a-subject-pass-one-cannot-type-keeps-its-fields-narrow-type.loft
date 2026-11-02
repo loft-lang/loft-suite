@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A match capture over a subject whose enum pass 1 cannot type yet — the subject comes from a
+// function declared BELOW — takes its FIELD's type, narrow element width included, and a write
+// through it reaches the subject.
+//
+// @FR-M-Variant binds each field for the arm's body at the field's type.  loft#2326's fix binds
+// such a capture at `Unknown` on pass 1 so the body can read it; the body's first write then
+// typed it (`items += [121]` made a `vector<u8>` field's capture `vector<integer>`), pass 2 kept
+// that, and the append wrote 8-byte elements into the byte vector it views: `"xw"` where `"xwy"`
+// is right.  Pass 2 now types the capture by its field.
+//
+// Axes this file MOVES:  where the subject's function sits (above / below); the field's element
+//                        width (u8 / integer); a write and a read through the capture.
+// Axes it HOLDS FIXED:   a struct-enum with one vector field.
+//
+// @falsified-at: none — the defect existed only on the join of 91-self-host's loft#2326 fix with
+//   this tree (never on main); `attic/scripts/recursive-enum-payload-mutation-666.loft` caught it.
+// CHANNEL: the asserts.
+enum B { Nil, Bytes { items: vector<u8> } }
+enum W { Nada, Wide { items: vector<integer> } }
+
+fn below_first() -> integer {
+  e = make_bytes();
+  match e { Bytes { items } => { items += [121]; }, _ => { } };
+  match e { Bytes { items } => len(items) * 1000 + items[1], _ => 0 }
+}
+fn make_bytes() -> B { Bytes { items: [120] } }
+
+fn wide_below() -> integer {
+  e = make_wide();
+  match e { Wide { items } => { items += [70000]; }, _ => { } };
+  match e { Wide { items } => len(items) * 1000000 + items[1], _ => 0 }
+}
+fn make_wide() -> W { Wide { items: [5] } }
+
+fn above() -> B { Bytes { items: [7] } }
+fn above_first() -> integer {
+  e = above();
+  match e { Bytes { items } => { items += [8]; }, _ => { } };
+  match e { Bytes { items } => len(items) * 1000 + items[1], _ => 0 }
+}
+
+fn test_a_capture_keeps_its_fields_narrow_type() {
+  assert(below_first() == 2121, "u8 field, subject from below: {below_first()}");
+  assert(wide_below() == 2070000, "integer field, subject from below: {wide_below()}");
+  assert(above_first() == 2008, "u8 field, subject from above: {above_first()}");
+}

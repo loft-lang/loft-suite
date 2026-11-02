@@ -1,0 +1,143 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Render-Ref`, `@FR-F-Render-Refs`, `@FR-F-Read-Ref` — a stored `reference<T>` renders as
+// a POINTER to the record it names, never as the store's numbers: `{"$ref":"#/leaves/1"}`, an
+// RFC 6901 pointer from the top of the document (a field contributes its name, an element its
+// position in the list its collection renders as — a keyed one in key order).  A target the
+// written value does not reach is written once more under a reserved `$refs` list, in the order
+// a reference first meets it, and pointed into (`#/$refs/0`); a value that is no object wraps as
+// `{"$value": …, "$refs": […]}`, its inside pointers one level down.  The reserved keys are
+// quoted in every form.  A type that can reach no reference renders exactly as before, and a
+// null reference is `null`.  `T.parse` reads both forms back: the `$refs` targets become records
+// of the result, every pointer names its record again — two references to one target name one
+// record, a cycle closes — and a pointer nothing holds is a parse misfit (loft#2268).
+//
+// The interpreter (the Rust runtime) and the C runtime write and read with separate code, so
+// the cell is the contract they share: every expected text below follows the rule by hand.
+// Axes: where the target is (inside: a field's element, a keyed element; outside: one, two
+// distinct, two references to one); the shape (a cycle across two values, a self-reference, a
+// vector root); the form (`{x}`, `{x:j}`, `{x:#}`, `{x:#j}`, `to_json`, `to_json_pretty`); a type
+// with no reference; the read (JSON and text round trips, the shared target, the cycle, the
+// inside pointer written through, a pointer to no record, an object that is no pointer).
+//
+// @ARMED: LOFT_POISON=1 LOFT_STRICT_STORES=1
+// @falsified-at: 0e95172cd (loft#2268) — interpret and native-c: a reference rendered as
+//   `DbRef(1,22,8)` (no `$ref`, no `$refs`), and `Tree.parse` of it read no reference.
+
+struct Leaf { name: text }
+struct Tree { leaves: vector<Leaf>, pick: reference<Leaf>?, also: reference<Leaf>? }
+struct Node { name: text, next: reference<Node>? }
+struct Tag { name: text }
+struct Bag { by: hash<Tag[name]>, pick: reference<Tag>? }
+struct Plain { a: integer, b: vector<integer> }
+
+// The expected texts are written with `<` `>` for braces and `'` for a double quote, so they
+// read as the document does.
+fn q(s: text) -> text { s.replace("<", "{{").replace(">", "}}").replace("'", "\"") }
+
+fn test_inside_and_outside() {
+  t = Tree { leaves: [Leaf { name: "a" }, Leaf { name: "b" }] };
+  other = Tree { leaves: [Leaf { name: "x" }, Leaf { name: "y" }] };
+  assert("{t:j}" == q("<'leaves':[<'name':'a'>,<'name':'b'>],'pick':null,'also':null>"), "none {t:j}");
+  t.pick = t.leaves[1];
+  assert("{t:j}" == q("<'leaves':[<'name':'a'>,<'name':'b'>],'pick':<'$ref':'#/leaves/1'>,'also':null>"), "inside {t:j}");
+  assert("{t}" == q("<leaves:[<name:'a'>,<name:'b'>],pick:<'$ref':'#/leaves/1'>,also:null>"), "inside text {t}");
+  t.pick = other.leaves[0];
+  t.also = other.leaves[0];
+  assert("{t:j}" == q("<'leaves':[<'name':'a'>,<'name':'b'>],'pick':<'$ref':'#/$refs/0'>,'also':<'$ref':'#/$refs/0'>,'$refs':[<'name':'x'>]>"), "one outside {t:j}");
+  t.also = other.leaves[1];
+  assert("{t}" == q("<leaves:[<name:'a'>,<name:'b'>],pick:<'$ref':'#/$refs/0'>,also:<'$ref':'#/$refs/1'>,'$refs':[<name:'x'>,<name:'y'>]>"), "two outside {t}");
+  assert(t.to_json() == "{t:j}", "to_json {t.to_json()}");
+}
+
+fn test_pretty_forms() {
+  t = Tree { leaves: [Leaf { name: "a" }] };
+  other = Tree { leaves: [Leaf { name: "x" }] };
+  t.pick = t.leaves[0];
+  t.also = other.leaves[0];
+  assert("{t:#}" == q("< leaves: [ < name: 'a' > ],\n  pick: <'$ref':'#/leaves/0'>,\n  also: <'$ref':'#/$refs/0'>,\n  '$refs': [< name: 'x' >]\n>"), "pretty {t:#}");
+  assert("{t:#j}" == q("<\n  'leaves': [ <\n      'name': 'a'\n    > ],\n  'pick': <'$ref':'#/leaves/0'>,\n  'also': <'$ref':'#/$refs/0'>,\n  '$refs': [<\n    'name': 'x'\n  >]\n>"), "pretty json {t:#j}");
+  assert(t.to_json_pretty() == "{t:#j}", "to_json_pretty {t.to_json_pretty()}");
+}
+
+fn test_shapes() {
+  a = Node { name: "a" };
+  b = Node { name: "b" };
+  a.next = b;
+  b.next = a;
+  assert("{a:j}" == q("<'name':'a','next':<'$ref':'#/$refs/0'>,'$refs':[<'name':'b','next':<'$ref':'#'>>]>"), "cycle {a:j}");
+  s = Node { name: "s" };
+  s.next = s;
+  assert("{s}" == q("<name:'s',next:<'$ref':'#'>>"), "self {s}");
+  other = Tree { leaves: [Leaf { name: "x" }] };
+  ts: vector<Tree> = [Tree { leaves: [Leaf { name: "p" }, Leaf { name: "q" }] }];
+  ts[0].pick = other.leaves[0];
+  ts[0].also = ts[0].leaves[1];
+  assert("{ts:j}" == q("<'$value':[<'leaves':[<'name':'p'>,<'name':'q'>],'pick':<'$ref':'#/$refs/0'>,'also':<'$ref':'#/$value/0/leaves/1'>>],'$refs':[<'name':'x'>]>"), "vector root {ts:j}");
+  g = Bag { by: [Tag { name: "m" }, Tag { name: "c" }] };
+  g.pick = g.by["m"];
+  assert("{g:j}" == q("<'by':[<'name':'c'>,<'name':'m'>],'pick':<'$ref':'#/by/1'>>"), "keyed {g:j}");
+  p = Plain { a: 1, b: [2, 3] };
+  assert("{p:j} {p}" == q("<'a':1,'b':[2,3]> <a:1,b:[2,3]>"), "no reference {p:j} {p}");
+}
+
+fn test_read_back() {
+  other = Tree { leaves: [Leaf { name: "x" }, Leaf { name: "y" }] };
+  t = Tree { leaves: [Leaf { name: "a" }, Leaf { name: "b" }] };
+  t.pick = t.leaves[1];
+  t.also = other.leaves[0];
+  j = "{t:j}";
+  u = Tree.parse(j);
+  assert("{u:j}" == j, "json round trip {u:j}");
+  txt = "{t}";
+  v = Tree.parse(txt);
+  assert("{v}" == txt, "text round trip {v}");
+  // The inside pointer names u's own element: a write through it shows in leaves.
+  u.pick.name = "B";
+  assert(u.leaves[1].name == "B", "inside pointer {u.leaves[1].name}");
+  // Two references to one outside target are one record again.
+  t.pick = other.leaves[1];
+  t.also = other.leaves[1];
+  w = Tree.parse("{t:j}");
+  w.pick.name = "Y";
+  assert(w.also.name == "Y" && other.leaves[1].name == "y", "shared target {w.also.name}");
+  a = Node { name: "a" };
+  b = Node { name: "b" };
+  a.next = b;
+  b.next = a;
+  n = Node.parse("{a:j}");
+  assert("{n:j}" == "{a:j}" && n.next.next.name == "a", "cycle {n:j}");
+  g = Bag { by: [Tag { name: "m" }, Tag { name: "c" }] };
+  g.pick = g.by["m"];
+  k = Bag.parse("{g:j}");
+  assert("{k:j}" == "{g:j}" && k.pick.name == "m", "keyed {k:j}");
+  ts: vector<Tree> = [Tree { leaves: [Leaf { name: "p" }, Leaf { name: "q" }] }];
+  ts[0].also = ts[0].leaves[1];
+  ts[0].pick = other.leaves[0];
+  rs = vector<Tree>.parse("{ts:j}");
+  assert("{rs:j}" == "{ts:j}" && rs[0].also.name == "q" && rs[0].pick.name == "x", "vector root {rs:j}");
+}
+
+fn test_read_misfits() {
+  bad = Tree.parse(q("<'leaves':[],'pick':<'$ref':'#/leaves/7'>>"));
+  assert("{bad:j}" == q("<'leaves':[],'pick':null,'also':null>"), "no record {bad:j}");
+  assert("{bad#errors}" == q("['line 1:1 path:$ref '#/leaves/7' names no record of the document']"), "no record errors {bad#errors}");
+  odd = Tree.parse(q("<'leaves':[],'pick':<'x':1>>"));
+  assert("{odd#errors}" == q("['line 1:14 path:pick']"), "no pointer {odd#errors}");
+}
+
+// An out-of-line child chain whose child refers to another link: the reader parks a reference
+// met in a chained child as it does one in a record's own field.
+struct Link2268 { v: integer, r: reference<Link2268>?, next: Link2268? }
+fn test_a_reference_inside_a_chained_child_reads_back() {
+  a = Link2268 { v: 1, next: Link2268 { v: 2, next: Link2268 { v: 3 } } };
+  a.next.next.r = a.next;
+  a.r = a;
+  j = "{a:j}";
+  b = Link2268.parse(j);
+  assert("{b:j}" == j, "the chain reads back as written: {b:j}");
+  assert(b.next.next.r.v == 2 && b.r.v == 1, "the pointers name the links: {b.next.next.r.v} {b.r.v}");
+  b.next.next.r.v = 20;
+  assert(b.next.v == 20, "the target is the link itself: {b.next.v}");
+}

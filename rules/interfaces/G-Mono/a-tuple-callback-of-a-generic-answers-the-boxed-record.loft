@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-Mono` / `@FR-F-Ret` — a generic's callback `f: fn(T) -> U` at a `U` that is a tuple
+// holding text is the function TYPE its concrete twin spells, `fn(T) -> (integer, text)`, whose
+// return is the boxed `__tuple<…>` record (loft#2190).  The instance kept the bare stack tuple
+// instead: a short lambda adopted that bare return, and its text member was a `__ret_text_N` the
+// callee cannot free and the caller only copies from — one `String` leaked per call on the
+// interpreter (loft#2356, the nightly valgrind red of `the-goal-program-of-flexible-generics`).
+// A NAMED `fn mk(x) -> (integer, text)` — boxed at its declaration — was refused by the same
+// generic ("expected fn(integer) -> (integer, text), got fn(integer) -> (integer, text)").  The
+// instance now boxes its fn-typed parameters' tuple returns, unboxes the calls it reads, and a
+// lambda boxes the tuple it adopts.
+//
+// The axes moved: the callback (a lambda, a named function, a fn-ref local holding it), what
+// the generic does with the answer (appends it, binds it first, discards it, returns it), and
+// `U` (a tuple with text; a tuple of scalars, a struct, a text and a nullable integer as the
+// controls — a scalar tuple only where it is not the generic's own return, which is loft
+// #2356's sibling noted in its report).  Every value is worked out by hand; `main` runs it all.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, C exit 1 -> 0 (the control refuses the
+//   named function); valgrind on the control's interpreter loses one block per lambda call
+//   (`definitely lost: 24 bytes in 3 blocks` for `map_v([1, 2, 3], |x| { (x, "n{x}") })`).
+// CHANNEL: the exit, and valgrind's definitely-lost count on the interpreter (the leak changes
+//   no value).
+// ARMED: valgrind --leak-check=full on `--interpret`; LOFT_POISON and LOFT_STRICT_STORES measured
+//   clean on the fixed tree, both backends.
+// HOLDS: the controls answer the same on both trees.
+
+struct S { n: integer, t: text }
+
+fn map_v<T, U>(g: vector<T>, f: fn(T) -> U) -> vector<U> {
+  out: vector<U> = [];
+  for c in g { out += [f(c)]; }
+  out
+}
+fn bound_v<T, U>(g: vector<T>, f: fn(T) -> U) -> vector<U> {
+  out: vector<U> = [];
+  for c in g { r = f(c); out += [r]; }
+  out
+}
+fn unread<T, U>(g: vector<T>, f: fn(T) -> U) -> integer {
+  n = 0;
+  for c in g { f(c); n += 1; }
+  n
+}
+fn last<T, U>(g: vector<T>, f: fn(T) -> U) -> U { f(g[len(g) - 1]) }
+
+fn named(x: integer) -> (integer, text) { (x, "n{x}") }
+
+fn test_a_lambda_answering_a_text_tuple() {
+  a = map_v([1, 2, 3], |x| { (x, "n{x}") });
+  assert("{a[0].0} {a[2].1} {len(a)}" == "1 n3 3", "appended: {a[2].1}");
+  b = bound_v([1, 2, 3], |x| { (x, "n{x}") });
+  assert("{b[1].1} {len(b)}" == "n2 3", "bound: {b[1].1}");
+  assert(unread([1, 2, 3], |x| { (x, "n{x}") }) == 3, "discarded");
+  z = last([1, 2, 3], |x| { (x, "n{x}") });
+  assert("{z.0} {z.1}" == "3 n3", "returned: {z.1}");
+}
+
+fn test_a_named_function_and_a_fn_ref_local() {
+  a = map_v([1, 2, 3], named);
+  b = bound_v([4, 5], named);
+  z = last([7], named);
+  assert("{a[2].1} {b[0].1} {z.1} {unread([1, 2], named)}" == "n3 n4 n7 2", "named: {a[2].1} {b[0].1} {z.1}");
+  fr = named;
+  c = map_v([1, 2], fr);
+  d = bound_v([3], fr);
+  y = last([8, 9], fr);
+  assert("{c[1].1} {d[0].1} {y.1} {unread([1, 2, 3], fr)}" == "n2 n3 n9 3", "fn-ref local: {c[1].1} {d[0].1} {y.1}");
+}
+
+fn test_the_controls() {
+  s = map_v([1, 2, 3], |x| { (x, x * 10) });
+  sb = bound_v([1, 2], |x| { (x, x * 10) });
+  assert("{s[2].1} {sb[1].1} {unread([1, 2], |x| { (x, x * 10) })}" == "30 20 2", "scalar tuple");
+  st = map_v([1, 2, 3], |x| { S { n: x, t: "s{x}" } });
+  zs = last([1, 2], |x| { S { n: x, t: "s{x}" } });
+  assert("{st[2].t} {zs.t}" == "s3 s2", "struct: {st[2].t} {zs.t}");
+  tx = bound_v([1, 2, 3], |x| { "t{x}" });
+  zt = last([5], |x| { "t{x}" });
+  assert("{tx[0]} {tx[2]} {zt}" == "t1 t3 t5", "text: {tx[0]} {zt}");
+  ni = map_v([1, 2, 3], |x| { if x > 1 { x } else { null } });
+  assert("{ni[0]} {ni[2]}" == "null 3", "nullable integer: {ni[0]} {ni[2]}");
+}
+
+fn main() {
+  test_a_lambda_answering_a_text_tuple();
+  test_a_named_function_and_a_fn_ref_local();
+  test_the_controls();
+}

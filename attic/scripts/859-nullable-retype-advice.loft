@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @EXPECT_WARNING: discharge with `?` (the type's default), `?? <default>`, or `match`
+// @EXPECT_WARNING: make that value non-null there (`!` when it cannot be null, an index loft proves), or test `g` here
+// @EXPECT_WARNING: handle null with a guard or `match`, or give `?? <value>`
 //
 // Re-storing a nullable result into the non-null slot it came from must name a cure that
 // WORKS.
@@ -22,7 +23,8 @@
 // Two spellings, one advice (@PLN153 phase 3b).  An INFERRED `g` widens to `float?` at the
 // second write (`(N-Join)`), so the store that is reported is the RETURN into `-> float`; a
 // DECLARED `d: float` keeps its type and the write itself is reported.  Both are `(N-Store)`'s
-// WARNING at full width — the program runs — and both name the discharges.
+// WARNING at full width — the program runs — and both name cures that compile: the inferred
+// one where `g` became nullable (its line), the declared one `!`, a guard or `?? <value>`.
 
 fn f(x: float) -> float {
   g = x / 2.0;

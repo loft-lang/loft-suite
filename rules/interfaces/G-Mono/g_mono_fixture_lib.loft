@@ -4,7 +4,16 @@
 //
 // A library that instantiates a standard generic at `vector<integer>` and at `vector<text>`:
 // `2343-a-generic-two-modules-instantiate-is-one-instance.loft` instantiates the same two.
+// Run on its own it is a cell too: the library's own calls answer through the same instances.
+//
+// @falsified-at: none — a conformance guard; the library's own calls answer as hand-computed.
+// CHANNEL: the asserts.
 
 pub fn lib_has(v: vector<integer>, x: integer) -> boolean { v.contains(x) }
 
 pub fn lib_has_text(v: vector<text>, x: text) -> boolean { v.contains(x) }
+
+fn test_the_library_answers_its_own_calls() {
+  assert(lib_has([1, 2, 3], 2) && !lib_has([1, 2, 3], 4), "integer instance");
+  assert(lib_has_text(["a", "b"], "b") && !lib_has_text(["a", "b"], "c"), "text instance");
+}

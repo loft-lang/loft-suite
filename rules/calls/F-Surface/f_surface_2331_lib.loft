@@ -23,6 +23,9 @@
 // carried by the cell that `use`s it.
 //
 // @EXPECT_ERROR: is a standard-library function, and its name is reserved for it
+// @EXPECT_ERROR: is a standard-library function, and its name is reserved for it
+// @EXPECT_ERROR: is a standard-library function, and its name is reserved for it
+// @EXPECT_ERROR: is a standard-library function, and its name is reserved for it
 // @falsified-at: none — alone, a conformance guard of the program-side refusal; the library
 //   half is falsified by the cell beside it (0e95172cd, loft#2331).
 
