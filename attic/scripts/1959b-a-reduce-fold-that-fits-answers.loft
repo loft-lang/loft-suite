@@ -9,7 +9,7 @@
 // value's type (f3), a text accumulator (f4), a lambda (f5); and through a function VALUE: a
 // local (v1), a parameter (v2), a field (v3), and a vector accumulator from an empty `[]` (v4).
 // @falsified-at: 7f164b6a0 — interpret exit 1 -> 0, interpret asserts 1 -> 0, native exit 1 -> 0
-// @falsified-by: tests/falsified/1959b-a-reduce-fold-that-fits-answers.patch — the same channels.
+// @falsified-by: tests/falsified/1959b-a-reduce-fold-that-fits-answers.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 2 -> 0
 //   CHANNEL: the EXIT channel on both backends, and the assertion channel on the interpreter:
 //   f3 is the one cell the fix moved — the control typed the fold's result by the integer
 //   initial value and read the float accumulator's bits as one.
