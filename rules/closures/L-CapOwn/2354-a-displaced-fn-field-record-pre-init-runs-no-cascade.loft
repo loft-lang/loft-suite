@@ -20,6 +20,9 @@
 // @ARMED: LOFT_POISON=1 LOFT_STRICT_STORES=1
 // @falsified-at: 0e95172cd (loft#2354) — interpret: a poisoned read in `main` ("Store access out
 //   of bounds: rec=3735928559"), the returned record's store released; native-c: green.
+// CHANNEL: the exit status (the interpreter's poisoned read faults the run).
+// WITNESS: main's interpreter run reads rec=3735928559 — the poison pattern — under LOFT_POISON=1.
+// HOLDS: the C backend is green on both trees; the leak check is clean on this tree.
 
 struct H { tag: integer, f: fn() -> integer }
 

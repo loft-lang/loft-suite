@@ -24,6 +24,9 @@
 // @ARMED: LOFT_POISON=1 LOFT_STRICT_STORES=1
 // @falsified-at: 0e95172cd (loft#2268) — interpret and native-c: a reference rendered as
 //   `DbRef(1,22,8)` (no `$ref`, no `$refs`), and `Tree.parse` of it read no reference.
+// CHANNEL: the asserts (a test that would pass without the rule fails by its message).
+// HOLDS: the leak check and the armed poison / strict-store run are clean on both trees and both
+//   backends.
 
 struct Leaf { name: text }
 struct Tree { leaves: vector<Leaf>, pick: reference<Leaf>?, also: reference<Leaf>? }
