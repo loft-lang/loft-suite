@@ -1,0 +1,151 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapKeep` / `@FR-O-Latest` / `@FR-L-CapOwn` — a closure built in a loop over a local the
+// loop re-assigns: each run of the build is its own record, it keeps the store the capture
+// named AT ITS BUILD, and that store is released once, by the last of its names to let go,
+// decided by store identity (loft#2357).  The re-assignment `v = …` after a build re-minted the
+// SAME backing in place, so the closure read the value assigned after it (`6` for `5`, silent, on
+// both backends and for every holder); a returned holder read a store the frame then freed;
+// and a record capture re-built in its work-ref (`p = P { … }`) answered the later record.
+//
+// Three let-go points carry it: the re-mint of a backing a record holds mints fresh; a rebuild
+// releases the store its record held unless another name still holds it; the frame's end
+// leaves a RETURNED record the store its slot holds.
+//
+// The axes moved: where the re-assignment stands (after the build, before it, the build in a
+// branch of a pass that re-assigns, the build in the LAST pass after it, a `break` after a
+// build, a nested loop that builds twice per pass, only on even passes), the holder (a returned
+// struct's fn field, a struct read in the frame, a fn-ref local called in the frame, a returned
+// fn-ref), the capture (a vector, a record), five passes, and two fields over one local.  Every
+// value is worked out by hand: a pass `i` re-assigns `v` to `i + 2` elements, so a build in
+// pass `i` after the previous pass's re-assignment reads `i + 1` elements.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, C exit 1 -> 0, 4 of 5 test functions (the
+//   asserted values: `2 6 6 2` for `5 5 5 5` — a returned holder read a released store even
+//   without poison — `1 6` for `4 6`, `6 40` for `5 30`)
+// CHANNEL: the asserted values, and LOFT_POISON / LOFT_STRICT_STORES (a freed store read, a store
+//   left at exit) on both backends.
+// ARMED: no instrument for the values; the store falsifiers for the release half.
+// HOLDS: the before-the-build shapes answer the same on both trees.
+
+struct H { tag: integer, f: fn() -> integer, g: fn() -> integer }
+struct P { n: integer }
+
+fn host() -> H { H { tag: 0, f: fn() -> integer { 0 }, g: fn() -> integer { 0 } } }
+
+fn after_returned() -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { h.f = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  h
+}
+fn after_in_frame() -> integer {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { h.f = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  h.f()
+}
+fn after_local() -> integer {
+  v = [1, 2, 3];
+  g = fn() -> integer { 0 };
+  for i in 0..3 { g = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  g()
+}
+fn after_returned_fn() -> fn() -> integer {
+  v = [1, 2, 3];
+  g = fn() -> integer { 0 };
+  for i in 0..3 { g = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  g
+}
+fn branch(at: integer) -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { v = [for k in 0..(i + 2) { k }]; if i == at { h.f = fn() -> integer { len(v) + i }; } }
+  h
+}
+fn broken() -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..9 { h.f = fn() -> integer { len(v) + i }; if i == 2 { break; } v = [for k in 0..(i + 2) { k }]; }
+  h
+}
+fn nested() -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { for j in 0..2 { h.f = fn() -> integer { len(v) + i + j }; } v = [for k in 0..(i + 2) { k }]; }
+  h
+}
+fn passes(n: integer, even_only: boolean) -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..n {
+    h.f = fn() -> integer { len(v) + i };
+    if !even_only || i % 2 == 0 { v = [for k in 0..(i + 2) { k }]; }
+  }
+  h
+}
+fn two_fields() -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 {
+    h.f = fn() -> integer { len(v) + i };
+    h.g = fn() -> integer { len(v) * 10 };
+    v = [for k in 0..(i + 2) { k }];
+  }
+  h
+}
+fn record(keep: boolean) -> integer {
+  p = P { n: 1 };
+  h = host();
+  for i in 0..3 { h.f = fn() -> integer { p.n + i }; p = P { n: i * 10 + 1 }; }
+  if keep { return h.f(); }
+  h.f() * 2
+}
+fn before() -> H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { v = [for k in 0..(i + 2) { k }]; h.f = fn() -> integer { len(v) + i }; }
+  h
+}
+
+fn test_re_assigned_after_the_build() {
+  a = after_returned();
+  f = after_returned_fn();
+  got = "{a.f()} {after_in_frame()} {after_local()} {f()}";
+  assert(got == "5 5 5 5", "after the build: {got}");
+}
+
+fn test_built_in_a_branch() {
+  b1 = branch(1);
+  b2 = branch(2);
+  assert("{b1.f()} {b2.f()}" == "4 6", "branch: {b1.f()} {b2.f()}");
+}
+
+fn test_a_break_a_nested_loop_and_more_passes() {
+  b = broken();
+  n = nested();
+  five = passes(5, false);
+  even = passes(5, true);
+  got = "{b.f()} {n.f()} {five.f()} {even.f()}";
+  assert(got == "5 6 9 8", "break, nested, five, even: {got}");
+}
+
+fn test_two_fields_and_a_record_capture() {
+  t = two_fields();
+  assert("{t.f()} {t.g()}" == "5 30", "two fields: {t.f()} {t.g()}");
+  assert(record(true) == 13 && record(false) == 26, "record capture: {record(true)}");
+}
+
+fn test_the_control() {
+  b = before();
+  assert(b.f() == 6, "re-assigned before the build: {b.f()}");
+}
+
+fn main() {
+  test_re_assigned_after_the_build();
+  test_built_in_a_branch();
+  test_a_break_a_nested_loop_and_more_passes();
+  test_two_fields_and_a_record_capture();
+  test_the_control();
+}
