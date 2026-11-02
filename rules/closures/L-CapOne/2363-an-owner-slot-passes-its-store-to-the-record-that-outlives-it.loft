@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapOne` / `@FR-L-CapKeep` / `@FR-O-Witness` — two or more closures over one nullable
+// struct local re-assigned after the builds.  The re-assignment puts the local on the
+// owner-witness path: each build hands the local's store to its record's OWNER slot
+// (`s__own`) and resets the witness, so the FIRST record owns the store and the later ones only
+// capture it.  Of records that adopt one store and coexist, the one that LEAVES owns it, and a
+// store is released by the last of its names to let go: the first record, left behind, released
+// the store the returned closure still read — `3` for `5`, silent on both backends, once a later
+// allocation reused the slot (loft#2363).  A record released while another live record holds
+// its owned store now passes the ownership over.
+//
+// The axes moved: how many records (two, three), where the escaper stands (last, in the
+// middle), what the re-assignment delivers (a literal, `null`, two literals), whether the kept
+// closure is called (before, after the re-assignment, never), and a frame where nothing escapes
+// (both stores released by the frame).  Every value is worked out by hand; each cell reuses the
+// released slots before it reads (`j`), so a released store is a wrong VALUE, not a lucky one.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, C exit 1 -> 0 (the escaping closure answers
+//   `3` for `5`: the reused slot's vector length)
+// CHANNEL: the asserted values; LOFT_STRICT_STORES names the use after free on the control.
+// ARMED: the slot reuse (`j`) for the values; LOFT_STRICT_STORES / LOFT_POISON measured clean on
+//   the fixed tree, both backends.
+// HOLDS: the escaper-first and nothing-escapes cells answer the same on both trees.
+
+struct C46 { a: integer }
+
+fn two_rebound() -> fn() -> integer {
+  s: C46? = C46 { a: 5 };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  out = fn() -> integer { if s == null { -1 } else { s.a } };
+  s = C46 { a: 9 };
+  out
+}
+fn two_called_rebound_null() -> fn() -> integer {
+  s: C46? = C46 { a: 5 };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  y = k();
+  out = fn() -> integer { (if s == null { -1 } else { s.a }) + y - y };
+  s = null;
+  out
+}
+fn three_escaper_last() -> fn() -> integer {
+  s: C46? = C46 { a: 5 };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  m = fn() -> integer { if s == null { -1 } else { s.a * 2 } };
+  out = fn() -> integer { if s == null { -1 } else { s.a } };
+  s = C46 { a: 9 };
+  out
+}
+fn three_escaper_middle() -> fn() -> integer {
+  s: C46? = C46 { a: 5 };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  out = fn() -> integer { if s == null { -1 } else { s.a } };
+  m = fn() -> integer { if s == null { -1 } else { s.a * 2 } };
+  s = C46 { a: 9 };
+  s = C46 { a: 11 };
+  out
+}
+fn kept_called_after() -> fn() -> integer {
+  s: C46? = C46 { a: 5 };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  out = fn() -> integer { if s == null { -1 } else { s.a } };
+  s = C46 { a: 9 };
+  z = k();
+  out
+}
+fn escaper_first() -> fn() -> integer {
+  s: C46? = C46 { a: 5 };
+  out = fn() -> integer { if s == null { -1 } else { s.a } };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  s = C46 { a: 9 };
+  out
+}
+fn nothing_escapes() -> integer {
+  s: C46? = C46 { a: 5 };
+  k = fn() -> integer { if s == null { -1 } else { s.a } };
+  m = fn() -> integer { if s == null { -1 } else { s.a } };
+  s = C46 { a: 9 };
+  k() + m() + (if s == null { -1 } else { s.a })
+}
+
+fn reuse() -> integer {
+  j: vector<C46> = [C46 { a: 91 }, C46 { a: 92 }, C46 { a: 93 }];
+  len(j)
+}
+
+fn test_two_records() {
+  a = two_rebound();
+  b = two_called_rebound_null();
+  assert(reuse() == 3, "reuse");
+  assert("{a()} {b()}" == "5 5", "two records: {a()} {b()}");
+}
+
+fn test_three_records() {
+  a = three_escaper_last();
+  b = three_escaper_middle();
+  assert(reuse() == 3, "reuse");
+  assert("{a()} {b()}" == "5 5", "three records: {a()} {b()}");
+}
+
+fn test_the_kept_closure_called_after() {
+  a = kept_called_after();
+  assert(reuse() == 3, "reuse");
+  assert(a() == 5, "kept closure called after: {a()}");
+}
+
+fn test_the_controls() {
+  a = escaper_first();
+  assert(reuse() == 3, "reuse");
+  assert(a() == 5 && nothing_escapes() == 19, "controls: {a()} {nothing_escapes()}");
+}
+
+fn main() {
+  test_two_records();
+  test_three_records();
+  test_the_kept_closure_called_after();
+  test_the_controls();
+}
