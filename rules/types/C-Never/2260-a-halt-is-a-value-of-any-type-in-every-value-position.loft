@@ -8,6 +8,9 @@
 // interpreter while `--native` and `--native-c` refused it.  One cell per position, each
 // result type a different kind; the halting arm is never taken, so every value is by hand.
 // @falsified-at: 9e6425727 — interpret exit 1 -> 0, native exit 1 -> 0 (refused, then compiled)
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 enum N { Leaf { v: integer }, Other }
 struct P { x: integer }
 

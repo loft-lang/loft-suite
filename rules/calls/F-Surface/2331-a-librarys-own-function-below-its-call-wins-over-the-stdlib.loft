@@ -17,6 +17,9 @@
 // CHANNEL: the asserts, and the refusal on the broken build.
 // ARMED: no instrument.
 // WITNESS: the message prints the answers.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 
 use f_surface_2331_lib;
 

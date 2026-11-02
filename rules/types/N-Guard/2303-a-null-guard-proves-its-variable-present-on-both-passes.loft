@@ -9,6 +9,9 @@
 // null branch.  Armed with the deny switch a library's CI runs under: a false warning fails.
 // @ARMED: LOFT_DENY_WARNINGS=1
 // @falsified-at: 9e6425727 — interpret exit 1 -> 0, native exit 1 -> 0 (the refusal and the false warnings)
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 struct S { n: integer }
 enum P { Owned, Borrowed { base: integer } }
 enum Q { X, Y }

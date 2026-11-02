@@ -16,6 +16,9 @@
 //
 // @falsified-at: 0e95172cd — interpret exit 134 -> 0, native exit 1 -> 0 (FALSIFY_NATIVE=rust)
 // CHANNEL: the interpreter's abort and the native build's E0425 on main, then the assertions.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 use c97_runtime_lib;
 
 fn main() {

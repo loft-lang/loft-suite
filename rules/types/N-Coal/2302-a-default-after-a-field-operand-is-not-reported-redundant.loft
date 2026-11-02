@@ -9,6 +9,9 @@
 // Armed with the deny switch a library's CI runs under, so the wrong warning fails the cell.
 // @ARMED: LOFT_DENY_WARNINGS=1
 // @falsified-at: 9e6425727 — interpret exit 1 -> 0, native exit 1 -> 0 (armed: the four wrong warnings)
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 struct Bag { items: vector<integer> }
 
 fn h(a: vector<integer>, b: integer) -> integer { len(a) + b }

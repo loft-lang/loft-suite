@@ -9,6 +9,9 @@
 // `--native` refuses the program (E0308: `&str` against `String`) while the interpreter runs it.
 // It must not count as a `null` arm either: the join stays as the written arms make it.
 // @falsified-at: 38f7016e4 — native exit 1 -> 0 (rustc E0308 on the arms' join)
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 enum Ty { Opt { inner: Ty }, Num { v: integer }, Tup { elems: vector<Ty> }, Other }
 
 fn key(t: Ty) -> text? {

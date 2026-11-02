@@ -16,6 +16,9 @@
 //
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the exit — main refused the program at compile time.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 
 enum Ty { TInt, TRef { n: integer, dep: vector<integer> } }
 struct Bl { name: text, result: vector<Ty>, sums: vector<integer>, names: vector<text> }

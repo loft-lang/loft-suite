@@ -26,6 +26,8 @@
 // 4 of 8 killed by signal 11; scored by hand against the installed main build.
 //   HOLDS: clean under `LOFT_STRICT_STORES=1` and the leak check, both backends.
 // @ARMED: LOFT_POISON=1
+//   CHANNEL: the read of a released store under LOFT_POISON — the interpreter's
+//   poisoned-store panic, the C's signal 11 — reported as the test's exit.
 struct H { tag: integer, f: fn() -> integer }
 
 fn every_pass() -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { h.f = fn() -> integer { len(v) + i }; } v += [4]; h }

@@ -12,3 +12,7 @@
 2026-11-01T11:49:27.733Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:44  [index_out_of_bounds] index 0 out of bounds for length 0
 2026-11-01T11:49:27.733Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:39  [index_out_of_bounds] index 0 out of bounds for length 0
 2026-11-01T11:49:27.733Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:44  [index_out_of_bounds] index 0 out of bounds for length 0
+2026-11-02T10:32:09.170Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:42  [index_out_of_bounds] index 0 out of bounds for length 0
+2026-11-02T10:32:09.171Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:47  [index_out_of_bounds] index 0 out of bounds for length 0
+2026-11-02T10:32:09.171Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:42  [index_out_of_bounds] index 0 out of bounds for length 0
+2026-11-02T10:32:09.171Z WARN   2333-a-witnessed-local-reassigned-from-a-call-returning-its-argument-copies.loft:47  [index_out_of_bounds] index 0 out of bounds for length 0

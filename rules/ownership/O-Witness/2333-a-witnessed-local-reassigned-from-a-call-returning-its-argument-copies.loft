@@ -20,6 +20,9 @@
 //
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 // CHANNEL: the assertions — main answers `view 312` on both backends.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 
 enum Ty { TInt, TRef { n: integer, dep: vector<integer> } }
 struct Attr { name: text, typedef: vector<Ty> }

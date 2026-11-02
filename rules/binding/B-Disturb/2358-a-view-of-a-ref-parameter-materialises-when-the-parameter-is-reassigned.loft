@@ -22,6 +22,11 @@
 // @falsified-at: 0e95172cd (loft#2358) — interpret: `main` reads a poisoned store; native-c:
 //   signal 11 (`main`, and the local twins).  Without the poison both backends answer
 //   `p_loop` 210 and `p_maybe` 105: the `&` parameter alone kept its alias.
+//   CHANNEL: the read of a released store under LOFT_POISON — the interpreter's
+//   poisoned-store panic, the C's signal 11 — reported as the test's exit.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 
 struct In { k: integer }
 struct W { inr: In }

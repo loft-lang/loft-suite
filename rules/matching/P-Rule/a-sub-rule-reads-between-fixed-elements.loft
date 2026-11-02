@@ -18,6 +18,9 @@
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0.  CHANNEL: exit — the
 //   control refused every shape here (a sub-rule had to be the whole pattern, and the
 //   recursion read as left recursion), so no assertion ran on it.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 enum Tok { Num { v: integer }, LP, RP, Plus, Comma, End }
 struct Cur { src: vector<Tok>, pos: integer }
 struct N { v: integer }

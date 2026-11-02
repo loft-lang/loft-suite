@@ -14,6 +14,9 @@
 // Axes it HOLDS FIXED:   unit and field variants as tokens; one rule per group.
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0.  CHANNEL: exit — the
 //   control refused a sub-rule group (`(args: num)*` read as a variant repetition).
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 enum Tok { Num { v: integer }, Id { name: text }, LP, RP, Comma, Arrow, Semi, End }
 struct N { v: integer }
 struct P { src: vector<Tok>, pos: integer, nodes: vector<N> }

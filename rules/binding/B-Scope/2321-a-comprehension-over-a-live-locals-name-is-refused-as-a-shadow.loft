@@ -11,6 +11,9 @@
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
 //   — main refused with another fault ("bound inside a block that has ended", on the read).
 // CHANNEL: the compile's diagnostic.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
 
 fn main() {
   t = 5;
