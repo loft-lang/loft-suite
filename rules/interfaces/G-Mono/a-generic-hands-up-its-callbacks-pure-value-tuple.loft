@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-Mono` / `@FR-F-Ret` — a generic `-> U` instantiated at a tuple returns the boxed
+// `__tuple<…>` record (the template compiled `U` as a record), while a callback
+// `f: fn(T) -> U` at a PURE-VALUE tuple (no text, record or collection member) keeps the bare
+// tuple ABI.  So `-> U { f(x) }` hands up a stack tuple where the signature promises the
+// record, and the instance's return rewrite (`promote_monomorph_tuple_return`) boxed only the
+// stack tuples written as a literal or held in a local — not one a CALL answers.  The
+// interpreter panicked (`allocation.rs`: a tuple's bits read as a store reference), or — at
+// `(float, boolean)` — answered `null null` without a word; the C refused the program ("a
+// reference expected, a Tup(0) found") and rustc-native did not compile it (loft#2361).  The
+// bound spelling `r = f(x); r` was right throughout.
+//
+// The axes moved: the callback (a lambda, a named function, a fn-ref local), where the call
+// stands (the body's tail, an early `return`, both arms of a tail `if`), and the tuple (two
+// integers, a float and a boolean, three members, a narrow `u8` member), with a tuple holding
+// text (the boxed callback, loft#2356) and a plain integer as the controls.  Every value is
+// worked out by hand.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0 (each test function panics), C exit 1 -> 0
+//   (the refusal)
+// CHANNEL: the exit, and the asserted values (`null null` at `(float, boolean)` on the control).
+// ARMED: no instrument; LOFT_POISON, LOFT_STRICT_STORES and the C under -DLOFT_POISON measured
+//   clean on the fixed tree, rustc-native too.
+// HOLDS: the integer control answers the same on both trees; the text-tuple control fails on the
+//   control tree too, as loft#2356 did there.
+
+fn last<T, U>(g: vector<T>, f: fn(T) -> U) -> U { f(g[len(g) - 1]) }
+fn early<T, U>(g: vector<T>, f: fn(T) -> U) -> U { if len(g) > 1 { return f(g[1]); } f(g[0]) }
+fn pick<T, U>(c: boolean, a: T, b: T, f: fn(T) -> U) -> U { if c { f(a) } else { f(b) } }
+
+fn pair(x: integer) -> (integer, integer) { (x, x * 10) }
+fn halves(x: integer) -> (float, boolean) { (x as float / 2.0, x > 2) }
+fn narrow(x: integer) -> (integer, u8) { (x, (x * 7) & 255) }
+
+fn test_a_lambda() {
+  a = last([1, 2, 3], |x| { (x, x * 10) });
+  b = early([4, 5, 6], |x| { (x, x * 10) });
+  c = pick(false, 7, 8, |x| { (x, x * 10) });
+  d = last([1, 2, 3], |x| { (x, x + 1, x + 2) });
+  assert("{a.0} {a.1} {b.0} {b.1} {c.0} {c.1} {d.0} {d.2}" == "3 30 5 50 8 80 3 5", "lambda: {a.1} {b.1} {c.1} {d.2}");
+}
+
+fn test_a_named_function() {
+  a = last([1, 2, 3], pair);
+  b = early([4, 5, 6], halves);
+  c = pick(true, 7, 8, narrow);
+  e = last([1, 2, 3], halves);
+  assert("{a.1} {b.0} {b.1} {c.0} {c.1} {e.0} {e.1}" == "30 2.5 true 7 49 1.5 true", "named: {a.1} {b.0} {b.1} {c.1} {e.0} {e.1}");
+}
+
+fn test_a_fn_ref_local() {
+  fr = pair;
+  hv = halves;
+  a = last([4], fr);
+  b = pick(false, 1, 3, hv);
+  c = early([9, 10], fr);
+  assert("{a.0} {a.1} {b.0} {b.1} {c.1}" == "4 40 1.5 true 100", "fn-ref local: {a.1} {b.0} {b.1} {c.1}");
+}
+
+fn test_the_controls() {
+  t = last([1, 2, 3], |x| { (x, "n{x}") });
+  n = pick(true, 4, 5, |x| { x * 10 });
+  assert("{t.1} {n}" == "n3 40", "controls: {t.1} {n}");
+}
