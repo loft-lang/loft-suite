@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A number a parse writes into a narrow field that does not fit stores the field's default —
+// whether it misses by a little (`300` into a `u8`) or lies outside 32 bits altogether.
+//
+// loft#984's rule: a value a field cannot represent stores the type's DEFAULT, the lowest value
+// in its range, or null where the field is nullable; a slot never holds a value its type cannot
+// represent.  `T.parse` cast the number to 32 bits before the setters' range checks saw it, so a
+// number outside 32 bits arrived as its low 32 bits — a different, in-range value (`2^32 + 5`
+// read 5).  A nullable narrow field took its lowest value for a misfit, not its null, and on
+// the C a nullable byte wrote the 64-bit null as a live 0 (loft#2373).
+//
+// Axes this file MOVES:  the width (u8, u16, i32, u32) × nullable or not; the value above 32
+//                        bits, below, inside 32 bits but outside the field, in range; the u32
+//                        top code (a value for `u32`, absence for `u32?`).
+// Axes it HOLDS FIXED:   a plain struct parsed from JSON text.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native-c exit 1 -> 0: main answers
+//   `5 5 5 7 7 7 7` for the numbers above 32 bits; scored by hand against the installed main.
+// CHANNEL: the asserts.
+// WITNESS: main's message for the first test prints the low 32 bits.
+// HOLDS: the in-range cell and a JSON `null` read the same on both builds.
+
+struct T { q: u8, qn: u8?, s: u16, r: i32, rn: i32?, w: u32, wn: u32? }
+
+fn show(t: T) -> text { "{t.q} {t.qn} {t.s} {t.r} {t.rn} {t.w} {t.wn}" }
+
+fn test_above_32_bits_is_a_misfit() {
+  t = T.parse("{{\"q\": 4294967301, \"qn\": 4294967301, \"s\": 4294967301, \"r\": 8589934599, \"rn\": 8589934599, \"w\": 8589934599, \"wn\": 8589934599}}");
+  assert(show(t) == "0 null 0 -2147483647 null 0 null", "above: {show(t)}");
+}
+
+fn test_below_32_bits_is_a_misfit() {
+  t = T.parse("{{\"q\": -4294967301, \"qn\": -4294967301, \"s\": -4294967301, \"r\": -8589934599, \"rn\": -8589934599, \"w\": -1, \"wn\": -1}}");
+  assert(show(t) == "0 null 0 -2147483647 null 0 null", "below: {show(t)}");
+}
+
+fn test_inside_32_bits_but_outside_the_field() {
+  t = T.parse("{{\"q\": 300, \"qn\": 300, \"s\": 70000, \"r\": 7, \"rn\": 7, \"w\": 4294967295, \"wn\": 4294967295}}");
+  assert(show(t) == "0 null 0 7 7 4294967295 null", "inside: {show(t)}");
+}
+
+fn test_in_range_and_null_read_back() {
+  t = T.parse("{{\"q\": 5, \"qn\": null, \"s\": 500, \"r\": -7, \"rn\": null, \"w\": 4000000000, \"wn\": null}}");
+  assert(show(t) == "5 null 500 -7 null 4000000000 null", "in range: {show(t)}");
+}
