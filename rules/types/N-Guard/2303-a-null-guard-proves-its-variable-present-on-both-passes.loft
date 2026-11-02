@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#2303 — `(N-Guard)`: `if v == null { return … }` proves `v` present for the rest of the
+// loft#2303 — `@FR-N-Guard`: `if v == null { return … }` proves `v` present for the rest of the
 // block, and `v` reads as `τ` there.  For a heap or enum value the first pass read `v == null`
 // with the polarity of the truthy `if v`, so the guard proved nothing after it — a struct-enum
 // `e == Owned` was refused, and a local bound from `e` was typed `τ?` and warned when used —

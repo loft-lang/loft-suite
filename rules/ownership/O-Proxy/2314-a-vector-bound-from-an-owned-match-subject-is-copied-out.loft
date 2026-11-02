@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#2314 — `(O-Proxy)`: a dependency on the binding's OWN mint (a vector's `__vdb_N` backing)
+// loft#2314 — `@FR-O-Proxy`: a dependency on the binding's OWN mint (a vector's `__vdb_N` backing)
 // says it owns a store; a dependency on any other local says it borrows.  A `match` over a
 // subject the function OWNS — a call's result delivered into a fresh buffer — binds its arm's
 // vector field as a part of that subject.  Returned, the binding must be COPIED into the

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @FR-N-Join
 //
 // The pass-1 twin of loft#2305, on the text accumulator.  A `match` tail of a `-> text?`
 // function whose arm calls a function declared BELOW it: pass 1 cannot type that call, and the

@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A text local that a closure WRITES and that the function then RETURNS answers what the
+// closure wrote, and the frame's own `s += x` on such a text reaches the same text.
+//
+// @FR-L-CapWrite: a captured write is shared in both directions.  Two routes lost it
+// (loft#2297).  A text local that was the function's return source became the hidden
+// `&text` return buffer, which is never boxed, so the closure wrote its own copy and
+// `fn t() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); s }` answered `a`.  And a frame
+// `s += "c"` on the boxed text found no operator (`No matching operator '+='`), so the
+// author had to spell it `s = "{s}c"`.
+//
+// Axes this file MOVES:  how the closure writes (a format rebind, `+=`); the frame write
+//                        after the call (none, `+=`, `+=` between two calls); where the
+//                        closure runs (here, in another function); the tail (bare, an
+//                        explicit `return`, through a local); a `text?` local; a text
+//                        PARAMETER the closure writes.
+// Axes it HOLDS FIXED:   the return is the function's last statement — a `return s` placed
+//                        before the closure is created is not covered here.
+//
+// The channel is the value (and the compile error for the `+=` cells).
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native-c exit 1 -> 0: the frame `+=` is
+// refused (`No matching operator '+='`); without those cells `tail_rebind` answers `a`;
+// scored by hand against the installed main build.
+//   HOLDS: clean under `LOFT_STRICT_STORES=1`, both backends.
+fn tail_rebind() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); s }
+fn tail_then_append() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); s += "c"; s }
+fn closure_appends() -> text { s = "a"; f = fn() { s += "b"; }; f(); s }
+fn through_a_local() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); f(); r = s; r }
+fn nullable() -> text { s: text? = "a"; f = fn() { s = "{s}b"; }; f(); s ?? "null" }
+fn append_between_calls() -> text { s = "a"; f = fn() { s += "b"; }; f(); s += "c"; f(); s }
+fn run(g: fn()) { g(); }
+fn called_elsewhere() -> text { s = "a"; f = fn() { s += "b"; }; run(f); s }
+fn explicit_return() -> text { s = "a"; f = fn() { s += "b"; }; f(); return s; }
+fn parameter(s: text) -> text { f = fn() { s += "b"; }; f(); s }
+
+fn main() {
+  assert(tail_rebind() == "ab", "tail_rebind {tail_rebind()}");
+  assert(tail_then_append() == "abc", "tail_then_append {tail_then_append()}");
+  assert(closure_appends() == "ab", "closure_appends {closure_appends()}");
+  assert(through_a_local() == "abb", "through_a_local {through_a_local()}");
+  assert(nullable() == "ab", "nullable {nullable()}");
+  assert(append_between_calls() == "abcb", "append_between_calls {append_between_calls()}");
+  assert(called_elsewhere() == "ab", "called_elsewhere {called_elsewhere()}");
+  assert(explicit_return() == "ab", "explicit_return {explicit_return()}");
+  assert(parameter("a") == "ab", "parameter {parameter("a")}");
+  s = "a";
+  f = fn() { s += "b"; };
+  f();
+  s += "c";
+  assert(s == "abc", "frame {s}");
+}

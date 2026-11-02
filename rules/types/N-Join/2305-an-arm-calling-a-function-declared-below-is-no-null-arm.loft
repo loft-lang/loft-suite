@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#2305 — `(N-Join)`: a value-`if` or `match` is optional iff one of its arms is.  An arm
+// loft#2305 — `@FR-N-Join`: a value-`if` or `match` is optional iff one of its arms is.  An arm
 // that calls a function declared BELOW the caller is not: the first pass cannot type that call
 // yet and spelled it as a `null`, every join read it as a `null` arm, and the first pass keeps
 // an inferred local's type — so `ok` below was `boolean?` and its return warned.  The `null`

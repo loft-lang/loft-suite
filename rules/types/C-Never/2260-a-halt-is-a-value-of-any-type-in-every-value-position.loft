@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#2260 — `(C-Never)`: `Never ⤳ τ`.  A call that never returns (`panic`, `exit`) fits
+// loft#2260 — `@FR-C-Never`: `Never ⤳ τ`.  A call that never returns (`panic`, `exit`) fits
 // wherever a value is wanted, as `?? panic(…)` always read it.  Everywhere else it was typed
 // `void`: an `else`, a then arm, a value `match` arm bound to a local and a function's tail were
 // refused ("expected integer, got void"), and a `match` tail with a halt arm compiled on the
