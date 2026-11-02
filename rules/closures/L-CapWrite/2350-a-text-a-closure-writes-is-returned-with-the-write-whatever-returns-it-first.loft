@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A text local a closure writes is returned WITH the write when a `return` of it comes before
+// the closure is created — the early return answers the value it had there.
+//
+// @FR-L-CapWrite: a captured write is shared in both directions.  Pass 1 met `return s` before
+// any closure was parsed and made `s` the function's hidden `&text` return buffer, which the
+// scalar-capture flip never boxes, so the closure wrote its own copy (loft#2350, the shape
+// loft#2297 left).  Now, at the end of the body's first pass, such a buffer keeps its place in
+// the signature under a compiler name and `s` is an ordinary local again — boxed, since a
+// closure writes it — and every `return` delivers into the buffer.
+//
+// Axes this file MOVES:  the early return (taken / not taken; one, two); the closure's write
+//                        (rebind, `+=`, called twice); a frame write after the call; an
+//                        explicit `return` at the end; the workaround spelling (return
+//                        through another local); a function with no closure (the control).
+// Axes it HOLDS FIXED:   the captured value is a `text`.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native-c exit 1 -> 0: `early(false)`
+//   answers `a` for `ab`; scored by hand against the installed main build.
+// CHANNEL: the asserts.
+// WITNESS: main answers `early(false)` = "a", `early_rebind(false)` = "a", `twice(2)` = "a".
+// HOLDS: the leak check and LOFT_STRICT_STORES are clean on both trees and both backends.
+fn early(c: boolean) -> text { s = "a"; if c { return s; } f = fn() { s += "b"; }; f(); s }
+fn early_rebind(c: boolean) -> text { s = "a"; if c { return s; } f = fn() { s = "{s}b"; }; f(); f(); s }
+fn early_after(c: boolean) -> text { s = "a"; if c { return s; } f = fn() { s += "b"; }; f(); s += "c"; return s; }
+fn twice(c: integer) -> text { s = "a"; if c == 0 { return s; } if c == 1 { s += "x"; return s; } f = fn() { s += "b"; }; f(); s }
+fn through_a_local(c: boolean) -> text { s = "a"; if c { r = s; return r; } f = fn() { s += "b"; }; f(); s }
+fn no_closure(c: boolean) -> text { s = "a"; if c { return s; } s += "b"; s }
+
+fn test_the_early_return_answers_its_value() {
+  assert(early(true) == "a" && early_rebind(true) == "a" && twice(0) == "a" && twice(1) == "ax", "early: {early(true)} {early_rebind(true)} {twice(0)} {twice(1)}");
+}
+fn test_the_closures_write_is_returned() {
+  assert(early(false) == "ab", "early(false) {early(false)}");
+  assert(early_rebind(false) == "abb", "early_rebind(false) {early_rebind(false)}");
+  assert(early_after(false) == "abc", "early_after(false) {early_after(false)}");
+  assert(twice(2) == "ab", "twice(2) {twice(2)}");
+  assert(through_a_local(false) == "ab" && through_a_local(true) == "a", "through_a_local {through_a_local(false)}");
+}
+fn test_a_function_with_no_closure() {
+  assert(no_closure(true) == "a" && no_closure(false) == "ab", "no_closure {no_closure(true)} {no_closure(false)}");
+}
