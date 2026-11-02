@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Copy`: a record UPDATE is a COPY of its base, whatever shape the base has — a field
+// read `..h.inner` and an element read `..xs[0]` included — and whatever position the update
+// stands in.  The base is never written and never released by it.
+//
+// Two defects stood behind one shape, an update over a VIEW base (loft#2370).  Built as a
+// TEMPORARY (an argument, an appended element, a postfix, a field assignment), its "copy" was
+// a work reference bound to the place with a plain `Set`, so the named fields wrote the base.
+// And the local the view was held in received a scope-exit free, which released the BASE's
+// store — inside a loop every iteration.  A temporary now takes a store of its own and copies
+// the base into it; the view local of a projection base owes no free.
+//
+// Axes it MOVES: the update's position (argument, appended element, postfix, field assignment,
+//   a named local inside a loop), the base (a field read, an element read), the copied field
+//   kinds (scalar, `text`, a vector).
+// HOLDS: an update bound to a named local outside a loop.
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// ARMED: the suite's leak gate.
+// WITNESS: each message prints the value read back and the base after it.
+// HOLDS: the named-local control passes on both builds.
+
+struct Inner { a: integer, b: integer }
+struct Outer { inner: Inner, k: integer }
+struct Bag { name: text, items: vector<integer> }
+struct Box { bag: Bag, n: integer }
+
+fn first_a(i: Inner) -> integer { i.a }
+fn count(b: Bag) -> integer { len(b.items) }
+
+fn main() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+
+  n = first_a(Inner { a: 7, ..h.inner });
+  assert(n == 7 && h.inner.a == 1, "an argument: {n}, base {h.inner.a}");
+
+  v: vector<Inner> = [];
+  v += [Inner { a: 8, ..h.inner }];
+  assert(v[0].a == 8 && v[0].b == 2 && h.inner.a == 1, "an appended element: {v[0].a} {v[0].b}, base {h.inner.a}");
+
+  m = Inner { a: 9, ..h.inner }.b;
+  assert(m == 2 && h.inner.a == 1, "a postfix: {m}, base {h.inner.a}");
+
+  o = Outer { inner: Inner { a: 0, b: 0 }, k: 0 };
+  o.inner = Inner { a: 6, ..h.inner };
+  assert(o.inner.a == 6 && o.inner.b == 2 && h.inner.a == 1, "a field assignment: {o.inner.a}, base {h.inner.a}");
+
+  xs = [Inner { a: 3, b: 4 }];
+  e = first_a(Inner { b: 0, ..xs[0] });
+  assert(e == 3 && xs[0].b == 4, "an element base: {e}, base {xs[0].b}");
+
+  x = Box { bag: Bag { name: "orig", items: [1, 2, 3] }, n: 1 };
+  k = count(Bag { items: [9], ..x.bag });
+  assert(k == 1 && len(x.bag.items) == 3 && x.bag.name == "orig", "a vector field: {k}, base {len(x.bag.items)} {x.bag.name}");
+
+  total = 0;
+  for i in 0..3 {
+    t = Bag { name: "loop{i}", ..x.bag };
+    total += len(t.items);
+    assert(t.name == "loop{i}", "the loop's copy is its own: {t.name}");
+  }
+  assert(total == 9 && len(x.bag.items) == 3, "a named local in a loop: {total}, base {len(x.bag.items)}");
+
+  // Control: a named local outside a loop.
+  y = Inner { a: 5, ..h.inner };
+  assert(y.a == 5 && y.b == 2 && h.inner.a == 1, "a named local: {y.a} {y.b}, base {h.inner.a}");
+}

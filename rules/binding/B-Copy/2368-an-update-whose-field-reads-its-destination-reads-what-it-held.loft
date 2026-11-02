@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Copy`: a record UPDATE `S { f: e, ..b }` is a copy of `b` with the named fields written
+// over it, and each field value reads what its names held when the statement began — never the
+// half-written copy (`(E-Asgn)`: the right-hand side is computed before the store).  So
+// `p = P { x: p.y, y: p.x, ..p }` swaps.
+//
+// Bound to its own variable, an update is lowered INTO that variable: the bind, then one write
+// per named field.  A field value that reads the destination then reads the bind's or an
+// earlier write's result — the swap answered `2 2` (loft#2368).  Such an update is now built
+// apart and then bound, as an update with a postfix already was (loft#1304).
+//
+// Axes it MOVES: field count (two, three), the literal's field ORDER, struct / `value struct`,
+//   a scalar / a `text` field, a field read twice, the destination read through a call
+//   argument, the base the destination itself or another record.
+// HOLDS: one named field reading the destination, a different destination, a plain literal.
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the fields read back.
+// HOLDS: the one-field, other-destination and plain-literal cells pass on both builds.
+
+struct Pt { x: integer, y: integer }
+struct P3 { a: integer, b: integer, c: integer }
+value struct Vp { x: integer, y: integer }
+struct Tx { s: text, t: text }
+
+fn total_of(q: Pt) -> integer { q.x + q.y }
+
+fn main() {
+  p = Pt { x: 1, y: 2 };
+  p = Pt { x: p.y, y: p.x, ..p };
+  assert(p.x == 2 && p.y == 1, "a swap reads the base: {p.x} {p.y}");
+
+  r = P3 { a: 1, b: 2, c: 3 };
+  r = P3 { a: r.b, b: r.c, c: r.a, ..r };
+  assert(r.a == 2 && r.b == 3 && r.c == 1, "a rotation of three: {r.a} {r.b} {r.c}");
+
+  c = Pt { x: 1, y: 2 };
+  c = Pt { y: c.x, x: c.y, ..c };
+  assert(c.x == 2 && c.y == 1, "the fields named in the other order: {c.x} {c.y}");
+
+  v = Vp { x: 1, y: 2 };
+  v = Vp { x: v.y, y: v.x, ..v };
+  assert(v.x == 2 && v.y == 1, "a value struct: {v.x} {v.y}");
+
+  t = Tx { s: "a", t: "b" };
+  t = Tx { s: t.t, t: t.s, ..t };
+  assert(t.s == "b" && t.t == "a", "two text fields: {t.s} {t.t}");
+
+  f = Pt { x: 1, y: 2 };
+  f = Pt { x: f.x + f.y, y: f.x * 10, ..f };
+  assert(f.x == 3 && f.y == 10, "a field read twice: {f.x} {f.y}");
+
+  i = Pt { x: 1, y: 2 };
+  i = Pt { x: total_of(i), y: total_of(i), ..i };
+  assert(i.x == 3 && i.y == 3, "the destination handed to a call: {i.x} {i.y}");
+
+  q = Pt { x: 10, y: 20 };
+  o = Pt { x: 1, y: 2 };
+  o = Pt { x: o.y, y: o.x, ..q };
+  assert(o.x == 2 && o.y == 1, "another base, the destination read: {o.x} {o.y}");
+
+  // Controls: one named field, a different destination, a plain literal.
+  g = Pt { x: 1, y: 2 };
+  g = Pt { y: g.x + g.y, ..g };
+  assert(g.x == 1 && g.y == 3, "one field: {g.x} {g.y}");
+  m = Pt { x: 1, y: 2 };
+  d = Pt { x: m.y, y: m.x, ..m };
+  assert(d.x == 2 && d.y == 1 && m.x == 1 && m.y == 2, "another destination: {d.x} {d.y} / {m.x} {m.y}");
+  n = Pt { x: 1, y: 2 };
+  n = Pt { x: n.y, y: n.x };
+  assert(n.x == 2 && n.y == 1, "a plain literal: {n.x} {n.y}");
+}

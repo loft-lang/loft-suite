@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-StoredRef`: a `reference<T>` field holds a LINK to a record, and a read through it
+// reads that record — whether the record holding the link is a named local or a temporary: a
+// call result, a parse result, a struct literal.
+//
+// Read off a temporary, the reference keeps its field's declared type, whose deps carry the
+// pointer marker rather than a frame variable (a named `p.to` is rebased on `p`).  The read
+// through it then asked to borrow from that marker, an internal compiler error (loft#2369).
+// It now borrows from no frame variable, as a read through a temporary's embedded field does.
+//
+// Axes it MOVES: the temporary (a call, `T.parse`, a struct literal), the reading position (a
+//   statement, `len(…)`, a format hole), a loop.
+// HOLDS: the temporary's own field, an embedded field of a temporary, the reference bound first.
+// @falsified-at: 0e95172cd — interpret exit 101 -> 0, interpret panicked -> clean, native exit 101 -> 0, native panicked -> clean
+// CHANNEL: the exit (the compile).
+// ARMED: the suite's leak gate.
+// WITNESS: each message prints the name read through the link.
+// HOLDS: the three controls compile and pass on main too (checked one at a time).
+
+struct Leaf { name: text }
+struct Link { label: text, to: reference<Leaf> }
+struct Pair { a: Leaf, n: integer }
+
+fn mk(l: Leaf) -> Link { Link { label: "m", to: &l } }
+fn mkp() -> Pair { Pair { a: Leaf { name: "pa" }, n: 1 } }
+
+fn main() {
+  far = Leaf { name: "far" };
+  link = Link { label: "x", to: &far };
+  doc = "{link:j}";
+
+  assert(mk(far).to.name == "far", "through a call: {mk(far).to.name}");
+  assert(Link.parse(doc).to.name == "far", "through a parse result");
+  assert(len(Link.parse(doc).to.name) == 3, "inside len()");
+  assert(Link { label: "y", to: &far }.to.name == "far", "through a struct literal");
+  total = 0;
+  for i in 0..20 {
+    total += len(Link.parse(doc).to.name) + len(mk(far).to.name);
+  }
+  assert(total == 120, "in a loop: {total}");
+
+  // Controls.
+  assert(Link.parse(doc).label == "x", "the temporary's own field");
+  assert(mkp().a.name == "pa", "an embedded field of a temporary");
+  bound = mk(far).to;
+  assert(bound.name == "far", "the reference bound first: {bound.name}");
+}
