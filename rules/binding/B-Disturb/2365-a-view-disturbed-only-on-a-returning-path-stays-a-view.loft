@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2365 (`@FR-B-View`, `@FR-B-Disturb`) — a view is copied only where it is LIVE ACROSS a
+// disturbance of its container, and `(B-Disturb)` holds per path.  An `if` arm that ends in
+// `return` leaves the function, so what it disturbs reaches nothing after the `if`: a view the
+// returning path grows or removes from stays a view on the path that continues, and a write
+// through it reaches the container.  The walk merged both arms' disturbances into the state
+// after the `if`, so the view was copied at its bind, the write after the `if` missed the
+// container (10 instead of 77), and `warning[lost-write]` blamed the author for it.
+//
+// The copies that must stay: an arm that disturbs without leaving (c3), a returning arm that
+// reads the view itself (c4), and a `break` arm, whose state reaches the loop's exit (c6).
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+
+struct E { n: integer }
+struct W { v: vector<E> }
+
+fn c1(w: W, grow: boolean) -> integer {
+  e = w.v[0];
+  if grow { w.v += [E { n: 1 }]; return -1; }
+  e.n = 77;
+  w.v[0].n
+}
+
+fn c2(w: W, keep: boolean) -> integer {
+  e = w.v[0];
+  if keep { w.v[1].n = 21; } else { w.v += [E { n: 1 }]; return -1; }
+  e.n = 77;
+  w.v[0].n
+}
+
+fn c3(w: W, grow: boolean) -> integer {
+  e = w.v[0];
+  if grow { w.v += [E { n: 1 }]; }
+  e.n = 77;
+  w.v[0].n + e.n
+}
+
+fn c4(w: W, grow: boolean) -> integer {
+  e = w.v[0];
+  if grow { w.v += [E { n: 1 }]; return e.n; }
+  e.n = 77;
+  w.v[0].n
+}
+
+fn c5(w: W, cut: boolean) -> integer {
+  e = w.v[1];
+  if cut { w.v.remove(0); return -1; }
+  e.n = 88;
+  w.v[1].n
+}
+
+fn c6(w: W) -> integer {
+  e = w.v[0];
+  for i in 0..3 {
+    if i == 1 { w.v += [E { n: 1 }]; break; }
+  }
+  e.n = 77;
+  w.v[0].n + e.n
+}
+
+fn fresh() -> W { W { v: [E { n: 10 }, E { n: 20 }] } }
+
+fn main() {
+  a = fresh();
+  assert(c1(a, false) == 77, "c1: the write after a returning arm reaches v[0]");
+  assert(a.v[0].n == 77, "c1: and the caller sees it");
+  b = fresh();
+  assert(c1(b, true) == -1 && len(b.v) == 3, "c1: the returning arm grew the vector");
+  c = fresh();
+  assert(c2(c, true) == 77, "c2: a returning else arm");
+  d = fresh();
+  assert(c3(d, false) == 87, "c3: copied — the arm does not leave, v[0] keeps 10, the copy 77");
+  f = fresh();
+  assert(c3(f, true) == 87 && len(f.v) == 3, "c3: grown, the copy still 77");
+  g = fresh();
+  assert(c4(g, true) == 10, "c4: the returning arm reads the view");
+  h = fresh();
+  assert(c4(h, false) == 10, "c4: copied — the write lands in the copy");
+  k = fresh();
+  assert(c5(k, false) == 88, "c5: a removal on the returning path");
+  m = fresh();
+  assert(c6(m) == 87 && len(m.v) == 3, "c6: a break arm's growth reaches the loop's exit");
+}
