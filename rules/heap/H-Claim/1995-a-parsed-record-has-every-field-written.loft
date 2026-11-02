@@ -19,7 +19,7 @@
 // hand-computed.
 //
 // @falsified-at: 59cdb57e1 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
-// @falsified-by: tests/falsified/1995-a-parsed-record-has-every-field-written.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// @falsified-by: tests/falsified/1995-a-parsed-record-has-every-field-written.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT (expected for a backend-divergence guard — only one side can move)
 //   CHANNEL: the ASSERTIONS — the control compiles this file and answers the earlier value.
 //   WITNESS: the control stops at the first cell, *a bare tag kept an earlier radius:
 //   Circle {r:7.5} []*.  Run one cell per program there, every cell fails: `Rect {w:11,h:22}`
