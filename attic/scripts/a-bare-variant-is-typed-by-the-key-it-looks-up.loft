@@ -4,7 +4,9 @@
 // A lookup key is a checked position like a call argument: the key field's type is the
 // expected type, so a bare variant resolves against the key's enum — `h[Green]` as `f(Green)`
 // does against a parameter.  Each collection is over its own record type, so no linked group
-// (`(Col-Group)`) shares records between them.
+// (`(Col-Group)`) shares records between them.  A second enum owns the same variant names
+// (`Lamp`), so the name alone picks neither (@C157 resolves a name only one visible enum owns):
+// only the key's type can.
 //
 // @falsified-at: c152e6e83 — interpret exit 1 -> 0, native exit 1 -> 0
 // @falsified-by: tests/falsified/a-bare-variant-is-typed-by-the-key-it-looks-up.patch — interpret exit 1 -> 0, native exit 1 -> 0
@@ -15,6 +17,7 @@
 //   HOLDS: on this tree all six lookups and three lengths answer on both backends.
 
 enum Col { Red, Green }
+enum Lamp { Green, Red, Off }
 struct EH { k: Col, n: integer }
 struct ES { k: Col, n: integer }
 struct EI { a: integer, k: Col, n: integer }

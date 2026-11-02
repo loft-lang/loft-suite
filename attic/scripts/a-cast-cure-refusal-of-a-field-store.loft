@@ -9,9 +9,10 @@
 // @falsified-at: 726b9665e — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 1/1 (the
 //   suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1
 //   -> 1/1.
-// @falsified-by: tests/falsified/a-cast-cure-refusal-of-a-field-store.patch — the same
-//   channels.  Score it with `scripts/falsify.sh <this file> --patch <that patch>` once
-//   726b9665e is out of reach.
+// @falsified-by: none at HEAD — reverting the fix no longer reproduces this cell: loft#1938
+//   spells every integer by its alias in Type::source_name (u8?), and diagnostics dedupe by
+//   position, so neither the misnamed cure nor the second report shows.  The receipt is the
+//   control above (726b9665e — reachable only from a PR ref, not a branch).
 // HOLDS: nothing runs on either tree (a refusal file).
 
 fn main() {
