@@ -17,7 +17,9 @@
 // @falsified-at: none — the defect this file catches was never on a commit: it is the leak
 //   the in-place bind has while an inferred local widened by `= null` still depends on
 //   itself, and both landed together.
-// @falsified-by: tests/falsified/1989-a-literal-bound-to-a-nullable-local-is-built-in-the-local.patch — interpret exit 1 -> 0, interpret leaked kt=100 S×2 -> clean, native exit 1 -> 0, native leaked kt=100 S×2 -> clean
+// @falsified-by: tests/falsified/1989-a-literal-bound-to-a-nullable-local-is-built-in-the-local.patch — interpret exit 1 -> 0, interpret leaked kt=101 S×2 -> clean, native exit 1 -> 0, native leaked kt=101 S×2 -> clean
+//   The patch also undoes loft#2017's record carve-out in `Variables::is_independent`, which
+//   now refuses this shape by itself: each revert alone leaves the guard green.
 //   CHANNEL: the LEAK — the control answers every value and leaves stores at exit.
 //   ARMED: LOFT_STRICT_STORES=1
 //   WITNESS: the control leaves `S×2` at exit on both backends — the record `widened` builds,
