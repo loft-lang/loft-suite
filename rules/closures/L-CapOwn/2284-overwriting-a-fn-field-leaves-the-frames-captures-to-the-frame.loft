@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// Overwriting a struct's fn field whose closure captured a local of THIS frame leaves that
+// local's store to the frame: the frame keeps using it, and it is released once.
+//
+// @FR-L-CapOwn: a captured store is freed ONCE, by whichever of the two outlives the other.
+// The record a frame builds into `h.f` adopted the frame's `v`; the overwrite then displaced
+// it while the frame still used `v`, and the displaced record's cascade freed `v` there
+// (loft#2284) — `v += [4]` wrote into a released store, which LOFT_POISON / strict stores
+// report on both backends.  Two routes: a non-capturing replacement (the reset binds the old
+// record and cascades it) and a capturing one (the new build releases the old record's
+// captures from the field's slot).  Now the record the overwrite displaces is compared with
+// the frame's own builds by identity; when it is one, its captures stay the frame's, released
+// at its end on the run where no record holds them any more.
+//
+// Axes this file MOVES:  the replacement (captures nothing, captures another local); how often
+//                        (once, twice, in a loop, under an `if`); the holder (left behind,
+//                        returned with the overwrite on one path); a record built ELSEWHERE
+//                        and overwritten here (a factory's), which must still be released by
+//                        its own cascade; a local fn-ref instead of a field (the control).
+// Axes it HOLDS FIXED:   the captured value is a `vector<integer>`; one fn field.
+//
+// The channel is the value under `LOFT_POISON=1` and the strict-store check (a read of a freed
+// store, and a store left at exit, both fail the run).  One test per shape: run together in one
+// test the runner's leak check trips on an unrelated defect (filed separately).
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0 (the poisoned store read in `replaced`),
+// native-c exit 1 -> 0; scored by hand against the installed main build.
+//   HOLDS: clean under `LOFT_STRICT_STORES=1`, both backends.
+// @ARMED: LOFT_POISON=1
+struct H { tag: integer, f: fn() -> integer }
+
+fn replaced() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; h.f = fn() -> integer { 7 }; v += [4]; "{len(v)} {h.f()}" }
+fn local_control() -> text { v = [1, 2, 3]; f = fn() -> integer { len(v) }; g = f; f = fn() -> integer { 7 }; v += [4]; "{len(v)} {f()} {g()}" }
+fn returned() -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; h.f = fn() -> integer { 7 }; v += [4]; assert(len(v) == 4, "returned v"); h }
+fn mkh() -> H { v = [1, 2, 3]; H { tag: 0, f: fn() -> integer { len(v) } } }
+fn factory() -> text { h = mkh(); a = h.f(); h.f = fn() -> integer { 7 }; "{a} {h.f()}" }
+fn kept() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; v += [4]; "{len(v)} {h.f()}" }
+fn in_a_loop() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { h.f = fn() -> integer { len(v) + i }; } v += [4]; "{len(v)} {h.f()}" }
+fn on_one_path(c: boolean) -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; if c { h.f = fn() -> integer { 7 }; } v += [4]; "{len(v)} {h.f()}" }
+fn capturing() -> text { v = [1, 2, 3]; w = [9, 9]; h = H { tag: 0, f: fn() -> integer { len(v) } }; h.f = fn() -> integer { len(w) }; v += [4]; "{len(v)} {h.f()}" }
+fn leaves_on_one_path(c: boolean) -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; if c { h.f = fn() -> integer { 7 }; } h }
+fn twice() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { len(v) } }; h.f = fn() -> integer { 7 }; h.f = fn() -> integer { 8 }; v += [4]; "{len(v)} {h.f()}" }
+
+fn test_replaced() { assert(replaced() == "4 7", "replaced {replaced()}"); }
+fn test_local_control() { assert(local_control() == "4 7 4", "local_control {local_control()}"); }
+fn test_returned() { r = returned(); assert(r.f() == 7, "returned {r.f()}"); }
+fn test_factory() { assert(factory() == "3 7", "factory {factory()}"); }
+fn test_kept() { assert(kept() == "4 4", "kept {kept()}"); }
+fn test_in_a_loop() { assert(in_a_loop() == "4 6", "in_a_loop {in_a_loop()}"); }
+fn test_on_one_path() {
+  assert(on_one_path(true) == "4 7", "on_one_path(true) {on_one_path(true)}");
+  assert(on_one_path(false) == "4 4", "on_one_path(false) {on_one_path(false)}");
+}
+fn test_capturing() { assert(capturing() == "4 2", "capturing {capturing()}"); }
+fn test_leaves_on_one_path() {
+  a = leaves_on_one_path(false);
+  b = leaves_on_one_path(true);
+  assert(a.f() == 3 && b.f() == 7, "leaves_on_one_path {a.f()} {b.f()}");
+}
+fn test_twice() { assert(twice() == "4 8", "twice {twice()}"); }

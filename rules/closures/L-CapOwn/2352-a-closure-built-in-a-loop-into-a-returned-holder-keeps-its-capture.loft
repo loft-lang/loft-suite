@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A closure built on every pass of a loop, capturing a local of the frame, keeps that capture
+// when what holds the closure LEAVES the frame — a struct's fn field, or the fn-ref itself.
+//
+// @FR-L-CapOwn: a captured heap store is freed once, by whichever of the two outlives the
+// other; a record that leaves takes the release over.  A build inside a loop never let the
+// record take over the capture's BACKING store, on the grounds that each pass may adopt a
+// different store — so the frame freed `v` at its end while the returned record still held it
+// (loft#2352: `h.f()` read 2 under LOFT_POISON, a use after free on the C).  When the capture
+// is assigned only before the loop, or before the build on every pass, the record left
+// standing holds exactly the store the local names at the end, and the frame's release of it
+// is conditional on that record.
+//
+// Axes this file MOVES:  the holder (a fn field of a returned struct, a returned fn-ref, a
+//                        fn-ref called after the loop, a struct left behind); the capture
+//                        (assigned once before the loop, re-assigned before the build on every
+//                        pass); the build (every pass, one pass, no pass).
+// Axes it HOLDS FIXED:   the capture is a `vector<integer>`.  Not covered: a capture assigned
+//                        AFTER its build within the pass, and a build in a branch of a pass
+//                        that re-assigns it — the local then names a store no record holds.
+//
+// The channel is the value under `LOFT_POISON=1` and the strict-store / leak checks.
+// @falsified-at: 0e95172cd — interpret: 4 of 8 tests fail (the poisoned store read), native-c:
+// 4 of 8 killed by signal 11; scored by hand against the installed main build.
+//   HOLDS: clean under `LOFT_STRICT_STORES=1` and the leak check, both backends.
+// @ARMED: LOFT_POISON=1
+struct H { tag: integer, f: fn() -> integer }
+
+fn every_pass() -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { h.f = fn() -> integer { len(v) + i }; } v += [4]; h }
+fn rebound_before() -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { v = [i, i]; h.f = fn() -> integer { len(v) + i }; } h }
+fn as_fn_ref() -> fn() -> integer { v = [1, 2, 3]; f = fn() -> integer { 0 }; for i in 0..3 { f = fn() -> integer { len(v) + i }; } v += [4]; f }
+fn called_after() -> text { v = [1, 2, 3]; f = fn() -> integer { 0 }; for i in 0..3 { f = fn() -> integer { len(v) + i }; } v += [4]; "{f()}" }
+fn one_pass() -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { if i == 1 { h.f = fn() -> integer { len(v) + i }; } } v += [4]; h }
+fn no_pass() -> H { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..0 { h.f = fn() -> integer { len(v) + i }; } v += [4]; h }
+fn left_behind() -> text { v = [1, 2, 3]; h = H { tag: 0, f: fn() -> integer { 0 } }; for i in 0..3 { h.f = fn() -> integer { len(v) + i }; } v += [4]; "{len(v)} {h.f()}" }
+fn rebound_fn_ref() -> text { v = [1, 2, 3]; f = fn() -> integer { 0 }; for i in 0..3 { v = [i, i]; f = fn() -> integer { len(v) + i }; } "{f()}" }
+
+fn test_every_pass() { h = every_pass(); assert(h.f() == 6, "every_pass {h.f()}"); }
+fn test_rebound_before() { h = rebound_before(); assert(h.f() == 4, "rebound_before {h.f()}"); }
+fn test_as_fn_ref() { f = as_fn_ref(); assert(f() == 6, "as_fn_ref {f()}"); }
+fn test_called_after() { assert(called_after() == "6", "called_after {called_after()}"); }
+fn test_one_pass() { h = one_pass(); assert(h.f() == 5, "one_pass {h.f()}"); }
+fn test_no_pass() { h = no_pass(); assert(h.f() == 0, "no_pass {h.f()}"); }
+fn test_left_behind() { assert(left_behind() == "4 6", "left_behind {left_behind()}"); }
+fn test_rebound_fn_ref() { assert(rebound_fn_ref() == "4", "rebound_fn_ref {rebound_fn_ref()}"); }
