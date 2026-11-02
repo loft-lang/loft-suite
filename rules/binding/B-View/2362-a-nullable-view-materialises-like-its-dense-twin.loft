@@ -1,0 +1,152 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-View`'s materialise clause, on a NULLABLE local: a view rebound while its container is
+// reassigned takes its copy at the bind, and "the nullability of the bound value changes
+// nothing".  A `τ?` local (`t: Ty? = …; t = x.tp`, then `x = …`) kept an alias into the record
+// the reassignment freed, where its dense twin copied: the interpreter read the freed record —
+// as null, or as whatever the slot held next (loft#2362).  The C backend was right.  Every
+// cell is one rebind of a nullable local off a projection whose container is then reassigned;
+// the axes are the projection (a struct-enum field, a struct field, a nested field, a vector
+// element), the slot it displaces (a record, the null sentinel, a value set back to null) and
+// the trip count, with a live-record census so the copy is not paid for with a leak.
+//
+// Expected, by hand: c_enum's last round binds `TNever` (2) and ends on `TVoid` (1); c_null
+// binds `TInt { min: 4 }` (14); c_struct binds P { 7, "s7" }; c_nested P { 6, "s6" }; c_elem
+// reads 1a from the first vector and 9z from its replacement; c_reset alternates 1..3 with
+// `true`; c_census sums 0..n-1 and holds as many records after 1 000 rounds as after 10.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   CHANNEL: an assertion, on the interpreter.
+//   WITNESS: "c_null 50" — the freed record's slot read as the record built after it.
+//   HOLDS: every cell on the C backend, on both trees; the dense twin (`t = TVoid`) on both.
+
+enum Ty { TVoid, TNever, TInt { min: integer } }
+struct P { n: integer, s: text }
+struct W { p: P, k: integer }
+struct O { w: W, tp: Ty }
+
+fn kind(t: Ty) -> integer { match t { TVoid => 1, TNever => 2, TInt { min } => 10 + min } }
+fn mk(i: integer) -> O {
+  O { w: W { p: P { n: i, s: "s{i}" }, k: i }, tp: if i % 2 == 0 { TInt { min: i } } else { TNever } }
+}
+
+fn census_records() -> integer {
+  cr_t = store_memory();
+  cr_i = cr_t.find("records ");
+  if !cr_i { return -1 }
+  cr_j = cr_i + 8;
+  cr_n = 0;
+  while cr_j < len(cr_t) && cr_t[cr_j] >= '0' && cr_t[cr_j] <= '9' {
+    cr_n = cr_n * 10 + (cr_t[cr_j] as integer - '0' as integer);
+    cr_j += 1;
+  }
+  cr_n
+}
+
+// The issue's shape: a struct-enum field, a `continue` round, the container reassigned again.
+fn c_enum() -> text {
+  t: Ty? = TVoid;
+  acc = 0;
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s);
+    t = x.tp;
+    if s % 2 == 0 {
+      if !(t is TNever) { t = TVoid; }
+      continue;
+    }
+    x = mk(s + 7);
+    acc += kind(t!);
+    t = TVoid;
+  }
+  "{acc} {kind(t!)}"
+}
+
+// The displaced slot holds the null sentinel.
+fn c_null() -> integer {
+  t: Ty? = null;
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s + 3);
+    t = x.tp;
+    x = mk(40);
+  }
+  kind(t!)
+}
+
+fn c_struct() -> text {
+  t: P? = P { n: 0, s: "" };
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s + 6);
+    t = x.w.p;
+    if s % 2 == 0 { continue; }
+    x = mk(s + 20);
+  }
+  "{t!.n} {t!.s}"
+}
+
+fn c_nested() -> text {
+  t: P? = null;
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s + 5);
+    t = x.w.p;
+    x = mk(70);
+  }
+  "{t!.n} {t!.s}"
+}
+
+fn c_elem() -> text {
+  t: P? = null;
+  v = [P { n: 1, s: "a" }, P { n: 2, s: "bb" }];
+  acc = "";
+  for s in 0..2 {
+    t = v[s];
+    v = [P { n: 9, s: "z" }, P { n: 9, s: "z" }];
+    acc += "{t!.n}{t!.s}";
+  }
+  acc
+}
+
+fn c_reset() -> text {
+  t: P? = null;
+  x = mk(0);
+  acc = "";
+  for s in 0..3 {
+    x = mk(s + 1);
+    t = x.w.p;
+    x = mk(90);
+    acc += "{t!.n}";
+    t = null;
+    acc += "{t == null}";
+  }
+  acc
+}
+
+fn c_census(n: integer) -> integer {
+  t: P? = null;
+  x = mk(0);
+  tot = 0;
+  for s in 0..n {
+    x = mk(s);
+    t = x.w.p;
+    x = mk(s + 1);
+    tot += t!.n;
+  }
+  assert(tot == n * (n - 1) / 2, "c_census total {tot}");
+  census_records()
+}
+
+fn main() {
+  assert(c_enum() == "2 1", "c_enum {c_enum()}");
+  assert(c_null() == 14, "c_null {c_null()}");
+  assert(c_struct() == "7 s7", "c_struct {c_struct()}");
+  assert(c_nested() == "6 s6", "c_nested {c_nested()}");
+  assert(c_elem() == "1a9z", "c_elem {c_elem()}");
+  assert(c_reset() == "1true2true3true", "c_reset {c_reset()}");
+  assert(census_records() >= 0, "the census answers");
+  assert(c_census(1000) == c_census(10), "c_census grows: {c_census(10)} -> {c_census(1000)}");
+}

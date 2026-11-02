@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Store` — a slice bound is an INDEX, and "a null index reads null": a text slice whose
+// start or end is null answers null (`(N-Prop)`), typed `text?`; a vector slice bound to a local
+// leaves it ABSENT, typed `vector<T>?`, and walked it takes no round (`@FR-I-RangeNull`).  The bound still warns, as a
+// single index does — it is a slot — and the slice is then the null the warning names, where
+// it read as the position 0: `t[1..maybe(0)]` answered "" and `t[maybe(0)..2]` the first two
+// characters (loft#2306).  Every form of bound: an end, a start, an open end, an open start,
+// an inclusive end before and after its `+ 1`; an absent slice counts 0 (`@FR-Col-Len`).
+// The controls: a nullable bound that holds a value slices as its value does.
+//
+// Expected, by hand, over "hello": each null form `null`; `len` of one 0; `t[1..2]` "e",
+// `t[1..=2]` "el", `t[3..]` "lo".  Over [10, 20, 30, 40]: each null bind `null`, each null walk
+// and comprehension empty; `v[1..2]` [20], `v[1..]` [20,30,40]; over three records, `rs[1..2]`
+// one record, n 2.  A loop alternating a null and a held bound keeps both answers (1000 nulls,
+// 2000 elements) — the local holds one of two backings and borrows both.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: an assertion — the control answers the slice as if the bound were 0.
+//   WITNESS: "v[1..null] is null" fails first: the control binds the empty slice; its text
+//     slices read "" and "he" for the null bounds.
+//   HOLDS: the controls (`v[1..2]`, `v[1..]`, `rs[1..2]`, `t[1..2]`, `t[1..=2]`, `t[3..]`) agree
+//     on both trees.
+
+fn maybe(x: integer) -> integer? { if x > 0 { x } else { null } }
+
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_end(t: text) -> boolean { t[1..maybe(0)] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_start(t: text) -> boolean { t[maybe(0)..2] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_start_open_end(t: text) -> boolean { t[maybe(0)..] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_end_open_start(t: text) -> boolean { t[..maybe(0)] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_start_inclusive(t: text) -> boolean { t[maybe(0)..=2] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_end_inclusive(t: text) -> boolean { t[1..=maybe(0)] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_length(t: text) -> integer { len(t[1..maybe(0)]) }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn held_end(t: text) -> text { t[1..maybe(2)] ?? "?" }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn held_both(t: text) -> text { t[maybe(1)..=maybe(2)] ?? "?" }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn held_start(t: text) -> text { t[maybe(3)..] ?? "?" }
+
+struct R { n: integer }
+
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_null_end(v: vector<integer>) -> boolean { w = v[1..maybe(0)]; w == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_null_start(v: vector<integer>) -> boolean { w = v[maybe(0)..2]; w == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_null_open_end(v: vector<integer>) -> boolean { w = v[maybe(0)..]; w == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_null_open_start(v: vector<integer>) -> boolean { w = v[..maybe(0)]; w == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_null_walk(v: vector<integer>) -> integer { n = 0; for x in v[maybe(0)..2] { n += x; } n }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_null_comprehension(v: vector<integer>) -> integer { len([for x in v[maybe(0)..2] { x }]) }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn rec_null(rs: vector<R>) -> boolean { w = rs[maybe(0)..1]; w == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_held_end(v: vector<integer>) -> text { w = v[1..maybe(2)]; "{w}" }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_held_start(v: vector<integer>) -> text { w = v[maybe(1)..]; "{w}" }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn rec_held(rs: vector<R>) -> integer { w = rs[maybe(1)..2]; len(w!) * 10 + w![0].n }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn vec_alternating(v: vector<integer>) -> integer {
+  nulls = 0;
+  total = 0;
+  for i in 0..2000 {
+    t = v[maybe(i % 2)..3];
+    if t == null { nulls += 1; } else { total += len(t!); }
+  }
+  nulls * 10000 + total
+}
+
+fn main() {
+  v = [10, 20, 30, 40];
+  rs = [R { n: 1 }, R { n: 2 }, R { n: 3 }];
+  assert(vec_null_end(v), "v[1..null] is null");
+  assert(vec_null_start(v), "v[null..2] is null");
+  assert(vec_null_open_end(v), "v[null..] is null");
+  assert(vec_null_open_start(v), "v[..null] is null");
+  assert(vec_null_walk(v) == 0, "a walk of v[null..2]: {vec_null_walk(v)}");
+  assert(vec_null_comprehension(v) == 0, "a comprehension over v[null..2]");
+  assert(rec_null(rs), "rs[null..1] is null");
+  assert(vec_held_end(v) == "[20]", "v[1..2]: {vec_held_end(v)}");
+  assert(vec_held_start(v) == "[20,30,40]", "v[1..]: {vec_held_start(v)}");
+  assert(rec_held(rs) == 12, "rs[1..2]: {rec_held(rs)}");
+  assert(vec_alternating(v) == 1000 * 10000 + 2000, "alternating: {vec_alternating(v)}");
+  t = "hello";
+  assert(null_end(t), "t[1..null] is null");
+  assert(null_start(t), "t[null..2] is null");
+  assert(null_start_open_end(t), "t[null..] is null");
+  assert(null_end_open_start(t), "t[..null] is null");
+  assert(null_start_inclusive(t), "t[null..=2] is null");
+  assert(null_end_inclusive(t), "t[1..=null] is null");
+  assert(null_length(t) == 0, "len of an absent slice: {null_length(t)}");
+  assert(held_end(t) == "e", "t[1..2]: {held_end(t)}");
+  assert(held_both(t) == "el", "t[1..=2]: {held_both(t)}");
+  assert(held_start(t) == "lo", "t[3..]: {held_start(t)}");
+}
