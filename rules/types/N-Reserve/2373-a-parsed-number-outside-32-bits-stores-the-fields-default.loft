@@ -4,7 +4,7 @@
 // A number a parse writes into a narrow field that does not fit stores the field's default —
 // whether it misses by a little (`300` into a `u8`) or lies outside 32 bits altogether.
 //
-// loft#984's rule: a value a field cannot represent stores the type's DEFAULT, the lowest value
+// @FR-N-Reserve, with loft#984's rule: a value a field cannot represent stores the type's DEFAULT, the lowest value
 // in its range, or null where the field is nullable; a slot never holds a value its type cannot
 // represent.  `T.parse` cast the number to 32 bits before the setters' range checks saw it, so a
 // number outside 32 bits arrived as its low 32 bits — a different, in-range value (`2^32 + 5`
@@ -13,7 +13,8 @@
 //
 // Axes this file MOVES:  the width (u8, u16, i32, u32) × nullable or not; the value above 32
 //                        bits, below, inside 32 bits but outside the field, in range; the u32
-//                        top code (a value for `u32`, absence for `u32?`).
+//                        top code (a value for `u32`, absence for `u32?` — the edge `(N-Reserve)`
+//                        spends on the null).
 // Axes it HOLDS FIXED:   a plain struct parsed from JSON text.
 //
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, native-c exit 1 -> 0: main answers
