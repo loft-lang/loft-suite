@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Store` — a slice bound is an INDEX, and "a null index reads null": a text slice whose
+// start or end is null answers null (`(N-Prop)`), typed `text?`.  The bound still warns, as a
+// single index does — it is a slot — and the slice is then the null the warning names, where
+// it read as the position 0: `t[1..maybe(0)]` answered "" and `t[maybe(0)..2]` the first two
+// characters (loft#2306).  Every form of bound: an end, a start, an open end, an open start,
+// an inclusive end before and after its `+ 1`; an absent slice counts 0 (`@FR-Col-Len`).
+// The controls: a nullable bound that holds a value slices as its value does.
+//
+// Expected, by hand, over "hello": each null form `null`; `len` of one 0; `t[1..2]` "e",
+// `t[1..=2]` "el", `t[3..]` "lo".
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: an assertion — the control answers the slice as if the bound were 0.
+//   WITNESS: "t[1..null] is null" fails first: the control's slice is "".
+//   HOLDS: the controls `t[1..2]`, `t[1..=2]`, `t[3..]` agree on both trees.
+
+fn maybe(x: integer) -> integer? { if x > 0 { x } else { null } }
+
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_end(t: text) -> boolean { t[1..maybe(0)] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_start(t: text) -> boolean { t[maybe(0)..2] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_start_open_end(t: text) -> boolean { t[maybe(0)..] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_end_open_start(t: text) -> boolean { t[..maybe(0)] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_start_inclusive(t: text) -> boolean { t[maybe(0)..=2] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_end_inclusive(t: text) -> boolean { t[1..=maybe(0)] == null }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn null_length(t: text) -> integer { len(t[1..maybe(0)]) }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn held_end(t: text) -> text { t[1..maybe(2)] ?? "?" }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn held_both(t: text) -> text { t[maybe(1)..=maybe(2)] ?? "?" }
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index
+fn held_start(t: text) -> text { t[maybe(3)..] ?? "?" }
+
+fn main() {
+  t = "hello";
+  assert(null_end(t), "t[1..null] is null");
+  assert(null_start(t), "t[null..2] is null");
+  assert(null_start_open_end(t), "t[null..] is null");
+  assert(null_end_open_start(t), "t[..null] is null");
+  assert(null_start_inclusive(t), "t[null..=2] is null");
+  assert(null_end_inclusive(t), "t[1..=null] is null");
+  assert(null_length(t) == 0, "len of an absent slice: {null_length(t)}");
+  assert(held_end(t) == "e", "t[1..2]: {held_end(t)}");
+  assert(held_both(t) == "el", "t[1..=2]: {held_both(t)}");
+  assert(held_start(t) == "lo", "t[3..]: {held_start(t)}");
+}
