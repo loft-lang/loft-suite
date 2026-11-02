@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// An update nested as a field of another update releases every temporary the function made.
+//
+// @FR-B-Copy: an update is a copy of its base with the named fields written; each literal's
+// temporary is released once.  Pass 1 parsed the outer update's fields as a plain literal and
+// abandoned it at the `..`, marking the nested update's work-ref skip-free BY NAME; pass 2 went
+// straight to the update and minted that name for the function's FIRST literal, which then
+// leaked (loft#2371).  An abandoned construction is marked on the second pass only.
+//
+// Axes this file MOVES:  the nesting (one inner update, two, one inside a loop); the outer
+//                        update bound and passed straight to a call; the first literal of the
+//                        function before it.
+// Axes it HOLDS FIXED:   record fields only (no collection, no text field in the update).
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: 0e95172cd — interpret 3 of 4 tests fail (main also writes the nested update
+//   through to its base, loft#2370, so the values move as well as the store); native-c the
+//   asserts hold and strict stores report NEVER FREED `kt=100 Inner×2`.  Scored by hand against
+//   the installed main build.
+// CHANNEL: the strict-store exit status, and on main's interpreter the asserts.
+// WITNESS: main's C run reports `not freed at program exit: kt=100 Inner×2`.
+// HOLDS: every assert, on both builds; a single literal and a plain nested literal leak nothing.
+
+struct Inner { a: integer, b: integer }
+struct Outer { inner: Inner, k: integer }
+struct Deep { o: Outer, n: integer }
+
+fn total_of(o: Outer) -> integer { o.inner.a + o.inner.b + o.k }
+
+fn test_one_nested_update_releases_the_first_literal() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+  e = Outer { inner: Inner { a: 7, ..h.inner }, ..h };
+  assert(e.inner.a == 7 && e.inner.b == 2 && e.k == 5 && h.inner.a == 1, "one: {e.inner.a} {e.inner.b} {e.k} {h.inner.a}");
+}
+
+fn test_passed_straight_to_a_call() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+  assert(total_of(Outer { inner: Inner { a: 10, ..h.inner }, ..h }) == 17, "call");
+}
+
+fn test_two_levels() {
+  d = Deep { o: Outer { inner: Inner { a: 1, b: 2 }, k: 5 }, n: 9 };
+  e = Deep { o: Outer { inner: Inner { b: 20, ..d.o.inner }, ..d.o }, ..d };
+  assert(e.o.inner.a == 1 && e.o.inner.b == 20 && e.o.k == 5 && e.n == 9 && d.o.inner.b == 2, "two: {e.o.inner.b} {d.o.inner.b}");
+}
+
+fn test_in_a_loop() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+  t = 0;
+  for i in 0..4 { e = Outer { inner: Inner { a: i, ..h.inner }, ..h }; t += e.inner.a + e.inner.b; }
+  assert(t == 14, "loop {t}");
+}
