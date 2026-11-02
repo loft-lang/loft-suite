@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2315 — `@FR-C-Var` (a variant converts to its enum) composed with `@FR-N-Join` (a join is
+// optional iff an arm is) and `@FR-N-Shape` (a test of a type's shape peels its `?`).  A `match`
+// over a STRUCT-ENUM subject whose result is an optional enum refused a later arm yielding
+// another variant or null — `VFloat { f } => if f > 0.0 { FFloat { v: f } } else { null }` —
+// with "cannot unify: Fd? and FFloat?": the arm gate peeled the arm's type but matched the
+// RESULT unpeeled, so `Fd?` never met its variant.  The same arms under an integer subject
+// compiled, which is why the subject is an axis here.
+//
+// Each cell prints by the STATIC type: a `Fd` prints `FFloat {v:1.5}`, an absent one `null`.
+// Every value by hand.
+//
+// Axes this file MOVES:  the subject (struct-enum, plain enum, integer), which arm is the
+//                        if-or-null (first, second, wildcard, both), the site (return,
+//                        inferred local), a heap payload (text), evaluation count (a loop).
+// Axes it HOLDS FIXED:   one result enum; the null spelled as the literal `null`.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the compile — main refuses this file ("cannot unify: Fd? and FFloat?").
+
+enum Fd { FInt { v: integer }, FFloat { v: float }, FName { s: text } }
+enum Fo { VInt { n: integer }, VFloat { f: float } }
+enum Col { Red, Green }
+
+// 1: both arms an if-or-null, struct-enum subject
+fn both(g: Fo) -> Fd? {
+  match g {
+    VInt { n } => if n > 0 { FInt { v: n } } else { null },
+    VFloat { f } => if f > 0.0 { FFloat { v: f } } else { null },
+  }
+}
+// 2: a plain variant first, the if-or-null second
+fn plain_first(g: Fo) -> Fd? {
+  match g {
+    VInt { n } => FInt { v: n },
+    VFloat { f } => if f > 0.0 { FFloat { v: f } } else { null },
+  }
+}
+// 3: the wildcard arm is the if-or-null
+fn wild(g: Fo) -> Fd? {
+  match g {
+    VInt { n } => if n > 0 { FInt { v: n } } else { null },
+    _ => if true { FFloat { v: 0.25 } } else { null },
+  }
+}
+// 4: a heap payload
+fn named(g: Fo) -> Fd? {
+  match g {
+    VInt { n } => if n > 0 { FInt { v: n } } else { null },
+    VFloat { f } => if f > 0.0 { FName { s: "f{f}" } } else { null },
+  }
+}
+// 5: a plain enum subject
+fn by_col(c: Col, k: integer) -> Fd? {
+  match c {
+    Red => if k > 0 { FInt { v: k } } else { null },
+    Green => if k > 0 { FFloat { v: 0.5 } } else { null },
+  }
+}
+// 6: an integer subject
+fn by_int(k: integer) -> Fd? {
+  match k {
+    1 => if k > 0 { FInt { v: 1 } } else { null },
+    _ => if k > 0 { FFloat { v: 2.5 } } else { null },
+  }
+}
+
+fn main() {
+  // 1
+  o1 = "{both(VInt { n: 3 })} {both(VInt { n: -3 })} {both(VFloat { f: 1.5 })} {both(VFloat { f: -1.0 })}";
+  assert(o1 == "FInt {{v:3}} null FFloat {{v:1.5}} null", "c1 {o1}");
+  // 2
+  o2 = "{plain_first(VInt { n: -4 })} {plain_first(VFloat { f: 2.0 })} {plain_first(VFloat { f: -2.0 })}";
+  assert(o2 == "FInt {{v:-4}} FFloat {{v:2}} null", "c2 {o2}");
+  // 3
+  o3 = "{wild(VInt { n: 0 })} {wild(VFloat { f: 9.0 })}";
+  assert(o3 == "null FFloat {{v:0.25}}", "c3 {o3}");
+  // 4: the text lives and is released once
+  o4 = "";
+  for f in [1.5, -1.0, 2.0] {
+    o4 += "{named(VFloat { f: f })} ";
+  }
+  assert(o4 == "FName {{s:\"f1.5\"}} null FName {{s:\"f2\"}} ", "c4 {o4}");
+  // 5
+  o5 = "{by_col(Red, 7)} {by_col(Green, 7)} {by_col(Green, 0)}";
+  assert(o5 == "FInt {{v:7}} FFloat {{v:0.5}} null", "c5 {o5}");
+  // 6
+  o6 = "{by_int(1)} {by_int(2)} {by_int(-1)}";
+  assert(o6 == "FInt {{v:1}} FFloat {{v:2.5}} null", "c6 {o6}");
+  // 7: an inferred local takes the optional enum, in a loop
+  n7 = 0;
+  for g in [VInt { n: 5 }, VFloat { f: -3.0 }, VFloat { f: 4.0 }] {
+    x = match g {
+      VInt { n } => if n > 0 { FInt { v: n } } else { null },
+      VFloat { f } => if f > 0.0 { FFloat { v: f } } else { null },
+    };
+    if x != null {
+      n7 += 1;
+    }
+  }
+  assert(n7 == 2, "c7 {n7}");
+  println("ok");
+}

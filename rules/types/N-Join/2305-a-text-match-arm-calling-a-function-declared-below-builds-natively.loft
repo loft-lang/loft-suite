@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// The pass-1 twin of loft#2305, on the text accumulator.  A `match` tail of a `-> text?`
+// function whose arm calls a function declared BELOW it: pass 1 cannot type that call, and the
+// arm it leaves must count as an arm that yields a value — as the call does on pass 2 — or the
+// accumulator gate answers differently on the two passes, the arms stay one Rust expression, and
+// `--native` refuses the program (E0308: `&str` against `String`) while the interpreter runs it.
+// It must not count as a `null` arm either: the join stays as the written arms make it.
+// @falsified-at: 38f7016e4 — native exit 1 -> 0 (rustc E0308 on the arms' join)
+enum Ty { Opt { inner: Ty }, Num { v: integer }, Tup { elems: vector<Ty> }, Other }
+
+fn key(t: Ty) -> text? {
+  match t {
+    Opt { inner } => {
+      k = key(inner);
+      if k == null { null } else { "{k}?" }
+    }
+    Num { v } => num_key(v),
+    Tup { elems } => {
+      r = "";
+      for e in elems {
+        k = key(e);
+        if k == null {
+          return null;
+        }
+        r += if e#index > 0 { ", {k}" } else { k! };
+      }
+      "({r})"
+    }
+    _ => null,
+  }
+}
+
+fn num_key(v: integer) -> text {
+  if v == 0 { "integer" } else { "integer(0, {v})" }
+}
+
+fn main() {
+  assert(key(Opt { inner: Num { v: 3 } }) == "integer(0, 3)?", "an option of a range");
+  assert(key(Tup { elems: [Num { v: 0 }, Opt { inner: Num { v: 2 } }] }) == "(integer, integer(0, 2)?)", "a tuple");
+  assert(key(Tup { elems: [Other] }) == null, "a member with no key");
+  assert(key(Other) == null, "no key");
+  println("a text match arm calling a function declared below builds natively OK");
+}

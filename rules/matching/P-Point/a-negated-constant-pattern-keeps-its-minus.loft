@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Point` — a pattern `-NAME` matches the negated constant.  The minus before a
+// non-literal operand was consumed and dropped, so `-LIMIT` matched `LIMIT` and answered wrong
+// with no diagnostic (loft#2323).
+//
+// Axes this file MOVES:  where `-NAME` sits (an arm alone, an alternative, a range bound); the
+//                        value tested (the negated constant, the constant itself, other).
+// Axes it HOLDS FIXED:   integer subject and constants.
+LIMIT = 5;
+STEP = 2;
+
+fn alone(n: integer) -> integer { match n { -LIMIT => 1, _ => 0 } }
+fn alternative(n: integer) -> integer { match n { 1 | -LIMIT => 1, _ => 0 } }
+fn bound(n: integer) -> integer { match n { -LIMIT..-STEP => 1, _ => 0 } }
+
+fn test_a_negated_constant_arm() {
+  assert(alone(-5) == 1, "-LIMIT matches -5");
+  assert(alone(5) == 0, "and not 5");
+}
+
+fn test_a_negated_constant_alternative() {
+  assert(alternative(-5) == 1 && alternative(1) == 1 && alternative(5) == 0, "1 | -LIMIT");
+}
+
+fn test_negated_constant_bounds() {
+  assert(bound(-5) == 1 && bound(-3) == 1 && bound(-2) == 0 && bound(3) == 0, "-LIMIT..-STEP");
+}

@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2340 — a vector literal written into a field whose holder's type the first pass does not
+// know yet (its value comes from a function declared below), with a literal nested inside it,
+// compiles.  The first pass built the outer literal as a value, minting its accumulator
+// `_vec_1`; the second built it into the field, minting none, so the nested literal took
+// `_vec_1` at another element shape and the program was refused ("cannot change type").
+//
+// Every value by hand: `with_deps` keeps the variant and replaces its deps; `total` sums.
+//
+// Axes this file MOVES:  the element (a struct-enum, an integer, a text), the nesting depth,
+//                        the holder (a match capture's element, a local from a call), backends.
+// Axes it HOLDS FIXED:   the holder's producer declared below its use.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — main refused the program at compile time.
+
+enum Ty { TInt, TRef { n: integer, dep: vector<integer> } }
+struct Bl { name: text, result: vector<Ty>, sums: vector<integer>, names: vector<text> }
+enum Nd { NNull, NBlock { block: vector<Bl> } }
+
+fn with_deps(t: Ty, d: vector<integer>) -> Ty { match t { TRef { n } => TRef { n: n, dep: d }, _ => t } }
+fn total(v: vector<integer>) -> integer { t = 0; for x in v { t += x; } t }
+fn deps_len(t: Ty) -> integer { match t { TRef { dep } => len(dep), _ => -1 } }
+
+fn retype(rb: integer) -> Nd {
+  code = make();
+  match code {
+    NBlock { block } => {
+      bl = block[0];
+      bl.result = [with_deps(TRef { n: 3, dep: [] }, [rb, rb + 1])];
+      bl.sums = [total([rb, total([rb, 1])])];
+      bl.names = ["n{total([rb, 2])}"];
+      code = NBlock { block: [bl] };
+    },
+    _ => {}
+  }
+  code
+}
+fn make() -> Nd { NBlock { block: [Bl { name: "b", result: [], sums: [], names: [] }] } }
+
+fn main() {
+  c = retype(7);
+  match c {
+    NBlock { block } => {
+      b = block[0];
+      assert(len(b.result) == 1 && deps_len(b.result[0]) == 2, "result");
+      assert(len(b.sums) == 1 && b.sums[0] == 15, "sums {b.sums}");
+      assert(len(b.names) == 1 && b.names[0] == "n9", "names {b.names}");
+    },
+    _ => { assert(false, "variant"); }
+  }
+}

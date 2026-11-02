@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE IN A CONCAT IS A COPY OF ITS RANGE (`@FR-Slice-Value`, `@FR-Col-Concat`).  A slice is
+// owed as a fresh vector at every vector-typed position, and an operand of `+` over vectors is
+// one: `v[..-1] + [x]` drops the last element into a new vector, the source untouched.  The slice
+// stayed an iterator there ("No matching operator '+' on 'iterator<integer>' and
+// 'vector<integer>'") while `w = v[..-1]` copied.  Left operand, right operand, both, as an
+// argument, a field's value, records with a text, one fresh value per loop turn, and the
+// slice of the very local the concat is assigned to (`v = v[..-1] + [x]`: the assignment must not
+// empty `v` before the slice reads it — it gave `[x]`, caught before it shipped).
+//
+// Values hand-computed from v = [1, 2, 3] and rs = a, b, c.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0 (main refuses the `+`).
+// CHANNEL: the asserts.
+// ARMED: the leak check (the suite arms it): each copy is released once.
+// WITNESS: each message names the position.
+// HOLDS: every cell on both backends.
+
+struct V { s: text }
+struct H { v: vector<integer> }
+
+fn total(r: vector<integer>) -> integer {
+  t = 0;
+  for x in r { t += x; }
+  t
+}
+
+fn names(r: vector<V>) -> text {
+  t = "";
+  for x in r { t += x.s; }
+  t
+}
+
+fn test_either_side_of_the_plus() {
+  v = [1, 2, 3];
+  a = v[..-1] + [9];
+  b = [0] + v[1..];
+  c = v[..1] + v[2..];
+  assert("{a} {b} {c} {v}" == "[1,2,9] [0,2,3] [1,3] [1,2,3]", "left, right, both: {a} {b} {c} {v}");
+  v = v[..-1] + [9];
+  assert("{v}" == "[1,2,9]", "into the local it slices: {v}");
+  h = H { v: [1, 2, 3] };
+  h.v = h.v[..-1] + [8];
+  assert("{h.v}" == "[1,2,8]", "into the field it slices: {h.v}");
+}
+
+fn test_in_other_positions() {
+  v = [1, 2, 3];
+  assert(total(v[0..-1] + [10]) == 13, "an argument: 1 + 2 + 10");
+  h = H { v: v[1..] + [7] };
+  assert("{h.v}" == "[2,3,7]", "a field: {h.v}");
+  rs = [V { s: "a" }, V { s: "b" }, V { s: "c" }];
+  n = names(rs[..-1] + [V { s: "z" }]);
+  assert(n == "abz" && names(rs) == "abc", "records: {n}");
+  s = 0;
+  for i in 0..3 { s += total(v[i..] + [i]); }
+  assert(s == 17, "per turn: 6 + 6 + 5 = {s}");
+}

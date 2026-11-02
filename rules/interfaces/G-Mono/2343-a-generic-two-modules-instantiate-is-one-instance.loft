@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC TWO MODULES INSTANTIATE IS ONE INSTANCE (`@FR-G-Mono`): one instance per distinct
+// instantiation, program-wide.  The program and its library each call `vector<integer>`'s and
+// `vector<text>`'s `contains`; the second module to instantiate reuses the first one's instance.
+// Each module minted its own under one key (loft#2343), and both native backends then emitted
+// two definitions of one function — a build failure; the interpreter ran.
+//
+// Values hand-computed: [1, 2] holds 1 and not 3; ["a", "b"] holds "b" and not "c".
+//
+// @falsified-at: 0e95172cd — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: exit — the native build.
+// ARMED: no instrument.
+// WITNESS: the message prints all four answers.
+// HOLDS: every cell on both backends.
+
+use g_mono_fixture_lib;
+
+fn test_both_modules_share_the_instance() {
+  v = [1, 2];
+  t = ["a", "b"];
+  s = "{g_mono_fixture_lib::lib_has(v, 1)} {v.contains(3)} {g_mono_fixture_lib::lib_has_text(t, "b")} {t.contains("c")}";
+  assert(s == "true false true false", "lib|own, integer|text: {s}");
+}

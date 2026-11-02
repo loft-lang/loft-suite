@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPREHENSION OVER A SLICE READS ITS BOUNDS AS POSITIONS (`@FR-I-Comp`, `@FR-Slice-Value`).
+// `[for x in v[a..b] { e }]` walks the elements a slice names — a bound below zero counting from
+// the end, both clamped into the vector — as `for x in v[a..b]` does.  The comprehension's
+// constant folds read a slice's bounds as the integer range `a..b`: `v[..-1]` became the empty
+// range `0..-1` and answered `[]`, and a constant body over `v[1..9]` built eight elements,
+// with no diagnostic (loft#2344).  A plain range still folds.
+//
+// Values hand-computed from v = [10, 20, 30].
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 2 assertion failures -> 0, native exit
+//   1 -> 0, native 4 assertion failures -> 0.
+// CHANNEL: the asserts.
+// ARMED: the leak check (the suite arms it).
+// WITNESS: each message prints the built vector.
+// HOLDS: every cell on both backends.
+
+struct R { s: text, n: integer }
+
+fn test_negative_and_clamped_bounds() {
+  v = [10, 20, 30];
+  a = [for x in v[..-1] { x }];
+  assert("{a}" == "[10,20]", "v[..-1]: {a}");
+  b = [for x in v[0..-1] { x + 1 }];
+  assert("{b}" == "[11,21]", "v[0..-1] + 1: {b}");
+  c = [for x in v[1..-1] { x }];
+  assert("{c}" == "[20]", "v[1..-1]: {c}");
+  d = [for x in v[-9..-1] { x }];
+  assert("{d}" == "[10,20]", "a start before the first clamps: {d}");
+  f = [for x in v[..-1] if x > 10 { x }];
+  assert("{f}" == "[20]", "a filter: {f}");
+}
+
+fn test_a_constant_body_counts_the_slice() {
+  v = [10, 20, 30];
+  a = [for x in v[1..9] { 7 }];
+  assert("{a}" == "[7,7]", "an end past the last clamps: {a}");
+  b = [for x in v[..-1] { 7 }];
+  assert("{b}" == "[7,7]", "a negative end: {b}");
+  r = [for i in 0..3 { i * 2 }];
+  assert("{r}" == "[0,2,4]", "a range still folds: {r}");
+}
+
+fn test_records() {
+  rs = [R { s: "a", n: 1 }, R { s: "b", n: 2 }, R { s: "c", n: 3 }];
+  t = [for r in rs[..-1] { r.s }];
+  assert("{t}" == "[\"a\",\"b\"]", "records, a text field: {t}");
+}

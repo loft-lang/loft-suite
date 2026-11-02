@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LENGTH LOCAL AND A LOOP COUNTER READ NON-NULL (`@FR-N-Index`).  `n = len(v); v[n - 1]` reads
+// the element `v[len(v) - 1]` reads, when `n` is assigned once and nothing that can run after it
+// (the rest of its block, a loop around it whole) writes `v` or a view of it;
+// `for x in v { v[x#index] }` reads the element `x` is.
+// Both store into a declared non-null slot with no discharge — for a scalar, a record, and a
+// field's vector — and a local bound from such a read is that element's type, though pass 1
+// (which has not seen the whole body) typed it `τ?`.  The untrusted neighbours are the sibling
+// file's warnings.
+//
+// @falsified-at: 0e95172cd — under LOFT_DENY_WARNINGS, interpret and native FAIL (7 unexpected
+//   warnings) -> ok; `make falsify` reads INERT, as it scores no warning.
+// CHANNEL: the asserts and the absence of the (N-Store) warning (`LOFT_DENY_WARNINGS`).
+// ARMED: no instrument.
+// WITNESS: each message names the read.
+// HOLDS: every cell on both backends.
+
+struct N { k: integer }
+struct B { ops: vector<N> }
+
+fn last_scalar(v: vector<integer>) -> integer {
+  n = len(v);
+  r: integer = v[n - 1];
+  r
+}
+
+fn second_last(v: vector<integer>) -> integer {
+  n = len(v);
+  r: integer = v[n - 2];
+  r
+}
+
+fn last_of_field(b: B) -> integer {
+  n = len(b.ops);
+  e = b.ops[n - 1];
+  e.k
+}
+
+fn last_after_view(b: B) -> integer {
+  n = len(b.ops);
+  first = b.ops[0];
+  e: N = b.ops[n - 1];
+  e.k * 10 + first.k
+}
+
+fn per_turn(v: vector<integer>) -> integer {
+  s = 0;
+  for i in 0..3 {
+    n = len(v);
+    r: integer = v[n - 1];
+    s += r + i;
+  }
+  s
+}
+
+fn weighted(v: vector<integer>) -> integer {
+  s = 0;
+  for x in v {
+    w: integer = v[x#index];
+    s += w * x;
+  }
+  s
+}
+
+fn keys(b: B) -> integer {
+  s = 0;
+  for o in b.ops {
+    e: N = b.ops[o#index];
+    s = s * 10 + e.k;
+  }
+  s
+}
+
+fn test_a_length_local() {
+  assert(last_scalar([3, 4, 5]) == 5, "the last scalar");
+  assert(second_last([3, 4, 5]) == 4, "arithmetic over the length");
+  assert(last_of_field(B { ops: [N { k: 7 }, N { k: 8 }] }) == 8, "a field's vector, bound");
+  assert(last_after_view(B { ops: [N { k: 1 }, N { k: 2 }] }) == 21, "after a view is bound");
+  assert(per_turn([4]) == 15, "taken inside a loop that writes nothing: 4+0 + 4+1 + 4+2");
+}
+
+fn test_a_loop_counter() {
+  assert(weighted([1, 2, 3]) == 14, "1*1 + 2*2 + 3*3");
+  assert(keys(B { ops: [N { k: 1 }, N { k: 2 }, N { k: 3 }] }) == 123, "a field's vector");
+}

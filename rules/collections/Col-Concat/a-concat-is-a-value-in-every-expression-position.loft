@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR CONCAT IS A VALUE IN EVERY EXPRESSION POSITION (`@FR-Col-Concat`).  `a + b` over two
+// vectors is a new vector — `a`'s elements then `b`'s — wherever an expression stands, and
+// neither operand changes.  It was refused in an expression ("creates a temporary; assign to a
+// variable first"), and the refusal hid two defects behind it: a literal right operand in a
+// struct literal's field took the struct's record as its store and never minted one (an
+// internal compiler error), and a literal FIRST operand there was built into the field while
+// the rest of the chain went into a temporary nothing read.  `(v + [9]).len()` was refused
+// separately (P395) because the concat adopted the assignment's destination as its buffer.
+//
+// Positions: a call argument (also under `+=`, `*=`, an element and a field `+=`, a text
+// `+=`), a loop body (one temporary per turn), a struct and a variant field (variable first,
+// literal first), a field assignment and `+=`, a return, a `for` head, a tuple member, a `??`
+// default, a lambda body, a `match` arm, an `if` arm, a method and an index postfix, a chain of
+// three.  Element kinds: integer, a record with a text, a vector.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0 (main refuses the concat
+//   in an expression, so nothing below runs there).
+// CHANNEL: the asserts.
+// ARMED: the leak check (the suite arms it): each temporary is released once.
+// WITNESS: each message names the position.
+// HOLDS: every cell on both backends.
+
+struct V { s: text, n: integer }
+struct H { k: integer, v: vector<integer>, vs: vector<V> }
+enum E { E1 { v: vector<integer> }, E2 }
+
+fn total(r: vector<integer>) -> integer {
+  t = 0;
+  for x in r { t += x; }
+  t
+}
+
+fn names(r: vector<V>) -> text {
+  t = "";
+  for x in r { t += x.s; }
+  t
+}
+
+fn plus_seven(a: vector<integer>) -> vector<integer> { a + [7] }
+
+fn append_record(a: vector<V>, b: V) -> vector<V> { return a + [b]; }
+
+fn test_an_argument() {
+  a = [4, 5];
+  assert(total(a + [1]) == 10 && len(a) == 2, "argument: 4+5+1, a unchanged");
+  assert(total([1, 2, 3, 4, 5]) + 100 * total([1, 2, 3] + [4, 5]) == 1515, "beside a literal");
+  x = 10;
+  x += total(a + [1]);
+  x *= total([1] + a) - 8;
+  assert(x == 40, "compound: (10 + 10) * 2, got {x}");
+  v = [1, 2];
+  v[0] += total(a + [1]);
+  assert(v[0] == 11 && len(v) == 2, "element +=: 1 + 10");
+  t = "x";
+  t += "{total(a + [9])}";
+  assert(t == "x18", "text +=: {t}");
+}
+
+fn test_a_loop_turn() {
+  a = [1, 2];
+  s = 0;
+  for i in 0..5 { s += total(a + [i]); }
+  assert(s == 25, "five turns of 3 + i: {s}");
+  vs = [V { s: "a", n: 1 }];
+  t = "";
+  for i in 0..4 { t += names(vs + [V { s: "{i}", n: i }]); }
+  assert(t == "a0a1a2a3" && len(vs) == 1, "records: {t}");
+}
+
+fn test_a_field() {
+  a = [4, 5];
+  h = H { k: 0, v: a + [6], vs: [V { s: "p", n: 1 }] + [V { s: "q", n: 2 }] };
+  assert("{h.v}" == "[4,5,6]" && names(h.vs) == "pq" && len(a) == 2, "struct fields: {h.v}");
+  g = H { k: 0, v: [1] + [2], vs: [] };
+  assert("{g.v}" == "[1,2]", "literal first: {g.v}");
+  g.v = [3] + a;
+  assert("{g.v}" == "[3,4,5]", "assigned, literal first: {g.v}");
+  g.v = g.v + [6];
+  assert("{g.v}" == "[3,4,5,6]", "assigned, reading itself: {g.v}");
+  g.v += a + [1];
+  assert("{g.v}" == "[3,4,5,6,4,5,1]", "+=: {g.v}");
+  g.k += total(a + [2, 3]);
+  assert(g.k == 14, "scalar field +=: {g.k}");
+  e = E1 { v: a + [3] };
+  n = match e { E1 { v } => len(v), _ => -1 };
+  assert(n == 3, "variant field: {n}");
+}
+
+fn test_a_return_and_a_head() {
+  r = plus_seven([1]);
+  assert("{r}" == "[1,7]", "return: {r}");
+  q = append_record([V { s: "a", n: 1 }], V { s: "b", n: 2 });
+  assert(names(q) == "ab", "return of records");
+  a = [1, 2];
+  s = 0;
+  for x in a + [3, 4] { s += x; }
+  assert(s == 10 && len(a) == 2, "for head: {s}");
+  nested = [[1], [2, 3]];
+  m = 0;
+  for w in nested + [[4]] { m += total(w); }
+  assert(m == 10, "vectors of vectors: {m}");
+}
+
+fn test_inside_other_expressions() {
+  a = [1, 2];
+  t = (a + [3], 9);
+  assert(len(t.0) == 3 && t.1 == 9, "tuple member");
+  none: vector<integer>? = null;
+  c = none ?? a + [5];
+  assert(len(c) == 3, "?? default: {c}");
+  f = fn(x: integer) -> integer { total(a + [x]) };
+  assert(f(3) == 6 && f(4) == 7, "lambda body");
+  k = 2;
+  s = match k { 1 => total(a), _ => total(a + [10]) };
+  assert(s == 13, "match arm: {s}");
+  on = true;
+  i = total(if on { a + [1] } else { a });
+  assert(i == 4, "if arm: {i}");
+  b = [2, 3];
+  assert(total(a + [10] + b) == 18 && len(a + b + a) == 6, "a chain of three");
+}
+
+fn test_a_postfix() {
+  v = [1, 2, 3];
+  n = (v + [9]).len();
+  x = (v + [9])[3];
+  w = (v + [9]);
+  s = (["a"] + ["b"]).len();
+  r = ([V { s: "q", n: 1 }] + [V { s: "r", n: 2 }])[1].s;
+  assert(n == 4 && x == 9 && "{w}" == "[1,2,3,9]" && s == 2 && r == "r" && len(v) == 3,
+    "postfix: {n} {x} {w} {s} {r}");
+  assert((v + [9]).len() == 4, "method receiver inside a call");
+}

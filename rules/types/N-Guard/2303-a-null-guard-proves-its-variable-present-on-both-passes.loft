@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2303 — `(N-Guard)`: `if v == null { return … }` proves `v` present for the rest of the
+// block, and `v` reads as `τ` there.  For a heap or enum value the first pass read `v == null`
+// with the polarity of the truthy `if v`, so the guard proved nothing after it — a struct-enum
+// `e == Owned` was refused, and a local bound from `e` was typed `τ?` and warned when used —
+// while the null branch itself proved `v` PRESENT.  One guard per type, both spellings, and the
+// null branch.  Armed with the deny switch a library's CI runs under: a false warning fails.
+// @ARMED: LOFT_DENY_WARNINGS=1
+// @falsified-at: 9e6425727 — interpret exit 1 -> 0, native exit 1 -> 0 (the refusal and the false warnings)
+struct S { n: integer }
+enum P { Owned, Borrowed { base: integer } }
+enum Q { X, Y }
+
+fn mk_s(x: integer) -> S? { if x > 0 { S { n: x } } else { null } }
+fn mk_p(x: integer) -> P? { if x > 1 { Borrowed { base: x } } else if x > 0 { Owned } else { null } }
+fn mk_v(x: integer) -> vector<integer>? { if x > 0 { [x, x] } else { null } }
+fn mk_f(x: integer) -> float? { if x > 0 { 0.5 + x } else { null } }
+fn mk_q(x: integer) -> Q? { if x > 0 { Y } else { null } }
+
+fn use_s(s: S) -> integer { s.n }
+fn use_p(p: P) -> integer { match p { Owned => 1, Borrowed { base } => base } }
+fn use_v(v: vector<integer>) -> integer { len(v) }
+fn use_q(q: Q) -> integer { if q == Y { 2 } else { 1 } }
+
+fn after_s(x: integer) -> integer {
+  e = mk_s(x);
+  if e == null {
+    return 0;
+  }
+  y = e;
+  use_s(y)
+}
+
+fn after_p(x: integer) -> integer {
+  e = mk_p(x);
+  if null == e {
+    return 0;
+  }
+  if e == Owned { 10 } else { use_p(e) }
+}
+
+fn after_v(x: integer) -> integer {
+  e = mk_v(x);
+  if e == null {
+    return 0;
+  }
+  y = e;
+  use_v(y)
+}
+
+fn after_q(x: integer) -> integer {
+  e = mk_q(x);
+  if null == e {
+    return 0;
+  }
+  y = e;
+  use_q(y)
+}
+
+fn else_if_p(x: integer) -> integer {
+  e = mk_p(x);
+  if e == null { 0 } else if e == Owned { 10 } else { use_p(e) }
+}
+
+fn in_null_branch(x: integer) -> float {
+  f = mk_f(x);
+  if f == null {
+    y = f;
+    return y ?? 9.5;
+  }
+  f ?? 0.0
+}
+
+fn test_a_null_guard_proves_its_variable_present() {
+  assert(after_s(0) == 0 && after_s(3) == 3, "struct: {after_s(0)} {after_s(3)}");
+  assert(after_p(0) == 0 && after_p(1) == 10 && after_p(4) == 4, "struct enum: {after_p(0)} {after_p(1)} {after_p(4)}");
+  assert(after_v(0) == 0 && after_v(3) == 2, "vector: {after_v(0)} {after_v(3)}");
+  assert(after_q(0) == 0 && after_q(3) == 2, "plain enum: {after_q(0)} {after_q(3)}");
+  assert(else_if_p(0) == 0 && else_if_p(1) == 10 && else_if_p(6) == 6, "else if: {else_if_p(0)} {else_if_p(1)} {else_if_p(6)}");
+  assert(in_null_branch(0) == 9.5 && in_null_branch(2) == 2.5, "null branch: {in_null_branch(0)} {in_null_branch(2)}");
+}

@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2325, `@FR-P-Alt` at a scalar FIELD — `S { n: 1 | 2 }`: the field matches when any
+// alternative does, read once.  It was refused (`Expect token }`).
+//
+// Axes it MOVES: the alternative kind (literals, a range beside a literal, texts), the
+// alternative that matches (first, last, none), and a second field beside the alternation.
+// Every value is hand-computed.
+//
+// CHANNEL: the COMPILE (a refusal before the fix) and the VALUE.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct AfS { n: integer, t: text }
+
+fn af_lits(s: AfS) -> integer { match s { AfS { n: 1 | 2 } => 1, _ => 0 } }
+fn af_range(s: AfS) -> integer { match s { AfS { n: 3..5 | 9 } => 1, _ => 0 } }
+fn af_text(s: AfS) -> integer { match s { AfS { t: "a" | "b", n } => n, _ => -1 } }
+
+fn main() {
+  assert(af_lits(AfS { n: 1, t: "" }) == 1 && af_lits(AfS { n: 2, t: "" }) == 1, "a literal matches");
+  assert(af_lits(AfS { n: 3, t: "" }) == 0, "no literal matches");
+  assert(af_range(AfS { n: 4, t: "" }) == 1 && af_range(AfS { n: 9, t: "" }) == 1, "range or literal");
+  assert(af_range(AfS { n: 5, t: "" }) == 0 && af_range(AfS { n: 8, t: "" }) == 0, "neither");
+  assert(af_text(AfS { n: 6, t: "b" }) == 6 && af_text(AfS { n: 6, t: "c" }) == -1, "texts");
+}

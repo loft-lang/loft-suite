@@ -1,0 +1,127 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2320 — `@FR-R-WorkBuffer` composed with `@FR-H-Drop` and `@FR-H-Copy-Lease`.  A callee's
+// vector local that never leaves its frame is a hidden buffer its caller supplies, and the
+// transitive clause makes the caller's work-ref a hidden parameter of the caller in turn.  A
+// HOOK (`OpDrop`, the cascade that calls it, `OpCopy`) took one too — but the scope pass places
+// a hook's calls after the rewrite, with the record alone, so every program whose hook called
+// such a function stopped with "Too few parameters on t_…_OpDrop (got 1, need 2)".  A hook is
+// declined like an entry point: its callees take their buffers from the hook's own frame.
+//
+// Each hook writes its message to this cell's trace file; `weigh(s)` is the byte sum of `s`
+// through a vector local, so each message carries a value the work buffer computed.  Every
+// value by hand: weigh("9") = 57, weigh("12") = 49 + 50 = 99, weigh("105") = 49 + 48 + 53 = 150.
+//
+// Axes this file MOVES:  the hook (OpDrop, OpDrop through a record's cascade, OpCopy), how far
+//                        the buffer climbs (the hook's callee, its callee's callee), the site
+//                        (scope end, rebind, a loop pass, a copying bind), a hook's own vector
+//                        local beside the climbed one.
+// Axes it HOLDS FIXED:   one element type (`u8`, `integer`); the trace through one file.
+//
+// @falsified-at: 0e95172cd — interpret exit 101 -> 0, interpret panicked -> clean, native exit 101 -> 0, native panicked -> clean
+// CHANNEL: the compile — main stops on this file with the internal error above.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_2320.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+// The byte sum of `s`: `bytes` never leaves the frame, so it is a work buffer.
+fn weigh(s: text) -> integer {
+  bytes: vector<u8> = [];
+  for c in s { bytes += [c as u8 ?? 0]; }
+  t = 0;
+  for b in bytes { t += b; }
+  t
+}
+
+// One frame further: `weigh`'s buffer climbs into this frame's parameters.
+fn deep(s: text) -> integer { weigh(s) + 1 }
+
+struct A { id: integer }
+fn OpDrop(self: A) { note("A{weigh("{self.id}")}"); }
+
+struct B { id: integer }
+fn OpDrop(self: B) { note("B{deep("{self.id}")}"); }
+
+struct Holder { a: A, k: integer }
+
+struct C { id: integer }
+fn OpDrop(self: C) { note("D{weigh("{self.id}")}"); }
+fn OpCopy(self: C) { note("C{weigh("{self.id}")}"); self.id += 100; }
+
+// A hook with a vector local of its own beside the callee's buffer.
+struct E { id: integer }
+fn OpDrop(self: E) {
+  v: vector<integer> = [];
+  v += [self.id];
+  v += [self.id * 2];
+  note("E{len(v)}:{v[0] + v[1]}:{weigh("{self.id}")}");
+}
+
+fn scope_end() -> integer { a = A { id: 9 }; a.id }
+fn climbed() -> integer { b = B { id: 12 }; b.id }
+fn cascade() -> integer { h = Holder { a: A { id: 9 }, k: 3 }; h.k }
+fn rebind() -> integer { a = A { id: 9 }; n = a.id; a = A { id: 12 }; n + a.id }
+fn looped() -> integer {
+  n = 0;
+  for i in [9, 12] {
+    a = A { id: i };
+    n += a.id;
+  }
+  n
+}
+fn copied(p: C) -> integer { x = p; x.id }
+fn copy_site() -> integer { c = C { id: 5 }; copied(c) }
+fn own_local() -> integer { e = E { id: 4 }; e.id }
+
+fn main() {
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace init failed"); }
+  // 1: OpDrop at scope end, the buffer one frame up
+  r1 = scope_end();
+  t1 = drain();
+  assert(r1 == 9 && t1 == "A57", "c1 {r1} {t1}");
+  // 2: the buffer two frames up
+  r2 = climbed();
+  t2 = drain();
+  assert(r2 == 12 && t2 == "B100", "c2 {r2} {t2}");
+  // 3: the hook reached through a record's cascade
+  r3 = cascade();
+  t3 = drain();
+  assert(r3 == 3 && t3 == "A57", "c3 {r3} {t3}");
+  // 4: a rebind releases the displaced record, the scope end the other
+  r4 = rebind();
+  t4 = drain();
+  assert(r4 == 21 && t4 == "A57,A99", "c4 {r4} {t4}");
+  // 5: a loop pass releases each pass's record
+  r5 = looped();
+  t5 = drain();
+  assert(r5 == 21 && t5 == "A57,A99", "c5 {r5} {t5}");
+  // 6: OpCopy on a copying bind; the copy (105) goes at the callee's exit, the original after
+  r6 = copy_site();
+  t6 = drain();
+  assert(r6 == 105 && t6 == "C53,D150,D53", "c6 {r6} {t6}");
+  // 7: the hook's own vector local stays its own
+  r7 = own_local();
+  t7 = drain();
+  assert(r7 == 4 && t7 == "E2:12:52", "c7 {r7} {t7}");
+  delete(trace_path());
+  println("ok");
+}

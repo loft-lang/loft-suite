@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2302 — `redundant-coalesce` asks whether the LEFT operand of THIS `??` can be null
+// (@FR-N-Coal).  A non-null field read just before it, as the previous operand of a call, a
+// tuple or a vector literal, is not that operand: the marker it left set rode into the next
+// operand, and a `??` whose default is in use was reported redundant under the field's name —
+// a warning `loft fix` applies, which turned `h(d.items, k ?? 7)` into a call answering null.
+// Armed with the deny switch a library's CI runs under, so the wrong warning fails the cell.
+// @ARMED: LOFT_DENY_WARNINGS=1
+// @falsified-at: 9e6425727 — interpret exit 1 -> 0, native exit 1 -> 0 (armed: the four wrong warnings)
+struct Bag { items: vector<integer> }
+
+fn h(a: vector<integer>, b: integer) -> integer { len(a) + b }
+
+fn test_a_default_after_a_field_operand_is_used() {
+  d = Bag { items: [1, 2] };
+  k = d.items[9];
+  assert(k == null, "an index past the end reads null");
+  assert(h(d.items, k ?? 7) == 9, "a call argument after a field: the default is used");
+  t = (d.items, k ?? 7);
+  assert(t.1 == 7, "a tuple element after a field: the default is used");
+  d.items += [k ?? 7];
+  assert(len(d.items) == 3 && d.items[2] == 7, "a literal appended to the field: the default is used");
+  d.items = [k ?? 8, k ?? 9];
+  assert(len(d.items) == 2 && d.items[0] == 8 && d.items[1] == 9, "a literal assigned to the field");
+}

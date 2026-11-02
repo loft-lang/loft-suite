@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2321 — `@FR-B-Scope`: a loop variable may not take the name of a local still in scope —
+// the loop would clobber it — and a comprehension's variable is a loop variable.  A `for`
+// statement over a live local's name is refused as a shadow; the comprehension went unrefused
+// until the read after it, which then reported the LIVE local as "bound inside a block that has
+// ended".  It now meets the statement loop's refusal, by the statement loop's check.
+//
+// @EXPECT_ERROR: loop variable 't' shadows a local named 't'
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+//   — main refused with another fault ("bound inside a block that has ended", on the read).
+// CHANNEL: the compile's diagnostic.
+
+fn main() {
+  t = 5;
+  v = [for t in [1, 2] { t * 2 }];
+  println("{t} {len(v)}");
+}

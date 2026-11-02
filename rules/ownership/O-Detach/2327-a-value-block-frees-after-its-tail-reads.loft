@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2327, `@FR-O-Detach` — a value block nested as the value of another block releases its
+// scope's temporaries AFTER its tail has read them.  `{ ex(0, first(h)) }` as a `match` or `if`
+// arm that also binds a local, or as the inner block of `x = { n = 1; { … } }`, had the
+// `first(h)` temporary freed in front of the call that reads it: the call copied a released
+// record and answered `null` (or a vector of `-1`s), silently and on every backend.
+//
+// Axes it MOVES: where the nested value block stands (a `match` arm with a text capture, a
+// `match` arm without one — a CONTROL, an `if` arm with a local, an assignment's block), the
+// result kind (a record, a text — a CONTROL, a vector), and the number of evaluations (one, a
+// thousand — a leak or a double free shows there).  Every value is hand-computed.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the VALUE (hand-computed per cell) and the LEAK (`main` runs every cell).
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+enum BkT { BkInt { lo: integer }, BkVoid }
+enum BkK { BkName { name: text }, BkNum { v: integer } }
+struct BkHolder { types: vector<BkT> }
+struct BkEx { code: integer, tp: BkT }
+
+fn bk_ex(code: integer, tp: BkT) -> BkEx { BkEx { code: code, tp: tp } }
+fn bk_first(h: BkHolder) -> BkT { h.types[0] ?? BkVoid }
+fn bk_lo(t: BkT) -> integer { match t { BkInt { lo } => lo, _ => -1 } }
+fn bk_label(t: BkT) -> text { "L{bk_lo(t)}" }
+fn bk_listing(t: BkT, step: integer) -> vector<integer> { [bk_lo(t), bk_lo(t) + step] }
+
+fn bk_capture(k: BkK, h: BkHolder) -> BkEx {
+  match k {
+    BkName { name } => { bk_ex(len(name), bk_first(h)) },
+    BkNum { v } => bk_ex(v, BkInt { lo: 7 })
+  }
+}
+
+fn bk_no_capture(k: BkK, h: BkHolder) -> BkEx {
+  match k {
+    BkName { name: _ } => { bk_ex(0, bk_first(h)) },
+    BkNum { v } => bk_ex(v, BkInt { lo: 7 })
+  }
+}
+
+fn bk_if(c: boolean, h: BkHolder) -> BkEx {
+  if c { s = "ab"; { bk_ex(len(s), bk_first(h)) } } else { bk_ex(9, BkInt { lo: 8 }) }
+}
+
+fn main() {
+  h = BkHolder { types: [BkInt { lo: 5 }] };
+  a = bk_capture(BkName { name: "nm" }, h);
+  assert(a.code == 2 && bk_lo(a.tp) == 5, "match arm with a capture: {a.code} {a.tp}");
+  b = bk_capture(BkNum { v: 3 }, h);
+  assert(b.code == 3 && bk_lo(b.tp) == 7, "the other arm: {b.code} {b.tp}");
+  d = bk_no_capture(BkName { name: "x" }, h);
+  assert(d.code == 0 && bk_lo(d.tp) == 5, "match arm without a capture: {d.code} {d.tp}");
+  x = { n = 1; { bk_ex(n, bk_first(h)) } };
+  assert(x.code == 1 && bk_lo(x.tp) == 5, "an assignment's nested block: {x.code} {x.tp}");
+  t = { q = "p"; { "{q}{bk_label(bk_first(h))}" } };
+  assert(t == "pL5" && len(t) == 3, "a text result: {t}");
+  w = { m = 2; { bk_listing(bk_first(h), m) } };
+  assert(len(w) == 2 && w[0] == 5 && w[1] == 7, "a vector result: {w}");
+  e = bk_if(true, h);
+  assert(e.code == 2 && bk_lo(e.tp) == 5, "an if arm with a local: {e.code} {e.tp}");
+  f = bk_if(false, h);
+  assert(f.code == 9 && bk_lo(f.tp) == 8, "the else arm: {f.code} {f.tp}");
+  total = 0;
+  for _ in 0..1000 {
+    r = bk_capture(BkName { name: "abc" }, h);
+    total += r.code + bk_lo(r.tp);
+  }
+  assert(total == 8000, "a thousand evaluations: {total}");
+}

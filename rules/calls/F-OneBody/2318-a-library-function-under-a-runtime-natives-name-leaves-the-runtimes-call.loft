@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2318 — `@FR-F-OneBody` across sources (@C97): a library may define a free function under a
+// standard-library name; the library's is reached qualified, the bare name stays the stdlib's.
+// When the stdlib's is a body-less native — `vector_sum_int`, which `sum` calls for integers,
+// and `env_variable` — a native build links its calls to the runtime's function of that bare
+// name.  The two same-named definitions were disambiguated by renaming EVERY call, the
+// runtime's included, so `--native` called a symbol nothing defines and did not build (E0425);
+// and the interpreter, recognising a destination-passing native by name, sent the library's
+// `env_variable` to the stdlib's native — a wrong answer, and beside `sum` an abort.  The library is `c97_runtime_lib.loft` beside this file.
+//
+// Axes this file MOVES:  the native (one a stdlib loft body calls, one the program calls), which
+//                        definition a call reaches (the library's qualified, the stdlib's bare).
+// Axes it HOLDS FIXED:   one library, imported without `*`.
+//
+// @falsified-at: 0e95172cd — interpret exit 134 -> 0, native exit 1 -> 0 (FALSIFY_NATIVE=rust)
+// CHANNEL: the interpreter's abort and the native build's E0425 on main, then the assertions.
+use c97_runtime_lib;
+
+fn main() {
+  v = [1, 2, 3];
+  // `sum` reaches the runtime's vector_sum_int: 1 + 2 + 3 + 10; the library's answers 4 + 1
+  o = "{sum(v, 10)} {c97_runtime_lib::vector_sum_int(4)}";
+  assert(o == "16 5", "vector_sum_int: {o}");
+  // the stdlib's env_variable reads an unset variable as null; the library's answers its own
+  e = env_variable("LOFT_C97_RUNTIME_SURELY_UNSET") ?? "unset";
+  assert(e == "unset" && c97_runtime_lib::env_variable("X") == "lib:X", "env_variable: {e}");
+  println("ok");
+}

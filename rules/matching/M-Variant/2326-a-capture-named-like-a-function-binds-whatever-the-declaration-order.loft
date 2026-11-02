@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2326, `@FR-M-Variant` — a field capture binds its name for the arm's body, whichever
+// order the file declares its types in.  With the struct holding the subject declared before
+// the enum, the first pass sees the subject as a type it cannot read yet and stepped over the
+// capture list without binding it: a capture named like a function then read the FUNCTION, and
+// `limit + 1` was refused (`No matching operator '+' on 'fn(BcP) -> integer'`).
+//
+// Axes it MOVES: the spelling (`is` over a place, `is` over a local, a `match` shorthand, a
+// `match` rename onto a function's name, a `_` rename beside a capture), whether the name is a
+// capture at all (a function call in the body is a CONTROL), the scope (the name means the
+// function again after the arm), and the variant taken.  The struct is declared BEFORE the
+// enum — the order that failed.  Every value is hand-computed.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the COMPILE (a refusal before the fix) and the VALUE.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct BcP { nodes: vector<BcE> }
+enum BcE { BcA { limit: integer, at: integer }, BcB { at: integer } }
+
+fn limit(q: BcP) -> integer { len(q.nodes) + 6 }
+fn at(n: integer) -> integer { n * 100 }
+
+fn bc_is_place(p: BcP) -> integer { if p.nodes[0] is BcA { limit } { limit + 1 } else { 0 } }
+fn bc_is_local(p: BcP) -> integer { e = p.nodes[0]; if e is BcA { limit } { limit + 1 } else { 0 } }
+fn bc_match(p: BcP) -> integer { match p.nodes[0] { BcA { limit } => limit + 1, _ => 0 } }
+fn bc_rename(p: BcP) -> integer { match p.nodes[0] { BcA { at: limit } => limit * 2, _ => 0 } }
+fn bc_wild(p: BcP) -> integer { match p.nodes[0] { BcA { limit: _, at } => at + 3, BcB { at } => at - 1 } }
+fn bc_call(p: BcP) -> integer { match p.nodes[0] { BcA { at } => at + limit(p), _ => at(1) } }
+fn bc_after(p: BcP) -> integer {
+  x = match p.nodes[0] { BcA { limit } => limit, _ => 0 };
+  x + limit(p)
+}
+
+fn main() {
+  a = BcP { nodes: [BcA { limit: 5, at: 9 }] };
+  b = BcP { nodes: [BcB { at: 4 }] };
+  assert(bc_is_place(a) == 6 && bc_is_place(b) == 0, "is over a place: {bc_is_place(a)} {bc_is_place(b)}");
+  assert(bc_is_local(a) == 6 && bc_is_local(b) == 0, "is over a local: {bc_is_local(a)} {bc_is_local(b)}");
+  assert(bc_match(a) == 6 && bc_match(b) == 0, "match: {bc_match(a)} {bc_match(b)}");
+  assert(bc_rename(a) == 18, "a rename onto a function's name: {bc_rename(a)}");
+  assert(bc_wild(a) == 12 && bc_wild(b) == 3, "a `_` beside a capture: {bc_wild(a)} {bc_wild(b)}");
+  assert(bc_call(a) == 16 && bc_call(b) == 100, "the function, called: {bc_call(a)} {bc_call(b)}");
+  assert(bc_after(a) == 12, "after the arm: {bc_after(a)}");
+}

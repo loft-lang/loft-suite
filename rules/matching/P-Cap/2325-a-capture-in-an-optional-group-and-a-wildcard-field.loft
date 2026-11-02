@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2325, `@FR-P-Cap` — a whole-element capture inside an optional group, `[(x: A)?, B]`,
+// binds `x : A?` (null when the group matched nothing, `@FR-P-Opt`); and `f: _` in a field of
+// an alternation branch binds nothing (`@FR-P-Point`).  Both were refused: the first by
+// `Expect token )`, the second by a refusal that named `f: _` as allowed, because `_` lexes as
+// a name and the test for it asked for a token.
+//
+// Axes it MOVES: the group taken or skipped, the capture read (null test, a field through it),
+// the wildcard field's branch (with fields, a unit variant), and a `_` in a fixed tail after
+// `..`.  Every value is hand-computed.
+//
+// CHANNEL: the COMPILE (a refusal before the fix) and the VALUE.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+enum CpT { CpA { f: integer }, CpB, CpC }
+
+fn cp_opt(v: vector<CpT>) -> integer {
+  match v {
+    [(x: CpA)?, CpB] => if x == null { 1 } else { 2 },
+    _ => 0
+  }
+}
+fn cp_opt_field(v: vector<CpT>) -> integer {
+  match v {
+    [(x: CpA)?, CpB] => match x { CpA { f } => f, _ => -1 },
+    _ => 0
+  }
+}
+fn cp_wild(v: vector<CpT>) -> integer { match v { [(CpA { f: _ } | CpB), ..] => 1, _ => 0 } }
+fn cp_tail(v: vector<CpT>) -> integer { match v { [CpA { f }, .., _] => f, _ => 0 } }
+
+fn main() {
+  assert(cp_opt([CpB]) == 1 && cp_opt([CpA { f: 1 }, CpB]) == 2 && cp_opt([CpC, CpB]) == 0, "optional capture");
+  assert(cp_opt_field([CpA { f: 7 }, CpB]) == 7 && cp_opt_field([CpB]) == -1, "a field through it");
+  assert(cp_wild([CpA { f: 3 }]) == 1 && cp_wild([CpB, CpC]) == 1 && cp_wild([CpC]) == 0 && cp_wild([]) == 0, "wildcard field");
+  assert(cp_tail([CpA { f: 5 }, CpC]) == 5 && cp_tail([CpA { f: 5 }]) == 0, "a wildcard tail");
+}

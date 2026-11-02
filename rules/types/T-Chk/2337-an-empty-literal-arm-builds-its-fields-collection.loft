@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2337 — `@FR-T-Chk`: a struct-literal field's declared type is the expected type of its
+// value, pushed into every sub-expression, so an empty `[]` an `if` answers in that value builds
+// the field's collection — as it does under a declared local or a field assignment.  The field
+// pushed only a function type, the `[]` then arm built an untyped placeholder, and the `if`
+// answered `void`: "Cannot assign void to a field of type vector<integer>".
+//
+// Every value by hand: a field's length and its items are the arm taken.
+//
+// Axes this file MOVES:  the element (integer, text, a keyed record), which arm is empty (then,
+//                        both, an `else if` link), the value bare or in a block, the literal
+//                        a fresh one or a rebind of a local, which arm runs, backends.
+// Axes it HOLDS FIXED:   a struct literal's named field; the `[]` in an `if`.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — main refused the literal at compile time.
+
+struct K { k: integer, w: integer }
+struct S { d: vector<integer> }
+struct T { h: text, d: vector<text> }
+struct H { m: hash<K[k]> }
+
+fn mk(c: boolean, v: integer) -> S {
+  S { d: if c { [] } else { [v, v + 1] } }
+}
+
+fn words(c: boolean) -> T {
+  T { h: "w", d: if c { [] } else { ["x", "yz"] } }
+}
+
+fn chain(n: integer) -> S {
+  S { d: if n == 0 { [] } else if n == 1 { [5] } else { [] } }
+}
+
+fn blocked(c: boolean) -> S {
+  S { d: { if c { [] } else { [2] } } }
+}
+
+fn keyed(c: boolean) -> H {
+  H { m: if c { [] } else { [K { k: 4, w: 40 }, K { k: 6, w: 60 }] } }
+}
+
+fn main() {
+  a = mk(true, 3);
+  b = mk(false, 7);
+  assert(len(a.d) == 0, "a {len(a.d)}");
+  assert(len(b.d) == 2 && b.d[0] == 7 && b.d[1] == 8, "b {b.d}");
+  t = words(true);
+  u = words(false);
+  assert(len(t.d) == 0 && t.h == "w", "t");
+  assert(len(u.d) == 2 && u.d[1] == "yz", "u");
+  assert(len(chain(0).d) == 0, "chain 0");
+  assert(len(chain(1).d) == 1 && chain(1).d[0] == 5, "chain 1");
+  assert(len(chain(2).d) == 0, "chain 2");
+  assert(len(blocked(true).d) == 0 && blocked(false).d[0] == 2, "blocked");
+  assert(len(keyed(true).m) == 0, "keyed empty");
+  km = keyed(false);
+  assert(len(km.m) == 2 && km.m[6].w == 60, "keyed");
+  r = S { d: [9] };
+  for i in 0..2 {
+    r = S { d: if i == 0 { [] } else { [r.d[0] ?? 1, 11] } };
+  }
+  assert(len(r.d) == 2 && r.d[0] == 1 && r.d[1] == 11, "rebind {r.d}");
+}

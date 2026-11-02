@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2319 — `@FR-O-Override`: a temp whose value a consuming op takes over owns nothing at any
+// later moment.  A record-returning call moved into a vector element (`progs[i] = mk(i)`, the
+// copy that frees its source) is lifted into a temp whose store the move frees; the temp still
+// named that store, so the next turn of the loop rebound into it on `--native` — re-minting a
+// store number the allocator had by then handed to `prog`'s copy, whose record was overwritten,
+// silently.  The temp is now read back as null after the move.  `mk` answers a local it bound
+// from another call, which is what makes its result a rebind rather than a plain adopt.
+//
+// Axes this file MOVES:  the move's target (a vector element, a struct field), whether another
+//                        local takes a record copy between the turns, the loop's length.
+// Axes it HOLDS FIXED:   one record type with a text and a vector field.
+//
+// @falsified-at: 0e95172cd — native exit 1 -> 0, native 1 assertion failures -> 0
+//   (FALSIFY_NATIVE=rust); interpret INERT (expected for a backend-divergence guard — only
+//   one side can move).
+// CHANNEL: an assertion, on native.
+struct L { fb: integer, name: text, xs: vector<integer> }
+struct Holder { slot: L, n: integer }
+
+fn empty() -> L { L { fb: 0, name: "", xs: [] } }
+fn mk(i: integer) -> L {
+  l = empty();
+  l.fb = 100 - i * 20;
+  l.name = "n{i}";
+  l.xs += [i, i];
+  l
+}
+
+fn main() {
+  // 1: moved into an element, `prog` copying the previous one each turn
+  progs: vector<L> = [];
+  lowered: vector<boolean> = [];
+  for _ in 0..5 {
+    progs += [empty()];
+    lowered += [false];
+  }
+  progs[0] = mk(0);
+  lowered[0] = true;
+  prog = progs[0]!;
+  o1 = "";
+  for callee in [1, 2, 3, 4] {
+    if !lowered[callee] {
+      progs[callee] = mk(callee);
+      lowered[callee] = true;
+    }
+    callee_prog = progs[callee]!;
+    o1 += "{prog.fb}>{callee_prog.fb} ";
+    prog = callee_prog;
+  }
+  assert(o1 == "100>80 80>60 60>40 40>20 " && "{progs[4].name}:{progs[4].xs}" == "n4:[4,4]", "c1 {o1}");
+  // 2: the same moves with nothing between the turns
+  vs: vector<L> = [empty(), empty(), empty()];
+  for i in 0..3 {
+    vs[i] = mk(i + 1);
+  }
+  o2 = "";
+  for v in vs {
+    o2 += "{v.fb}{v.name} ";
+  }
+  assert(o2 == "80n1 60n2 40n3 ", "c2 {o2}");
+  // 3: moved into a field; `kept = h.slot` binds a VIEW of the field (the documented alias),
+  //    so after the first turn it reads what the field holds now
+  h = Holder { slot: empty(), n: 0 };
+  kept = empty();
+  o3 = "";
+  for i in 1..4 {
+    h.slot = mk(i);
+    o3 += "{kept.fb}>{h.slot.fb} ";
+    kept = h.slot;
+  }
+  assert(o3 == "0>80 60>60 40>40 " && kept.name == "n3", "c3 {o3}");
+  println("ok");
+}

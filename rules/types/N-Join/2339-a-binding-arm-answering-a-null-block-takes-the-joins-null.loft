@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2339 — `@FR-N-Join`: a `match` arm that answers `null` answers the null of the type the
+// arms join to.  An arm that binds names arrives as the block of its bindings around the body
+// block, and the null recogniser read only the outer block's last operator, so a body block
+// ending in `null` stayed a value-less arm beside value arms: the interpreter answered null for
+// every arm after it, the C backend refused the program.
+//
+// Every value by hand: `PL { v }` answers its own expression of `v`; `PN { name: "x" }` takes the
+// early return; any other `PN` and `PW` answer null.
+//
+// Axes this file MOVES:  the null arm's body (a guarded return then `null`, a statement then
+//                        `null`, a nested block), the result (integer?, text?, a struct-enum ?),
+//                        the arm read (before, at, after the null arm), backends.
+// Axes it HOLDS FIXED:   a struct-enum subject; the first arm a bare `null`.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 2 -> 0
+// CHANNEL: the assertions on the interpreter, the refusal on the C backend.
+
+enum Nd { NA, NV { n: integer }, NS { s: text } }
+enum Pt { PW, PN { name: text }, PL { v: integer } }
+
+fn ret_int(p: Pt) -> integer? {
+  match p { PW => null, PN { name } => { if name == "x" { return 1; } null }, PL { v } => v * 2 }
+}
+fn stmt_int(p: Pt) -> integer? {
+  match p { PW => null, PN { name } => { k = len(name); null }, PL { v } => v + 1 }
+}
+fn nested_int(p: Pt) -> integer? {
+  match p { PW => null, PN { name } => { { null } }, PL { v } => v - 1 }
+}
+fn ret_text(p: Pt) -> text? {
+  match p { PW => null, PN { name } => { if name == "x" { return "hit"; } null }, PL { v } => "v{v}" }
+}
+fn ret_rec(p: Pt) -> Nd? {
+  match p { PW => null, PN { name } => { if name == "x" { return NV { n: 1 }; } null }, PL { v } => NV { n: v } }
+}
+fn n_of(x: Nd?) -> integer { if x is NV { n } { n } else { -1 } }
+
+fn main() {
+  assert(ret_int(PL { v: 3 }) == 6 && ret_int(PN { name: "x" }) == 1, "ret_int");
+  assert(ret_int(PN { name: "y" }) == null && ret_int(PW) == null, "ret_int null");
+  assert(stmt_int(PL { v: 3 }) == 4 && stmt_int(PN { name: "q" }) == null, "stmt_int");
+  assert(nested_int(PL { v: 3 }) == 2 && nested_int(PN { name: "q" }) == null, "nested_int");
+  assert(ret_text(PL { v: 3 }) == "v3" && ret_text(PN { name: "x" }) == "hit", "ret_text");
+  assert(ret_text(PN { name: "y" }) == null, "ret_text null");
+  assert(n_of(ret_rec(PL { v: 7 })) == 7 && n_of(ret_rec(PN { name: "x" })) == 1, "ret_rec");
+  assert(ret_rec(PN { name: "y" }) == null && ret_rec(PW) == null, "ret_rec null");
+}

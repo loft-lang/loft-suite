@@ -1,0 +1,17 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for loft#2318's cell beside it (`@FR-F-OneBody`, @C97 — a LIBRARY may define
+// a free function under a standard-library name).  These two are names of body-less
+// standard-library natives, whose calls a native build links to the runtime's function of that
+// bare name: `vector_sum_int` (what `sum` calls for integers) and `env_variable`.  The cell
+// `2318-a-library-function-under-a-runtime-natives-name-leaves-the-runtimes-call.loft` uses it.
+// Run on its own it is a cell too, the other half of @C97: as a PROGRAM the same definitions are
+// refused, a standard-library name being reserved for the standard library there.
+//
+// @EXPECT_ERROR: its name is reserved for it
+// @falsified-at: none — a conformance guard: the refusal is the rule's, on every build.
+// CHANNEL: the compile.
+
+pub fn vector_sum_int(a: integer) -> integer { a + 1 }
+pub fn env_variable(name: text) -> text { "lib:{name}" }

@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2325, `@FR-M-Sep` — in a VECTOR match, as in every other, the comma after an arm whose
+// body is a block may be left out.  It was required there (`Expect token ,`).
+//
+// Axes it MOVES: the arm before the missing comma (a block body, an expression body — which
+// keeps its comma), the arm after it (a slice pattern, `_`), and a block body that is itself a
+// match.  Every value is hand-computed.
+//
+// CHANNEL: the COMPILE (a refusal before the fix) and the VALUE.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+fn ms_blocks(v: vector<integer>) -> integer {
+  match v {
+    [a] => { a }
+    [a, b] => { a + b }
+    _ => 0
+  }
+}
+
+fn ms_mixed(v: vector<integer>) -> integer {
+  match v {
+    [] => -1,
+    [a, ..] => {
+      match a { 0 => 100, _ => a }
+    }
+  }
+}
+
+fn main() {
+  assert(ms_blocks([4]) == 4 && ms_blocks([4, 5]) == 9 && ms_blocks([1, 2, 3]) == 0, "blocks");
+  assert(ms_mixed([]) == -1 && ms_mixed([0, 9]) == 100 && ms_mixed([7]) == 7, "mixed");
+}

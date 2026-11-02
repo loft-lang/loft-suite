@@ -1,0 +1,9 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A library that instantiates a standard generic at `vector<integer>` and at `vector<text>`:
+// `2343-a-generic-two-modules-instantiate-is-one-instance.loft` instantiates the same two.
+
+pub fn lib_has(v: vector<integer>, x: integer) -> boolean { v.contains(x) }
+
+pub fn lib_has_text(v: vector<text>, x: text) -> boolean { v.contains(x) }

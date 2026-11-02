@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2317 — `@FR-N-Shape`: a test of a type's shape peels its `?`.  The interpreter carries a
+// text producer like `to_lowercase` or `replace` only as a destination-passing native, written
+// straight into the target text.  Its route asked whether the target IS `text` without peeling
+// the `?`, so a `text?` local fell to the ordinary call — and with no plain native to call, the
+// body-less definition answered an empty text, silently (in a larger program the unbalanced
+// stack crashed it).  Native code was right throughout.
+//
+// Axes this file MOVES:  the target (a `text?` local assigned, declared with the value, set in
+//                        an `if` arm, in a loop; a `&text?` parameter, a `text?` field, a
+//                        `text?` return, a `vector<text?>` element), the native (to_lowercase,
+//                        to_uppercase, replace).
+// Axes it HOLDS FIXED:   the receiver is a non-null text parameter.
+//
+// @falsified-at: 0e95172cd — interpret exit 139 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move).
+// CHANNEL: the interpreter's exit — main crashed on the unbalanced stack (SIGSEGV) after the
+//   `text?` locals read back empty.
+struct O { name: text? }
+
+fn assigned(s: text) -> integer {
+  x: text? = s;
+  if x != null { x = s.to_lowercase(); }
+  len(x ?? "")
+}
+fn declared(s: text) -> integer { x: text? = s.to_lowercase(); len(x ?? "") }
+fn in_arm(c: boolean, s: text) -> integer {
+  x: text? = null;
+  if c { x = s.replace("l", "") } else { x = s.to_uppercase() }
+  len(x ?? "")
+}
+fn in_loop(s: text) -> integer {
+  n = 0;
+  for i in 0..3 {
+    x: text? = s;
+    if x != null { x = s.to_lowercase(); }
+    n += len(x ?? "") + i;
+  }
+  n
+}
+fn set_through(r: &text?, s: text) { r = s.to_uppercase(); }
+fn through(s: text) -> integer { x: text? = "zz"; set_through(x, s); len(x ?? "") }
+fn field(s: text) -> integer { o = O { name: null }; o.name = s.replace("l", "LL"); len(o.name ?? "") }
+fn ret_of(s: text) -> text? { s.to_lowercase() }
+fn element(s: text) -> integer { v: vector<text?> = ["a"]; v[0] = s.to_uppercase(); len(v[0] ?? "") }
+
+fn main() {
+  s = "Hello";
+  // "hello" 5, "Heo" 3, "HELLO" 5; the loop 5 + 0, 5 + 1, 5 + 2 = 18
+  o1 = "{assigned(s)} {declared(s)} {in_arm(true, s)} {in_arm(false, s)} {in_loop(s)}";
+  assert(o1 == "5 5 3 5 18", "c1 text? locals: {o1}");
+  // "HELLO" 5, "HeLLLLo" 7, "hello" 5, "HELLO" 5
+  o2 = "{through(s)} {field(s)} {len(ret_of(s) ?? "")} {element(s)}";
+  assert(o2 == "5 7 5 5", "c2 other targets: {o2}");
+  x: text? = s;
+  if x != null { x = s.to_lowercase(); }
+  assert(x == "hello", "c3 the value itself: {x ?? "null"}");
+  println("ok");
+}

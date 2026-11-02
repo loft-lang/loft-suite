@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2325, `@FR-P-Guard` — a guard on a PLAIN-struct arm, `S { x } if x > 0 => …`, runs with
+// the pattern's bindings and a false guard moves selection to the next arm, as on an enum arm.
+// It was refused (`Expect token =>`).
+//
+// Axes it MOVES: the guard's outcome (true, false), a literal field beside the guard, a
+// multi-pattern arm (`@FR-P-Multi`) under one guard, and an arm after the guarded one (a guarded
+// arm covers nothing, so it is reachable).  Every value is hand-computed.
+//
+// CHANNEL: the COMPILE (a refusal before the fix) and the VALUE.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
+
+struct GdS { x: integer, n: integer }
+
+fn gd_one(s: GdS) -> integer { match s { GdS { x } if x > 0 => x * 10, _ => -1 } }
+fn gd_lit(s: GdS) -> integer { match s { GdS { n: 2, x } if x < 5 => x, GdS { n: 2 } => 99, _ => 0 } }
+fn gd_multi(s: GdS) -> integer { match s { GdS { x: 0, n: v } | GdS { x: v, n: 0 } if v > 3 => v, _ => -2 } }
+
+fn main() {
+  assert(gd_one(GdS { x: 4, n: 0 }) == 40, "guard holds: {gd_one(GdS { x: 4, n: 0 })}");
+  assert(gd_one(GdS { x: -4, n: 0 }) == -1, "guard fails: {gd_one(GdS { x: -4, n: 0 })}");
+  assert(gd_lit(GdS { x: 3, n: 2 }) == 3, "literal and guard: {gd_lit(GdS { x: 3, n: 2 })}");
+  assert(gd_lit(GdS { x: 7, n: 2 }) == 99, "guard fails, the next arm: {gd_lit(GdS { x: 7, n: 2 })}");
+  assert(gd_lit(GdS { x: 3, n: 1 }) == 0, "the literal fails: {gd_lit(GdS { x: 3, n: 1 })}");
+  assert(gd_multi(GdS { x: 0, n: 8 }) == 8, "first pattern: {gd_multi(GdS { x: 0, n: 8 })}");
+  assert(gd_multi(GdS { x: 6, n: 0 }) == 6, "second pattern: {gd_multi(GdS { x: 6, n: 0 })}");
+  assert(gd_multi(GdS { x: 2, n: 0 }) == -2, "second pattern, guard fails: {gd_multi(GdS { x: 2, n: 0 })}");
+  assert(gd_multi(GdS { x: 1, n: 1 }) == -2, "no pattern: {gd_multi(GdS { x: 1, n: 1 })}");
+}

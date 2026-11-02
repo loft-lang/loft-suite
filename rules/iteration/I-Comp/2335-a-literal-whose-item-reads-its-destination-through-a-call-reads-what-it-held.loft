@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2335 — `@FR-I-Comp` / `@FR-E-Asgn-Compound`: a collection literal reads what its destination
+// held when the statement BEGAN, whichever part reads it.  A part that reads the destination
+// through a CALL lost it: handed a place prefix (`tp(v, 0)` for the destination `v.vars[0].td`),
+// the callee read the destination after the build had cleared it, which no snapshot rename can
+// redirect; and with the read inside an argument (`wd(o.td[0] ?? TU, …)`), the snapshot store was
+// released before the call read the view its argument had been lifted into.  The fix stages such a
+// part — evaluates it into a temp before the build — for a record element whose part is a call
+// naming the destination, and for any element read through a prefix.
+//
+// Every value by hand: `val` is inner*100 + 10*len(dep) + dep[0] for TV, -1 for TU.
+//
+// Axes this file MOVES:  the destination (a field through an element, a plain field, a local),
+//                        how the part reads it (a prefix to a call, an element as an argument, an
+//                        identity call, two parts), replace or append, the element kind
+//                        (struct-enum, struct, scalar), backends.
+// Axes it HOLDS FIXED:   one statement per read; the callee only reads.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — main reads the cleared destination (`element prefix -1`).
+
+enum Ty { TU, TV { inner: integer, dep: vector<integer> } }
+struct Var { name: text, td: vector<Ty> }
+struct Vars { vars: vector<Var> }
+struct P { x: integer, n: text }
+struct Q { ps: vector<P> }
+fn tp(v: Vars, nr: integer) -> Ty { v.vars[nr].td[0] ?? TU }
+fn wd(t: Ty, deps: vector<integer>) -> Ty { match t { TV { inner } => TV { inner: inner, dep: deps }, _ => t } }
+fn val(t: Ty) -> integer { match t { TV { inner, dep } => inner * 100 + len(dep) * 10 + (dep[0] ?? 0), TU => -1 } }
+struct Box { ps: vector<P>, ints: vector<integer> }
+struct One { td: vector<Ty> }
+
+fn first(b: Box) -> P { b.ps[0] }
+fn bump(p: P) -> P { P { x: p.x + 1, n: p.n + "+" } }
+fn total(b: Box) -> integer { t = 0; for i in b.ints { t += i; } t }
+
+fn through_element_prefix() {
+  v = Vars { vars: [Var { name: "a", td: [TV { inner: 7, dep: [] }] }] };
+  v.vars[0].td = [wd(tp(v, 0), [11])];
+  assert(val(v.vars[0].td[0] ?? TU) == 721, "element prefix {val(v.vars[0].td[0] ?? TU)}");
+  v.vars[0].td = [tp(v, 0)];
+  assert(val(v.vars[0].td[0] ?? TU) == 721, "identity {val(v.vars[0].td[0] ?? TU)}");
+  v.vars[0].td = [wd(tp(v, 0), [1]), wd(tp(v, 0), [2])];
+  r = val(v.vars[0].td[0] ?? TU) * 1000 + val(v.vars[0].td[1] ?? TU);
+  assert(r == 711712, "two parts {r}");
+}
+
+fn plain_field() {
+  o = One { td: [TV { inner: 7, dep: [] }] };
+  o.td = [wd(o.td[0] ?? TU, [11])];
+  assert(val(o.td[0] ?? TU) == 721, "field {val(o.td[0] ?? TU)}");
+  o.td += [wd(o.td[0] ?? TU, [12])];
+  assert(len(o.td) == 2 && val(o.td[1] ?? TU) == 722, "append {len(o.td)} {val(o.td[1] ?? TU)}");
+}
+
+fn local() {
+  l = [TV { inner: 7, dep: [] }];
+  l = [wd(l[0] ?? TU, [11])];
+  assert(val(l[0] ?? TU) == 721, "local {val(l[0] ?? TU)}");
+}
+
+fn struct_and_scalar() {
+  b = Box { ps: [P { x: 5, n: "p" }], ints: [1, 2, 3] };
+  b.ps = [bump(first(b))];
+  assert(len(b.ps) == 1 && b.ps[0].x == 6 && b.ps[0].n == "p+", "struct {b.ps[0].x} {b.ps[0].n}");
+  b.ints = [total(b), total(b) * 2];
+  assert(len(b.ints) == 2 && b.ints[0] == 6 && b.ints[1] == 12, "scalar {b.ints[0]} {b.ints[1]}");
+  b.ps += [bump(first(b))];
+  assert(len(b.ps) == 2 && b.ps[1].x == 7, "struct append {b.ps[1].x}");
+}
+
+fn main() {
+  through_element_prefix();
+  plain_field();
+  local();
+  struct_and_scalar();
+}
