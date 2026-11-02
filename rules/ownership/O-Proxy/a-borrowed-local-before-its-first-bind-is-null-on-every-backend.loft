@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Proxy` — a borrowed local (a view, its type carrying the dep on what it borrows) that the
+// scope pass declares ahead of its first bind holds NULL until that bind, on every backend.  The
+// interpreter used to pre-init it as a stack-frame DbRef pointing into its dep's slot, which a
+// liveness test (`OpConvBoolFromRef`, `OpStoreLive`) reads as a record, where native and C hold
+// `DbRef::NULL`: one value, two answers.  A program cannot name such a local before its bind, so
+// the test that read it was the compiler's own — a displaced fn-field record's cascade
+// (loft#2354, its own cell under L-CapOwn) — and the class is closed where the value is written.
+//
+// The shapes below are the ones that produce such a pre-init (a view bound in one arm and
+// returned, a vector view chosen by a value branch) beside the shapes whose null is the program's
+// own (a value branch with a `null` arm, a match, a loop that may find nothing).  Every answer is
+// hand-computed, on both backends, under the store checks: a pre-init the store reads as a record
+// would show there.
+//
+// @ARMED: LOFT_POISON=1 LOFT_STRICT_STORES=1
+// @falsified-at: none — a conformance guard; the values agree on 0e95172cd too (the one reader
+//   of the pre-init's value was loft#2354's cascade).
+
+struct S { a: integer }
+struct Box { items: vector<S>, extra: vector<S> }
+
+// The view `y` is bound in one arm: declared ahead of it, read only after the bind.
+fn arm_bound(b: Box, k: integer) -> integer {
+  if k > 0 {
+    y = b.items[1];
+    return y.a;
+  }
+  -2
+}
+// A vector view chosen by a value branch.
+fn view_vec(b: Box, c: boolean) -> integer {
+  v = if c { b.items } else { b.extra };
+  len(v)
+}
+// The program's own nulls.
+fn branch_value(b: Box, c: boolean) -> integer {
+  x = if c { b.items[0] } else { null };
+  if x == null { -1 } else { x.a }
+}
+fn match_bound(b: Box, k: integer) -> integer {
+  r = match k { 0 => b.items[0], 1 => b.items[1], _ => null };
+  if r != null { r.a * 10 } else { -3 }
+}
+fn loop_hit(b: Box, want: integer) -> integer {
+  hit = null;
+  for e in b.items { if e.a == want { hit = e; } }
+  if hit == null { 0 } else { hit.a * 100 }
+}
+
+fn main() {
+  b = Box { items: [S { a: 5 }, S { a: 6 }], extra: [S { a: 9 }] };
+  assert(arm_bound(b, 0) == -2 && arm_bound(b, 1) == 6, "arm {arm_bound(b, 0)} {arm_bound(b, 1)}");
+  assert(view_vec(b, false) == 1 && view_vec(b, true) == 2, "vector view");
+  assert(branch_value(b, false) == -1 && branch_value(b, true) == 5, "branch value");
+  assert(match_bound(b, 2) == -3 && match_bound(b, 1) == 60, "match");
+  assert(loop_hit(b, 7) == 0 && loop_hit(b, 6) == 600, "loop");
+  assert(b.items[0].a == 5 && b.items[1].a == 6 && b.extra[0].a == 9, "the borrowed record intact");
+}
