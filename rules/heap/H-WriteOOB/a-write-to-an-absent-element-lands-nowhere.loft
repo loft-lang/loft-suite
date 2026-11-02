@@ -67,7 +67,7 @@ fn text_loop(t: vector<text>) { for i in 0..4 { t[i] = "x{i}"; } }
 fn mk() -> vector<integer> { [11, 22, 33] }
 fn grid(v: vector<integer>, g: G) { for j in 0..g.h { for i in 0..g.w { v[j * g.w + i] = j * 10 + i; } } }
 
-fn main() {
+fn scalar_and_compound() {
   // straight-line scalar writes: literal, variable, null and negative indices
   v1: vector<integer> = [11, 22, 33];
   v1[9] = 5;
@@ -90,6 +90,9 @@ fn main() {
   v2[-7] *= 2;
   v2[-1] += 100;
   assert("{v2}" == "[11,22,133]" && len(v2) == 3, "compound: {v2}");
+}
+
+fn element_types() {
   // element types
   // eight elements, because a narrow write that took its width from the DEFINITION (loft#1378)
   // wrote eight bytes: `b[-8] = 9` then zeroed the seven neighbours after it
@@ -128,6 +131,9 @@ fn main() {
   es[9].n = 5;
   es[-1].n = 9;
   assert(es[0].n == 9 && len(es) == 1, "struct-enum: {es[0].n} {len(es)}");
+}
+
+fn records() {
   // records: field through the element, whole literal, whole variable, null view
   r1: vector<P> = [P { x: 1, y: 2 }, P { x: 3, y: 4 }];
   r1[9].x = 5;
@@ -161,6 +167,9 @@ fn main() {
   h1[-2].name = "w";
   assert(h1[0].name == "a" && "{h1[0].tags}" == "[1]" && hv.name == "qq" && "{hv.tags}" == "[5,6]" && len(h1) == 1,
     "heap-owning: {h1[0].name} {h1[0].tags} {hv.name} {hv.tags} {len(h1)}");
+}
+
+fn linked_keyed_and_roots() {
   // the linked layout: a keyed collection over K makes vector<K> a vector of record ids
   lk: vector<K> = [K { id: 1, n: 10 }, K { id: 2, n: 20 }];
   ix = Idx { by: [K { id: 5, n: 50 }] };
@@ -195,6 +204,9 @@ fn main() {
   mk()[-1] = 6;
   assert("{p1}" == "[11,22,6]" && "{a1}" == "[11,22,6]" && "{o1.v}" == "[11,22,6]" && "{cr}" == "[11,22,6]",
     "roots: {p1} {a1} {o1.v} {cr}");
+}
+
+fn loops() {
   // loops: the hoisted header and base, a negative counter, the fill, the view address
   l1: vector<integer> = [11, 22, 33];
   loop_header(l1);
@@ -234,6 +246,9 @@ fn main() {
   gv: vector<integer> = [9, 9, 9, 9, 9, 9, 9];
   grid(gv, G { w: 3, h: 4 });
   assert("{gv}" == "[0,1,2,10,11,12,20]" && len(gv) == 7, "guarded chain grid: {gv}");
+}
+
+fn index_boolean_and_branches() {
   // an `index` miss, a boolean element, and the write under an `if` arm and in a loop body here
   ik: index<K[id]> = [K { id: 3, n: 30 }];
   ik[8].n = 5;
@@ -247,5 +262,16 @@ fn main() {
   if len(w1) == 3 { w1[9] = 5; w1[-1] = 6; } else { w1[0] = 0; }
   for k in 0..2 { w1[k + 7] = 1; w1[k - 3] = 40 + k; }
   assert("{w1}" == "[40,41,6]" && len(w1) == 3, "if arm and loop body: {w1}");
+}
+
+// One function per section: one C function this size (417 locals) took `cl /O1` past the
+// sweep's compile limit, where gcc takes seconds.
+fn main() {
+  scalar_and_compound();
+  element_types();
+  records();
+  linked_keyed_and_roots();
+  loops();
+  index_boolean_and_branches();
   println("a write to an absent element lands nowhere: every cell holds");
 }
