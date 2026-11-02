@@ -1,0 +1,111 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2372 (`@FR-O-Witness`, `@FR-B-Copy`) — a record local that has an owner witness (it is
+// rebound from a call somewhere in the function; that branch need not run), bound from an
+// unwrapped optional local of an inner block (`code = delivered!`), takes a COPY, as the
+// whole-value bind `code = delivered` does.  Aliased, the inner block's end freed `delivered`
+// and `code` read the freed store: `other` for every call, on both backends, silently.  The same
+// holds for a local the return buffer was renamed onto (`body_ret`, an argument by slot).
+// Met in the self-host elaborator, where an untaken `code = vector_return(…, code, …)` lost
+// the body of every function whose tail a parameter is.
+//
+// The controls: the unwrap into a fresh local first (`t = delivered!; code = t`), and a local
+// with no witness (no call rebind).  The defect reads a freed store, so whether it shows depends
+// on what reuses the slot: `main` computes the results before asserting them, the order measured
+// to fail on every run before the fix — keep it.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+
+struct Blk { ops: vector<Node>, name: text }
+enum Node {
+  NdNull,
+  NdLine { n: integer },
+  NdBlock { block: vector<Blk> }
+}
+struct Ex { code: Node, tp: integer }
+
+fn pass(c: Node, k: integer) -> Node {
+  if k > 100 { return NdNull; }
+  c
+}
+
+fn deliver(c: Node, k: integer) -> Node? {
+  if k > 50 { return null; }
+  if k > 40 { return NdBlock { block: [Blk { ops: [NdLine { n: 0 }], name: "fresh" }] }; }
+  c
+}
+
+fn mk(k: integer) -> Ex {
+  Ex { code: NdBlock { block: [Blk { ops: [NdLine { n: k }, NdLine { n: k + 1 }], name: "b" }] }, tp: 1 }
+}
+
+// The witnessed local, first bound to a view of a local's field.
+fn body(k: integer, flag: boolean) -> Node {
+  b = mk(k);
+  code = b.code;
+  if flag {
+    code = pass(code, k);
+  }
+  if k >= 0 {
+    delivered = deliver(code, k);
+    if delivered != null {
+      code = delivered!;
+    }
+  }
+  code
+}
+
+// The same local renamed onto the return buffer: its first bind is a field of a call's result.
+fn body_ret(k: integer, flag: boolean) -> Node {
+  code = mk(k).code;
+  if flag {
+    code = pass(code, k);
+  }
+  if k >= 0 {
+    delivered = deliver(code, k);
+    if delivered != null {
+      code = delivered!;
+    }
+  }
+  code
+}
+
+// Control: no call rebind, so no witness.
+fn plain(k: integer) -> Node {
+  b = mk(k);
+  code = b.code;
+  if k >= 0 {
+    delivered = deliver(code, k);
+    if delivered != null {
+      code = delivered!;
+    }
+  }
+  code
+}
+
+fn show(r: Node) -> text {
+  match r {
+    NdBlock { block } => {
+      s = "{block[0].name}:";
+      for o in block[0].ops {
+        s += match o { NdLine { n } => "L{n} ", _ => "? " };
+      }
+      s
+    },
+    _ => "other"
+  }
+}
+
+fn main() {
+  a = show(body(3, false));
+  b = show(body(4, true));
+  f = show(body(45, false));
+  assert(a == "b:L3 L4 " && b == "b:L4 L5 " && f == "fresh:L0 ", "witnessed: a '{a}' b '{b}' f '{f}'");
+  r = show(body_ret(3, false));
+  rf = show(body_ret(45, true));
+  assert(r == "b:L3 L4 " && rf == "fresh:L0 ", "renamed onto the buffer: '{r}' '{rf}'");
+  n = show(body(60, false));
+  assert(n == "b:L60 L61 ", "no answer keeps the view: '{n}'");
+  assert(show(plain(3)) == "b:L3 L4 " && show(plain(45)) == "fresh:L0 ", "no witness");
+}
