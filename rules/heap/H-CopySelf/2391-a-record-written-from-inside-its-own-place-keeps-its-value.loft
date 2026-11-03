@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2391, `@FR-H-CopySelf` / `@FR-H-Copy` — a RECORD delivered into a place from inside that
+// place keeps its value: the record twin of loft#1916's collection cells beside it.
+//
+// `c.tp = match c.tp { Opt { inner } => inner, _ => c.tp }` read back as neither variant, on both
+// backends and with nothing said: the copy released what the place owns before it wrote, and the
+// source was one of those records.  A source that reads the place's root (a projection, a match
+// over it, a call whose result borrows a parameter) is now copied into a record of its own first.
+//
+// Axes this file MOVES:  the place (a local's field, an element's field, a parameter's field, a
+//                        whole element); the source (a match binding of the place's child, a
+//                        borrowing call answering the child, the whole field, or null).
+// Axes it HOLDS FIXED:   one struct-enum type; one write per statement.
+// The controls were already right: a vector field from its own element's field (loft#1916) and a
+// local rebound from its own child (`(H-Materialise)`).  Still open, so not here: a LOCAL viewing
+// a record inside the place written back into it (`y = match c.tp { … }; c.tp = y`).
+//
+// Values hand-computed beside each assert.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+enum T { Leaf { n: integer }, Opt { inner: T } }
+struct Ex { tp: T, k: integer }
+struct Box { t: T }
+struct Node { id: integer, kids: vector<Node> }
+fn leaf(t: T) -> integer { match t { Leaf { n } => n, _ => -1 } }
+fn peel_param(c: Ex) -> integer { c.tp = match c.tp { Opt { inner } => inner, _ => c.tp }; leaf(c.tp) }
+fn pick(c: Ex) -> T? { if c.k > 0 { match c.tp { Opt { inner } => inner, _ => c.tp } } else { null } }
+fn tp_of(c: Ex) -> T { c.tp }
+fn main() {
+  // a field from a match binding of its own child: 1
+  c = Ex { tp: Opt { inner: Leaf { n: 1 } }, k: 0 };
+  c.tp = match c.tp { Opt { inner } => inner, _ => c.tp };
+  assert(leaf(c.tp) == 1, "field {leaf(c.tp)}");
+  // an element's field: 2
+  v: vector<Box> = [Box { t: Opt { inner: Leaf { n: 2 } } }];
+  v[0].t = match v[0].t { Opt { inner } => inner, _ => v[0].t };
+  assert(leaf(v[0].t) == 2, "element field {leaf(v[0].t)}");
+  // a parameter's field: 3
+  assert(peel_param(Ex { tp: Opt { inner: Leaf { n: 3 } }, k: 0 }) == 3, "param");
+  // a whole element: 6
+  w: vector<T> = [Opt { inner: Leaf { n: 6 } }];
+  w[0] = match w[0] { Opt { inner } => inner, _ => w[0] };
+  assert(leaf(w[0]) == 6, "element {leaf(w[0])}");
+  // a borrowing call that answers null: the field keeps Opt { Leaf 4 } -> 40
+  e = Ex { tp: Opt { inner: Leaf { n: 4 } }, k: 0 };
+  e.tp = pick(e);
+  r = match e.tp { Opt { inner } => leaf(inner) * 10, _ => -1 };
+  assert(r == 40, "null source {r}");
+  // the same call answering the field's own child: 5
+  f = Ex { tp: Opt { inner: Leaf { n: 5 } }, k: 1 };
+  f.tp = pick(f);
+  assert(leaf(f.tp) == 5, "present source {leaf(f.tp)}");
+  // a call answering the whole field it is written to: 9
+  d = Ex { tp: Leaf { n: 9 }, k: 0 };
+  d.tp = tp_of(d);
+  assert(leaf(d.tp) == 9, "self call {leaf(d.tp)}");
+  // controls: a vector field from its own element's field, a local from its own child
+  n = Node { id: 0, kids: [Node { id: 1, kids: [Node { id: 4, kids: [] }, Node { id: 5, kids: [] }] }] };
+  n.kids = n.kids[0].kids;
+  assert(len(n.kids) == 2 && n.kids[1].id == 5, "vector field");
+  l: T = Opt { inner: Leaf { n: 7 } };
+  l = match l { Opt { inner } => inner, _ => l };
+  assert(leaf(l) == 7, "local");
+}
