@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2388 — `@FR-C-Never`: a local bound to a value that never arrives (an `if` or `match`
+// whose every arm leaves the function or the loop) has no value to hold, so nothing after that
+// statement runs.  The parser typed the local `Never`, which the slot allocator gives no slot:
+// an integer local's read was an internal compiler error, and a TEXT local's store was dropped
+// whole, its `return`s with it, so the function answered the code after it — silently.  One
+// cell per shape; every value is the one the diverging statement returns, by hand.
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, native exit 1 -> 0 (refused, then compiled)
+// CHANNEL: the exit (the old tree refuses `at_the_end` as "expected integer, got void") and
+//   the asserts.
+// ARMED: no instrument.
+// WITNESS: each assert message prints the values it read.
+// HOLDS: with `at_the_end` taken out the old tree compiles, and `as_text` answers "!" for both
+//   — the silent text case; the integer cells stop on the internal error.
+enum E { A { v: integer }, B { a: integer, b: integer } }
+
+fn inferred(k: integer) -> integer { x = if k > 0 { return 2; } else { return 3; }; x + 1 }
+fn declared(k: integer) -> integer { y: integer = if k > 0 { return 2; } else { return 3; }; y + 1 }
+fn as_text(k: integer) -> text { s = if k > 0 { return "a"; } else { return "b"; }; "{s}!" }
+fn by_match(e: E) -> integer { x = match e { A { v } => { return v; }, B { a, b } => { return a + b; } }; x + 100 }
+fn in_a_loop() -> integer { n = 0; for i in 0..10 { x = if i < 3 { n += 1; continue; } else { break; }; n += x; } n }
+fn more_after(k: integer) -> integer { x = if k > 0 { return 5; } else { return 6; }; z = x * 2; w = "{z}"; len(w) }
+fn at_the_end(k: integer) -> integer { x = if k > 0 { return 2; } else { return 3; }; }
+fn in_a_block(k: integer) -> integer { r = { x = if k > 0 { return 9; } else { return 8; }; x + 1 }; r }
+
+fn main() {
+  assert(inferred(1) == 2 && inferred(0) == 3, "an inferred local: {inferred(1)} {inferred(0)}");
+  assert(declared(1) == 2 && declared(0) == 3, "a declared local: {declared(1)} {declared(0)}");
+  assert(as_text(1) == "a" && as_text(0) == "b", "a text local: {as_text(1)} {as_text(0)}");
+  assert(by_match(A { v: 7 }) == 7 && by_match(B { a: 1, b: 3 }) == 4, "a match: {by_match(A { v: 7 })}");
+  assert(in_a_loop() == 3, "continue three times, then break: {in_a_loop()}");
+  assert(more_after(1) == 5 && more_after(0) == 6, "locals after it: {more_after(1)} {more_after(0)}");
+  assert(at_the_end(1) == 2 && at_the_end(0) == 3, "the body's last statement: {at_the_end(1)}");
+  assert(in_a_block(1) == 9 && in_a_block(0) == 8, "inside a value block: {in_a_block(1)} {in_a_block(0)}");
+  println("ok");
+}
