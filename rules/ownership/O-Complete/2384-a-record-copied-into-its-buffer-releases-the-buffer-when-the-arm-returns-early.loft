@@ -1,0 +1,216 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A function answering a record whose tail is copied into its return buffer releases that buffer
+// on every path, including a `return` from inside the copied arm.
+//
+// The tail of each function below is a join of a fresh record and a borrowed view, so it is
+// delivered by COPY: the buffer is minted, then the arm is copied into it.  The mint ran BEFORE
+// the arm, so an arm that `return`s a different record early left it behind — the buffer is a
+// parameter, no free on the return path names it, and the caller frees only the result it is
+// handed (@FR-O-Complete).  A pooled buffer (@FR-R-Reuse) hid it, so every call site here
+// declines the pool: its result local is assigned twice.  One record per call, on both backends
+// (loft#2384).
+//
+// Axes this file MOVES:  the tail (a `match`, a value block); what the early `return` answers (a
+//                        fresh record, `null`, a parameter); the result (`T?`, a dense `T`).
+// Axes it HOLDS FIXED:   one early `return` per function, a record enum of one level.
+//
+// The controls were already clean: a dense result, a call site the pool covers, and the early
+// `return` written as the branch's own value.
+//
+// The leak gate is the channel: every value below was right before the fix as well.
+//
+// @falsified-at: f6ee9b1a9 — interpret leaked kt=100 T×50 -> clean, native leaked kt=100 T×60 -> clean
+enum T {
+  TInt { lo: integer },
+  TVec { inner: T }
+}
+
+struct D { returned: vector<T> }
+
+enum S {
+  SName { name: text, arg: integer },
+  SOther
+}
+
+fn depth(t: T?) -> integer {
+  match t {
+    TVec { inner } => 1 + depth(inner),
+    TInt { lo } => 1000 * lo,
+    _ => -1
+  }
+}
+
+// A `match` tail: one arm returns a fresh record early, the other answers a borrowed view.
+fn by_match(ds: vector<D>, nodes: vector<S>, n: integer) -> T? {
+  match nodes[n] {
+    SName { name, arg } => {
+      if name == "vector" {
+        inner = by_match(ds, nodes, arg);
+        if inner == null {
+          return null;
+        }
+        inner = by_match(ds, nodes, arg);
+        return TVec { inner: inner! };
+      }
+      { t = ds[arg].returned[0] ?? TInt { lo: 0 }; if arg > 100 { TVec { inner: t } } else { t } }
+    },
+    _ => null
+  }
+}
+
+// A value block tail with the same early return.
+fn by_block(ds: vector<D>, nodes: vector<S>, n: integer) -> T? {
+  a = 0;
+  {
+    match nodes[n] {
+      SName { name, arg } => {
+        if name == "vector" {
+          inner = by_block(ds, nodes, arg);
+          if inner == null {
+            return null;
+          }
+          inner = by_block(ds, nodes, arg);
+          return TVec { inner: inner! };
+        }
+        a = arg;
+      },
+      _ => { return null; }
+    }
+    { t = ds[a].returned[0] ?? TInt { lo: 0 }; if a > 100 { TVec { inner: t } } else { t } }
+  }
+}
+
+// The early return answers null.
+fn null_early(ds: vector<D>, k: integer) -> T? {
+  match k {
+    0 => { if ds[0].returned[0] != null { return null; } { t = ds[1].returned[0] ?? TInt { lo: 0 }; if 1 > 100 { TVec { inner: t } } else { t } } },
+    _ => { t = ds[k].returned[0] ?? TInt { lo: 0 }; if k > 100 { TVec { inner: t } } else { t } }
+  }
+}
+
+// The early return answers a parameter.
+fn param_early(ds: vector<D>, p: T, k: integer) -> T? {
+  match k {
+    0 => { if len(ds) > 0 { return p; } { t = ds[1].returned[0] ?? TInt { lo: 0 }; if 1 > 100 { TVec { inner: t } } else { t } } },
+    _ => { t = ds[k].returned[0] ?? TInt { lo: 0 }; if k > 100 { TVec { inner: t } } else { t } }
+  }
+}
+
+// A dense result: the control, clean before the fix.
+fn dense(ds: vector<D>, k: integer) -> T {
+  match k {
+    0 => { if len(ds) > 0 { return TVec { inner: TInt { lo: 9 } }; } { t = ds[1].returned[0] ?? TInt { lo: 0 }; if 1 > 100 { TVec { inner: t } } else { t } } },
+    _ => { t = ds[k].returned[0] ?? TInt { lo: 0 }; if k > 100 { TVec { inner: t } } else { t } }
+  }
+}
+
+fn world() -> vector<D> {
+  ds: vector<D> = [];
+  for i in 0..8 { ds += [D { returned: [TInt { lo: i }] }]; }
+  ds
+}
+
+fn nested() -> vector<S> {
+  [SName { name: "vector", arg: 1 }, SName { name: "u8", arg: 7 }, SName { name: "vector", arg: 0 }]
+}
+
+fn test_match_tail() {
+  ds = world();
+  nodes = nested();
+  c = 0;
+  for _ in 0..10 {
+    c += depth(by_match(ds, nodes, 2));
+  }
+  assert(c == 10 * 7002, "match tail {c}");
+}
+
+fn test_block_tail() {
+  ds = world();
+  nodes = nested();
+  c = 0;
+  for _ in 0..10 {
+    c += depth(by_block(ds, nodes, 2));
+  }
+  assert(c == 10 * 7002, "block tail {c}");
+}
+
+fn test_null_early() {
+  ds = world();
+  c = 0;
+  for _ in 0..10 {
+    r = null_early(ds, 0);
+    c += depth(r);
+    r = null_early(ds, 3);
+    c += depth(r);
+  }
+  assert(c == 10 * (-1 + 3000), "null early {c}");
+}
+
+fn test_param_early() {
+  ds = world();
+  p = TInt { lo: 5 };
+  c = 0;
+  for _ in 0..10 {
+    r = param_early(ds, p, 0);
+    c += depth(r);
+    r = param_early(ds, p, 4);
+    c += depth(r);
+  }
+  assert(c == 10 * (5000 + 4000), "param early {c}");
+}
+
+fn test_dense() {
+  ds = world();
+  c = 0;
+  for _ in 0..10 {
+    r = dense(ds, 0);
+    c += depth(r);
+    r = dense(ds, 6);
+    c += depth(r);
+  }
+  assert(c == 10 * (9001 + 6000), "dense {c}");
+}
+
+fn test_pooled_control() {
+  ds = world();
+  nodes = nested();
+  c = 0;
+  for _ in 0..10 {
+    r = by_match(ds, nodes, 0);
+    c += depth(r);
+  }
+  assert(c == 10 * 7001, "pooled {c}");
+}
+
+// The early `return` written as the branch's own value.
+fn no_early(ds: vector<D>, k: integer) -> T? {
+  match k {
+    0 => if len(ds) > 0 { TVec { inner: TInt { lo: 2 } } } else { t = ds[1].returned[0] ?? TInt { lo: 0 }; if k > 100 { TVec { inner: t } } else { t } },
+    _ => { t = ds[k].returned[0] ?? TInt { lo: 0 }; if k > 100 { TVec { inner: t } } else { t } }
+  }
+}
+
+fn test_workaround() {
+  ds: vector<D> = [];
+  for i in 0..8 { ds += [D { returned: [TInt { lo: i }] }]; }
+  c = 0;
+  for _ in 0..10 {
+    r = no_early(ds, 0);
+    c += depth(r);
+    r = no_early(ds, 3);
+    c += depth(r);
+  }
+  assert(c == 10 * (2001 + 3000), "workaround {c}");
+}
+
+fn main() {
+  test_match_tail();
+  test_block_tail();
+  test_null_early();
+  test_param_early();
+  test_dense();
+  test_pooled_control();
+  test_workaround();
+}
