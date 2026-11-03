@@ -16,6 +16,11 @@
 // to fail on every run before the fix — keep it.
 //
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts; the freed read answers `other`.
+// ARMED: no instrument (it fails on the plain run; LOFT_POISON makes the freed read certain).
+// WITNESS: each assert message prints the name it read.
+// HOLDS: the controls are cells of this file (the unwrap into a fresh local first, and a
+//        local with no witness).
 
 struct Blk { ops: vector<Node>, name: text }
 enum Node {

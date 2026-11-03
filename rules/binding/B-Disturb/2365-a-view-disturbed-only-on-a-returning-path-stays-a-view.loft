@@ -13,6 +13,11 @@
 // reads the view itself (c4), and a `break` arm, whose state reaches the loop's exit (c6).
 //
 // @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts (each value hand-computed above its case).
+// ARMED: no instrument.
+// WITNESS: each assert message prints the answer it read.
+// HOLDS: the copies that must stay are cells of this file (c3 an arm that disturbs without
+//        leaving, c4 a returning arm that reads the view, c6 a `break` arm).
 
 struct E { n: integer }
 struct W { v: vector<E> }
