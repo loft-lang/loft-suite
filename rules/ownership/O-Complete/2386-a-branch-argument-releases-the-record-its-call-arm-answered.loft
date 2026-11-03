@@ -1,0 +1,153 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A branch handed to a call as an argument releases the record a call in one of its arms
+// answered.
+//
+// `ex(if c { tp(v, 0) } else { TInt })`: `tp` copies an element out of its argument into a record
+// of its own (`v.vars[nr]!.type_def[0]`), so its answer is OWNED.  An owned arm of a branch is
+// adopted by the binding the branch is assigned to — but an argument has no such binding, and the
+// arm got no temporary of its own either, while the same call as the argument itself is lifted
+// into one and freed.  One record per call, on both backends (loft#2386).
+//
+// Axes this file MOVES:  the branch (an `if`, a nested `if`, a `match`); its arms (one owned
+//                        call, two); the consumer (a call that copies the argument, one that
+//                        answers it, a vector push).
+// Axes it HOLDS FIXED:   one call answering an owned record, a record enum with a vector field.
+//
+// The controls were already clean: a vector push of the branch, the branch bound to a local
+// first, and the call as the argument itself.
+//
+// The leak gate is the channel: every value below was right before the fix as well.
+//
+// @falsified-at: f6ee9b1a9 — interpret leaked kt=100 T×47 -> clean, native leaked kt=100 T×47 -> clean
+enum T {
+  TInt,
+  TVec { inner: vector<T> },
+  TOther { n: integer }
+}
+
+struct Ex { tp: T }
+struct Var { type_def: vector<T> }
+struct Vars { vars: vector<Var> }
+
+// Answers an owned copy of an element it reads out of its argument.
+fn tp(v: Vars, nr: integer) -> T {
+  v.vars[nr]!.type_def[0]
+}
+
+fn ex(t: T) -> Ex {
+  Ex { tp: t }
+}
+
+fn same(t: T) -> T {
+  t
+}
+
+fn weight(t: T) -> integer {
+  match t {
+    TVec { inner } => 10 + len(inner),
+    TOther { n } => n,
+    _ => 1
+  }
+}
+
+fn world() -> Vars {
+  Vars { vars: [Var { type_def: [TVec { inner: [TInt] }] }, Var { type_def: [TOther { n: 5 }] }] }
+}
+
+fn test_a_branch_argument() {
+  v = world();
+  c = 0;
+  for i in 0..10 {
+    x = ex(if i >= 0 { tp(v, 0) } else { TInt });
+    c += weight(x.tp);
+  }
+  assert(c == 10 * 11, "branch argument {c}");
+}
+
+fn test_two_owned_arms() {
+  v = world();
+  c = 0;
+  for i in 0..10 {
+    x = ex(if i % 2 == 0 { tp(v, 0) } else { tp(v, 1) });
+    c += weight(x.tp);
+  }
+  assert(c == 5 * 11 + 5 * 5, "two arms {c}");
+}
+
+fn test_a_nested_branch() {
+  v = world();
+  c = 0;
+  for i in 0..10 {
+    x = ex(if i >= 0 { if i < 5 { tp(v, 0) } else { tp(v, 1) } } else { TInt });
+    c += weight(x.tp);
+  }
+  assert(c == 5 * 11 + 5 * 5, "nested {c}");
+}
+
+fn test_a_match_argument() {
+  v = world();
+  c = 0;
+  for i in 0..10 {
+    x = ex(match i % 3 { 0 => tp(v, 0), 1 => tp(v, 1), _ => TInt });
+    c += weight(x.tp);
+  }
+  // i % 3 over 0..10: 0 four times, 1 three times, 2 three times
+  assert(c == 4 * 11 + 3 * 5 + 3 * 1, "match {c}");
+}
+
+fn test_a_callee_answering_its_argument() {
+  v = world();
+  c = 0;
+  for i in 0..10 {
+    t = same(if i >= 0 { tp(v, 1) } else { TInt });
+    c += weight(t);
+  }
+  assert(c == 10 * 5, "answered back {c}");
+}
+
+fn test_a_vector_push() {
+  v = world();
+  xs: vector<T> = [];
+  for i in 0..10 {
+    xs += [if i >= 0 { tp(v, 0) } else { TInt }];
+  }
+  c = 0;
+  for x in xs {
+    c += weight(x);
+  }
+  assert(c == 10 * 11, "push {c}");
+}
+
+fn test_the_branch_bound_first() {
+  v = world();
+  c = 0;
+  for i in 0..10 {
+    t = if i >= 0 { tp(v, 0) } else { TInt };
+    x = ex(t);
+    c += weight(x.tp);
+  }
+  assert(c == 10 * 11, "bound first {c}");
+}
+
+fn test_the_call_as_the_argument() {
+  v = world();
+  c = 0;
+  for _ in 0..10 {
+    x = ex(tp(v, 0));
+    c += weight(x.tp);
+  }
+  assert(c == 10 * 11, "call argument {c}");
+}
+
+fn main() {
+  test_a_branch_argument();
+  test_two_owned_arms();
+  test_a_nested_branch();
+  test_a_match_argument();
+  test_a_callee_answering_its_argument();
+  test_a_vector_push();
+  test_the_branch_bound_first();
+  test_the_call_as_the_argument();
+}
