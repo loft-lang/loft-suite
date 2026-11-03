@@ -1,0 +1,131 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A record local FIRST bound from a value branch whose arm is a variable — `at = if c { a } else
+// { a }` — and rebound later copies the chosen arm, as the single bind `at = a` does
+// (`formal/binding.md` @FR-B-Copy: a plain whole-value bind copies; `formal/ownership.md`
+// @FR-O-Complete: every path of a bound value branch is its own binding).  Because the local is
+// rebound, it owns what it holds from its first bind on, so the rebind releases the old value.
+// Handed the arm's store instead, that release freed the arm's variable — the CALLER's record for
+// a parameter arm — and the next allocation reused the store: the caller read someone else's
+// data, on both backends, with no diagnostic (loft#2398).
+//
+// The cells vary the branch (`if`, `match`, an `else if` chain), the arm (parameter, local, a
+// parameter beside a call that does not run), the place (a loop body), the record (a
+// struct-enum, a struct) and the binding's nullability.  Each
+// reads the arm's variable after the rebind, then allocates, then reads it again.  Values are
+// hand-computed.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0
+// CHANNEL: the first parameter cell on both backends — on the control the caller's element is
+//   gone after the allocation (`-1`) on the interpreter, and null (`t[0] is null`) on native.
+// HOLDS: leak, panic and free-refusal are clean on both trees.
+
+enum Ty { TInt, TText { dep: vector<integer> }, TOpt { inner: Ty } }
+
+struct P { a: integer, tags: vector<integer> }
+
+fn base(t: Ty) -> Ty {
+  match t { TOpt { inner } => base(inner), _ => t }
+}
+
+fn bare(t: Ty) -> Ty {
+  match t { TText { dep: _ } => TText { dep: [] }, _ => t }
+}
+
+fn dl(t: Ty) -> integer {
+  match t { TText { dep } => len(dep), _ => -1 }
+}
+
+fn params(c: boolean, a: Ty) -> integer {
+  at = if c { a } else { a };
+  at = bare(at);
+  dl(at)
+}
+
+fn mixed(c: boolean, a: Ty) -> integer {
+  at = if c { a } else { base(a) };
+  at = bare(at);
+  dl(at)
+}
+
+fn looped(c: boolean, a: Ty) -> integer {
+  r = 0;
+  for i in 0..3 {
+    at = if c || i < 0 { a } else { a };
+    at = bare(at);
+    r += dl(at) + 1;
+  }
+  r
+}
+
+fn by_match(k: integer, a: Ty, b: Ty) -> integer {
+  at = match k { 0 => a, 1 => b, _ => a };
+  at = bare(at);
+  dl(at)
+}
+
+fn by_chain(k: integer, a: Ty, b: Ty) -> integer {
+  at = if k == 0 { a } else if k == 1 { b } else { a };
+  at = bare(at);
+  dl(at)
+}
+
+fn nullable(c: boolean, a: Ty?) -> integer {
+  at = if c { a } else { a };
+  at = bare(at ?? TInt);
+  dl(at ?? TInt)
+}
+
+fn reset(p: P) -> P {
+  P { a: p.a + 1, tags: [] }
+}
+
+fn record(c: boolean, a: P) -> integer {
+  at = if c { a } else { a };
+  at = reset(at);
+  at.a
+}
+
+// The caller's vector still holds its element after the call, and after an allocation that
+// would reuse a released store.
+fn intact(t: vector<Ty>, what: text) {
+  assert(dl(t[0]!) == 1, "{what}: the caller's element after the call: {dl(t[0]!)}");
+  u = [TInt, TInt, TInt];
+  assert(dl(t[0]!) == 1 && len(t) == 2 && len(u) == 3, "{what}: the caller's element after an allocation: {dl(t[0]!)} {len(t)}");
+}
+
+fn main() {
+  t1 = [TText { dep: [3] }, TInt];
+  assert(params(false, t1[0]!) == 0, "parameter arms: the rebound local's value");
+  intact(t1, "parameter arms");
+
+  t2 = [TText { dep: [3] }, TInt];
+  assert(mixed(true, t2[0]!) == 0, "the parameter arm beside a call arm: the rebound local's value");
+  intact(t2, "the parameter arm beside a call arm");
+
+  t3 = [TText { dep: [3] }, TInt];
+  assert(looped(false, t3[0]!) == 3, "in a loop: three rebound values, each 0 + 1");
+  intact(t3, "in a loop");
+
+  t4 = [TText { dep: [3] }, TInt];
+  assert(nullable(false, t4[0]) == 0, "a nullable binding: the rebound local's value");
+  intact(t4, "a nullable binding");
+
+  t5 = [TText { dep: [3] }, TText { dep: [4, 4] }];
+  assert(by_match(1, t5[0]!, t5[1]!) == 0 && by_chain(1, t5[0]!, t5[1]!) == 0, "a match and an else-if chain: the rebound local's value");
+  w5 = [TInt, TInt, TInt];
+  assert(dl(t5[0]!) == 1 && dl(t5[1]!) == 2 && len(w5) == 3, "a match and an else-if chain: the caller's elements after an allocation: {dl(t5[0]!)} {dl(t5[1]!)}");
+
+  s = TText { dep: [4, 5] };
+  c = true;
+  at = if c { s } else { s };
+  at = bare(at);
+  u = [TInt, TInt, TInt];
+  assert(dl(at) == 0 && dl(s) == 2 && len(u) == 3, "local arms: the local keeps its record: {dl(s)}");
+
+  ps = [P { a: 1, tags: [7] }];
+  assert(record(false, ps[0]) == 2, "a struct: the rebound local's value");
+  w = [P { a: 9, tags: [] }, P { a: 9, tags: [] }];
+  assert(ps[0].a == 1 && len(ps[0].tags) == 1 && ps[0].tags[0] == 7 && len(w) == 2, "a struct: the caller's record after an allocation: {ps[0].a} {len(ps[0].tags)}");
+}
