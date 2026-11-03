@@ -1,0 +1,124 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A call that may answer either its parameter or a record of its own answers that record on every
+// turn of a loop, and the caller releases it, when an argument is a unit variant of an enum
+// with fields (`TInt` of `enum Ty { TInt, TOpt { inner: Ty } }`).
+//
+// Such a value is a record the argument builds in place, and its block did not name the work-ref
+// it fills, so the call site could not hoist it out to a variable: the @P290 bracket could not
+// name every argument, the bind kept its never-free answer, and the callee's fresh record was
+// freed by nobody — one per call.  On the interpreter the copy into the lifted temp then re-used
+// that temp's freed slot IN PLACE; once the allocator had handed the slot to the callee's next
+// answer, the re-init wiped the answer and every turn after the first read null (loft#2385).
+//
+// Axes this file MOVES:  the unit variant (unqualified, qualified `Ty.TInt`); the call (direct,
+//                        through a forwarding function); the consumer (an argument, a local
+//                        bound twice).
+// Axes it HOLDS FIXED:   one record parameter the callee may answer, one enum argument.
+//
+// The controls were already right: the unit variant held in a local first, and a variant with
+// fields as the argument.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+enum Ty {
+  TInt,
+  TOpt { inner: Ty }
+}
+
+enum N {
+  NA { n: integer },
+  NB { m: integer }
+}
+
+fn weight(n: N?) -> integer {
+  match n {
+    NA { n } => n,
+    NB { m } => 100 + m,
+    _ => -1
+  }
+}
+
+// Answers its parameter, or a record of its own.
+fn store(code: N, src: Ty, k: integer) -> N? {
+  if k == 0 {
+    return code;
+  }
+  if src is TOpt {
+    return NB { m: k + 1 };
+  }
+  NB { m: k }
+}
+
+fn admit(code: N, src: Ty, k: integer) -> N? {
+  store(code, src, k)
+}
+
+fn test_a_unit_variant_argument() {
+  c = NA { n: 7 };
+  t = 0;
+  for _ in 0..10 {
+    t += weight(store(c, TInt, 2));
+  }
+  assert(t == 10 * 102, "unit variant {t}");
+}
+
+fn test_a_qualified_unit_variant_argument() {
+  c = NA { n: 7 };
+  t = 0;
+  for _ in 0..10 {
+    t += weight(store(c, Ty.TInt, 3));
+  }
+  assert(t == 10 * 103, "qualified {t}");
+}
+
+fn test_through_a_forwarding_call() {
+  c = NA { n: 7 };
+  t = 0;
+  for _ in 0..10 {
+    t += weight(admit(c, TInt, 4));
+    t += weight(admit(c, TInt, 0));
+  }
+  assert(t == 10 * (104 + 7), "forwarded {t}");
+}
+
+fn test_bound_twice() {
+  c = NA { n: 7 };
+  t = 0;
+  for _ in 0..10 {
+    r = store(c, TInt, 5);
+    t += weight(r);
+    r = admit(c, TInt, 6);
+    t += weight(r);
+  }
+  assert(t == 10 * (105 + 106), "bound twice {t}");
+}
+
+fn test_the_variant_in_a_local() {
+  c = NA { n: 7 };
+  s = TInt;
+  t = 0;
+  for _ in 0..10 {
+    t += weight(store(c, s, 2));
+  }
+  assert(t == 10 * 102, "local {t}");
+}
+
+fn test_a_variant_with_fields() {
+  c = NA { n: 7 };
+  t = 0;
+  for _ in 0..10 {
+    t += weight(store(c, TOpt { inner: TInt }, 2));
+  }
+  assert(t == 10 * 103, "with fields {t}");
+}
+
+fn main() {
+  test_a_unit_variant_argument();
+  test_a_qualified_unit_variant_argument();
+  test_through_a_forwarding_call();
+  test_bound_twice();
+  test_the_variant_in_a_local();
+  test_a_variant_with_fields();
+}

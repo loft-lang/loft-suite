@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A function answering a heap value that `return`s from an inner block releases, on that path,
+// the temporary the scope pass lifted a call argument of the block into.
+//
+// `tagged(view(h, 0))` lifts `view(h, 0)` into a `__lift_N` the frame owns, and @FR-O-Complete
+// owes its release on every path out.  The block-result hoist (loft#722) moves a lift to the
+// enclosing scope when the block's RESULT may borrow into it, and drops its frees from the
+// block's tail; it read the `return`'s own `OpFreeRef(__lift_1)` as such a borrow, so it hoisted
+// the lift and deleted the one free that path had — the outer scope's free is never reached past
+// the `return`.  One record per call, on both backends (loft#2382).
+//
+// Axes this file MOVES:  the result (a vector, a record, a hash, a formatted text); the jump (a
+//                        `return` inside an `if`, inside a `for`); the lifted argument (a call
+//                        answering a view, one answering a fresh record).
+// Axes it HOLDS FIXED:   one lifted argument, read for one integer.
+//
+// The controls were already clean: an integer result, the value as the body's tail, the block
+// binding a local, a `continue` and a `break` leaving the block.
+//
+// The leak gate is the channel: every value below was right before the fix as well.
+//
+// @falsified-at: f6ee9b1a9 — interpret leaked kt=100 D×60 -> clean, native leaked kt=100 D×60 -> clean
+struct D { items: vector<integer>, tag: integer }
+struct H { ds: vector<D> }
+struct R { n: integer }
+struct K { k: integer }
+
+fn view(h: H, i: integer) -> D { h.ds[i]! }
+fn fresh(i: integer) -> D { D { items: [i], tag: i } }
+fn tagged(d: D) -> integer { d.tag }
+
+fn vec_if(h: H) -> vector<integer> { if true { b = tagged(view(h, 0)); return [b]; } [] }
+fn vec_fresh(h: H) -> vector<integer> { if true { b = tagged(fresh(2)); return [b]; } [] }
+fn vec_loop(h: H) -> vector<integer> { for _ in 0..1 { b = tagged(view(h, 0)); return [b]; } [] }
+fn rec_if(h: H) -> R { if true { b = tagged(view(h, 0)); return R { n: b }; } R { n: 0 } }
+fn hash_if(h: H) -> hash<K[k]> { if true { b = tagged(view(h, 0)); return [K { k: b }]; } [] }
+fn text_if(h: H) -> text { if true { b = tagged(view(h, 0)); return "{b}"; } "" }
+
+fn int_if(h: H) -> integer { if true { b = tagged(view(h, 0)); return b; } 0 }
+fn vec_tail(h: H) -> vector<integer> { b = tagged(view(h, 0)); [b] }
+fn loop_continue(h: H) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..3 {
+    if i < 2 {
+      b = tagged(view(h, 0));
+      r += [b];
+      continue;
+    }
+    r += [0];
+  }
+  r
+}
+
+fn test_the_returning_blocks() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  t = 0;
+  for _ in 0..10 {
+    t += (vec_if(h)[0] ?? 0) + (vec_fresh(h)[0] ?? 0) + (vec_loop(h)[0] ?? 0) + rec_if(h).n;
+    t += len(hash_if(h)) + len(text_if(h));
+  }
+  assert(t == 130, "returning blocks {t}");
+}
+
+fn test_controls() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  t = 0;
+  for _ in 0..10 {
+    t += int_if(h) + (vec_tail(h)[0] ?? 0) + len(loop_continue(h));
+  }
+  assert(t == 90, "controls {t}");
+}
+
+fn main() {
+  test_the_returning_blocks();
+  test_controls();
+}

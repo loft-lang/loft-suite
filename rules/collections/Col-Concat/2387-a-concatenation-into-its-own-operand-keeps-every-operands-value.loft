@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A vector concatenation assigned back to a vector it reads keeps every operand's value.
+//
+// `v = v[..-1] + [v[-1] * 10]`: the concatenation is built into `v` itself, so an operand after
+// the first that reads `v` is materialised into a temporary before `v` is cleared.  The
+// temporary was filled with a copy of the whole of `v` rather than with the operand's own
+// value — right for a bare `v = a + v` and nothing else — so the literal was lost and `v`
+// answered its slice followed by its old self, `[1, 1, 2]`, on both backends (loft#2387).
+//
+// Axes this file MOVES:  the operand that reads `v` (a literal of an element, a call over `v`,
+//                        a slice of `v`); its position (second, middle of three); the element
+//                        (an integer, a text, a record enum); the destination (a local, a
+//                        parameter).
+// Axes it HOLDS FIXED:   one concatenation per statement.
+//
+// The controls were already right: a bare `v` as the later operand, and the concatenation
+// bound to another name.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+enum N {
+  NA { n: integer },
+  NB { tag: text }
+}
+
+fn wrap(x: N) -> N {
+  match x {
+    NA { n } => NA { n: n * 10 },
+    _ => x
+  }
+}
+
+fn show(l: vector<N>) -> text {
+  t = "";
+  for x in l {
+    t += match x { NA { n } => "{n},", NB { tag } => "{tag}," };
+  }
+  t
+}
+
+fn tail_of(v: vector<integer>) -> vector<integer> {
+  [v[-1] ?? 0, 7]
+}
+
+fn rewrite(l: vector<N>) -> vector<N> {
+  l = l[..-1] + [wrap(l[-1])];
+  l
+}
+
+fn test_a_literal_of_an_element() {
+  m: vector<integer> = [1, 2];
+  m = m[..-1] + [m[-1] * 10];
+  assert("{m}" == "[1,20]", "integers {m}");
+  t: vector<text> = ["a", "b"];
+  t = t[..-1] + ["{t[-1]}!"];
+  assert("{t}" == "[\"a\",\"b!\"]", "texts {t}");
+  r: vector<N> = [NA { n: 1 }, NB { tag: "x" }, NA { n: 2 }];
+  r = r[..-1] + [wrap(r[-1])];
+  assert(show(r) == "1,x,20,", "records {show(r)}");
+}
+
+fn test_a_call_over_the_destination() {
+  m: vector<integer> = [1, 2, 3];
+  m = m[..-1] + tail_of(m);
+  assert("{m}" == "[1,2,3,7]", "call {m}");
+}
+
+fn test_a_slice_after_the_first_operand() {
+  m: vector<integer> = [5, 6, 7];
+  m = [0] + m[1..];
+  assert("{m}" == "[0,6,7]", "slice {m}");
+}
+
+fn test_the_reader_in_the_middle() {
+  m: vector<integer> = [1, 2];
+  m = [9] + [m[0] + 100] + [8];
+  assert("{m}" == "[9,101,8]", "middle {m}");
+}
+
+fn test_a_parameter_destination() {
+  r = rewrite([NA { n: 1 }, NA { n: 2 }]);
+  assert(show(r) == "1,20,", "parameter {show(r)}");
+}
+
+fn test_a_bare_later_operand() {
+  a: vector<integer> = [1];
+  m: vector<integer> = [2, 3];
+  m = a + m;
+  assert("{m}" == "[1,2,3]", "bare {m}");
+}
+
+fn test_bound_to_another_name() {
+  m: vector<integer> = [1, 2];
+  k = m[..-1] + [m[-1] * 10];
+  assert("{k}" == "[1,20]" && "{m}" == "[1,2]", "other name {k} {m}");
+}
+
+fn main() {
+  test_a_literal_of_an_element();
+  test_a_call_over_the_destination();
+  test_a_slice_after_the_first_operand();
+  test_the_reader_in_the_middle();
+  test_a_parameter_destination();
+  test_a_bare_later_operand();
+  test_bound_to_another_name();
+}

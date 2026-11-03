@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2391 — A `&` LINK INTO WHAT AN OVERWRITE RELEASES IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  Writing a whole record into `o.inner` releases the vector the old value owned, so `l = &o.inner.v[0]` would name a released record and the write through it would reach nothing.  A `&` is the author's request for a live link, so loft declines rather than handing back a copy.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/2391-a-whole-record-written-into-a-place-ends-the-views-into-what-it-owned.loft`.
+// @EXPECT_ERROR: cannot overwrite the part of `o` that holds `l` while `l` references a place inside it
+
+struct S { n: integer }
+struct In { v: vector<S> }
+struct O { inner: In }
+
+fn main() {
+  o = O { inner: In { v: [S { n: 5 }] } };
+  b = In { v: [S { n: 6 }] };
+  l = &o.inner.v[0];
+  o.inner = b;
+  l.n = 3;
+  println("{o.inner.v[0].n}");
+}

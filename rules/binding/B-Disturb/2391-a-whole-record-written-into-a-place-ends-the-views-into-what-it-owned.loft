@@ -1,0 +1,148 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2391 (`@FR-B-Disturb`, `@FR-B-View`) — `(B-Disturb)`'s OVERWRITE event: a whole record
+// written into a place copies the new value in and releases what the OLD value owned — its
+// vectors, its children, their elements.  The place itself stays, so a view OF it re-reads the
+// new value; a view INTO what the old value owned ends, and a plain one live across the write
+// is copied at its bind (the author is told: `view-copied`).
+//
+// Ended, copied: a2 a `match` unwrap written back over its own source (the filed shape), b2 an
+// element of a field's vector across the field's overwrite, c2 the same through a vector
+// element, j2 a write in a loop, m2 a grandchild across its parent's overwrite by a literal,
+// s2 a view deeper than an element across `sort_by` (which writes each element whole).
+//
+// Controls, unchanged: d2 an element written back with its own view (no copy, the write
+// lands), e2 a view OF the overwritten place re-reads it, g2 a view dead before the write,
+// i2 a sibling field overwritten (the view keeps writing through), k2 a text read out before
+// the write is a value, l2 a whole local written in (nothing viewed inside the old value).
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+
+enum Ty { Opt { inner: Ty }, Int { bits: integer } }
+struct Cell { tp: Ty }
+struct S { n: integer }
+struct In { v: vector<S>, tag: integer }
+struct O { inner: In, z: integer }
+struct E { v: vector<S> }
+struct T { k: integer, left: T? }
+struct P { k: integer, names: vector<S> }
+struct D { n: integer, w: vector<integer> }
+struct B { n: integer, w: vector<integer> }
+struct OB { inner: B }
+struct Two { a: In, b: In }
+struct Named { name: text, v: vector<integer> }
+struct ON { inner: Named }
+
+fn a2() -> integer {
+  c = Cell { tp: Opt { inner: Int { bits: 32 } } };
+  y = match c.tp { Opt { inner } => inner, _ => c.tp };
+  c.tp = y;
+  match c.tp { Int { bits } => bits, _ => -1 }
+}
+
+fn b2() -> integer {
+  o = O { inner: In { v: [S { n: 701 }, S { n: 702 }], tag: 1 }, z: 5 };
+  other = In { v: [S { n: 901 }], tag: 2 };
+  x = o.inner.v[0];
+  o.inner = other;
+  x.n * 10000 + o.inner.v[0].n * 10 + len(o.inner.v)
+}
+
+fn c2() -> integer {
+  v = [E { v: [S { n: 11 }, S { n: 12 }] }, E { v: [S { n: 21 }] }];
+  r = E { v: [S { n: 31 }] };
+  x = v[0].v[1];
+  v[0] = r;
+  x.n * 1000 + v[0].v[0].n * 10 + len(v[0].v)
+}
+
+fn j2() -> integer {
+  o = O { inner: In { v: [S { n: 5 }], tag: 0 }, z: 0 };
+  x = o.inner.v[0];
+  t = 0;
+  for i in 0..3 {
+    t += x.n;
+    o.inner = In { v: [S { n: 100 + i }], tag: i };
+  }
+  t * 1000 + o.inner.v[0].n
+}
+
+fn m2() -> integer {
+  t = T { k: 1, left: T { k: 2, left: T { k: 3, left: null } } };
+  g = t.left.left;
+  t.left = T { k: 20, left: null };
+  l = t.left;
+  if g == null || l == null { return -1; }
+  g.k * 100 + l.k
+}
+
+fn s2() -> integer {
+  v = [P { k: 3, names: [S { n: 31 }, S { n: 32 }, S { n: 33 }] }, P { k: 1, names: [S { n: 11 }, S { n: 12 }] }];
+  x = v[0].names[1];
+  e = v[0];
+  v.sort_by(fn(p: P) -> integer { p.k });
+  x.n * 10000 + e.k * 1000 + v[0].names[1].n * 10 + len(v[1].names)
+}
+
+fn d2() -> integer {
+  v = [D { n: 1, w: [4, 5] }, D { n: 2, w: [6] }];
+  e = v[0];
+  e.n = 41;
+  v[0] = e;
+  v[0].n * 10 + v[0].w[1]
+}
+
+fn e2() -> integer {
+  o = OB { inner: B { n: 1, w: [7] } };
+  b = B { n: 2, w: [8, 9] };
+  a = o.inner;
+  o.inner = b;
+  a.n * 10 + a.w[1]
+}
+
+fn g2() -> integer {
+  o = O { inner: In { v: [S { n: 5 }], tag: 0 }, z: 0 };
+  x = o.inner.v[0];
+  before = x.n;
+  o.inner = In { v: [S { n: 6 }], tag: 1 };
+  before * 10 + o.inner.v[0].n
+}
+
+fn i2() -> integer {
+  o = Two { a: In { v: [S { n: 5 }], tag: 0 }, b: In { v: [S { n: 7 }], tag: 0 } };
+  nb = In { v: [S { n: 8 }], tag: 1 };
+  x = o.a.v[0];
+  o.b = nb;
+  x.n = 55;
+  o.a.v[0].n * 10 + o.b.v[0].n
+}
+
+fn k2() -> text {
+  o = ON { inner: Named { name: "first", v: [1] } };
+  t = o.inner.name;
+  o.inner = Named { name: "second", v: [2] };
+  "{t}/{o.inner.name}"
+}
+
+fn l2() -> integer {
+  c = Cell { tp: Opt { inner: Int { bits: 32 } } };
+  y = Int { bits: 64 };
+  c.tp = y;
+  match c.tp { Int { bits } => bits, _ => -1 }
+}
+
+fn main() {
+  assert(a2() == 32, "a2: the unwrapped payload survives being written over its source: {a2()}");
+  assert(b2() == 7019011, "b2: x keeps 701, the field holds the new vector: {b2()}");
+  assert(c2() == 12311, "c2: x keeps 12, the element holds the new vector: {c2()}");
+  assert(j2() == 15102, "j2: every turn reads the 5 bound before the loop: {j2()}");
+  assert(m2() == 320, "m2: the grandchild keeps 3, the child is the literal: {m2()}");
+  assert(s2() == 321123, "s2: x keeps 32, e is the sorted first element: {s2()}");
+  assert(d2() == 415, "d2: an element written back with its own view: {d2()}");
+  assert(e2() == 29, "e2: a view of the place reads the new value: {e2()}");
+  assert(g2() == 56, "g2: a view dead before the write: {g2()}");
+  assert(i2() == 558, "i2: a sibling's overwrite keeps the write-through: {i2()}");
+  assert(k2() == "first/second", "k2: a text read out is a value: {k2()}");
+  assert(l2() == 64, "l2: a whole local written in: {l2()}");
+}

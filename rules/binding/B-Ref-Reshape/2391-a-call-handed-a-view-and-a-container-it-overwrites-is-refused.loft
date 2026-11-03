@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2391 — A CALL HANDED A VIEW AND A CONTAINER IT OVERWRITES IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A plain parameter aliases the caller's value (`calls.md` F-ParamHeap), so `put(c, y)` with `y` unwrapped out of `c.tp` and `put` writing `c.tp = y` hands the callee a reference into the record its own write releases.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the same write inline materialises the view instead —
+//   `rules/binding/B-Disturb/2391-a-whole-record-written-into-a-place-ends-the-views-into-what-it-owned.loft` (a2).
+// @EXPECT_ERROR: cannot pass both `c` and a reference into it to `put`
+
+enum Ty { Opt { inner: Ty }, Int { bits: integer } }
+struct Cell { tp: Ty }
+
+fn put(c: Cell, y: Ty) { c.tp = y; }
+
+fn main() {
+  c = Cell { tp: Opt { inner: Int { bits: 32 } } };
+  y = match c.tp { Opt { inner } => inner, _ => c.tp };
+  put(c, y);
+  println("{match c.tp { Int { bits } => bits, _ => -1 }}");
+}

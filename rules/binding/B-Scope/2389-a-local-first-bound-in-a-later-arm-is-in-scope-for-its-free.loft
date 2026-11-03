@@ -1,0 +1,110 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A record local first bound in an arm after the first of a function's tail `match` compiles
+// and answers on every backend (`@FR-B-Scope`: it lives in the arm that binds it).
+//
+// The scope pass null-inits such a local at the head of the outer `match`'s `else` arm and frees
+// it at the function's end.  rustc-native wrote the local's `let` where emission first reached
+// it — inside that `else { … }` — so the function-level free named a binding out of scope
+// (`E0425`); the interpreter and C hold every local in the frame and never saw it (loft#2389).
+//
+// Axes this file MOVES:  the local (a nested `match`'s subject temp, a local the source names);
+//                        the arm's result (an early `return`, a value arm); the first arm (a
+//                        `return`, a self tail call whose jump frees the local before the arm
+//                        that binds it); the depth (a `match` in a `match` in an arm).
+// Axes it HOLDS FIXED:   a record local; a function whose tail is the `match`.
+//
+// Values hand-computed beside each assert.
+//
+// @falsified-at: f6ee9b1a9 — native exit 1 -> 0 (FALSIFY_NATIVE=rust: the rustc leg); interpret INERT (expected
+//   for a backend-divergence guard — only one side can move)
+enum N {
+  Leaf { v: integer },
+  Span { inner: N },
+  If { c: N, t: N, f: N },
+  Call { k: integer, args: vector<N> }
+}
+
+fn unspan(n: N) -> N {
+  match n {
+    Span { inner } => unspan(inner),
+    _ => n
+  }
+}
+
+// The subjects of the nested matches are record temps.
+fn nested(code: N) -> integer {
+  match code {
+    Span { inner } => { return nested(inner) + 100; },
+    If { c, t, f: _ } => {
+      match unspan(t) {
+        Leaf { v } => {
+          match unspan(c) {
+            Leaf { v: w } => { return v * 10 + w; },
+            _ => {}
+          }
+        },
+        _ => {}
+      }
+      return -1;
+    },
+    _ => 0
+  }
+}
+
+// The same with each subject bound to a local the source names.
+fn bound(code: N) -> integer {
+  match code {
+    Span { inner } => { return bound(inner) + 100; },
+    If { c, t, f: _ } => {
+      ut = unspan(t);
+      match ut {
+        Leaf { v } => {
+          uc = unspan(c);
+          match uc {
+            Leaf { v: w } => { return v * 10 + w; },
+            _ => {}
+          }
+        },
+        _ => {}
+      }
+      return -1;
+    },
+    _ => 0
+  }
+}
+
+// The first arm is a self tail call (a jump), the nested match sits in a value arm.
+fn deps(n: N) -> vector<integer> {
+  match n {
+    Span { inner } => deps(inner),
+    Leaf { v } => [v],
+    Call { k, args } => {
+      if k == 1 && len(args) > 0 {
+        match unspan(args[0]) {
+          Leaf { v } => [v, k],
+          _ => []
+        }
+      } else {
+        []
+      }
+    },
+    _ => []
+  }
+}
+
+fn main() {
+  i = If { c: Span { inner: Leaf { v: 2 } }, t: Leaf { v: 3 }, f: Leaf { v: 0 } };
+  // t = Leaf 3, c unspans to Leaf 2: 3 * 10 + 2, plus 100 for the Span.
+  assert(nested(Span { inner: i }) == 132, "nested {nested(Span { inner: i })}");
+  // c is not a Leaf: the inner match falls through to -1.
+  assert(nested(If { c: i, t: Leaf { v: 3 }, f: Leaf { v: 0 } }) == -1, "nested fall");
+  assert(nested(Leaf { v: 5 }) == 0, "nested rest");
+  assert(bound(Span { inner: i }) == 132, "bound {bound(Span { inner: i })}");
+  assert(bound(If { c: i, t: Leaf { v: 3 }, f: Leaf { v: 0 } }) == -1, "bound fall");
+  d = deps(Span { inner: Call { k: 1, args: [Span { inner: Leaf { v: 8 } }] } });
+  assert(len(d) == 2 && d[0] == 8 && d[1] == 1, "deps call {d}");
+  assert(len(deps(Call { k: 2, args: [] })) == 0, "deps empty");
+  assert(deps(Leaf { v: 3 })[0] == 3, "deps leaf");
+}
