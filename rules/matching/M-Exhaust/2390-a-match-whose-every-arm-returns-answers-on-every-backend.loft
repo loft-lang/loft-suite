@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// An exhaustive `match` whose every arm `return`s, as a function's tail or its `return` value,
+// compiles and answers on every backend (`@FR-M-Exhaust`: it covers every variant, so the
+// fallback the lowering adds is never taken).
+//
+// The `match` lowers to `return if A {…} else if B {…} else null`.  rustc-native typed the
+// absent `null` arm from the arm beside it, which only returns and so yields nothing to copy:
+// it wrote `()` where the function's type was wanted (`E0308`).  The interpreter and C never
+// type that arm (loft#2390).
+//
+// Axes this file MOVES:  the result type (integer, float, text, a record); the position (the
+//                        function's tail, an explicit `return match`); the arm count (two,
+//                        three).
+// Axes it HOLDS FIXED:   no `_` arm (one makes the fallback an arm of its own); every arm
+//                        diverging.
+//
+// Values hand-computed beside each assert.
+//
+// @falsified-at: f6ee9b1a9 — native exit 1 -> 0 (FALSIFY_NATIVE=rust: the rustc leg); interpret INERT (expected
+//   for a backend-divergence guard — only one side can move)
+enum N {
+  Leaf { v: integer },
+  Two { a: integer, b: integer },
+  Three { a: integer, b: integer, c: integer }
+}
+
+struct P {
+  x: integer
+}
+
+fn as_int(n: N) -> integer {
+  match n {
+    Leaf { v } => { return v; },
+    Two { a, b } => { return a * 10 + b; },
+    Three { a, b, c } => { return a * 100 + b * 10 + c; },
+  }
+}
+
+fn as_float(n: N) -> float {
+  match n {
+    Leaf { v } => { return v as float; },
+    Two { a, b } => { return (a * 10 + b) as float; },
+    Three { a, b: _, c: _ } => { return a as float; },
+  }
+}
+
+fn as_text(n: N) -> text {
+  match n {
+    Leaf { v } => { return "l{v}"; },
+    Two { a, b } => { return "t{a}{b}"; },
+    Three { a, b: _, c } => { return "h{a}{c}"; },
+  }
+}
+
+fn as_record(n: N) -> P {
+  match n {
+    Leaf { v } => { return P { x: v }; },
+    Two { a, b } => { return P { x: a * 10 + b }; },
+    Three { a: _, b, c: _ } => { return P { x: b }; },
+  }
+}
+
+fn returned(n: N) -> integer {
+  return match n {
+    Leaf { v } => { return v + 1; },
+    Two { a, b: _ } => { return a + 2; },
+    Three { a: _, b: _, c } => { return c + 3; },
+  };
+}
+
+fn main() {
+  assert(as_int(Two { a: 3, b: 4 }) == 34, "int two");
+  assert(as_int(Leaf { v: 7 }) == 7, "int leaf");
+  assert(as_int(Three { a: 1, b: 2, c: 3 }) == 123, "int three");
+  assert(as_float(Two { a: 3, b: 4 }) == 34.0, "float two");
+  assert(as_float(Three { a: 9, b: 0, c: 0 }) == 9.0, "float three");
+  assert(as_text(Two { a: 3, b: 4 }) == "t34", "text two");
+  assert(as_text(Three { a: 5, b: 0, c: 6 }) == "h56", "text three");
+  assert(as_record(Two { a: 3, b: 4 }).x == 34, "record two");
+  assert(as_record(Three { a: 0, b: 8, c: 0 }).x == 8, "record three");
+  assert(returned(Leaf { v: 1 }) == 2, "returned leaf");
+  assert(returned(Two { a: 1, b: 0 }) == 3, "returned two");
+  assert(returned(Three { a: 0, b: 0, c: 1 }) == 4, "returned three");
+}
