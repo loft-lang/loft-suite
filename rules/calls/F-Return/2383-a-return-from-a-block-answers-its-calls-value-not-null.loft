@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `return` inside a block whose value is a call over a LIFTED argument answers the call's value.
+//
+// `return same(view(h, 0))`: the scope pass lifts `view(h, 0)` into a `__lift_N`, so the value
+// reaches the return as `Insert([__lift_1 = view(…), same(__lift_1, …)])`, with the frame's
+// frees to run after it.  A return value that frees follow is bound to a `__ret_tail_N` first —
+// for a bare call, a `CallRef` and a branch.  The lifted shape was none of those, so the call ran
+// as a dropped statement and the return fabricated `null`: `0` on the C backend, and a read of
+// a freed store on the interpreter under `LOFT_STRICT_STORES` (loft#2383).
+//
+// Axes this file MOVES:  the jump's block (an `if`, a `for`); the lifted argument (a call
+//                        answering a view, one answering a fresh record); the answer (the
+//                        record, a vector field of it, a text built from it).
+// Axes it HOLDS FIXED:   one lifted argument, a callee of one parameter.
+//
+// The control is the same call as the body's tail, which was right before the fix.
+//
+// @falsified-at: f6ee9b1a9 — native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: the interpreter answered right on the control by accident (its `OpReturn` takes the
+//   eval-stack top the dropped call left), so its channels read the same; its fault shows only
+//   under `LOFT_STRICT_STORES=1` (a read of a freed store), which the falsify sweep does not arm.
+struct D { items: vector<integer>, tag: integer }
+struct H { ds: vector<D> }
+
+fn view(h: H, i: integer) -> D { h.ds[i]! }
+fn fresh(i: integer) -> D { D { items: [i], tag: i } }
+fn same(d: D) -> D { d }
+fn items(d: D) -> vector<integer> { d.items }
+fn label(d: D) -> text { "t{d.tag}" }
+
+fn rec_if(h: H) -> D { if true { return same(view(h, 0)); } D { items: [], tag: 0 } }
+fn rec_loop(h: H) -> D { for _ in 0..2 { return same(view(h, 0)); } D { items: [], tag: 0 } }
+fn rec_fresh(h: H) -> D { if true { return same(fresh(4)); } D { items: [], tag: 0 } }
+fn vec_if(h: H) -> vector<integer> { if true { return items(view(h, 0)); } [] }
+fn text_if(h: H) -> text { if true { return label(view(h, 0)); } "" }
+fn rec_tail(h: H) -> D { same(view(h, 0)) }
+
+fn test_the_returns_from_a_block() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  t = 0;
+  for _ in 0..10 {
+    t += rec_if(h).tag + rec_loop(h).tag + rec_fresh(h).tag + (vec_if(h)[0] ?? 0) + len(text_if(h));
+  }
+  assert(t == 190, "returns from a block {t}");
+}
+
+fn test_the_tail_control() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  t = 0;
+  for _ in 0..10 {
+    t += rec_tail(h).tag;
+  }
+  assert(t == 30, "tail {t}");
+}
+
+fn main() {
+  test_the_returns_from_a_block();
+  test_the_tail_control();
+}
