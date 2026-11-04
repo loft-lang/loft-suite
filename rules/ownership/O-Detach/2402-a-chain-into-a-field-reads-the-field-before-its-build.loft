@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2402 — a `+` chain assigned to a vector field builds its first operand straight into the
+// field, so a later operand that reads the field reads what the field held before the
+// statement (`@FR-E-Asgn-Compound`, `@FR-I-Comp`, `@FR-O-Detach`): a snapshot is taken ahead of
+// the clear and the reads go to it, as a literal reading its own destination does.  Before,
+// the read saw the rebuilt field — `b.ops = [10] + b.ops` answered `[10,10]` on both backends.
+//
+// Cells, each asserting the whole value:
+// - a literal then the field, and with a literal after it; an element's field (`v[0].ops`);
+//   text elements; record elements (`vector<P>`, each field read back);
+// - a first literal that reads the field itself, then the field again (two snapshots);
+// - a `for` element's field, read through the element;
+// - a sibling field between the literal and the field;
+// - 1000 prepends in a loop: the length, both ends, and no store left at exit.
+// Controls that were right before: the field as the first operand, a local as the first
+// operand, a local destination.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the asserts — the first cell ends the run on both backends (`[10,10]`).
+
+struct P { n: integer, s: text }
+struct B { ops: vector<integer> }
+struct T { ss: vector<text> }
+struct R { ps: vector<P> }
+struct W { a: vector<integer>, c: vector<integer> }
+
+fn main() {
+  b = B { ops: [1, 2] };
+  b.ops = [10] + b.ops;
+  assert("{b.ops}" == "[10,1,2]", "prepend: {b.ops}");
+  b.ops = [0] + b.ops + [20];
+  assert("{b.ops}" == "[0,10,1,2,20]", "both sides: {b.ops}");
+  v = [B { ops: [1, 2] }];
+  v[0].ops = [10] + v[0].ops;
+  assert("{v[0].ops}" == "[10,1,2]", "element field: {v[0].ops}");
+  t = T { ss: ["a", "b"] };
+  t.ss = ["z"] + t.ss;
+  assert("{t.ss}" == "[\"z\",\"a\",\"b\"]", "text: {t.ss}");
+  r = R { ps: [P { n: 1, s: "a" }] };
+  r.ps = [P { n: 0, s: "z" }] + r.ps;
+  assert(len(r.ps) == 2 && r.ps[0].n == 0 && r.ps[0].s == "z" && r.ps[1].n == 1 && r.ps[1].s == "a", "records: {len(r.ps)}");
+  d = B { ops: [1, 2] };
+  d.ops = [d.ops[1] * 10] + d.ops;
+  assert("{d.ops}" == "[20,1,2]", "literal reads too: {d.ops}");
+  hs = [B { ops: [1] }, B { ops: [2] }];
+  for h in hs {
+    h.ops = [h.ops[0] + 10] + h.ops;
+  }
+  assert("{hs[0].ops}" == "[11,1]" && "{hs[1].ops}" == "[12,2]", "for element: {hs[0].ops} {hs[1].ops}");
+  w = W { a: [1], c: [5] };
+  w.a = [0] + w.c + w.a;
+  assert("{w.a}" == "[0,5,1]" && "{w.c}" == "[5]", "sibling: {w.a} {w.c}");
+  l = B { ops: [] };
+  for i in 0..1000 {
+    l.ops = [i] + l.ops;
+  }
+  assert(len(l.ops) == 1000 && l.ops[0] == 999 && l.ops[999] == 0, "loop: {len(l.ops)} {l.ops[0]}");
+  // Controls.
+  c = B { ops: [1, 2] };
+  c.ops = c.ops + [3];
+  x = [0];
+  c.ops = x + c.ops;
+  assert("{c.ops}" == "[0,1,2,3]", "controls: {c.ops}");
+  lv = [1, 2];
+  lv = [0] + lv;
+  assert("{lv}" == "[0,1,2]", "local: {lv}");
+}
