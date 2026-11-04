@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A vector literal keeps its elements after a statement that builds a literal on the second pass
+// only.
+//
+// `return Box { n: blk([P { x: 1 }]) }` with `Box` declared below the function: the first pass
+// does not build that literal's temporary (`_vec_N`) and the second does, so every later literal
+// temporary is numbered one site later than on the first pass.  The second pass took the first
+// pass's type for its temporary when the shape agreed, borrows included, so a literal met a
+// chain temporary typed as a view of the chain's left operand, minted no store and lost its
+// elements: `a + b + [P { x: 40 }]` answered `a`'s, a two-operand chain likewise, a second
+// early literal answered nothing — on both backends, with no diagnostic; a `vector<integer>`
+// chain was an internal compiler error (loft#2406).
+//
+// Axes this file MOVES:  the element (a record, a text); the chain (three operands, two); where
+//                        it stands (a struct field, a call argument); the literal that loses
+//                        its elements (in the chain, in a second early return).
+// Axes it HOLDS FIXED:   the shifting site (a literal in a struct literal of a later struct).
+//
+// The controls were already right: the chain as a call argument and a bare literal as the field.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+struct P { x: integer }
+struct Hold { ps: vector<P> }
+struct HoldT { ts: vector<text> }
+fn blk(ops: vector<P>) -> integer { len(ops) }
+fn cnt(ops: vector<P>) -> integer { s = 0; for p in ops { s += p.x; } s }
+// text elements
+fn c_text(b: vector<text>, early: boolean) -> Box {
+  a = ["p", "q"];
+  if early { return Box { n: blk([P { x: 1 }]) }; }
+  h = HoldT { ts: a + b + ["z"] };
+  Box { n: len(h.ts) * 10 + len(h.ts[2] ?? "") }
+}
+// the chain as a call argument
+fn c_arg(b: vector<P>, early: boolean) -> Box {
+  a = [P { x: 1 }, P { x: 2 }];
+  if early { return Box { n: blk([P { x: 1 }]) }; }
+  Box { n: cnt(a + b + [P { x: 40 }]) }
+}
+// a two-operand chain
+fn c_two(early: boolean) -> Box {
+  a = [P { x: 1 }, P { x: 2 }];
+  if early { return Box { n: blk([P { x: 1 }]) }; }
+  h = Hold { ps: a + [P { x: 40 }] };
+  Box { n: cnt(h.ps) }
+}
+// a bare literal as the field
+fn c_bare(early: boolean) -> Box {
+  a = [P { x: 1 }];
+  if early { return Box { n: blk([P { x: 1 }]) }; }
+  h = Hold { ps: [P { x: 40 }, P { x: 2 }] };
+  Box { n: cnt(h.ps) + len(a) * 100 }
+}
+// two shifting sites
+fn c_twice(b: vector<P>, k: integer) -> Box {
+  a = [P { x: 1 }, P { x: 2 }];
+  if k == 1 { return Box { n: blk([P { x: 1 }]) }; }
+  if k == 2 { return Box { n: blk([P { x: 2 }, P { x: 3 }]) }; }
+  h = Hold { ps: a + b + [P { x: 40 }] };
+  Box { n: cnt(h.ps) }
+}
+struct Box { n: integer }
+fn main() {
+  t = c_text([], false).n;
+  assert(t == 31, "text: {t}");
+  g = c_arg([P { x: 100 }], false).n;
+  assert(g == 143, "arg: {g}");
+  w = c_two(false).n;
+  assert(w == 43, "two: {w}");
+  r = c_bare(false).n;
+  assert(r == 142, "bare: {r}");
+  q = c_twice([], 0).n;
+  assert(q == 43, "twice: {q}");
+  e1 = c_twice([], 2).n;
+  assert(e1 == 2, "twice early: {e1}");
+}

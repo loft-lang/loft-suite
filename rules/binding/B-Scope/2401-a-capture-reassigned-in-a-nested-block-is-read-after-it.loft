@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2401 — a pattern's capture is bound by the pattern for its whole arm (`@FR-M-Variant`,
+// `@FR-B-Scope`), so a reassignment inside a block nested in the arm is a write to the capture,
+// and the read after that block reads what it wrote.  The capture was never recorded as bound,
+// so the first such write was recorded as a binding of the inner block and the read after it
+// was refused as `local-out-of-scope`, on both backends.
+//
+// Cells, each asserting the value on both paths (written, and not written):
+// - a variant field (`A { n }`), a vector-pattern element (`[a, ..]`), an `is` capture
+//   (`x is A { n }`) and a plain-struct pattern (`P { n }`), reassigned in an `if` block;
+// - a vector-pattern element compound-assigned inside a `for` in the arm;
+// - an outer local of the capture's spelling, which names the outer local again after the
+//   match (`n = 5` before it reads 5 after it, whatever the arm wrote).
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the exit — the control refuses the file at compile time (`local-out-of-scope`).
+
+enum N { A { n: integer }, B }
+struct P { n: integer }
+
+fn variant(x: N, k: integer) -> integer { match x { A { n } => { if k > 0 { n = 41; } n }, B => 0 } }
+fn element(v: vector<integer>, k: integer) -> integer { match v { [a, ..] => { if k > 0 { a = 42; } a }, _ => 0 } }
+fn is_capture(x: N, k: integer) -> integer { if x is A { n } { if k > 0 { n = 43; } return n; } 0 }
+fn plain(x: P, k: integer) -> integer { match x { P { n } => { if k > 0 { n = 44; } n } } }
+fn in_loop(v: vector<integer>) -> integer { match v { [a, ..] => { for i in 0..3 { if i == 1 { a += 10; } } a }, _ => 0 } }
+fn outer(x: N, k: integer) -> integer { n = 5; r = match x { A { n } => { if k > 0 { n = 41; } n }, B => 0 }; r * 100 + n }
+
+fn main() {
+  assert(variant(A { n: 7 }, 1) == 41 && variant(A { n: 7 }, 0) == 7, "variant: {variant(A { n: 7 }, 1)} {variant(A { n: 7 }, 0)}");
+  assert(element([7, 8], 1) == 42 && element([7, 8], 0) == 7, "element: {element([7, 8], 1)} {element([7, 8], 0)}");
+  assert(is_capture(A { n: 7 }, 1) == 43 && is_capture(A { n: 7 }, 0) == 7, "is: {is_capture(A { n: 7 }, 1)}");
+  assert(plain(P { n: 7 }, 1) == 44 && plain(P { n: 7 }, 0) == 7, "plain: {plain(P { n: 7 }, 1)}");
+  assert(in_loop([7, 8]) == 17, "loop: {in_loop([7, 8])}");
+  assert(outer(A { n: 7 }, 1) == 4105 && outer(A { n: 7 }, 0) == 705 && outer(B, 1) == 5, "outer: {outer(A { n: 7 }, 1)} {outer(B, 1)}");
+}

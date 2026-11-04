@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2403 — a self-call in tail position whose argument is a non-null unwrap of a part of a
+// parameter (`walk(rest[i]!, rest, i + 1)`, `seek(rest[i] ?? return -7, rest, i + 1, k - 1)`)
+// is a jump (`@FR-R-TailSelf`): the unwrap's `ncr` block answers the element it tested, a view
+// of the parameter, and its exit runs before the jump binds any parameter.  Before, the call
+// stayed a call — warned as making "a value this frame would have to own" — and overflowed at
+// 10 000 frames on both backends.
+//
+// Cells, 20 000 frames deep over a flat vector of records:
+// - `x!` on each element in turn, the element's own field read at the bottom, and with an
+//   accumulator beside it;
+// - `x ?? return d`: to the last element, three steps, and one step past the end, where the
+//   early return inside the argument answers `-7` in the original frame.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the exit — the control overflows at 10 000 frames on the first call.
+
+struct P { n: integer }
+
+fn walk(p: P, rest: vector<P>, i: integer) -> integer { if i == len(rest) { p.n } else { walk(rest[i]!, rest, i + 1) } }
+fn total(p: P, rest: vector<P>, i: integer, acc: integer) -> integer { if i == len(rest) { acc + p.n } else { total(rest[i]!, rest, i + 1, acc + p.n) } }
+fn seek(p: P, rest: vector<P>, i: integer, k: integer) -> integer {
+  if k == 0 { return p.n; }
+  seek(rest[i] ?? return -7, rest, i + 1, k - 1)
+}
+
+fn main() {
+  rest: vector<P> = [];
+  for i in 1..20001 { rest += [P { n: i }]; }
+  start = P { n: 0 };
+  assert(walk(start, rest, 0) == 20000, "walk {walk(start, rest, 0)}");
+  assert(total(start, rest, 0, 0) == 200010000, "total {total(start, rest, 0, 0)}");
+  assert(seek(start, rest, 0, 20000) == 20000, "seek to the end {seek(start, rest, 0, 20000)}");
+  assert(seek(start, rest, 0, 3) == 3, "seek three {seek(start, rest, 0, 3)}");
+  assert(seek(start, rest, 0, 20001) == -7, "seek past the end {seek(start, rest, 0, 20001)}");
+}
