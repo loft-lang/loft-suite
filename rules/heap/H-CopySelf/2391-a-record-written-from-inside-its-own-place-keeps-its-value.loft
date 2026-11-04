@@ -20,6 +20,8 @@
 // Values hand-computed beside each assert.
 //
 // @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
 enum T { Leaf { n: integer }, Opt { inner: T } }
 struct Ex { tp: T, k: integer }
 struct Box { t: T }

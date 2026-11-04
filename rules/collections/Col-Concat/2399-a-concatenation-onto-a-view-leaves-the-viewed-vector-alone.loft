@@ -28,6 +28,8 @@
 // and a postfix operand.
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
 struct G { tp: vector<vector<integer>> }
 struct W { v: vector<integer> }
 struct P { n: integer, s: text }

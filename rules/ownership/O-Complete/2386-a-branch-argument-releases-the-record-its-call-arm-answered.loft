@@ -22,6 +22,10 @@
 // The leak gate is the channel: every value below was right before the fix as well.
 //
 // @falsified-at: f6ee9b1a9 — interpret leaked kt=100 T×47 -> clean, native leaked kt=100 T×47 -> clean
+//   ARMED: LOFT_NATIVE_LEAK_CHECK=1, which `falsify` sets itself; the leak is read off the
+//   file's `main`, so a run with no instrument of your own scores it.
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
 enum T {
   TInt,
   TVec { inner: vector<T> },

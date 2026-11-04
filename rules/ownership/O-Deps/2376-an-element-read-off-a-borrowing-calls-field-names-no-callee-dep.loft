@@ -26,6 +26,10 @@
 // The leak gate is the channel: every value below was right before the fix as well.
 //
 // @falsified-at: f6ee9b1a9 — interpret leaked kt=101 D×98 -> clean, native leaked kt=101 D×49 -> clean
+//   ARMED: LOFT_NATIVE_LEAK_CHECK=1, which `falsify` sets itself; the leak is read off the
+//   file's `main`, so a run with no instrument of your own scores it.
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
 struct A { n: integer }
 struct D { items: vector<A>, tag: integer }
 struct H { ds: vector<D> }

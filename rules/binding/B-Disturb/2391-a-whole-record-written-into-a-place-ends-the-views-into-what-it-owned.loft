@@ -18,6 +18,8 @@
 // the write is a value, l2 a whole local written in (nothing viewed inside the old value).
 //
 // @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
 
 enum Ty { Opt { inner: Ty }, Int { bits: integer } }
 struct Cell { tp: Ty }
