@@ -8,7 +8,7 @@
 // ARMED: no instrument.
 // HOLDS: the plain-bind spelling materialises instead —
 //   `rules/binding/B-Disturb/2161-a-container-named-through-a-field-or-an-element-ends-its-views.loft`.
-// @EXPECT_ERROR: cannot give `w` a new value while `c` references a place inside it
+// @EXPECT_ERROR: cannot overwrite the part of `w` that holds `c` while `c` references a place inside it
 
 struct S { n: integer }
 struct W { tag: integer, a: vector<S> }
