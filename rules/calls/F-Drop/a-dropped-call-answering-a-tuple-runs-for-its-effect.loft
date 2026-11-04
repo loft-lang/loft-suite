@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A dropped call that answers a tuple runs for its effect (`@FR-F-Drop`), however it reaches
+// the backend: once the leaf inliner copies the callee in, the statement is a dropped block
+// ending in the tuple itself.  The C backend refused that tuple ("the construct Tuple") and
+// with it every test in the file -- hex_body 0.3.6 on the 2026-12 join.
+fn turn(v: float, lx: float, ly: float) -> (float, float) {
+  th = v * 6.283185307179586;
+  c = cos(th);
+  s = sin(th);
+  (lx * c - ly * s, lx * s + ly * c)
+}
+fn test_a_dropped_call_answering_a_tuple_runs_for_its_effect() {
+  (ax, ay) = turn(0.25, 1.0, 0.0);
+  turn(0.1, 1.4, -0.6);
+  assert(ax > -0.000001 && ax < 0.000001 && ay > 0.999999 && ay < 1.000001, "a quarter turn of (1, 0) is (0, 1)");
+}
