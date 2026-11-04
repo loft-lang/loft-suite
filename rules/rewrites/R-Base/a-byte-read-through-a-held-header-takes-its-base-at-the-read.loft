@@ -12,8 +12,9 @@
 //   so the stale read answers right unless the vacated block is poisoned.
 // @falsified-by: tests/falsified/a-byte-read-through-a-held-header-takes-its-base-at-the-read.patch — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-//   ARMED: `LOFT_POISON=1`.  Unarmed, the control answers `ok`: the stale base reads the
-//   vacated block's old bytes.
+//   ARMED: `LOFT_POISON=1` and FALSIFY_NATIVE=rust.  Unarmed, the control answers `ok`: the
+//   stale base reads the vacated block's old bytes.  The patch plants the defect in the rustc
+//   writer (`src/generation/`), so on the default C leg the control answers as this tree does.
 //
 // rb.data is [10, 20, 30, 40, 50, 60, 70, 80] (10 (i + 1)); rb.out starts empty.
 

@@ -8,10 +8,14 @@
 //   backend-divergence guard — only one side can move)
 // @falsified-by: tests/falsified/a-generator-keeps-its-links-tuples-and-text-copies-across-a-yield.patch — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// CHANNEL: the native exit — rustc refuses the control (E0425 on a link, a tuple or the text
-//   parameter's copy declared in another state; E0605 on a tuple field's zero).
-// HOLDS: asserts 0, leak none, panic none and free-refusals 0 on both trees and both backends;
-//   the interpreter answers every cell on both, as measured by `make falsify` at 594cceed8.
+//   ARMED: FALSIFY_NATIVE=rust — the patch reverts the rustc writer (`src/generation/`),
+//     which the default C leg does not run.
+//   CHANNEL: the native exit — rustc refuses the control (E0425 on a link, a tuple or the text
+//     parameter's copy declared in another state; E0605 on a tuple field's zero).
+//   WITNESS: the control's rustc run reports `cannot find value` for `var_c`, `var_t` and
+//     `var___tp_p` (E0425) and `non-primitive cast: {integer} as (i64, i64)` (E0605).
+//   HOLDS: asserts 0, leak none, panic none and free-refusals 0 on both trees and both
+//     backends; the interpreter answers every cell on both.
 
 fn bump8(x: &u8) { x += 1; }
 fn run(g: iterator<integer>) -> text { s = ""; for v in g { s += "{v} "; } s }

@@ -18,10 +18,12 @@
 //   WITNESS: exit 1 at the first `whole: Rect { w, h }`.
 //   HOLDS: nothing runs; every cell is unreached.
 // @falsified-by: tests/falsified/a-match-arm-captures-its-subject.patch — interpret exit 1 -> 0, native exit 1 -> 0
-//   Step 6 reverted whole (the durable receipt): the same refusal.
+//   The arm root parses no capture (`root_capture` answers none), so `name:` before a pattern
+//   is a parse error again.
 //   CHANNEL: a refusal, on BOTH backends.
 //   ARMED: nothing.
-//   WITNESS: as above.
+//   WITNESS: exit 1, and the one error reported is *No matching operator '+=' on 'float' and
+//     'void'* at r6, whose `match` with `c: Circle { r }` arms answers no value.
 //   HOLDS: as above.
 
 enum Sh { Circle { r: float }, Rect { w: float, h: float }, Dot }
