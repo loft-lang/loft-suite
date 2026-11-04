@@ -16,6 +16,7 @@
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
 //   CHANNEL: the exit — the control refuses the file at compile time (`local-out-of-scope`).
+// HOLDS: leak and panic are clean on both backends.
 
 enum N { A { n: integer }, B }
 struct P { n: integer }

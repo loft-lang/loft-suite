@@ -17,6 +17,7 @@
 // The controls were already right: `[]` as the second arm, and a declared local.
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: leak and panic are clean on both backends.
 fn bound(u: integer?) -> integer {
   v = if u == null { [] } else { [u!] };
   r = len(v) * 10;

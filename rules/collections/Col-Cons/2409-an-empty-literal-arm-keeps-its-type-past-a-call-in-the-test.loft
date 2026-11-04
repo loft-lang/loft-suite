@@ -16,6 +16,7 @@
 // The controls were already right: a test with no call, and the call bound before the `if`.
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: leak and panic are clean on both backends.
 fn sq(x: integer) -> integer { x * x }
 
 fn by_call(k: integer) -> vector<integer>? {

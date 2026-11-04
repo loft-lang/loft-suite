@@ -16,6 +16,7 @@
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
 //   CHANNEL: the exit — the control overflows at 10 000 frames on the first call.
+// HOLDS: leak and panic are clean on both backends.
 
 struct P { n: integer }
 

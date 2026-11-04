@@ -19,6 +19,7 @@
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 //   CHANNEL: the asserts — the first cell ends the run on both backends (`[10,10]`).
+// HOLDS: leak and panic are clean on both backends.
 
 struct P { n: integer, s: text }
 struct B { ops: vector<integer> }

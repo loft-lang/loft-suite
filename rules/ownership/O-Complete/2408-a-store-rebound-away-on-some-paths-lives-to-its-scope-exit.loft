@@ -14,6 +14,7 @@
 // and text elements; two controls take the rebind, or rebind on the straight line, where the
 // early free is the right answer.
 // @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// HOLDS: leak and panic are clean on both backends.
 
 struct Vars2408 { present: vector<integer> }
 

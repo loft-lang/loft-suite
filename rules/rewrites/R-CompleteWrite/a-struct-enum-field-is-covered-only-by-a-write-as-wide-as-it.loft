@@ -31,6 +31,7 @@
 //   against the fix's, `--interpret` and `--native-c`; rustc `--native` passes on the fix, under
 //   LOFT_POISON_CLAIM=1 too (not scored on the control).  Under `c_sweep.py --asan` the control reads `sanitizer`
 //   ([strict] SEGV), the fix `match` in every mode.
+// HOLDS: leak and panic are clean on both backends.
 enum T { Leaf { n: integer }, Opt { inner: T } }
 enum U { A { s: text }, B { n: integer } }
 struct Box { t: T }

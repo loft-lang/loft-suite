@@ -21,6 +21,7 @@
 // The controls were already right: the chain as a call argument and a bare literal as the field.
 //
 // @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// HOLDS: leak and panic are clean on both backends.
 struct P { x: integer }
 struct Hold { ps: vector<P> }
 struct HoldT { ts: vector<text> }
