@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STRUCT-ENUM FIELD IS COVERED ONLY BY A WRITE AS WIDE AS IT (`@FR-R-CompleteWrite`, crossed
+// with `@FR-B-OutOfLine`).  The rule lets a literal skip the default prefill where "the emitter
+// proves coverage of every schema field position by the group's contiguous `OpSet*`s", each write
+// as wide as its field.  The parser primes an inline struct-enum field with a four-byte
+// `OpSetInt4(e, pos, 0)`; a variant holding the enum itself keeps that child OUT OF LINE, in a
+// four-byte slot further into the field, and the `OpSetChildRec` that fills the slot READS it
+// first, to release the child it replaces.  Coverage by position alone counted the prime as the
+// whole field: the element was minted without its prefill and the slot held what the bytes held
+// before — on the C backend a released record, so `leaf` answered null, and under AddressSanitizer
+// a SEGV in `loft_remove_claims_one` (loft-suite's H-CopySelf/2391 cell, whose `Box` is this one).
+//
+// Axes this file MOVES:  the slot's history (a fresh vector, a vector cleared and refilled, a
+//                        vector rebuilt each pass), the depth of the child (one and two `Opt`s),
+//                        the enum's place (the only field of the element, the element itself), the
+//                        variant's payload (a recursive child, a text — the control).
+// Axes it HOLDS FIXED:   the mint is a vector element (`OpNewRecord`); one write per literal.
+//
+// Values hand-computed: leaf(Leaf n) = n, leaf(Opt x) = 100 + leaf(x).
+//   rebuilt(4): each pass i adds Σ_j (100 + 10i + j) for j in 0..3 = 303 + 30i, then 107 after the
+//     clear; over i in 0..4: 4·303 + 30·6 + 4·107 = 1820.
+//   deep(3): Σ_i (200 + i) for i in 0..3 = 603, plus 207 after the clear = 810.
+//   whole(3): vector<T> elements Opt{Leaf i}: Σ (100 + i) = 303, plus 109 after the clear = 412.
+//   texts(3): Bu{A{"s{i}"}}: "s0s1s2" then "z" after the clear = "s0s1s2z".
+//
+// @falsified-at: 369b941cf — native-c exit 1 -> 0, native-c 1 assertion failures -> 0 (`rebuilt
+//   null`; with that cell removed, `deep null`); interpret 0 -> 0, INERT by design: the
+//   interpreter keeps the prefill and is the oracle.  Scored by hand, a dev build of that commit
+//   against the fix's, `--interpret` and `--native-c`; rustc `--native` passes on the fix, under
+//   LOFT_POISON_CLAIM=1 too (not scored on the control).  Under `c_sweep.py --asan` the control reads `sanitizer`
+//   ([strict] SEGV), the fix `match` in every mode.
+enum T { Leaf { n: integer }, Opt { inner: T } }
+enum U { A { s: text }, B { n: integer } }
+struct Box { t: T }
+struct Bu { u: U }
+fn leaf(t: T) -> integer { match t { Leaf { n } => n, Opt { inner } => 100 + leaf(inner) } }
+fn ut(u: U) -> text { match u { A { s } => s, B { n } => "{n}" } }
+
+fn rebuilt(passes: integer) -> integer {
+  s = 0;
+  for i in 0..passes {
+    v: vector<Box> = [];
+    for j in 0..3 { v += [Box { t: Opt { inner: Leaf { n: i * 10 + j } } }]; }
+    for b in v { s += leaf(b.t); }
+    v.clear();
+    v += [Box { t: Opt { inner: Leaf { n: 7 } } }];
+    s += leaf(v[0].t);
+  }
+  s
+}
+
+fn deep(n: integer) -> integer {
+  v: vector<Box> = [];
+  for i in 0..n { v += [Box { t: Opt { inner: Opt { inner: Leaf { n: i } } } }]; }
+  s = 0;
+  for b in v { s += leaf(b.t); }
+  v.clear();
+  v += [Box { t: Opt { inner: Opt { inner: Leaf { n: 7 } } } }];
+  s + leaf(v[0].t)
+}
+
+fn whole(n: integer) -> integer {
+  w: vector<T> = [];
+  for i in 0..n { w += [Opt { inner: Leaf { n: i } }]; }
+  s = 0;
+  for t in w { s += leaf(t); }
+  w.clear();
+  w += [Opt { inner: Leaf { n: 9 } }];
+  s + leaf(w[0])
+}
+
+fn texts(n: integer) -> text {
+  v: vector<Bu> = [];
+  for i in 0..n { v += [Bu { u: A { s: "s{i}" } }]; }
+  r = "";
+  for b in v { r += ut(b.u); }
+  v.clear();
+  v += [Bu { u: A { s: "z" } }];
+  "{r}{ut(v[0].u)}"
+}
+
+fn main() {
+  fresh: vector<Box> = [Box { t: Opt { inner: Leaf { n: 2 } } }, Box { t: Leaf { n: 5 } }];
+  assert(leaf(fresh[0].t) == 102 && leaf(fresh[1].t) == 5 && len(fresh) == 2, "fresh {leaf(fresh[0].t)}");
+  r = rebuilt(4);
+  assert(r == 1820, "rebuilt {r}");
+  d = deep(3);
+  assert(d == 810, "deep {d}");
+  w = whole(3);
+  assert(w == 412, "whole {w}");
+  t = texts(3);
+  assert(t == "s0s1s2z", "texts {t}");
+}
