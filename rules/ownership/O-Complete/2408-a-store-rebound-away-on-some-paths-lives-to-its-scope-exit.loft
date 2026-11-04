@@ -1,0 +1,145 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A local rebound away under an `if`, a `match` arm or a loop still holds its first store on
+// every path that skips the rebind — @FR-O-Complete, "per binding, per path".  Last-use
+// reclaim (`scopes/last_use.rs`) frees a store early at its data's death, and read a rebind
+// under a branch as that death on every path: `l`'s first store was freed before the next
+// allocation, which reused it, and the path that skipped the rebind read that allocation's
+// data instead — `[9]` for `[100,300]`, `[""]` for two texts, on both backends, with no
+// diagnostic (loft#2408).
+//
+// The cells vary where the rebind sits (an `if` inside a loop, a top-level `if`, a loop that
+// runs zero times, a `match` arm) and what it binds (a call result, a literal), over integer
+// and text elements; two controls take the rebind, or rebind on the straight line, where the
+// early free is the right answer.
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+
+struct Vars2408 { present: vector<integer> }
+
+fn grow2408(l: vector<integer>, x: integer) -> vector<integer> {
+  r = l;
+  r += [x];
+  r
+}
+
+fn grow_text2408(l: vector<text>, x: text) -> vector<text> {
+  r = l;
+  r += [x];
+  r
+}
+
+fn in_a_loop_branch(vars: Vars2408, k: integer) -> text {
+  l: vector<integer> = [];
+  for s in [1, 3] {
+    if s == k {
+      l = grow2408(l, 7);
+    } else {
+      l += [s * 100];
+    }
+  }
+  // The allocation after the rebind is what reuses a store freed too early.
+  dp = len(vars.present);
+  vars.present += [1];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn in_an_if(vars: Vars2408, k: integer) -> text {
+  l: vector<integer> = [41, 42];
+  if k == 1 {
+    l = grow2408(l, 7);
+  }
+  dp = len(vars.present);
+  vars.present += [5];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn in_a_loop(vars: Vars2408, k: integer) -> text {
+  l: vector<integer> = [41, 42];
+  for s in 0..k {
+    l = grow2408(l, s);
+  }
+  dp = len(vars.present);
+  vars.present += [5];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn in_a_match_arm(vars: Vars2408, k: integer) -> text {
+  l: vector<integer> = [41, 42];
+  match k {
+    1 => { l = grow2408(l, 7); },
+    _ => {}
+  }
+  dp = len(vars.present);
+  vars.present += [5];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn to_a_literal(vars: Vars2408, k: integer) -> text {
+  l: vector<integer> = [41, 42];
+  if k == 1 {
+    l = [5];
+  }
+  dp = len(vars.present);
+  vars.present += [5];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn of_texts(vars: Vars2408, k: integer) -> text {
+  l: vector<text> = ["ab", "cd"];
+  if k == 1 {
+    l = grow_text2408(l, "x");
+  }
+  dp = len(vars.present);
+  vars.present += [5];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn on_the_straight_line(vars: Vars2408, k: integer) -> text {
+  l: vector<integer> = [41, 42];
+  l = grow2408(l, k);
+  dp = len(vars.present);
+  vars.present += [5];
+  vars.present = vars.present[0..dp];
+  "{l}"
+}
+
+fn test_the_rebind_is_skipped() {
+  v = Vars2408 { present: [9] };
+  a = in_a_loop_branch(v, 2);
+  b = in_an_if(v, 0);
+  c = in_a_loop(v, 0);
+  d = in_a_match_arm(v, 0);
+  e = to_a_literal(v, 0);
+  f = of_texts(v, 0);
+  assert(a == "[100,300]", "loop branch: {a}");
+  assert(b == "[41,42]", "if: {b}");
+  assert(c == "[41,42]", "zero-trip loop: {c}");
+  assert(d == "[41,42]", "match arm: {d}");
+  assert(e == "[41,42]", "literal: {e}");
+  assert(f == "[\"ab\",\"cd\"]", "texts: {f}");
+  assert(v.present == [9], "present: {v.present}");
+}
+
+fn test_the_rebind_is_taken() {
+  v = Vars2408 { present: [9] };
+  a = in_a_loop_branch(v, 3);
+  b = in_an_if(v, 1);
+  c = in_a_loop(v, 2);
+  d = on_the_straight_line(v, 3);
+  assert(a == "[100,7]", "loop branch: {a}");
+  assert(b == "[41,42,7]", "if: {b}");
+  assert(c == "[41,42,0,1]", "loop: {c}");
+  assert(d == "[41,42,3]", "straight line: {d}");
+}
+
+fn main() {
+  test_the_rebind_is_skipped();
+  test_the_rebind_is_taken();
+}

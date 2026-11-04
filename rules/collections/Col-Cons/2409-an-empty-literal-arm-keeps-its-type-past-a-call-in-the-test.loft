@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// An empty literal arm keeps the type of the position it answers for past a call in the test.
+//
+// `if sq(k) == 0 { [] } else { null }` as a `vector<integer>?` result: reading the call's
+// arguments reset the parser's expected type and did not restore it, so the arms lost the
+// result's type and `[]` was read untyped — it answered null, and in a `match` arm nothing at
+// all, which the C backend refused (loft#2409).  `(Col-Cons)`: `[]` is the empty collection of
+// the type its position takes — not null.
+//
+// Axes this file MOVES:  the call in the test (a function, a method, a vector's length); where
+//                        the `if` stands (a function's tail, a `match` arm, a declared local).
+// Axes it HOLDS FIXED:   the element (`integer`); the other arm `null`.
+//
+// The controls were already right: a test with no call, and the call bound before the `if`.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+fn sq(x: integer) -> integer { x * x }
+
+fn by_call(k: integer) -> vector<integer>? {
+  if sq(k) == 0 { [] } else { null }
+}
+
+fn by_length(args: vector<integer>) -> vector<integer>? {
+  if len(args) == 0 { [] } else { null }
+}
+
+fn by_method(t: text) -> vector<integer>? {
+  if t.starts_with("e") { [] } else { null }
+}
+
+enum Pick { Empty { args: vector<integer> }, Other }
+
+fn in_arm(p: Pick) -> vector<integer>? {
+  match p {
+    Empty { args } => if len(args) == 0 { [] } else { null },
+    _ => null
+  }
+}
+
+fn declared(k: integer) -> integer {
+  v: vector<integer>? = if sq(k) == 0 { [] } else { null };
+  if v == null { -1 } else { len(v!) }
+}
+
+fn no_call(k: integer) -> vector<integer>? {
+  if k == 0 { [] } else { null }
+}
+
+fn bound_first(k: integer) -> vector<integer>? {
+  s = sq(k);
+  if s == 0 { [] } else { null }
+}
+
+fn main() {
+  assert(by_call(0) != null && len(by_call(0)!) == 0, "a call in the test");
+  assert(by_call(2) == null, "a call in the test, the null arm");
+  assert(by_length([]) != null, "a length in the test");
+  assert(by_method("eq") != null && by_method("x") == null, "a method in the test");
+  assert(in_arm(Pick::Empty { args: [] }) != null, "in a match arm");
+  assert(declared(0) == 0 && declared(3) == -1, "a declared local: {declared(0)} {declared(3)}");
+  assert(no_call(0) != null && bound_first(0) != null, "the controls");
+}

@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// An empty literal arm takes its element from the other arm.
+//
+// `if u == null { [] } else { [u!] }` where nothing else names the element: the `[]` was read
+// with no element type and the `if` typed `void`, so the other arm's vector was evaluated and
+// dropped.  A `for` over `a + (if …)` walked `a` alone — the wrong sum, no diagnostic — an
+// inferred bind failed with `Unknown function len` and a `for` over the `if` with `Unknown in
+// expression type void` (loft#2407).  `(Col-Cons)`: `[]` is the empty collection of the type the
+// arms join to, a value and not a null.
+//
+// Axes this file MOVES:  where the `if` stands (an inferred bind, a `for` source, a concat's
+//                        operand inside a `for` source); the arm shape (two arms, an `else if`).
+// Axes it HOLDS FIXED:   the element (`integer`); `[]` as the FIRST arm.
+//
+// The controls were already right: `[]` as the second arm, and a declared local.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+fn bound(u: integer?) -> integer {
+  v = if u == null { [] } else { [u!] };
+  r = len(v) * 10;
+  if v == null {
+    r += 5;
+  }
+  r
+}
+fn walked(u: integer?) -> integer {
+  s = 0;
+  for c in (if u == null { [] } else { [u!] }) {
+    s += c;
+  }
+  s
+}
+fn concat(a: vector<integer>, u: integer?) -> integer {
+  s = 0;
+  for c in a + (if u == null { [] } else { [u!] }) {
+    s += c;
+  }
+  s
+}
+fn chained(k: integer) -> integer {
+  v = if k == 0 { [] } else if k == 1 { [7] } else { [k, k] };
+  t = 0;
+  for c in v {
+    t += c;
+  }
+  len(v) * 100 + t
+}
+fn second(u: integer?) -> integer {
+  v = if u != null { [u!] } else { [] };
+  len(v)
+}
+fn declared(u: integer?) -> integer {
+  v: vector<integer> = if u == null { [] } else { [u!] };
+  len(v)
+}
+fn main() {
+  assert(bound(4) == 10, "bound, other arm: {bound(4)}");
+  assert(bound(null) == 0, "bound, empty arm (empty, not null): {bound(null)}");
+  assert(walked(4) == 4, "for over the if: {walked(4)}");
+  assert(walked(null) == 0, "for over the empty arm: {walked(null)}");
+  assert(concat([1, 2], 4) == 7, "for over a concat: {concat([1, 2], 4)}");
+  assert(concat([1, 2], null) == 3, "for over a concat, empty arm: {concat([1, 2], null)}");
+  assert(chained(0) == 0, "else-if, empty: {chained(0)}");
+  assert(chained(1) == 107, "else-if, middle: {chained(1)}");
+  assert(chained(3) == 206, "else-if, last: {chained(3)}");
+  assert(second(4) == 1 && second(null) == 0, "control: second arm empty");
+  assert(declared(4) == 1 && declared(null) == 0, "control: declared");
+}
