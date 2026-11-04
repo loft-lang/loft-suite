@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2411 (`@FR-B-Scope`) — A BIND FROM A LATER FUNCTION, AFTER ITS BLOCK ENDED, IS A NEW
+// BINDING.  The same rule as `1700-a-bind-after-its-block-ended-is-a-new-binding-at-any-type.loft`,
+// with the value coming from a call to a function defined further down: the first pass has no
+// type for it yet, and it read the new binding with the ended one's type — `r >= 0` refused on
+// a vector, the compile stopping before the second pass could split the binding.  A local whose
+// latest first-pass bind has no type yet now reads as untyped there, as a fresh one would; a
+// declared local keeps its declaration (its last two cells, and the text cell, held before).
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — the control refuses this file ("No matching operator").
+// ARMED: every run.
+// WITNESS: `No matching operator '>=' on 'integer' and 'vector<integer>'`.
+// HOLDS: `texts`, `same`, `declared` (a text read of the ended vector, a same-type rebind, a
+// declared local).
+
+fn ops(c: boolean) -> integer {
+  if c { r = [1, 2]; assert(len(r) == 2, "the first binding"); }
+  r = later_int(37);
+  if r >= 0 { r + 5 } else { -1 }
+}
+
+fn items(c: boolean) -> vector<integer> {
+  if c { r = "ended"; assert(r == "ended", "the first binding"); }
+  r = later_int(11);
+  [r, r * 2]
+}
+
+fn texts(c: boolean) -> text {
+  if c { v = [3]; assert(len(v) == 1, "the first binding"); }
+  v = later_text("ab");
+  "{v}{v + "c"}"
+}
+
+fn looped(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    if i > 0 { q = [i]; t += len(q); }
+    q = later_int(i);
+    t += q * 10;
+  }
+  t
+}
+
+fn same(c: boolean) -> integer {
+  if c { s = 4; assert(s == 4, "the first binding"); }
+  s = later_int(6);
+  s * 3
+}
+
+fn declared(c: boolean) -> integer {
+  d: integer = later_int(8);
+  if c { d = later_int(9); }
+  d + 1
+}
+
+fn later_int(n: integer) -> integer { n }
+fn later_text(s: text) -> text { s }
+
+fn main() {
+  assert(ops(true) == 42, "an operator on the new binding: {ops(true)}");
+  assert(ops(false) == 42, "the block not taken: {ops(false)}");
+  assert(items(true) == [11, 22], "a vector of the new binding: {items(true)}");
+  assert(texts(true) == "ababc", "a text new binding: {texts(true)}");
+  assert(looped(3) == 32, "per iteration: {looped(3)}");
+  assert(same(true) == 18, "the same type keeps one binding: {same(true)}");
+  assert(declared(true) == 10, "a declared local: {declared(true)}");
+  println("a bind from a later function after its block ended is a new binding: every cell holds");
+}
