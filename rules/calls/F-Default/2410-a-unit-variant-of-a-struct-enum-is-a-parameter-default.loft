@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Default` — a default is well-formed exactly where the same expression written as the
+// argument is (formal/calls.md D-call-26).  A struct enum's unit variant is a plain enum
+// constant on pass 1 and a record built into a work-ref on pass 2, which a call site cannot
+// replay; pass 2 hoisted it into a function pass 1 never minted, and `t: N = Void` was
+// refused "Expect token )" — bare or qualified, first parameter or not (loft#2410).  A variant
+// with fields, a plain enum's default and the same value as an argument always compiled.
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: leak and panic are clean on both backends.
+
+enum N { Int { n: integer }, Void }
+enum M { Nil, Num { v: integer } }
+struct S { k: integer }
+
+fn bare(x: integer, t: N = Void) -> integer { if t is Void { x } else { 0 } }
+fn qualified(t: N = N::Void) -> integer { if t is Void { 7 } else { 0 } }
+fn then_more(t: M = Nil, x: integer = 2) -> integer { match t { Nil => x, Num { v } => v } }
+fn returned(t: N = Void) -> N { t }
+fn method(self: S, t: N = Void) -> integer { if t is Void { self.k } else { -1 } }
+
+fn test_a_unit_variant_default_answers_the_variant() {
+  got = "{bare(3)} {bare(4, N::Int { n: 1 })} {qualified()} {then_more()} {then_more(M::Num { v: 9 })} {then_more(x: 5)}";
+  assert(got == "3 0 7 2 9 5", "unit-variant defaults: {got}");
+  r = returned();
+  assert(r is Void, "the default is the value returned");
+  s = S { k: 11 };
+  for _ in 0..3 { s.k += s.method(); }
+  assert(s.k == 88, "replayed at every call: {s.k}");
+}
