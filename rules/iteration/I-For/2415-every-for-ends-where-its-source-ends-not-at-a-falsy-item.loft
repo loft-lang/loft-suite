@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `for` ends where its source does — a vector at its length, a text at its last character,
+// a custom iterator when `next` answers null — `@FR-I-For`, `(I-Done)`.  A format string's
+// `for` and a comprehension are the same loop (`(I-Comp)`), and both ended on the ITEM
+// instead: a format `for` on `!item` and a comprehension over an `operator next` on the item's
+// truthiness (loft#2415).  So a `boolean` walk stopped at its first `false` (`[true]` for
+// `[true,false,true]`), a null element ended a format walk early, a vector or struct-enum item
+// was refused with a message about `!`, and a text in a format string never ended at all —
+// its cursor was declared in a nested block, so `c#count` reused its slot.
+//
+// Each cell writes one walk three ways — the statement, the comprehension, the format string —
+// and asks the three agree with the value worked out by hand.  The items a format `for` refused
+// outright are 2415b's, so a refusal there cannot hide a wrong answer here.
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 2 -> 0
+// HOLDS: leak and panic are clean on both backends.
+
+struct Flip2415 { n: integer, max: integer }
+pub operator next(self: Flip2415) -> boolean? {
+  if self.n >= self.max {
+    return null;
+  }
+  self.n += 1;
+  self.n % 2 == 1
+}
+
+struct Pairs2415 { n: integer, max: integer }
+pub operator next(self: Pairs2415) -> vector<integer>? {
+  if self.n >= self.max {
+    return null;
+  }
+  self.n += 1;
+  [self.n, self.n]
+}
+
+fn test_a_boolean_vector() {
+  bs = [true, false, true];
+  st = "";
+  for b in bs { st += "{b},"; }
+  co = [for b in bs { b }];
+  fm = "{for b in bs { b }}";
+  assert(st == "true,false,true,", "statement {st}");
+  assert("{co}" == "[true,false,true]", "comprehension {co}");
+  assert(fm == "[true,false,true]", "format {fm}");
+  assert("{for b in bs if !b { b }}" == "[false]", "filtered format");
+}
+
+fn test_a_null_element_is_an_element() {
+  ns: vector<integer?> = [1, null, 3];
+  st = "";
+  for n in ns { st += "{n},"; }
+  assert(st == "1,null,3,", "statement {st}");
+  assert("{for n in ns { n }}" == "[1,null,3]", "format");
+}
+
+fn test_a_text_source() {
+  s = "héllo";
+  assert("{for c in s { c }}" == "[h,é,l,l,o]", "text");
+  assert("{for c in "abc" { c }}" == "[a,b,c]", "literal text");
+  assert("{for c in s if c != 'l' { c }}" == "[h,é,o]", "filtered text");
+}
+
+fn test_a_custom_iterator() {
+  st = "";
+  for b in Flip2415 { n: 0, max: 4 } { st += "{b},"; }
+  co = [for b in Flip2415 { n: 0, max: 4 } { b }];
+  fm = "{for b in Flip2415 { n: 0, max: 4 } { b }}";
+  assert(st == "true,false,true,false,", "statement {st}");
+  assert("{co}" == "[true,false,true,false]", "comprehension {co}");
+  assert(fm == "[true,false,true,false]", "format {fm}");
+  pv = [for p in Pairs2415 { n: 0, max: 3 } { len(p) }];
+  assert("{pv}" == "[2,2,2]", "vector comprehension {pv}");
+}
+
+fn main() {
+  test_a_boolean_vector();
+  test_a_null_element_is_an_element();
+  test_a_text_source();
+  test_a_custom_iterator();
+}

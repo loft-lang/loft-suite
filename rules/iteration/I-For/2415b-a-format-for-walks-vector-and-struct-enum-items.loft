@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A format string's `for` walks any item a `for` statement walks (`@FR-I-For`, `(I-Comp)`).  It
+// ended its loop on `!item`, which a vector and a struct enum do not have, so
+// `"{for v in vs { len(v) }}"` was refused with "No matching operator '!' on 'vector<integer>'"
+// — an operator the program never wrote (loft#2415).  The runtime half is 2415's.
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: leak and panic are clean on both backends.
+
+enum Nd2415 { NdNull, NdInt { n: integer } }
+
+struct Pairs2415 { n: integer, max: integer }
+pub operator next(self: Pairs2415) -> vector<integer>? {
+  if self.n >= self.max {
+    return null;
+  }
+  self.n += 1;
+  [self.n, self.n]
+}
+
+fn test_vector_and_struct_enum_items() {
+  vs = [[1, 2], [3]];
+  ops = [Nd2415::NdInt { n: 1 }, Nd2415::NdNull];
+  assert("{for v in vs { len(v) }}" == "[2,1]", "vector items");
+  assert("{for o in ops { o }}" == "[NdInt {{n:1}},NdNull {{}}]", "struct-enum items");
+  assert("{[for o in ops { o }]}" == "[NdInt {{n:1}},NdNull {{}}]", "struct-enum comprehension");
+  assert("{for p in Pairs2415 { n: 0, max: 3 } { len(p) }}" == "[2,2,2]", "vector format");
+}
+
+fn main() {
+  test_vector_and_struct_enum_items();
+}
