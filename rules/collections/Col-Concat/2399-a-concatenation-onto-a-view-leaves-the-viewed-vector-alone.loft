@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-Col-Concat`.
 //
 // A concatenation whose first operand is a view of another vector builds a new vector and
 // leaves the viewed one alone (`(Col-Concat)`: neither operand changes).
