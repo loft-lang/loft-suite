@@ -1,0 +1,143 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-View` through a discharge: `g.places[j]!` names element j of the container, so
+// reading `g.places[j]!.level` views the store of `g`.  The `!` temp, which is the subject's value
+// under a compiler name, BORROWS that store.  It never owns it.  It owned it when the element's
+// struct was declared BELOW its holder.  Pass 1 created the `_ncr_N` temp as `Unknown(Visited)`,
+// resolved it to a dep-less `ref(Visited)` between the passes, and kept that type in pass 2,
+// because the pass-2-wins rule for generated temps tested only their `__` prefix.  Read as an
+// owner, the temp's scope-exit free released the `Game` store.  Every later read of `g` then
+// read a freed store, which the next allocation took over (loft#2404).  The `?` / `?? d`
+// twin (`__ncc_N`) was right all along, and so was a user bind `el = g.places[j]!`, whose deps
+// come from its assignment.
+//
+// The cells: the read as an assignment source and as a `const` argument; the three
+// spellings that mint the temp (`!`, `?? panic(…)`, `?? return`); a holder that is a local
+// rather than a parameter; and a record census over many rounds.  The CONTROLS are the
+// `__ncc_` twin, a holder whose element is declared first (`Shelf` / `Box`), and a HASH of a
+// late-declared element (`Atlas` / `Room`), whose keyed read never took the dep-less type.
+// They pass on both builds, which shows the guard scores the order and not the discharge.
+//
+// Expected, by hand: `go_*` copy place 1's level (`v2`, 8) into `world`.  `stamp` then adds an
+// `x`, and an unrelated `Game` built afterwards must not show through, so the answer is
+// "v2x 8 2 v2 99" each time.  The local cell reads "v1" / 7 for j = 0, the shelf "b" / 4, the
+// atlas "r2" / 6.  The census sums 8 per round and holds as many records after 1 000 rounds
+// as after 10.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: exit, on both backends; the halt is the cell's own `!` in `stamp`.
+//   WITNESS: "g.places[1] is null" — the freed Game store, taken over by `other`.
+//   HOLDS: the controls (`go_default`, `c_shelf`, `c_atlas`) pass on both trees.  The cell
+//   also fails on main @ 369b941cf on both backends.
+
+struct Game { world: Lv, places: vector<Visited> }
+struct Visited { place: text, level: Lv }
+struct Lv { name: text, n: integer }
+
+// The control holder: its element is declared FIRST.
+struct Box { name: text, n: integer }
+struct Shelf { top: Box, boxes: vector<Box> }
+
+// The control container: a hash, its element declared below it like `Visited`.
+struct Atlas { here: Lv, rooms: hash<Room[key]> }
+struct Room { const key: text, level: Lv }
+
+fn mk() -> Game {
+  Game {
+    world: Lv { name: "w1", n: 1 },
+    places: [Visited { place: "p", level: Lv { name: "v1", n: 7 } },
+             Visited { place: "q", level: Lv { name: "v2", n: 8 } }]
+  }
+}
+
+fn take(l: const Lv, to: Lv) {
+  to.name = l.name;
+  to.n = l.n;
+}
+
+fn go_bang(g: Game, j: integer) { g.world = g.places[j]!.level; }
+fn go_carg(g: Game, j: integer) { take(g.places[j]!.level, g.world); }
+fn go_panic(g: Game, j: integer) { g.world = (g.places[j] ?? panic("gone")).level; }
+fn go_return(g: Game, j: integer) { g.world = (g.places[j] ?? return).level; }
+fn go_default(g: Game, j: integer) { g.world = g.places[j]?.level; }
+
+// Write through `g`, build an unrelated Game where a freed store would be reused, then read `g`.
+fn stamp(g: Game) -> text {
+  g.world.name += "x";
+  other = Game { world: Lv { name: "zz", n: 99 }, places: [] };
+  "{g.world.name} {g.world.n} {len(g.places)} {g.places[1]!.level.name} {other.world.n}"
+}
+
+fn census_records() -> integer {
+  cr_t = store_memory();
+  cr_i = cr_t.find("records ");
+  if !cr_i { return -1 }
+  cr_j = cr_i + 8;
+  cr_n = 0;
+  while cr_j < len(cr_t) && cr_t[cr_j] >= '0' && cr_t[cr_j] <= '9' {
+    cr_n = cr_n * 10 + (cr_t[cr_j] as integer - '0' as integer);
+    cr_j += 1;
+  }
+  cr_n
+}
+
+fn c_local() -> text {
+  g = mk();
+  j = 0;
+  if len(g.places) > 0 { g.world = g.places[j]!.level; }
+  other = Game { world: Lv { name: "zz", n: 99 }, places: [] };
+  "{g.world.name} {g.world.n} {len(g.places)} {other.world.n}"
+}
+
+fn c_shelf() -> text {
+  s = Shelf { top: Box { name: "t", n: 0 }, boxes: [Box { name: "a", n: 3 }, Box { name: "b", n: 4 }] };
+  j = 1;
+  s.top = s.boxes[j]!;
+  "{s.top.name} {s.top.n} {len(s.boxes)}"
+}
+
+fn c_atlas() -> text {
+  a = Atlas { here: Lv { name: "h", n: 0 }, rooms: [] };
+  a.rooms += [Room { key: "r1", level: Lv { name: "r1", n: 5 } },
+              Room { key: "r2", level: Lv { name: "r2", n: 6 } }];
+  k = "r2";
+  a.here = a.rooms[k]!.level;
+  other = Atlas { here: Lv { name: "zz", n: 99 }, rooms: [] };
+  "{a.here.name} {a.here.n} {len(a.rooms)} {other.here.n}"
+}
+
+fn c_census(n: integer) -> integer {
+  tot = 0;
+  for r in 0..n {
+    g = mk();
+    go_bang(g, r % 2);
+    go_carg(g, 1);
+    tot += g.world.n;
+  }
+  assert(tot == n * 8, "c_census total {tot}");
+  census_records()
+}
+
+fn main() {
+  g1 = mk(); go_bang(g1, 1);
+  s1 = stamp(g1);
+  assert(s1 == "v2x 8 2 v2 99", "go_bang {s1}");
+  g2 = mk(); go_carg(g2, 1);
+  s2 = stamp(g2);
+  assert(s2 == "v2x 8 2 v2 99", "go_carg {s2}");
+  g3 = mk(); go_panic(g3, 1);
+  s3 = stamp(g3);
+  assert(s3 == "v2x 8 2 v2 99", "go_panic {s3}");
+  g4 = mk(); go_return(g4, 1);
+  s4 = stamp(g4);
+  assert(s4 == "v2x 8 2 v2 99", "go_return {s4}");
+  g5 = mk(); go_default(g5, 1);
+  s5 = stamp(g5);
+  assert(s5 == "v2x 8 2 v2 99", "go_default (control) {s5}");
+  assert(c_local() == "v1 7 2 99", "c_local {c_local()}");
+  assert(c_shelf() == "b 4 2", "c_shelf (control) {c_shelf()}");
+  assert(c_atlas() == "r2 6 2 99", "c_atlas (control) {c_atlas()}");
+  assert(census_records() >= 0, "the census answers");
+  assert(c_census(1000) == c_census(10), "c_census grows: {c_census(10)} -> {c_census(1000)}");
+}
