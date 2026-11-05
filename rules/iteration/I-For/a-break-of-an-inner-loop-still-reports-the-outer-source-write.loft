@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BREAK OF AN INNER LOOP STILL REPORTS THE OUTER SOURCE WRITE (`@FR-I-For`,
+// `loop-source-written`).  The notice is quiet for a write the loop leaves right after (the cell
+// beside this one), but a `break` leaves only the innermost loop: an outer loop whose bound the
+// write changed goes round again on the bound it took at its start, which is what the notice
+// is for.  Values hand-computed: the outer loop runs its 3 rounds, not the 1 the write asks.
+//
+// @falsified-at: none — the guard of the quiet case's reach: a quieting that read any `break`
+//   as leaving every loop would drop this warning.
+// CHANNEL: the expected warning (`@EXPECT_WARNING`) and the assert.
+// WITNESS: `rounds 3`.
+// HOLDS: the quiet cell beside it.
+// @EXPECT_WARNING: loop-source-written
+
+fn rounds(n: integer) -> integer {
+  m = n;
+  r = 0;
+  for i in 0..m {
+    r += 1;
+    for j in 0..2 {
+      if j == 1 {
+        m = 1;
+        break;
+      }
+    }
+  }
+  r
+}
+
+fn main() {
+  assert(rounds(3) == 3, "the outer loop keeps the bound it started with: {rounds(3)}");
+  println("rounds {rounds(3)}");
+}
