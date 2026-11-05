@@ -12,9 +12,7 @@
 // source is declared: `vector<u8>`, one byte an element.
 // @EXPECT_ERROR: Cannot assign vector<u8> to a field of type vector<integer>
 // @falsified-at: cc67bbe71 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
-// @falsified-by: tests/falsified/a-struct-literal-refuses-a-vector-of-another-element-width.patch
-//   — the same channels as the control above; score it with `scripts/falsify.sh <this file>
-//   --patch <that patch>`.
+// @falsified-by: tests/falsified/a-struct-literal-refuses-a-vector-of-another-element-width.patch — the same channels as the control above; score it with `scripts/falsify.sh <this file> --patch <that patch>`.
 //   CHANNEL: expectations — the control COMPILES the literal (no refusal to match, so the
 //   `@EXPECT_ERROR` is unmet and the suite's verdict is FAIL) and answers garbage; here the
 //   refusal is reported and matched.
