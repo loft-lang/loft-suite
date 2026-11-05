@@ -28,6 +28,7 @@
 //   left at exit) on both backends.
 // ARMED: no instrument for the values; the store falsifiers for the release half.
 // HOLDS: the before-the-build shapes answer the same on both trees.
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, which releases the store the capture's build still names.
 
 struct H { tag: integer, f: fn() -> integer, g: fn() -> integer }
 struct P { n: integer }

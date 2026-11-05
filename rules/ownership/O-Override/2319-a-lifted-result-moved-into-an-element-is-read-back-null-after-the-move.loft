@@ -20,6 +20,7 @@
 //   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
 //   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
 //   exit moves.
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, which frees the moved result the element still names (`progs[callee] is null`).
 struct L { fb: integer, name: text, xs: vector<integer> }
 struct Holder { slot: L, n: integer }
 

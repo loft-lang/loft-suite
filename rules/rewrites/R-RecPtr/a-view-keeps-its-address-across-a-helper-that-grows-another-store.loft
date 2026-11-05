@@ -23,6 +23,7 @@
 //   sibling(t):   t.items = mk(), t.log = []; k = 0, 1: o = t.items[k]; log 3000 values into
 //                 t.log, enough to grow the store; o.a * 100 + o.b: 110 + 220 = 330;
 //                 len(t.log) 6000 → 336000
+// @observes: LOFT_NO_CALLEE_DISTURB — the switch stops the helper's growth ending the views, so their `view-copied` advice leaves the output.
 struct Op { a: integer, b: integer }
 
 fn push(st: vector<integer>, v: integer) { st += [v]; }

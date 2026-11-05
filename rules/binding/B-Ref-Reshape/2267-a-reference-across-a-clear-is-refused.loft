@@ -10,6 +10,7 @@
 // HOLDS: the plain-bind spelling is copied out instead —
 //   `rules/binding/B-Disturb/2267-a-clear-or-a-method-ends-the-views-into-a-vector.loft`.
 // @EXPECT_ERROR: cannot call `clear` while `c` references a place inside `v`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the reference across `clear` is no longer refused, which is what this program checks.
 
 struct S { n: integer, s: text }
 

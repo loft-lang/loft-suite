@@ -9,6 +9,7 @@
 // HOLDS: the same write inline materialises the view instead —
 //   `rules/binding/B-Disturb/2391-a-whole-record-written-into-a-place-ends-the-views-into-what-it-owned.loft` (a2).
 // @EXPECT_ERROR: cannot pass both `c` and a reference into it to `put`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the call is no longer refused, which is what this program checks.
 
 enum Ty { Opt { inner: Ty }, Int { bits: integer } }
 struct Cell { tp: Ty }

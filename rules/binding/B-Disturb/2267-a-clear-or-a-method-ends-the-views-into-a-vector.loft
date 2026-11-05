@@ -17,6 +17,7 @@
 // CHANNEL: the VALUE of the view after the call, hand-computed, and the LEAK.
 // ARMED: no instrument.
 // HOLDS: every cell, on every backend.
+// @observes: LOFT_NO_CALLEE_DISTURB — the switch stops `clear` and a method ending the views into a vector, so their `view-copied` advice leaves its output.
 
 struct S { n: integer, s: text }
 struct Bag { items: vector<S> }

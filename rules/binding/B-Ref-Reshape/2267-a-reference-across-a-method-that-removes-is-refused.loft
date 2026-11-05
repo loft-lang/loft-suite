@@ -10,6 +10,7 @@
 // HOLDS: the free-function spelling was refused already; the plain bind is copied out —
 //   `rules/binding/B-Disturb/2267-a-clear-or-a-method-ends-the-views-into-a-vector.loft`.
 // @EXPECT_ERROR: cannot call `drop_first` while `c` references a place inside `b`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the reference across the removing method is no longer refused, which is what this program checks.
 
 struct S { n: integer }
 struct Bag { items: vector<S> }

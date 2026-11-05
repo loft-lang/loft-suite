@@ -22,6 +22,7 @@
 //   HOLDS: assertions, leak, panic, free-refusal, expectations are equal on both trees.
 //   Falsify prints only the channels that MOVE and requires HERE to be clean, so each of
 //   those is clean on both. The native side was not scored in this sweep.
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of the projected record is what the `c1` assertion checks.
 struct S { n: integer }
 struct O { inner: S, opt: S? }
 fn rdn(s: S?) -> integer { if s != null { s.n } else { -1 } }

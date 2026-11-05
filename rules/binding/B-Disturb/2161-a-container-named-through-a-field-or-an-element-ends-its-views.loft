@@ -25,6 +25,7 @@
 // view, element, field of an element), where (inline, one call down, two calls down, a
 // parameter's own field), the statement (straight-line, an `if` arm, a loop's back edge) and
 // the view (plain, a `??` discharge).
+// @observes: LOFT_NO_CALLEE_DISTURB — the switch stops a callee's growth ending the caller's views, so the `view-copied` advice for the call sites leaves its output.
 
 struct S { n: integer }
 struct W { tag: integer, a: vector<S> }
