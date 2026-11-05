@@ -34,7 +34,7 @@ oracle, and the annotations are the ones `loft test` reads:
 | header line | meaning |
 |---|---|
 | `// @EXPECT_ERROR: <substring>` | the file (or the function below) must be refused with a diagnostic containing it |
-| `// @EXPECT_WARNING: <substring>` | a warning containing it must be emitted; any other warning fails the cell |
+| `// @EXPECT_WARNING: <substring>` | a warning containing it must be emitted; a warning no cell claims is printed, not failed — arm `@ARMED: LOFT_DENY_WARNINGS=1` to fail on one |
 | `// @EXPECT_FAIL[: <substring>]` | the function below (or every one) must fault at run time |
 | `// @IGNORE` | the function below is not run |
 | `// @ARGS: <argv…>` | positional arguments; `--lib`, `--project`, `--production`, `--log-conf` as flags |
