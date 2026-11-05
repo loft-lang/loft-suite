@@ -12,7 +12,7 @@
 //
 // @falsified-at: none — the channel is a warning, which `make falsify` (values only) cannot read.
 //   By hand: `loft-suite run --chapter iteration` with the installed main (loft 2026.11.0) FAILs
-//   both lanes with 3 unexpected warnings; the tree that settles the notice passes.  Found on
+//   both lanes with 4 unexpected warnings; the tree that settles the notice passes.  Found on
 //   the self-hosted elaborator's build (`selfhost/src/el_vars.loft` `pop_loop`).
 // CHANNEL: the absence of a warning — armed with `LOFT_DENY_WARNINGS=1`, any warning fails the
 //   cell (an unclaimed one is otherwise only printed).
@@ -47,6 +47,18 @@ fn take_break(t: Tab, k: integer) -> integer {
   got
 }
 
+// The right-hand side holds a block of its own (a comprehension's body): what follows the
+// write is still the `return` after it.
+fn take_inline(t: Tab, k: integer) -> integer {
+  for e in t.es {
+    if e.k == k {
+      t.es = [for x in t.es if x.k != k { x }];
+      return e.n;
+    }
+  }
+  -1
+}
+
 fn upto(n: integer) -> integer {
   m = n;
   t = 0;
@@ -67,5 +79,7 @@ fn main() {
   assert(take_break(t, 3) == 10, "break: the entry before the removed one");
   assert(len(t.es) == 1, "break removed it: {len(t.es)}");
   assert(upto(5) == 3, "a range bound written then returned: {upto(5)}");
+  u = Tab { es: [Ent { k: 4, n: 40 }, Ent { k: 5, n: 50 }], removed: 0 };
+  assert(take_inline(u, 4) == 40 && len(u.es) == 1, "a comprehension right-hand side");
   println("a write the loop leaves right after is not reported");
 }
