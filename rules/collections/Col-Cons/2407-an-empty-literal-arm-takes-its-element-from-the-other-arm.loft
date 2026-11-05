@@ -7,7 +7,7 @@
 // with no element type and the `if` typed `void`, so the other arm's vector was evaluated and
 // dropped.  A `for` over `a + (if …)` walked `a` alone — the wrong sum, no diagnostic — an
 // inferred bind failed with `Unknown function len` and a `for` over the `if` with `Unknown in
-// expression type void` (loft#2407).  `(Col-Cons)`: `[]` is the empty collection of the type the
+// expression type void` (loft#2407).  `@FR-Col-Cons`: `[]` is the empty collection of the type the
 // arms join to, a value and not a null.
 //
 // Axes this file MOVES:  where the `if` stands (an inferred bind, a `for` source, a concat's

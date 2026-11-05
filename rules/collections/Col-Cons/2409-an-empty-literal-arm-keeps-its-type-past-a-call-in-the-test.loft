@@ -6,7 +6,7 @@
 // `if sq(k) == 0 { [] } else { null }` as a `vector<integer>?` result: reading the call's
 // arguments reset the parser's expected type and did not restore it, so the arms lost the
 // result's type and `[]` was read untyped — it answered null, and in a `match` arm nothing at
-// all, which the C backend refused (loft#2409).  `(Col-Cons)`: `[]` is the empty collection of
+// all, which the C backend refused (loft#2409).  `@FR-Col-Cons`: `[]` is the empty collection of
 // the type its position takes — not null.
 //
 // Axes this file MOVES:  the call in the test (a function, a method, a vector's length); where

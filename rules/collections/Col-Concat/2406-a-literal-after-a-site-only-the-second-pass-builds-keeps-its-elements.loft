@@ -11,7 +11,7 @@
 // chain temporary typed as a view of the chain's left operand, minted no store and lost its
 // elements: `a + b + [P { x: 40 }]` answered `a`'s, a two-operand chain likewise, a second
 // early literal answered nothing — on both backends, with no diagnostic; a `vector<integer>`
-// chain was an internal compiler error (loft#2406).
+// chain was an internal compiler error (loft#2406).  `@FR-Col-Concat`: `a + b` is a new vector of a's elements, then b's.
 //
 // Axes this file MOVES:  the element (a record, a text); the chain (three operands, two); where
 //                        it stands (a struct field, a call argument); the literal that loses
