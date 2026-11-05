@@ -1,0 +1,131 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2417, `@FR-H-FreeNull` — A LOCAL A LATER ARM BINDS FREES NOTHING ON THE ARMS BEFORE IT.
+// A heap local the program never bound on a path holds null there, so its free on that path
+// releases nothing: not the caller's record, not a store another name holds.
+//
+// The shape: a `match` whose LATER arm binds a record local that borrows from a local the same
+// arm binds first (a nested `match`'s subject `unspan(args[0])`, borrowing `args`).  The scope
+// pass would not null-init the subject at the outer `match`, its dep not being bound yet, so the
+// next `if` down did — inside the outer `else` arm, which opens no block of its own — and the
+// local stayed registered at the function's scope.  Its free at the function's end (or at a
+// self tail call's jump) then ran on the EARLIER arms' paths too, reading a slot the subject
+// shares with the first arm's `inner`: the interpreter freed the caller's record.  C declares
+// every local up front as null and was right.
+//
+// Axes this file MOVES:  the earlier arm (a plain value arm, a self tail call); the subject's
+//                        borrow (a vector element, a record field).
+// Axes it HOLDS FIXED:   a record subject; an enum `match` in a function's tail.
+//
+// Values hand-computed beside each assert.  Each cell reads the caller's argument after the
+// call, which the stray free destroyed — so the control fails without `LOFT_POISON`.
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: assertion failures on the interpreter.
+// HOLDS: leak and panic are clean on both backends.
+
+enum N {
+  Leaf { v: integer },
+  Span { inner: N },
+  Call { k: integer, args: vector<N> }
+}
+
+enum M {
+  Wrap { inner: M },
+  Pair { k: integer, a: N },
+  Nil
+}
+
+fn unspan(n: N) -> N {
+  match n {
+    Span { inner } => unspan(inner),
+    _ => n
+  }
+}
+
+fn leafv(n: N) -> integer {
+  match n {
+    Leaf { v } => v,
+    _ => -1
+  }
+}
+
+// The first arm answers a value: the function-end free runs on its path.
+fn plain(n: N) -> vector<integer> {
+  match n {
+    Span { inner } => [leafv(inner) * 1000],
+    Leaf { v } => [v],
+    Call { k, args } => {
+      if k == 1 && len(args) > 0 {
+        match unspan(args[0]) { Leaf { v } => [v, k], _ => [] }
+      } else { [] }
+    },
+    _ => []
+  }
+}
+
+// The first arm is a self tail call: the jump runs the same free.
+fn jump(n: N) -> vector<integer> {
+  match n {
+    Span { inner } => jump(inner),
+    Leaf { v } => [v],
+    Call { k, args } => {
+      if k == 1 && len(args) > 0 {
+        match unspan(args[0]) { Leaf { v } => [v, k], _ => [] }
+      } else { [] }
+    },
+    _ => []
+  }
+}
+
+// The subject borrows a field binding instead of a vector element.
+fn field(m: M) -> vector<integer> {
+  match m {
+    Wrap { inner } => field(inner),
+    Nil => [0],
+    Pair { k, a } => {
+      if k == 1 {
+        match unspan(a) { Leaf { v } => [v, k], _ => [] }
+      } else { [] }
+    }
+  }
+}
+
+fn main() {
+  s = Span { inner: Leaf { v: 7 } };
+  d = plain(s);
+  // Span 7: leafv 7 * 1000.
+  assert(len(d) == 1 && d[0] == 7000, "plain span {d}");
+  c = Call { k: 1, args: [Span { inner: Leaf { v: 8 } }] };
+  e = plain(c);
+  // args[0] unspans to Leaf 8, k is 1.
+  assert(len(e) == 2 && e[0] == 8 && e[1] == 1, "plain call {e}");
+  // s is the caller's: still Span { Leaf 7 }.
+  assert(leafv(unspan(s)) == 7, "plain arg {leafv(unspan(s))}");
+
+  t = Span { inner: Call { k: 1, args: [Span { inner: Leaf { v: 8 } }] } };
+  j = jump(t);
+  assert(len(j) == 2 && j[0] == 8 && j[1] == 1, "jump call {j}");
+  assert(len(jump(Call { k: 2, args: [] })) == 0, "jump empty");
+  assert(jump(Leaf { v: 3 })[0] == 3, "jump leaf");
+  // t is the caller's: still Span { Call { k: 1, one argument } }.
+  tk = match t {
+    Span { inner } => match inner { Call { k, args } => k * 10 + len(args), _ => -2 },
+    _ => -3
+  };
+  assert(tk == 11, "jump arg {tk}");
+
+  w = Wrap { inner: Pair { k: 1, a: Span { inner: Leaf { v: 9 } } } };
+  f = field(w);
+  // a unspans to Leaf 9, k is 1.
+  assert(len(f) == 2 && f[0] == 9 && f[1] == 1, "field pair {f}");
+  assert(field(Nil)[0] == 0, "field nil");
+  wk = match w {
+    Wrap { inner } => match inner { Pair { k, a } => k * 100 + leafv(unspan(a)), _ => -2 },
+    _ => -3
+  };
+  // k 1 * 100 + leaf 9.
+  assert(wk == 109, "field arg {wk}");
+}
