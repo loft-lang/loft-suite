@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `match e { null => …, x: _ => … }` eliminates `τ?` at EVERY τ (`@FR-N-Match`), and `x: _`
+// binds the whole subject (`@FR-P-Cap` at the arm root) — a nullable VECTOR and a nullable
+// KEYED collection included.  A vector's slice arms stand beside the null arm; a keyed
+// collection has no positions, so it is matched as a whole.
+//
+// Before loft#2427 neither parsed: a vector subject read only `[…]`, `_` or a bare name as an
+// arm head, so `null` and `x: _` broke out of the arm loop ("Expect token }"), and a keyed
+// subject had no match path at all.  The keyed capture is a view of the subject's store,
+// bound once ahead of the arms: bound inside its arm it was pre-inited to null there, and a
+// keyed null-init mints a store the view overwrote — the leak gate is that cell's channel.
+//
+// The cells that can FAIL:
+//   c1  a `vector<integer>?` with `null` and `x: _`
+//   c2  `null` beside slice arms that cover every length
+//   c3  `null` and a bare name over a `vector<text>?`
+//   c4  `null` over a call's `vector<S>?`, slice arm then `_`
+//   c5  a guard on the capture
+//   c6  a `hash<K[k]>?`                         — and its capture leaked one store per match
+//   c7  a `sorted<K[k]>?` field, bare name
+//   c8  an `index<K[k]>?` captured and looked up by key
+//
+// The control, which a too-wide fix would move: c9, a dense vector subject with a `null`
+// arm, which never matches.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: the suite's leak gate (`LOFT_LEAK_CHECK=1`) for c6, which the runner arms on every
+//   run; the rest is ordinary assertions.
+//   WITNESS: the control does not parse the file ("Expect token }") on both backends; with
+//   the arm heads alone and not the keyed capture's binding, c6 leaks `hash<K[k]>×2`.
+//   HOLDS: panic and free-refusal are clean on both trees and both backends; HERE passes
+//   every assertion with no leak.
+//
+// CHANNEL: the compile (the file did not parse), the assertions, and the leak gate.
+
+struct S { n: integer }
+struct K { k: integer }
+struct KV { k: integer, v: integer }
+struct O { s: sorted<K[k]>? }
+
+fn c1(s: vector<integer>?) -> integer { match s { null => -1, x: _ => len(x) } }
+fn c2(s: vector<integer>?) -> integer { match s { null => -1, [] => 0, [a, ..r] => a + len(r) } }
+fn c3(s: vector<text>?) -> text { match s { null => "none", x => "{len(x)}" } }
+fn mk(b: boolean) -> vector<S>? { if b { [S { n: 9 }] } else { null } }
+fn c4(b: boolean) -> integer { match mk(b) { null => -1, [h, .._] => h.n, _ => -2 } }
+fn c5(s: vector<integer>?) -> text { match s { null => "none", x: _ if len(x) > 2 => "big", _ => "small" } }
+fn c6(s: hash<K[k]>?) -> integer { match s { null => -1, x: _ => len(x) } }
+fn c7(o: O) -> text { match o.s { null => "none", x => "{len(x)}" } }
+fn c8(s: index<KV[k]>?) -> integer { match s { null => -1, x: _ => x[2].v ?? -2 } }
+fn c9(s: vector<integer>) -> integer { match s { null => -1, x: _ => len(x) } }
+
+fn test_a_nullable_vector() {
+  a: vector<integer>? = null;
+  e: vector<integer> = [];
+  assert(c1(a) == -1 && c1([1, 2, 3]) == 3, "c1");
+  assert(c2(a) == -1 && c2(e) == 0 && c2([5, 1, 1]) == 7, "c2");
+  t: vector<text>? = null;
+  assert(c3(t) == "none" && c3(["p", "q"]) == "2", "c3");
+  assert(c4(false) == -1 && c4(true) == 9, "c4");
+  assert(c5([1, 2, 3]) == "big" && c5([1]) == "small" && c5(a) == "none", "c5");
+  assert(c9([4, 5]) == 2, "c9");
+}
+
+fn test_a_nullable_keyed_collection() {
+  a: hash<K[k]>? = null;
+  h: hash<K[k]> = [K { k: 1 }, K { k: 2 }];
+  for i in 0..3 { assert(c6(a) == -1 && c6(h) == 2, "c6"); }
+  assert(c7(O { s: null }) == "none" && c7(O { s: [K { k: 3 }, K { k: 1 }, K { k: 2 }] }) == "3", "c7");
+  i: index<KV[k]> = [KV { k: 1, v: 10 }, KV { k: 2, v: 20 }];
+  n: index<KV[k]>? = null;
+  assert(c8(i) == 20 && c8(n) == -1, "c8");
+}
