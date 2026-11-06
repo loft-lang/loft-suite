@@ -20,6 +20,8 @@
 //   c3  a record link to a PARAMETER            — `5 5 5`: the consumer's value aliased
 //   c4  a record link to a LOCAL                — `5 5`
 //   c5  a struct-enum link written through      — the hand-over the record cells share
+//   (c5 and c10 also guard loft#2421 on `--native`: a struct-enum link and a link in an
+//   eagerly collected loop did not compile there)
 //
 // The controls, each of which a too-wide fix would move:
 //   c6  a text link to a local                  — already correct
