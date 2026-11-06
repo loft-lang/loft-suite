@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A nullable record local (`@FR-L-Null`: absent is its sentinel) owns exactly the store its
+// LATEST assignment gave it (`@FR-O-Latest`), one owner at a time (`@FR-O-Owner`), on every
+// path (`@FR-O-Complete`): rebound in a loop from a call, from a call that alternates with
+// null, through `??`, through a `match` with a null arm, as a nullable field, as an element of
+// a `vector<S?>`, returned from a branch, captured by a closure and swapped.  Every cell held
+// on both backends when written, with the leak gate armed; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the leak gate first, then the assertions.
+
+struct S { n: integer, t: text, v: vector<integer> }
+struct H { s: S? }
+
+fn mk(n: integer) -> S { S { n: n, t: "t{n}", v: [n] } }
+fn mko(n: integer) -> S? { if n > 0 { mk(n) } else { null } }
+fn pick(b: boolean) -> S? { s: S? = null; if b { s = mk(4); } s }
+
+fn test_rebound_in_a_loop() {
+  s: S? = null;
+  for i in 1..4 { s = mk(i); }
+  assert((s.n ?? -1) == 3 && (s.t ?? "-") == "t3", "from a call: {s.n ?? -1}");
+  a: S? = null;
+  c = 0;
+  for i in 0..4 { a = mko(i % 2); if a != null { c += 1; } }
+  assert((a.n ?? -1) == 1 && c == 2, "alternating with null: {a.n ?? -1} {c}");
+  b: S? = null;
+  for i in 0..3 { b = mko(0) ?? mk(5); }
+  assert((b.n ?? -1) == 5, "through ??: {b.n ?? -1}");
+  m: S? = mk(1);
+  for i in 0..3 { m = match i { 0 => mk(6), 1 => null, _ => mk(8) }; }
+  assert((m.n ?? -1) == 8 && (m.t ?? "-") == "t8", "through a match: {m.n ?? -1}");
+}
+
+fn test_as_a_field_and_an_element() {
+  h = H { s: null };
+  for i in 1..4 { h.s = mk(i); }
+  assert((h.s.n ?? -1) == 3, "field: {h.s.n ?? -1}");
+  v: vector<S?> = [null, mk(1)];
+  for i in 1..4 { v[0] = mk(i); }
+  v[1] = null;
+  assert((v[0].n ?? -1) == 3 && (v[1].n ?? -1) == -1, "element: {v[0].n ?? -1}");
+}
+
+fn test_returned_captured_and_swapped() {
+  a = pick(true);
+  b = pick(false);
+  assert((a.n ?? -1) == 4 && (b.n ?? -1) == -1, "returned: {a.n ?? -1} {b.n ?? -1}");
+  s: S? = mk(2);
+  f = fn() -> integer { s.n ?? -1 };
+  r1 = f();
+  s = null;
+  assert(r1 == 2 && (s.n ?? -1) == -1, "captured: {r1}");
+  x: S? = mk(1);
+  y: S? = mk(2);
+  t = x;
+  x = y;
+  y = t;
+  assert((x.n ?? -1) == 2 && (y.n ?? -1) == 1, "swapped: {x.n ?? -1} {y.n ?? -1}");
+}
