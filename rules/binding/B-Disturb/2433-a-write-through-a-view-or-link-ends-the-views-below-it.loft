@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A disturbance made THROUGH a view or a link is a disturbance of the place that view names
+// (`@FR-B-Disturb`, `@FR-B-OutOfLine`): with `w = t.left`, the write `w.left = null` releases
+// `t.left.left`, so a view `n = t.left.left` that is used after it materialises at its bind,
+// exactly as it does for the direct `t.left.left = null`.
+//
+// Before, the walk keyed the release by the written place's own root — `w`, or the link `cur` —
+// and no view of `t` was shaken: `n` kept naming the released record and read `0` on both
+// backends (the direct spelling answered `20`).
+//
+// The cells, on `sample()` = 50(30(20, 40), 70(…)), each reading `n.k` after the write:
+//   d1  the direct write, the control              t.left.left = null      → 7 20
+//   d2  through a struct view                      w = t.left; w.left = …  → 7 20
+//   d3  through a `&` link                         cur = &t.left; cur.left → 7 20
+//   d4  a whole null write through a field link    cur = &t.left; cur = …  → 5 20
+//   d5  a record written into the view's own place, which the view re-reads → 8 1
+//   d6  a vector grown through an inline-struct view while an element is viewed → 7 201
+//
+// CHANNEL: the assertions and the leak gate.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1
+//   -> 0, native 1 assertion failures -> 0
+// HOLDS: every assertion, the leak gate and the refusals are clean on this tree, both backends.
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+struct E { v: integer }
+struct I { tag: integer, items: vector<E> }
+struct O { k: integer, inner: I }
+
+fn size(t: Tree?) -> integer {
+  if t == null { return 0; }
+  1 + size(t.left) + size(t.right)
+}
+fn sample() -> Tree {
+  Tree { k: 50,
+    left: Tree { k: 30, left: Tree { k: 20 }, right: Tree { k: 40 } },
+    right: Tree { k: 70, left: Tree { k: 60, right: Tree { k: 65 } }, right: Tree { k: 80 } } }
+}
+
+fn direct() -> text { t = sample(); n = t.left.left; t.left.left = null; "{size(t)} {n.k}" }
+fn through_view() -> text { t = sample(); n = t.left.left; w = t.left; w.left = null; "{size(t)} {n.k}" }
+fn through_link() -> text { t = sample(); n = t.left.left; cur = &t.left; cur.left = null; "{size(t)} {n.k}" }
+fn field_link_cleared() -> text { t = sample(); n = t.left.left; cur = &t.left; cur = null; "{size(t)} {n.k}" }
+fn overwritten_place() -> text {
+  t = sample();
+  n = t.left.left;
+  w = t.left;
+  w.left = Tree { k: 1 };
+  "{size(t)} {n.k}"
+}
+fn grown_through_view() -> text {
+  o = O { k: 1, inner: I { tag: 2, items: [E { v: 7 }] } };
+  e = o.inner.items[0];
+  w = o.inner;
+  for i in 0..200 { w.items += [E { v: i }]; }
+  "{e.v} {len(o.inner.items)}"
+}
+
+fn main() {
+  assert(direct() == "7 20", "d1 {direct()}");
+  assert(through_view() == "7 20", "d2 {through_view()}");
+  assert(through_link() == "7 20", "d3 {through_link()}");
+  assert(field_link_cleared() == "5 20", "d4 {field_link_cleared()}");
+  assert(overwritten_place() == "8 1", "d5 {overwritten_place()}");
+  assert(grown_through_view() == "7 201", "d6 {grown_through_view()}");
+  println("2433 views ok");
+}

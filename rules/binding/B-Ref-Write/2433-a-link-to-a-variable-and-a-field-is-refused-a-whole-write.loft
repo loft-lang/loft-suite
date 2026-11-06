@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Write` — a link bound to a whole variable at one `&` bind (`cur = &t`) and to an
+// out-of-line field at another (`cur = &cur.left`) has no one place a WHOLE write could land in:
+// the variable's record, or the field that holds a child.  Such a write is refused, and the
+// message names the cure.  A field write through the same link (`cur.k = 1`) is not refused.
+//
+// Before loft#2433 the write rebound the local in silence and the tree kept its node.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1, native exit 1
+//   -> 0, native expectations FAIL/1 -> 0/1
+// HOLDS: nothing runs on either tree (a refusal file).
+//
+// @EXPECT_ERROR: 'cur' is linked to a variable at one `&` bind and to a field at another
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn mixed(t: Tree) {
+  cur = &t;
+  if t.k > 0 { cur = &cur.left; }
+  cur.k = 7;
+  cur = Tree { k: 1 };
+}
+
+fn main() {
+  t = Tree { k: 5, left: Tree { k: 3 } };
+  mixed(t);
+  println("{t.k}");
+}

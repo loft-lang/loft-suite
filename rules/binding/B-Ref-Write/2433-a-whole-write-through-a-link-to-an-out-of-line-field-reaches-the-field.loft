@@ -1,0 +1,138 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `&` link to an out-of-line field (`cur = &t.left`, `@FR-L-OutOfLine`) names the FIELD, so a
+// whole write through it — `cur = cur.right`, `cur = null`, `cur = Tree {…}` — lands in that
+// field (`@FR-B-Ref-Write`), and the link then reads what the field holds.  This is the cursor
+// walk of a search tree: find the slot, then unlink, clear or fill it.
+//
+// Before loft#2433 the link held the child RECORD, so a whole write rebound the local and the
+// tree kept its node: an unlink answered `5 60` where `4 65` is right, a clear left the subtree
+// standing, and only `dead-assignment` hinted at it — on both backends.
+//
+// The cells, each hand-computed on `sample()` = 50(30(20, 40), 70(60(·, 65), 80)):
+//   c1  unlink the leftmost node under the right child           → 7, 20 30 40 50 65 70 80
+//   c2  clear the left subtree                                    → 5
+//   c3  delete through two links (leaf, one child, two children)  → 5, 40 50 60 65 80
+//   c4  insert into the empty slot a walk ends at                 → 8 nodes, in order
+//   c5  a call's result written through the link                  → 50 30 20 40 5
+//   c6  a write after a clear                                      → 9 50 60 65 70 80
+//   c7  a link bound inside a loop body                            → 20 30 40 50 70 80
+//   c8  19 999 inserts and 6 667 deletes through links — none copies a subtree
+//
+// CHANNEL: the assertions and the leak gate.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1
+//   -> 0, native 1 assertion failures -> 0
+// HOLDS: every assertion, the leak gate and the refusals are clean on this tree, both backends.
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn size(t: Tree?) -> integer {
+  if t == null { return 0; }
+  1 + size(t.left) + size(t.right)
+}
+fn walk(t: Tree?) -> text {
+  if t == null { return ""; }
+  "{walk(t.left)}{t.k} {walk(t.right)}"
+}
+fn sample() -> Tree {
+  Tree { k: 50,
+    left: Tree { k: 30, left: Tree { k: 20 }, right: Tree { k: 40 } },
+    right: Tree { k: 70, left: Tree { k: 60, right: Tree { k: 65 } }, right: Tree { k: 80 } } }
+}
+fn leaf(k: integer) -> Tree { Tree { k: k } }
+
+fn drop_min(t: Tree) {
+  cur = &t.right;
+  while cur.left != null { cur = &cur.left; }
+  cur = cur.right;
+}
+
+fn clear_left(t: Tree) {
+  cur = &t.left;
+  cur = null;
+}
+
+fn remove(t: Tree, k: integer) -> boolean {
+  cur = &t.left;
+  if k > t.k { cur = &t.right; }
+  while cur != null && cur.k != k {
+    if k < cur.k { cur = &cur.left; } else { cur = &cur.right; }
+  }
+  if cur == null { return false; }
+  if cur.left == null {
+    cur = cur.right;
+  } else if cur.right == null {
+    cur = cur.left;
+  } else {
+    m = &cur.right;
+    while m.left != null { m = &m.left; }
+    cur.k = m.k ?? 0;
+    m = m.right;
+  }
+  true
+}
+
+fn insert(t: Tree, k: integer) {
+  cur = &t.left;
+  if k > t.k { cur = &t.right; }
+  while cur != null {
+    if k < cur.k { cur = &cur.left; } else { cur = &cur.right; }
+  }
+  cur = leaf(k);
+}
+
+fn key(i: integer) -> integer { ((i * 1103515245 + 12345) % 2147483648) % 100000 }
+
+fn main() {
+  t1 = sample();
+  drop_min(t1);
+  assert(size(t1) == 7 && walk(t1) == "20 30 40 50 65 70 80 ", "c1 {walk(t1)}");
+
+  t2 = sample();
+  clear_left(t2);
+  assert(size(t2) == 5 && walk(t2) == "50 60 65 70 80 ", "c2 {walk(t2)}");
+
+  t3 = sample();
+  r = "{remove(t3, 70)} {remove(t3, 20)} {remove(t3, 99)} {remove(t3, 30)}";
+  assert(r == "true true false true", "c3 answers {r}");
+  assert(size(t3) == 5 && walk(t3) == "40 50 60 65 80 ", "c3 {walk(t3)}");
+
+  t4 = Tree { k: 50 };
+  for k in [30, 70, 20, 40, 60, 80, 65] { insert(t4, k); }
+  assert(size(t4) == 8 && walk(t4) == "20 30 40 50 60 65 70 80 ", "c4 {walk(t4)}");
+
+  t5 = sample();
+  c5 = &t5.right;
+  c5 = leaf(5);
+  assert(walk(t5) == "20 30 40 50 5 ", "c5 {walk(t5)}");
+
+  t6 = sample();
+  c6 = &t6.left;
+  c6 = null;
+  c6 = Tree { k: 9 };
+  assert(size(t6) == 6 && walk(t6) == "9 50 60 65 70 80 ", "c6 {walk(t6)}");
+
+  t7 = sample();
+  for _round in 0..2 {
+    c7 = &t7.right;
+    while c7.left != null { c7 = &c7.left; }
+    c7 = c7.right;
+  }
+  assert(walk(t7) == "20 30 40 50 70 80 ", "c7 {walk(t7)}");
+
+  t8 = Tree { k: 50000 };
+  n = 1;
+  for i in 0..20000 {
+    k = key(i);
+    if k != 50000 { insert(t8, k); n += 1; }
+  }
+  gone = 0;
+  for i in 0..20000 {
+    if i % 3 == 0 && key(i) != 50000 && remove(t8, key(i)) { gone += 1; }
+  }
+  // From an independent Python run of the same keys over a multiset.
+  assert(n == 20000 && gone == 6667 && size(t8) == 13333, "c8 {n} {gone} {size(t8)}");
+  println("2433 ok");
+}
