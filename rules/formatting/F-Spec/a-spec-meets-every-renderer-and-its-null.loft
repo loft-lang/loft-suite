@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Spec` crossed with `@FR-F-Render` at every renderer and at its NULL: a sign and a
+// zero pad never touch a null (`@FR-F-Spec-Zero`), a non-zero fill still pads it
+// (`@FR-F-Spec-Fill`), a null character renders as nothing yet is padded, a width pads a
+// vector, an enum and a codepoint (not a byte) of text, a struct renders a null field
+// (`@FR-F-Render-Fields`), a precision rounds a tie to the even digit (`@FR-F-Float-Text`),
+// and the flags are read in any order.  Every cell held on both backends when written; the
+// ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct Q { a: integer, b: integer }
+enum E { A, B }
+
+fn test_a_null_takes_no_sign_and_no_zero_pad() {
+  n: integer = null;
+  m = 7;
+  assert("[{n:+5}] [{m:+5}]" == "[ null] [   +7]", "sign");
+  assert("[{n:08}] [{m:08}]" == "[    null] [00000007]", "zero pad");
+  a = -1;
+  b = 255;
+  assert("{a:04} {b:#06x}" == "-001 0x00ff", "zero pad after a sign and a marker");
+  f: float = null;
+  g = -5.0;
+  assert("{f:+.2} {g:+.2}" == "null -5.00", "float");
+}
+
+fn test_a_fill_pads_text_and_its_null() {
+  s = "ab";
+  assert("{s:*>6} {s:*<6} {s:*^6}" == "****ab ab**** **ab**", "aligns");
+  t: text? = null;
+  assert("[{t:*>6}]" == "[**null]", "null text");
+  e = "é";
+  assert("[{e:>3}] [{e:*<3}]" == "[  é] [é**]", "codepoints");
+  c: character = null;
+  d = 'x';
+  assert("[{c}] [{c:>3}] [{d:>3}]" == "[] [   ] [  x]", "character");
+}
+
+fn test_a_width_pads_a_vector_an_enum_and_a_struct_renders_its_null() {
+  v = [1, 2];
+  assert("[{v:>10}] [{v:<10}]" == "[     [1,2]] [[1,2]     ]", "vector");
+  x = E.A;
+  y: E = null;
+  assert("[{x:>5}] [{y}]" == "[    A] [null]", "enum");
+  q = Q { a: null, b: 2 };
+  assert("{q}" == "{{a:null,b:2}}", "struct: {q}");
+}
+
+fn test_precision_and_flag_order() {
+  a = 2.5;
+  b = 3.5;
+  c = -0.125;
+  d = 0.375;
+  assert("{a:.0} {b:.0} {c:.2} {d:+.2}" == "2 4 -0.12 +0.38", "ties to even");
+  x = 1.5;
+  assert("[{x:+<8.3}] [{x:<+8.3}]" == "[+1.500  ] [+1.500  ]", "any order");
+}

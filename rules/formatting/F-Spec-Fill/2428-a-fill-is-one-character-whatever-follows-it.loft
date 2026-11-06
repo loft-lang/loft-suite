@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A spec's FILL is one character that is not a flag (`@FR-F-Spec-Fill`), and the alignment
+// after it is a flag of its own (`@FR-F-Spec`), so `{s:=>5}` is fill `=`, right-aligned:
+// `===ab`.  A fill never pairs with the next character into an operator.
+//
+// Before loft#2428 the spec was read with the lexer's operator pairing still on: `=>` was read
+// as one token, the arm arrow, so the fill took both characters and the alignment was lost —
+// `ab===`, silently, on both backends — and `->` likewise.
+//
+// The cells that can FAIL:
+//   c1  `=>` — fill `=`, right                  — answered `ab===`
+//   c2  `=<` and `=^` beside it                 — the same fill at the other alignments
+//
+// The controls, each of which a too-wide fix would move:
+//   c3  `*>`, `~>`, `|>`, `!>` — fills that never paired
+//   c4  `>>5` — `>` is a FLAG, never a fill, so this is two alignments: `   ab`
+//   c5  a number: `{n:#06x}`, `{n:+5}`, `{n:08}` — the flags after no fill
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4 assertion failures -> 0
+//   ARMED: no instrument.  Ordinary assertions on every backend.
+//   WITNESS: the control answers `[ab===]` for c1 and `[ab===]` for `=^6`.
+//   HOLDS: leak, panic and free-refusal are clean on both trees and both backends; the
+//   VALUE channel is the whole measurement.
+//
+// CHANNEL: the assertions.
+
+fn test_a_fill_that_paired_into_an_operator() {
+  s = "ab";
+  assert("[{s:=>5}]" == "[===ab]", "c1: [{s:=>5}]");
+  assert("[{s:=<5}]" == "[ab===]" && "[{s:=^6}]" == "[==ab==]", "c2");
+}
+
+fn test_the_controls() {
+  s = "ab";
+  assert("{s:*>5}{s:~>5}{s:|>5}{s:!>5}" == "***ab~~~ab|||ab!!!ab", "c3");
+  assert("[{s:>>5}]" == "[   ab]", "c4: [{s:>>5}]");
+  n = 255;
+  m = 7;
+  assert("{n:#06x} [{m:+5}] {m:08}" == "0x00ff [   +7] 00000007", "c5");
+}
