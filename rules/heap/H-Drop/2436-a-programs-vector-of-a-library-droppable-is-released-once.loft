@@ -12,8 +12,11 @@
 // - d2: two elements → "7,8";
 // - d3: the vector held in a program struct → "9".
 //
-// @falsified-at: 369b941cf — interpret and native: the internal error ("Dual definition of
-//   t_12vector<Pair>_OpDropAll") -> the three traces, by the suite runner on both backends
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — the control stops at the internal error ("Dual definition of
+//   t_12vector<Pair>_OpDropAll") before any test runs; the asserts read the drop traces.
+// HOLDS: asserts, leak, panic, free-refusal are equal on both trees, on both backends.
+// WITNESS: each assert's message prints the trace it read.
 
 use hdrop_2436_lib;
 

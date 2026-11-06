@@ -12,6 +12,7 @@
 // @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the
 //   suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 ->
 //   0/1 (the suite's verdict, not a count of matches)
+// HOLDS: asserts, leak, panic, free-refusal are equal on both trees, on both backends.
 // CHANNEL: the diagnostic's text.
 
 // @EXPECT_ERROR: expected `vector<Fill>` with the `Fill` declared at
