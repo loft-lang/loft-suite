@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A text local that borrows a parameter's text (`t = it.name`) reads, after each bind, exactly
+// the text that bind named: the empty literal, a literal, another parameter's text, a value
+// kept across iterations, and on every way out of the frame.
+//
+// The interpreter applies `@FR-R-TextBorrow`'s store-read clause as the writers do: the local's
+// slot holds a view of the bound bytes, not a `String` of its own.  An owned text is cleared
+// and appended to on a rebind, and the empty literal is no append at all, so a view must take
+// every bind whole — an empty rebind that writes nothing leaves the OLD bytes (r1), a first
+// bind to `""` that writes nothing leaves the slot unwritten (r3), and a clear of the slot
+// treats the view as a `String`.  Each expected value is worked out by hand beside it; values
+// AND sizes are asserted.
+//
+// @falsified-at: none — a speed change with no earlier defect; scored by hand: with the empty
+// rebind's put left out for a view, --interpret answers r1 = 663 (the old "Qwerty" kept)
+
+struct Item { name: text, n: integer }
+
+// r1 — rebound to the empty literal, then to a literal: 6 * 100 + 0 * 10 + 3 = 603.
+fn r1(it: Item) -> integer {
+  t = it.name;
+  a = len(t);
+  t = "";
+  b = len(t);
+  t = "xyz";
+  a * 100 + b * 10 + len(t)
+}
+
+// r2 — rebound in one arm only: "Qwerty" when taken, "none" when not.
+fn r2(it: Item, f: boolean) -> text {
+  t = "none";
+  if f {
+    t = it.name;
+  }
+  "{t}"
+}
+
+// r3 — first bound to "", then kept across iterations: "fghij" -> 5 * 10 + 'f' (102) % 10 = 52.
+fn r3(v: vector<text>) -> integer {
+  best = "";
+  for i in 0..len(v) {
+    c = v[i] ?? "";
+    if len(c) > len(best) {
+      best = c;
+    }
+  }
+  len(best) * 10 + (best.byte_at(0) ?? 0) % 10
+}
+
+// r4 — read on an early return from inside a loop: stop 3 -> 6 + 3 = 9, stop 20 -> -1.
+fn r4(it: Item, stop: integer) -> integer {
+  t = it.name;
+  for k in 0..10 {
+    if k == stop {
+      return len(t) + k;
+    }
+  }
+  -1
+}
+
+// r5 — rebound per element, left by break: "ab" 2 + "cde" 3, then "fghij" breaks -> 5.
+fn r5(v: vector<text>) -> integer {
+  s = 0;
+  for i in 0..len(v) {
+    t = v[i] ?? "";
+    if len(t) > 3 {
+      break;
+    }
+    s += len(t);
+  }
+  s
+}
+
+fn main() {
+  it = Item { name: "Qwerty", n: 3 };
+  w = ["ab", "cde", "fghij", "k"];
+  for rep in 0..3 {
+    assert(r1(it) == 603, "r1 {r1(it)} rep {rep}");
+    a2 = r2(it, true);
+    b2 = r2(it, false);
+    assert(a2 == "Qwerty" && len(a2) == 6, "r2 taken {a2}");
+    assert(b2 == "none" && len(b2) == 4, "r2 not taken {b2}");
+    assert(r3(w) == 52, "r3 {r3(w)}");
+    assert(r4(it, 3) == 9, "r4 stop {r4(it, 3)}");
+    assert(r4(it, 20) == -1, "r4 through {r4(it, 20)}");
+    assert(r5(w) == 5, "r5 {r5(w)}");
+  }
+  assert(it.name == "Qwerty" && len(it.name) == 6, "the source untouched {it.name}");
+  println("ok");
+}
