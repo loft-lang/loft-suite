@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// The library half of 2436-a-programs-vector-of-a-library-droppable-is-released-once.loft: a
+// droppable `H`, a `Pair` that holds one, and two functions over `vector<Pair>`, so the
+// library declares its own `vector<Pair>` beside the program's `vector<hdrop_2436_lib::Pair>`.
+// Each drop appends its id to a trace file the program reads back.
+
+pub fn trace_path() -> text { return "loft_2436_trace.tmp"; }
+
+pub fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+pub fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+pub struct H { h: integer }
+fn OpDrop(self: H) { note("{self.h}"); }
+pub struct Pair { pub a: H }
+pub fn pairs_len(v: const vector<Pair>) -> integer { len(v) }
+pub fn add(v: vector<Pair>, n: integer) { v += [Pair { a: H { h: n } }]; }

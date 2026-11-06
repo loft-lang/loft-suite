@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PROGRAM'S VECTOR OF A LIBRARY'S DROPPABLE IS RELEASED ONCE (`@FR-H-Drop`): the program
+// declares `vector<hdrop_2436_lib::Pair>` while the library has its own `vector<Pair>`, two
+// definitions of one name in two sources.  Each gets a drop cascade named after its type, and
+// the cascades were declared in whichever source was current when the pass ran — the
+// program's, for both — so the second was a "Dual definition of t_12vector<Pair>_OpDropAll"
+// internal error (loft#2436).  A cascade now lives in its type's own source, where every lookup
+// reads it.  Each element is released exactly once, at its vector's end:
+// - d1: a local filled through the library → "3";
+// - d2: two elements → "7,8";
+// - d3: the vector held in a program struct → "9".
+//
+// @falsified-at: 369b941cf — interpret and native: the internal error ("Dual definition of
+//   t_12vector<Pair>_OpDropAll") -> the three traces, by the suite runner on both backends
+
+use hdrop_2436_lib;
+
+struct Box2436 { ps: vector<hdrop_2436_lib::Pair> }
+
+fn d1() -> integer {
+  v: vector<hdrop_2436_lib::Pair> = [];
+  hdrop_2436_lib::add(v, 3);
+  return hdrop_2436_lib::pairs_len(v);
+}
+
+fn d2() -> integer {
+  v: vector<hdrop_2436_lib::Pair> = [];
+  hdrop_2436_lib::add(v, 7);
+  hdrop_2436_lib::add(v, 8);
+  return hdrop_2436_lib::pairs_len(v);
+}
+
+fn d3() -> integer {
+  b = Box2436 { ps: [] };
+  hdrop_2436_lib::add(b.ps, 9);
+  return hdrop_2436_lib::pairs_len(b.ps);
+}
+
+fn test_a_programs_vector_of_a_library_droppable_is_released_once() {
+  _ = hdrop_2436_lib::drain();
+  assert(d1() == 1, "d1 holds one element");
+  got = hdrop_2436_lib::drain();
+  assert(got == "3", "d1 releases it once: {got}");
+  assert(d2() == 2, "d2 holds two");
+  got = hdrop_2436_lib::drain();
+  assert(got == "7,8", "d2 releases each once: {got}");
+  assert(d3() == 1, "d3 holds one in the struct");
+  got = hdrop_2436_lib::drain();
+  assert(got == "9", "d3 releases it with the struct: {got}");
+}
