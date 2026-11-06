@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-ParamRef` crossed with `@FR-B-Ref-Write`: a WHOLE-VALUE write to a `&` parameter
+// replaces the caller's value — a record, a text, a vector — and releases what it displaces;
+// the caller's place may be a local, an element or a field, and the write may repeat in a
+// loop.  Every cell held on both backends when written; each expected value is hand-computed,
+// and the leak gate covers the displaced stores.  The ledger row is in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, t: text }
+struct R { n: integer }
+struct O { s: R, k: integer }
+
+fn put(s: &S) { s = S { n: 5, t: "q" }; }
+fn put_i(s: &S, i: integer) { s = S { n: i, t: "n{i}" }; }
+fn put_t(t: &text, i: integer) { t = "n{i}"; }
+fn put_v(v: &vector<integer>, i: integer) { v = [i, i, i]; }
+fn put_r(r: &R) { r = R { n: 7 }; }
+
+fn test_a_whole_value_write() {
+  x = S { n: 1, t: "a" };
+  put(x);
+  assert(x.n == 5 && x.t == "q", "record: {x.n}{x.t}");
+}
+
+fn test_repeated_in_a_loop() {
+  x = S { n: 9, t: "a" };
+  for i in 0..3 { put_i(x, i); }
+  assert(x.n == 2 && x.t == "n2", "record: {x.n} {x.t}");
+  t = "a";
+  for i in 0..3 { put_t(t, i); }
+  assert(t == "n2", "text: {t}");
+  v = [1];
+  for i in 0..3 { put_v(v, i); }
+  assert(len(v) == 3 && v[0] == 2, "vector: {len(v)} {v[0]}");
+}
+
+fn test_at_an_element_and_a_field() {
+  v = [R { n: 1 }, R { n: 2 }];
+  put_r(v[1]);
+  assert(v[0].n == 1 && v[1].n == 7, "element: {v[0].n} {v[1].n}");
+  o = O { s: R { n: 1 }, k: 3 };
+  put_r(o.s);
+  assert(o.s.n == 7 && o.k == 3, "field: {o.s.n} {o.k}");
+}
