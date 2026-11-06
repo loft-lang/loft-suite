@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// @catches: LOFT_NO_CALLEE_DISTURB — the switch stops a callee's growth from disturbing the caller's view, which is what this program checks.
+// No cell's value moves with LOFT_NO_CALLEE_DISTURB — every cell is a control — so the file
+// declares no `@catches` for it.
 //
 // binding.md D-bind-48 / `(B-Ref-Reshape)`'s callee clause — the OVER-REACH half.
 //
@@ -27,13 +28,14 @@
 //   CHANNEL: none on this file, deliberately — see above.  Its job is over-reach, not detection.
 //   ARMED: no instrument; the `D` lines are the oracle and an ordinary run prints them.
 //   WITNESS: measured on the pre-fix binary (`1f87e1aee`) — all four cells answered exactly what
-//   they answer now, and the non-droppable cell printed the copy-out advice then as it does now.
+//   they answer now, and the non-droppable cell printed the copy-out advice then.
 //   ⚠ Score the advice with `LOFT_NO_CACHE=1`.  A warm whole-program cache REPLAYS a stored
 //   diagnostic set, so the same source reads zero advice on one binary and one on another — which
 //   looks like "the control is dead" or "the fix changed the advice" and is neither.
 //   HOLDS: each cell must keep COMPILING and release every resource exactly once.  A cure that
 //   ignores the droppable question moves `a_non_droppable_view_survives_a_callees_growth` (which
-//   must still materialise AND still say so); one that ignores LIVENESS moves
+//   must still materialise; `LOFT_TRACE_DISTURB=1` names the copy, and the advice is said only of
+//   a view written through); one that ignores LIVENESS moves
 //   `a_view_dead_before_the_callees_growth_still_compiles`; one that counts a container the callee
 //   MINTED ITSELF — the hidden `__retbuf` included — moves
 //   `a_container_the_callee_mints_itself_reaches_nothing`; and one that treats any call as a
