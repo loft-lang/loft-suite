@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `text` parameter is bound to the argument's VALUE (`@FR-F-ParamText`), and a `&` link to
+// it names that parameter as a place (`@FR-B-Ref-Lvalue`): reading the link reads the
+// parameter, writing through it writes the parameter, and the caller's text is never touched.
+//
+// Before loft#2422 a write to a text parameter (`t += "!"`) moved it onto an owned local, but
+// a LINK did not: `c = &t` named the caller's borrowed view, and the link read its bytes as an
+// owned text.  The interpreter answered an empty text silently for a plain read and crashed
+// after a write; `--native-c` refused the program.  Both spellings of the link, and the link
+// in a lambda and in a generator, took the same route.
+//
+// loft#2423 is the `--native` half of c9: a local text link handed on to a `&text` parameter
+// passed the address of the link (`*mut *mut String`) and did not compile.
+//
+// The cells that can FAIL:
+//   c1  read through the link                   — empty text
+//   c2  append through the link, return it      — crash
+//   c3  append through the link, return `t`     — crash
+//   c4  whole write through the link            — crash
+//   c5  the annotated spelling `c: &text = t`   — crash
+//   c6  a link in a `for` loop                  — crash
+//   c7  two links to one parameter              — crash
+//   c8  a lambda's text parameter               — crash
+//   c9  the link handed to a `&text` parameter  — crash; `--native` did not compile
+//
+// The controls, each of which a too-wide fix would move:
+//   c10 a direct write `t += "!"`               — the promotion that always worked
+//   c11 the caller's text after any of the above — unchanged (`@FR-F-ParamText`)
+//   c12 an `integer`, a record and a vector parameter linked the same way
+//   c13 a local text link handed to a `&text` parameter (loft#2423 alone)
+//
+// @falsified-at: 0e95172cd — interpret exit 138 -> 0, native exit 1 -> 0
+//
+// CHANNEL: the assertions; on the interpreter also the crash.
+
+struct B { n: integer }
+
+fn bang(s: &text) { s += "?"; }
+
+fn c1(t: text) -> text { c = &t; c }
+fn c2(t: text) -> text { c = &t; c += "!"; c }
+fn c3(t: text) -> text { c = &t; c += "!"; t }
+fn c4(t: text) -> text { c = &t; c = "zz"; t }
+fn c5(t: text) -> text { c: &text = t; c += "!"; t }
+fn c6(t: text) -> text { c = &t; for i in 0..3 { c += "{i}"; } t }
+fn c7(t: text) -> text { c = &t; d = &t; c += "!"; d += "?"; t }
+fn c9(t: text) -> text { c = &t; bang(c); t }
+fn c10(t: text) -> text { t += "!"; t }
+fn gen(t: text) -> iterator<text> { c = &t; yield c; c += "!"; yield c; }
+fn int_link(t: integer) -> integer { c = &t; c += 3; t }
+fn rec_link(t: B) -> integer { c = &t; c.n += 3; t.n }
+fn vec_link(t: vector<integer>) -> integer { c = &t; c += [3]; len(t) }
+
+fn test_a_link_to_a_text_parameter() {
+  assert(c1("hi") == "hi", "c1: [{c1("hi")}]");
+  assert(c2("hi") == "hi!", "c2: {c2("hi")}");
+  assert(c3("hi") == "hi!", "c3: {c3("hi")}");
+  assert(c4("hi") == "zz", "c4: {c4("hi")}");
+  assert(c5("hi") == "hi!", "c5: {c5("hi")}");
+  assert(c6("a") == "a012", "c6: {c6("a")}");
+  assert(c7("hi") == "hi!?", "c7: {c7("hi")}");
+  f = fn(t: text) -> text { c = &t; c += "!"; t };
+  assert(f("hi") == "hi!", "c8: {f("hi")}");
+  assert(c9("hi") == "hi?", "c9: {c9("hi")}");
+  r = "";
+  for v in gen("hi") { r += "{v} "; }
+  assert(r == "hi hi! ", "generator: {r}");
+}
+
+fn test_the_controls() {
+  assert(c10("hi") == "hi!", "c10: {c10("hi")}");
+  s = "hi";
+  a = c3(s);
+  b = c9(s);
+  assert(a == "hi!" && b == "hi?" && s == "hi", "c11: {a} {b} {s}");
+  x = 5;
+  r = B { n: 5 };
+  v = [1, 2];
+  assert(int_link(x) == 8 && x == 5, "c12 integer: {int_link(x)} {x}");
+  assert(rec_link(r) == 8 && r.n == 8, "c12 record: {r.n}");
+  assert(vec_link(v) == 3 && len(v) == 3, "c12 vector: {len(v)}");
+  t = "hi";
+  l = &t;
+  bang(l);
+  assert(t == "hi?", "c13: {t}");
+}
