@@ -28,7 +28,7 @@
 // @falsified-at: 7be7a4679 — interpret exit 1 -> 0, interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4
 //   assertion failures -> 0, native panicked -> clean
 // @falsified-by: tests/falsified/2145-a-write-back-releases-only-what-the-binding-owned.patch — interpret exit 1 -> 0,
-//   interpret 2 assertion failures -> 0, native exit 1 -> 0, native 4 assertion failures -> 0, native panicked -> clean
+//   interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0, native leaked kt=101 S×3 -> clean
 // CHANNEL: the leak and the store-lifetime channels, both backends.
 // WITNESS: on 7be7a4679 the interpreter reports `[strict-store] USE AFTER FREE (write) store #5 type=S`
 //   killed by the free of `<anon>`; native answers `and the field it viewed: got -2401053088876216593,

@@ -8,6 +8,8 @@
 //   backend-divergence guard — only one side can move)
 // @falsified-by: tests/falsified/a-diverging-arm-beside-a-text-or-boolean-arm-compiles-natively.patch — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
+//   ARMED: FALSIFY_NATIVE=rust — the defect is the rustc writer's (`src/generation/emit.rs`);
+//     the default C leg emits these arms correctly on both trees and reads INERT.
 // HOLDS: the interpreter answers every cell on both trees; leak and panic are clean.
 // CHANNEL: the native exit — rustc refuses the control's emission.
 

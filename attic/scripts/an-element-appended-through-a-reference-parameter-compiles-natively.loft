@@ -8,8 +8,12 @@
 // the `slow-reference-parameter` advice it draws is expected.
 // @falsified-at: f188f58be — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/an-element-appended-through-a-reference-parameter-compiles-natively.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
+// No patch receipt: its control is gone since f87367ca4 (@PLN211) deleted the writers'
+//   element-first clauses.  The rustc writer's mint at the declaration named the container
+//   by its raw variable; `(R-ElemFirst)` is now an IR rewrite (`opt::elem_first::mint`) whose
+//   mint names it as `Value::Var`, rendered like any other read of a `&` parameter, so the
+//   mis-spelled container has no site to plant.  The cells still hold the property on both
+//   backends: both mint shapes through a `&`, beside the local and plain-parameter controls.
 struct Th { tx: integer, ty: integer, hs: vector<float> }
 struct Bag { items: vector<Th>, n: integer }
 

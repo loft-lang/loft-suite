@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // `@FR-R-ElemFirst`'s comprehension clause — a row built by a comprehension and appended as a
-// whole element of a vector of vectors (`[for y { [for x { … }] }]`) is built in that element on
-// `--native`, instead of in a loop-buffer store and copied across.  The interpreter applies no
-// rewrite and is the oracle; every value below is computed by hand.  What can go wrong is an
+// whole element of a vector of vectors (`[for y { [for x { … }] }]`) is built in that element,
+// instead of in a loop-buffer store and copied across.  The rule is an IR rewrite every backend
+// runs (`opt::elem_first`), so the oracle is the hand-computed values.  What can go wrong is an
 // element minted twice or not finished (a wrong length), a row written into a store whose
 // buffer moved while it grew (c5 forces growth past every first claim), a pair inside a pair
 // (c6), and a body that reads the vector being built (c3: its rows depend on how many rows
@@ -14,12 +14,12 @@
 // body cannot name the vector it is bound to, so the clause's "names the destination" decline
 // is defensive for this spelling.
 //
-// @falsified-by: tests/falsified/a-comprehension-row-is-built-in-its-element.patch — the loop
-//   body not consulting the element-first overrides, so the row's element is minted at the
-//   declaration AND at the append and the copy is kept.
-//   CHANNEL: an assertion, on --native.
+// @falsified-by: tests/falsified/a-comprehension-row-is-built-in-its-element.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   The IR rewrite keeping the append's own mint (`opt::elem_first::statement`), so the row's
+//   element is minted at the declaration AND at the append.
+//   CHANNEL: an assertion, on both backends (the rewrite is the IR's, so both run it).
 //   WITNESS: `assertion failed: c1 row lengths`.
-//   HOLDS: --interpret green (it applies no rewrite).
+//   HOLDS: leak, panic and free-refusal are clean on both trees and both backends.
 
 fn c1() {
   g = [for y in 0..4 { [for x in 0..3 { x * 10 + y }] }];
