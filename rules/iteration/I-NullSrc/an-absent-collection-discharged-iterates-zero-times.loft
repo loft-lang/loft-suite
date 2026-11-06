@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-NullSrc` crossed with `@FR-H-ReadNull`: an absent collection iterates zero times and
+// continues.  A source TYPED `τ?` is discharged first — `v?` or `v ?? []`, there being no
+// implicit unwrap — and then a null local, a null vector field and a null hash field each run the
+// body zero times, while a present one runs it once per element.  Every cell held on both
+// backends when written; the ledger row is in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct K { k: integer }
+struct O { v: vector<integer>?, h: hash<K[k]>? }
+
+fn test_a_discharged_absent_source() {
+  a: vector<integer>? = null;
+  o = O { v: null, h: null };
+  c1 = 0;
+  for x in a? { c1 += 1; }
+  c2 = 0;
+  for x in o.v ?? [] { c2 += 1; }
+  c3 = 0;
+  for x in o.h? { c3 += 1; }
+  b: vector<integer>? = [4, 5];
+  c4 = 0;
+  for x in b? { c4 += 1; }
+  assert("{c1} {c2} {c3} {c4}" == "0 0 0 2", "{c1} {c2} {c3} {c4}");
+}

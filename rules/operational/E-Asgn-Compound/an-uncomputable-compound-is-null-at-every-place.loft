@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Asgn-Compound` crossed with `@FR-E-Op` and `@FR-E-Uncomp`: `place op= e` stores
+// `v₁ op v₂`, and where that is not computable — an overflow, a division or remainder by zero —
+// it stores null and continues, at a wide and a narrow integer, at an element and at a field;
+// a null then stays null.  Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct S { n: integer }
+
+fn test_a_scalar_place() {
+  x = 9223372036854775807;
+  x += 1;
+  y = x;
+  y += 1;
+  i = 7;
+  i /= 0;
+  j = 7;
+  j %= 0;
+  k = -9223372036854775807;
+  k -= 2;
+  m = 3;
+  m += 0;
+  assert("{x} {y} {i} {j} {k} {m}" == "null null null null null 3", "{x} {y} {i} {j} {k} {m}");
+  a: u8? = 250;
+  a += 10;
+  b: u8? = 250;
+  b += 4;
+  c: i8? = -120;
+  c -= 20;
+  assert("{a} {b} {c}" == "null 254 null", "narrow: {a} {b} {c}");
+}
+
+fn test_an_element_and_a_field() {
+  v = [9223372036854775807, 5];
+  v[0] += 1;
+  s = S { n: 9223372036854775807 };
+  s.n *= 2;
+  assert("{v[0]} {v[1]} {s.n}" == "null 5 null", "{v[0]} {v[1]} {s.n}");
+}
