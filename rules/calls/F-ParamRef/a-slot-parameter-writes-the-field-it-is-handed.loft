@@ -1,0 +1,109 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-ParamRef` crossed with `@FR-B-OutOfLine` and `@FR-B-Ref-Repoint` (@PLN219): a `&Tree?`
+// parameter handed an out-of-line FIELD — directly (`take_min(t.right)`) or through a local
+// field link (`n = &t.left; take_min(n)`) — writes that field, before any re-point as after it;
+// `slot = &slot.left` re-points the parameter and never rebinds the caller's variable; a
+// forwarder passes the place on; a callee declared after its caller is handed the field too.
+// Rust's `&mut Option<Box<Tree>>` slot cursor, in its `&` spelling.
+//
+// Before, a whole write through such a parameter rebound the caller's LOCAL link (the field kept
+// its child), the re-point `slot = &slot.left` wrote the caller's variable, and a field could not
+// be passed at all ("Cannot pass a literal or expression to a '&' parameter").
+//
+// A view live across such a call is copied at its bind, as for the direct possibly-null write.
+// Hand-computed on t = 50(30(_, 40), 70(60, _)) unless a cell builds its own tree.
+//
+// CHANNEL: the assertions and the leak gate.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0 (the control refuses the
+//   direct field argument at compile time; the assertions are the channel for every other cell)
+// HOLDS: every assertion and the leak gate are clean on this tree, all three backends.
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn size(t: Tree?) -> integer { if t == null { return 0; } 1 + size(t.left) + size(t.right) }
+fn keys(t: Tree?) -> integer { if t == null { return 0; } t.k + keys(t.left) + keys(t.right) }
+fn sample() -> Tree {
+  Tree { k: 50, left: Tree { k: 30, right: Tree { k: 40 } }, right: Tree { k: 70, left: Tree { k: 60 } } }
+}
+
+fn take_min(slot: &Tree?) -> integer {
+  while slot.left != null { slot = &slot.left; }
+  k = slot.k!;
+  slot = slot.right;
+  k
+}
+fn forward(s: &Tree?) -> integer { take_min(s) }
+fn clear(slot: &Tree?) { slot = null; }
+fn put(slot: &Tree?, k: integer) { slot = Tree { k: k }; }
+fn add(slot: &Tree?, k: integer) {
+  while slot != null {
+    if k < slot.k { slot = &slot.left; } else { slot = &slot.right; }
+  }
+  slot = Tree { k: k };
+}
+
+fn main() {
+  // a field handed directly; the loop runs once
+  t = sample();
+  a = take_min(t.right);
+  assert("{a} {size(t)} {keys(t)}" == "60 4 190", "direct {a} {size(t)} {keys(t)}");
+  // through a forwarder; the loop runs zero times and the write lands before any re-point
+  t2 = sample();
+  b = forward(t2.left);
+  assert("{b} {size(t2)} {keys(t2)}" == "30 4 220", "forward {b} {size(t2)} {keys(t2)}");
+  // a local field link handed on; zero iterations, the right child null
+  t3 = Tree { k: 50, left: Tree { k: 30 }, right: Tree { k: 70, right: Tree { k: 80 } } };
+  n = &t3.right.right;
+  c = take_min(n);
+  assert("{c} {size(t3)} {keys(t3)} {n == null}" == "80 3 150 true", "link0 {c} {size(t3)} {keys(t3)}");
+  // a local field link handed on; two iterations
+  t4 = Tree { k: 50, left: Tree { k: 30, left: Tree { k: 20, right: Tree { k: 25 } } } };
+  m = &t4.left;
+  d = take_min(m);
+  assert("{d} {size(t4)} {keys(t4)} {m.k}" == "20 3 105 30", "link2 {d} {size(t4)} {keys(t4)}");
+  // a null written on entry
+  t5 = sample();
+  l = &t5.left;
+  clear(l);
+  assert("{size(t5)} {keys(t5)}" == "3 180", "clear {size(t5)} {keys(t5)}");
+  // a record written into an absent field, and a walk that inserts below a field
+  t6 = sample();
+  put(t6.right.right, 99);
+  add(t6.left, 35);
+  add(t6.left, 45);
+  assert("{size(t6)} {keys(t6)}" == "8 429", "put/add {size(t6)} {keys(t6)}");
+  // a whole variable: the re-point walks the caller's tree and never rebinds `u`
+  u: Tree? = null;
+  add(u, 5);
+  for i in 0..20 { add(u, (i * 37) % 101); }
+  e = take_min(u);
+  assert("{e} {u.k} {size(u)}" == "0 5 20", "variable {e} {u.k} {size(u)}");
+  // a callee declared after its caller is handed the field too
+  assert(late() == "2 120", "late {late()}");
+  // a view live across the call is disturbed as by a write that may be null: copied at its bind
+  t7 = Tree { k: 50, left: Tree { k: 30 }, right: Tree { k: 70, left: Tree { k: 60, right: Tree { k: 65 } } } };
+  v7 = t7.right.left;
+  f = take_min(t7.right);
+  assert("{f} {size(t7)} {v7.k}" == "60 4 60", "view-child {f} {size(t7)} {v7.k}");
+  t8 = Tree { k: 50, left: Tree { k: 30, left: Tree { k: 20 } } };
+  v8 = t8.left.left;
+  clear(t8.left);
+  assert("{size(t8)} {v8.k}" == "1 20", "view-below {size(t8)} {v8.k}");
+  t9 = Tree { k: 50, left: Tree { k: 30, left: Tree { k: 20 } } };
+  v9 = t9.left.left;
+  l9 = &t9.left;
+  clear(l9);
+  assert("{size(t9)} {v9.k}" == "1 20", "view-link {size(t9)} {v9.k}");
+  println("slot parameters ok");
+}
+
+fn late() -> text {
+  t = Tree { k: 50, left: Tree { k: 30 }, right: Tree { k: 70 } };
+  n = &t.left;
+  wipe(n);
+  "{size(t)} {keys(t)}"
+}
+fn wipe(slot: &Tree?) { slot = null; }
