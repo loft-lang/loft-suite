@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Copy` crossed with the values a bind can copy that no cell cited with it: a tuple
+// with heap members (`@FR-T-Record` — a copy is a copy of each member), a slice
+// (`@FR-Slice-Value` — a FRESH sub-collection, of scalars or of records), a concatenation of
+// slices (`@FR-Col-Concat` — neither operand changes), and a struct holding a vector
+// (`@FR-H-Copy`).  Every cell held on both backends when written; each expected value is
+// hand-computed, and the leak gate covers the copies.  The ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer }
+struct O { v: vector<integer> }
+
+fn test_a_tuple_copy_copies_each_member() {
+  a = (1, "x", [1]);
+  b = a;
+  b.1 = "y";
+  b.2 += [2];
+  assert(a.1 == "x" && len(a.2) == 1 && b.1 == "y" && len(b.2) == 2, "{a.1} {len(a.2)} {b.1} {len(b.2)}");
+}
+
+fn test_a_slice_is_fresh() {
+  v = [1, 2, 3];
+  s = v[0..2];
+  s += [9];
+  v[0] = 7;
+  assert(len(v) == 3 && len(s) == 3 && s[0] == 1 && v[0] == 7, "scalars: {len(s)} {s[0]}");
+  r = [S { n: 1 }, S { n: 2 }, S { n: 3 }];
+  t = r[1..];
+  t[0].n = 9;
+  assert(r[1].n == 2 && t[0].n == 9, "records: {r[1].n} {t[0].n}");
+}
+
+fn test_a_concatenation_of_slices() {
+  v = [1, 2, 3];
+  w = v[1..] + v[..1];
+  assert(len(w) == 3 && w[0] == 2 && w[1] == 3 && w[2] == 1 && len(v) == 3, "vector: {len(w)}");
+  t = "hello";
+  u = t[3..] + t[..3];
+  assert(u == "lohel" && t == "hello", "text: {u}");
+}
+
+fn test_a_struct_copy_owns_its_vector() {
+  o = O { v: [1] };
+  p = o;
+  p.v += [2];
+  assert(len(o.v) == 1 && len(p.v) == 2, "{len(o.v)} {len(p.v)}");
+}

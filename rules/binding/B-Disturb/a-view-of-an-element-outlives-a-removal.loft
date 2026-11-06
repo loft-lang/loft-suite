@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Disturb` crossed with `@FR-Col-Remove`: a removal renumbers every later position
+// (`@FR-Col-RemoveDense`), so it ends the place a view of a later element names, and the view
+// keeps the element it was bound to (`@FR-B-View` materialises it at the bind).  A view of an
+// EARLIER element is untouched.  The removal disturbs wherever it happens, in this frame or in
+// a callee.  Every cell held on both backends when written; the ledger row is in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer }
+
+fn drop_first(v: &vector<S>) { v.remove(0); }
+
+fn test_a_view_of_a_later_element() {
+  v = [S { n: 1 }, S { n: 2 }, S { n: 3 }];
+  e = v[2];
+  v.remove(0);
+  assert(e.n == 3 && len(v) == 2, "here: {e.n} {len(v)}");
+  w = [S { n: 1 }, S { n: 2 }, S { n: 3 }];
+  f = w[2];
+  drop_first(w);
+  assert(f.n == 3 && len(w) == 2, "in a callee: {f.n} {len(w)}");
+}
+
+fn test_a_view_of_an_earlier_element() {
+  v = [S { n: 1 }, S { n: 2 }, S { n: 3 }];
+  e = v[0];
+  v.remove(2);
+  assert(e.n == 1 && len(v) == 2, "{e.n} {len(v)}");
+}

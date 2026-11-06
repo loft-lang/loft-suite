@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Left` crossed with the forms that hold several operands and that no cell cited with
+// it: a tuple literal (`@FR-T-Cons`), a format string (`@FR-F-Interp`) and a compound
+// assignment, whose place is reduced before its right side and exactly once
+// (`@FR-E-Asgn-Compound`) — at an element, a struct field of an element, a nested index and a
+// text element.  A counter with an effect makes the order observable; every value is
+// hand-computed from the rule.  Every cell held on both backends when written; the ledger row
+// is in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct P { y: integer }
+
+fn tick(c: &integer) -> integer { c += 1; c }
+
+fn test_literals_and_formats_reduce_left_to_right() {
+  n = 0;
+  t = (tick(n), tick(n), tick(n));
+  assert(t.0 == 1 && t.1 == 2 && t.2 == 3 && n == 3, "tuple: {t.0}{t.1}{t.2}");
+  m = 0;
+  s = "{tick(m)}-{tick(m)}-{tick(m)}";
+  assert(s == "1-2-3" && m == 3, "format: {s}");
+}
+
+fn test_a_compound_reduces_its_place_first_and_once() {
+  v = [10, 20, 30];
+  n = 0;
+  v[tick(n)] += tick(n) * 100;
+  assert(v[0] == 10 && v[1] == 220 && v[2] == 30 && n == 2, "element: {v[1]} {n}");
+  w = [P { y: 1 }, P { y: 2 }];
+  n = 0;
+  w[tick(n)].y += 5;
+  assert(w[0].y == 1 && w[1].y == 7 && n == 1, "field: {w[1].y} {n}");
+  m = [[0, 0], [0, 5]];
+  n = 0;
+  m[tick(n)][tick(n) - 1] += 5;
+  assert(m[1][1] == 10 && m[0][1] == 0 && n == 2, "nested: {m[1][1]} {n}");
+  ts = ["a", "b"];
+  n = 0;
+  ts[tick(n) - 1] += "x{tick(n)}";
+  assert(ts[0] == "ax2" && ts[1] == "b" && n == 2, "text: {ts[0]} {n}");
+}
