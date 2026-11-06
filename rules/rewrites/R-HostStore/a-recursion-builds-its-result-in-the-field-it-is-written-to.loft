@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-HostStore` — `t.left = insert_rec(t.left, k)`: where every answer of the callee is its
+// argument or its return buffer, the buffer names t's store and the field adopts the callee's
+// record by its number; nothing is copied and no store is made per call.  The values are the
+// copy's.  A callee that answers a CHILD of its argument (`return t.right`) is declined: adopting
+// that record by number would make one record a child twice — its cells pin the copy's values.
+// @falsified-at: a build of this tree whose proof admitted ANY answered variable — `drop_min`'s
+//   grandchild adopted by number, then released with its old parent: interpret panics on the
+//   corrupt reference, native-c does not reach `ok` -> ok.
+// Hand-computed (the key sums by `python3 -c`).  CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with the rewrite and without
+//   it (`LOFT_NO_HOST_STORE=1`).
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn size(t: Tree?) -> integer { if t == null { return 0; } 1 + size(t.left) + size(t.right) }
+fn total(t: Tree?) -> integer { if t == null { return 0; } t.k + total(t.left) + total(t.right) }
+
+fn insert_rec(t: Tree?, k: integer) -> Tree? {
+  if t == null { return Tree { k: k, left: null, right: null }; }
+  if k < t.k { t.left = insert_rec(t.left, k); } else if k > t.k { t.right = insert_rec(t.right, k); }
+  t
+}
+
+// declined: answers its argument's right child
+fn drop_min(t: Tree?) -> Tree? {
+  if t == null { return null; }
+  if t.left == null { return t.right; }
+  t.left = drop_min(t.left);
+  t
+}
+
+fn main() {
+  t: Tree? = null;
+  for i in 0..2000 { t = insert_rec(t, (i * 7919) % 2003); }
+  assert(size(t) == 2000 && total(t) == 2004445, "2,000 inserts: {size(t)} {total(t)}");
+  u = Tree { k: 50, left: Tree { k: 30, left: Tree { k: 20, right: Tree { k: 25 } }, right: Tree { k: 40 } } };
+  u.left = drop_min(u.left);
+  assert(size(u) == 4 && total(u) == 145 && u.left.left.k == 25, "a declined callee keeps the copy: {total(u)}");
+  u.left = drop_min(u.left);
+  u.left = drop_min(u.left);
+  assert(size(u) == 2 && total(u) == 90, "twice more: {total(u)}");
+  println("host store ok");
+}
