@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Sub` crossed with `@FR-C-Int`: a narrower integer is accepted wherever a wider one
+// is, implicitly — an argument, a vector element, a local, a field, a tuple member — with its
+// value.  And `@FR-I-Narrow`'s nullable clause: narrowing into a `τ?` is implicit and CHECKED,
+// the value when it fits and null when it does not, at a parameter and at a local.  Every
+// cell held on both backends when written; the ledger row is in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct W { n: integer }
+
+fn twice(x: integer) -> integer { x * 2 }
+fn or_minus(x: u8?) -> integer { x ?? -1 }
+
+fn test_a_narrow_integer_widens() {
+  b: u8 = 100;
+  assert(twice(b) == 200, "argument: {twice(b)}");
+  v: vector<integer> = [];
+  c: u8 = 7;
+  v += [c];
+  assert(v[0] == 7, "element: {v[0]}");
+  d: i8 = -3;
+  e: integer = d;
+  assert(e == -3, "local: {e}");
+  a: u8 = 254;
+  h: u16 = 65534;
+  w = W { n: a };
+  t: (integer, integer) = (a, h);
+  assert(w.n + 1 == 255 && t.1 + 1 == 65535, "field and member: {w.n} {t.1}");
+}
+
+fn test_a_narrowing_into_a_nullable_is_checked() {
+  i = 7;
+  j = 300;
+  k = -5;
+  assert(or_minus(i) == 7 && or_minus(j) == -1 && or_minus(k) == -1, "parameter");
+  m = 250;
+  n = 256;
+  x: u8? = m;
+  y: u8? = n;
+  assert(x == 250 && y == null, "local: {x} {y}");
+}
