@@ -1,0 +1,68 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `&` link to a `&vector` PARAMETER shares the caller's vector (`@FR-B-Ref-Alias`): an
+// append through the link, through the parameter or through the caller's own name is one
+// append to one vector, in both spellings of the link.
+//
+// Before loft#2424 the bind read the `&vector` parameter as a LINK to copy — the link-to-link
+// route a scalar or record link takes (`d = &c`) — instead of a collection handle to share.
+// `p = &a` left `p` typed as a link and never bound: an internal compiler error on both
+// backends for a read, a stack-store panic on the interpreter for an append.  The annotated
+// `p: &vector<integer> = a` was refused as a retype.
+//
+// The cells that can FAIL:
+//   c1  `p = &a`, append through `p`           — panic / ICE
+//   c2  `p = &a`, read `len(p)` after `a +=`   — ICE
+//   c3  `p: &vector<integer> = a`              — refused as a retype
+//   c4  a whole-value write through `p`        — the shared store is refilled in place
+//
+// The controls, each of which a too-wide fix would move:
+//   c5  a link to a vector LOCAL               — always shared
+//   c6  a link to a by-value vector parameter  — always shared
+//   c7  a link to a `&hash` parameter          — always shared
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: no instrument.  Ordinary assertions on every backend.
+//   WITNESS: the control does not build the file: an internal compiler error (`Incorrect var p`)
+//   on both backends, before any assertion runs.
+//   HOLDS: leak, panic and free-refusal are clean on both trees and both backends; the
+//   compile is the whole measurement, and HERE passes every assertion.
+//
+// CHANNEL: the assertions; the ICE and the panic are a plain run's exit code.
+
+struct K { k: integer }
+
+fn c1(a: &vector<integer>) { p = &a; p += [3]; }
+fn c2(a: &vector<integer>) -> integer { p = &a; a += [9]; len(p) }
+fn c3(a: &vector<integer>) { p: &vector<integer> = a; p += [3]; }
+fn c4(a: &vector<integer>) { p = &a; p = [7, 8, 9, 10]; }
+fn c6(a: vector<integer>) { p = &a; p += [3]; }
+fn c7(a: &hash<K[k]>) { p = &a; p += [K { k: 2 }]; }
+
+fn test_a_link_to_a_ref_vector_parameter() {
+  x = [1, 2];
+  c1(x);
+  assert(len(x) == 3 && x[2] == 3, "c1: {len(x)}");
+  y = [1, 2];
+  assert(c2(y) == 3 && len(y) == 3, "c2: {len(y)}");
+  z = [1, 2];
+  c3(z);
+  assert(len(z) == 3, "c3: {len(z)}");
+  w = [1, 2];
+  c4(w);
+  assert(len(w) == 4 && w[0] == 7, "c4: {len(w)}");
+}
+
+fn test_the_controls() {
+  v = [1, 2];
+  p = &v;
+  p += [3];
+  assert(len(v) == 3, "c5: {len(v)}");
+  u = [1, 2];
+  c6(u);
+  assert(len(u) == 3, "c6: {len(u)}");
+  h: hash<K[k]> = [K { k: 1 }];
+  c7(h);
+  assert(len(h) == 2, "c7: {len(h)}");
+}
