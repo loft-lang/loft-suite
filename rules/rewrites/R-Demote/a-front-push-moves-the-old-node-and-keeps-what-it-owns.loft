@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Demote` — `h = N { …, next: h }` and `o.next = N { …, next: o.next }` MOVE the old node
+// into a fresh child of the destination's store instead of copying the list: the program sees the
+// value the copy would build.  The old node's text and vector move with it, so the literal's
+// writes into the destination's record release nothing the child now holds; an absent
+// destination takes the literal as built.  2,000 pushes check the list end to end.
+//
+// @falsified-at: none — a conformance guard: the copy it replaces gave the same values; it
+//   holds the move to them.  The emitted C carries `loft_demote_rec` at each push (4 sites).
+// Hand-computed.  CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with `OpDemoteRec` and with
+//   the five-op form it replaces (`LOFT_NO_DIRECT_DEMOTE=1`).
+
+struct N { v: integer, name: text, tags: vector<integer>, next: N? }
+
+fn walk(n: N?) -> text {
+  out = "";
+  cur = &n;
+  while cur != null { out += "{cur.v}{cur.name}{len(cur.tags)} "; cur = &cur.next; }
+  out
+}
+
+fn main() {
+  h = N { v: 1, name: "a", tags: [1] };
+  h = N { v: 2, name: "bb", tags: [1, 2], next: h };
+  h = N { v: 3, name: "ccc", tags: [], next: h };
+  assert(walk(h) == "3ccc0 2bb2 1a1 ", "front pushes: {walk(h)}");
+  h.next = N { v: 9, name: "z", tags: [7, 7, 7], next: h.next };
+  assert(walk(h) == "3ccc0 9z3 2bb2 1a1 ", "a push after the head: {walk(h)}");
+  e: N? = null;
+  e = N { v: 5, name: "e", tags: [5], next: e };
+  assert(walk(e) == "5e1 ", "an absent destination: {walk(e)}");
+  l = N { v: 0, name: "", tags: [] };
+  for i in 1..2000 { l = N { v: i, name: "{i % 10}", tags: [i], next: l }; }
+  s = 0;
+  n = 0;
+  c = &l;
+  while c != null { s += c.v + len(c.tags) + len(c.name); n += 1; c = &c.next; }
+  assert(n == 2000 && s == 1999000 + 1999 + 1999, "2,000 pushes: {n} {s}");
+  println("demote ok");
+}
