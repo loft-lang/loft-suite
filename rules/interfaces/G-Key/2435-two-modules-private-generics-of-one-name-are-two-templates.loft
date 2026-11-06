@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO MODULES' PRIVATE GENERICS OF ONE NAME ARE TWO TEMPLATES (`@FR-G-Key`: "two templates of
+// one name … are two keys").  `g_key_2435_pick_a_lib` and `g_key_2435_pick_b_lib` each declare
+// a private `pick<T>` — a's answers its first argument, b's its second — and each calls its own
+// at `integer` and at `text`.  A template's name is unique only within its module and the
+// instance lookup is program-wide, so the key `i_7integer_n_pick` named both, and the second
+// module's call ran the FIRST module's body: b answered "9 u" where its own body says "2 v",
+// with nothing said (loft#2435).
+//
+// Values hand-computed in the two libraries' headers: a's pick(3, 1) and pick("p", "q") are
+// "3 p"; b's pick(9, 2) and pick("u", "v") are "2 v".
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native
+//   exit 1 -> 0, native 2 assertion failures -> 0
+// CHANNEL: the assert — a wrong answer, no diagnostic, on both backends.
+// HOLDS: the libraries' own cells (each module alone answers its own body).
+
+use g_key_2435_pick_a_lib;
+use g_key_2435_pick_b_lib;
+
+fn test_each_module_runs_its_own_template() {
+  a = g_key_2435_pick_a_lib::picked(3, 1, "p", "q");
+  b = g_key_2435_pick_b_lib::picked(9, 2, "u", "v");
+  assert("{a} | {b}" == "3 p | 2 v", "a | b: {a} | {b}");
+}

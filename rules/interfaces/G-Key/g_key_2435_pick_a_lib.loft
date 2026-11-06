@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @FR-G-Key
+//
+// One of the two modules `2435-two-modules-private-generics-of-one-name-are-two-templates.loft`
+// loads: a private `pick<T>` that answers its FIRST argument, the name `g_key_2435_pick_b_lib`
+// gives one answering its second.  Run on its own it is a cell too.
+//
+// Values hand-computed: pick(3, 1) is 3; pick("p", "q") is "p".
+//
+// @falsified-at: none — a conformance guard; the library's own calls answer as hand-computed.
+// CHANNEL: the asserts.
+
+fn pick<T>(x: T, y: T) -> T { x }
+
+pub fn picked(a: integer, b: integer, s: text, t: text) -> text { "{pick(a, b)} {pick(s, t)}" }
+
+fn test_the_module_answers_alone() {
+  s = picked(3, 1, "p", "q");
+  assert(s == "3 p", "pick a alone: {s}");
+}

@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @FR-G-Key
+//
+// The generics `2435-two-modules-types-of-one-name-key-two-instances.loft` instantiates from
+// both of its modules, each at its own `Fill`: a free generic over a vector, one bound to a
+// whole tuple, and a generic struct with a function over it.  Run on its own it is a cell too:
+// each answers at a plain type.
+//
+// @falsified-at: none — a conformance guard; the library's own calls answer as hand-computed.
+// CHANNEL: the asserts.
+
+pub fn count<T>(v: vector<T>) -> integer {
+  n = 0;
+  for _x in v {
+    n += 1;
+  }
+  n
+}
+
+pub fn id<T>(x: T) -> T { x }
+
+pub struct Wrap<T> { pub a: T }
+
+pub fn unwrap<T>(w: Wrap<T>) -> T { w.a }
+
+fn test_the_generics_answer_at_a_plain_type() {
+  assert(count([4, 5, 6]) == 3, "count");
+  assert(id(7) == 7, "id");
+  w: Wrap<integer> = Wrap { a: 8 };
+  assert(unwrap(w) == 8, "unwrap");
+}

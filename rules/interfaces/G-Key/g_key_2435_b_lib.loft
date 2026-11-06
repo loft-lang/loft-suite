@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @FR-G-Key
+//
+// The other module `2435-two-modules-types-of-one-name-key-two-instances.loft` loads: the same
+// names as `g_key_2435_a_lib`, each a different type — `Fill` carries a text before its key,
+// `Tone` has a third variant, `Box<T>` puts `b` first and adds a `c`, and `pick<T>` answers
+// its SECOND argument.  Run on its own it is a cell too: alone, nothing shares a name with it.
+//
+// Values hand-computed for [Fill 9, Fill 2, Fill 6]: sorted first 2, lowest 2, count 3, the
+// tones [Lo, Mid, Hi] count 3, `pick` answers v[1].key = 2, the tuple (Fill 2, 5) reads
+// 2 * 10 + 5 = 25, the box's `a` + `c` is 9 + 7 = 16, the wrap holds Fill 2.
+//
+// @falsified-at: none — a conformance guard; the library's own calls answer as hand-computed.
+// CHANNEL: the asserts.
+
+use g_key_2435_gen_lib;
+
+pub struct Fill { pub tag: text, pub key: integer }
+
+pub enum Tone { Lo, Mid, Hi }
+
+pub struct Box<T> { pub b: T, pub a: T, pub c: integer }
+
+fn pick<T>(x: T, y: T) -> T { y }
+
+pub fn answers(v: vector<Fill>, tones: vector<Tone>) -> text {
+  w = v;
+  w.sort_by(|x| { x.key });
+  low = v.min_by(|x| { x.key });
+  t = g_key_2435_gen_lib::id((v[1]!, 5));
+  bx: Box<integer> = Box { a: v[0]!.key, b: v[1]!.key, c: 7 };
+  wr: g_key_2435_gen_lib::Wrap<Fill> = g_key_2435_gen_lib::Wrap { a: v[1]! };
+  "{w[0]!.key} {low!.key} {g_key_2435_gen_lib::count(v)} {g_key_2435_gen_lib::count(tones)} {pick(v[0]!.key, v[1]!.key)} {t.0.key * 10 + t.1} {bx.a + bx.c} {g_key_2435_gen_lib::unwrap(wr).key}"
+}
+
+fn test_the_module_answers_alone() {
+  s = answers(
+    [Fill { tag: "x", key: 9 }, Fill { tag: "y", key: 2 }, Fill { tag: "z", key: 6 }],
+    [Tone.Lo, Tone.Mid, Tone.Hi]
+  );
+  assert(s == "2 2 3 3 2 25 16 2", "b alone: {s}");
+}

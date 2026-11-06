@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// TWO MODULES' TYPES OF ONE NAME KEY TWO INSTANCES (`@FR-G-Key`): an instance is keyed by each
+// bound type's full IDENTITY and by its template, and a name is unique only within the module
+// that declares it.  `g_key_2435_a_lib` and `g_key_2435_b_lib` each declare a `Fill`, a
+// `Tone`, a generic `Box<T>` and a private `pick<T>`, and this program declares a `Fill` of its
+// own; each module instantiates generics over its own.  The instance lookup is program-wide,
+// and the key spelled a type, a generic type's template and a function template by their
+// bare NAME, so the second module's call reached the first module's instance (loft#2435):
+//
+// - at a TYPE (`sort_by`, `min_by`, a user generic, an enum, a tuple bound whole) it was
+//   checked against the other module's `Fill` and refused — "expected vector<Fill>, got
+//   vector<Fill>";
+// - at a generic TYPE's template (`Box<integer>` in both) the second module built the first
+//   module's struct — "Unknown field Box<integer>.c";
+// - at a FUNCTION template (`pick<T>` at `integer` in both) the second module's call ran the
+//   first module's body and answered WRONG with nothing said.
+//
+// Values hand-computed in the two libraries' headers: a answers "1 1 2 2 3 15 3 1" and b
+// "2 2 3 3 2 25 16 2"; the program's own [Fill 8, Fill 4, Fill 6] sorts to 4 first and counts
+// 3.  The libraries' own cells are the control: one module alone, nothing shares a name.
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the asserts — the program compiles and each module answers through its own
+// instances, on both backends.
+// HOLDS: the libraries' own cells (each module alone).
+
+use g_key_2435_a_lib;
+use g_key_2435_b_lib;
+use g_key_2435_gen_lib;
+
+struct Fill { key: integer }
+
+fn test_each_module_keys_its_own_instances() {
+  a = g_key_2435_a_lib::answers(
+    [g_key_2435_a_lib::Fill { key: 3 }, g_key_2435_a_lib::Fill { key: 1 }],
+    [g_key_2435_a_lib::Tone.Hi, g_key_2435_a_lib::Tone.Lo]
+  );
+  b = g_key_2435_b_lib::answers(
+    [
+      g_key_2435_b_lib::Fill { tag: "x", key: 9 },
+      g_key_2435_b_lib::Fill { tag: "y", key: 2 },
+      g_key_2435_b_lib::Fill { tag: "z", key: 6 }
+    ],
+    [g_key_2435_b_lib::Tone.Lo, g_key_2435_b_lib::Tone.Mid, g_key_2435_b_lib::Tone.Hi]
+  );
+  own = [Fill { key: 8 }, Fill { key: 4 }, Fill { key: 6 }];
+  own.sort_by(|x| { x.key });
+  s = "{a} | {b} | {own[0]!.key} {g_key_2435_gen_lib::count(own)}";
+  assert(s == "1 1 2 2 3 15 3 1 | 2 2 3 3 2 25 16 2 | 4 3", "a | b | own: {s}");
+}

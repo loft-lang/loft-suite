@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// ANOTHER MODULE'S TYPE OF ONE NAME IS REFUSED, NAMING BOTH (`@FR-G-Key`'s other half: two
+// modules' `Fill` are two types, so a `vector` of one is no `vector` of the other).  The
+// refusal stands; what it says is the guarded part.  Rendered by name the two read alike, and
+// the message was "expected vector<Fill>, got vector<Fill>" — two identical types, nothing to
+// act on (loft#2435).  Where two different types share a name INSIDE a former, the message
+// names the type inside and where each was declared, as it already did for a bare one
+// (loft#1094).
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the
+//   suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 ->
+//   0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the diagnostic's text.
+
+// @EXPECT_ERROR: expected `vector<Fill>` with the `Fill` declared at
+
+use g_key_2435_a_lib;
+use g_key_2435_b_lib;
+
+fn main() {
+  x = [g_key_2435_a_lib::Fill { key: 3 }];
+  println(g_key_2435_b_lib::answers(x, []));
+}
