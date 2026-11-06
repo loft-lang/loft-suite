@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-CopyView`, the WALK clause — `cur: Tree? = t; … cur = cur.left` copies `t` at the bind
+// (`@FR-B-Copy`), and where the cursor is afterwards only read and stepped to its own children,
+// and nothing in the walk can change what it walks, the copy is a view: no program can tell.
+// Each cell computes the value the copy gives, by hand.  The declined cells pin the copy's
+// meaning where a view would differ: a walk whose source is written during it reads the
+// values it copied; a cursor handed out of the function stays a copy.
+//
+// @falsified-at: a build of this tree whose witness strip removed a whole `if` that only
+//   CONTAINED a witness test (the cursor's step with it) — `find` never steps: interpret and
+//   native-c hang to the timeout -> ok.  The bench drivers answered wrong hashes on that build.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with the clause and without
+//   it (`LOFT_NO_COPY_VIEW_WALK=1`).
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+struct Node { v: integer, next: Node? }
+
+fn sample() -> Tree {
+  Tree { k: 50, left: Tree { k: 30, left: Tree { k: 20 }, right: Tree { k: 40 } }, right: Tree { k: 70 } }
+}
+
+// the lookup over a parameter
+fn find(t: Tree, k: integer) -> boolean {
+  cur: Tree? = t;
+  while cur != null {
+    if k == cur.k { return true; }
+    if k < cur.k { cur = cur.left; } else { cur = cur.right; }
+  }
+  false
+}
+
+// two walks: the second is bound from a list the first one builds
+fn reverse_twice() -> text {
+  h = Node { v: 1, next: Node { v: 2, next: Node { v: 3 } } };
+  r: Node? = null;
+  cur: Node? = h;
+  while cur != null { r = Node { v: cur.v * 10, next: r }; cur = cur.next; }
+  out = "";
+  cur = r;
+  while cur != null { out += "{cur.v} "; cur = cur.next; }
+  out
+}
+
+// declined: the walk writes its own source, so it reads the copy's values
+fn written_source() -> text {
+  h = Node { v: 1, next: Node { v: 2, next: Node { v: 3 } } };
+  cur: Node? = h;
+  out = "";
+  while cur != null { h.next.v = 99; out += "{cur.v} "; cur = cur.next; }
+  "{out}{h.next.v}"
+}
+
+// declined: the cursor leaves the function
+fn last(h: Node) -> Node? {
+  cur: Node? = h;
+  while cur != null && cur.next != null { cur = cur.next; }
+  cur
+}
+
+fn main() {
+  t = sample();
+  assert(find(t, 40) && find(t, 70) && !find(t, 35), "lookups");
+  assert(reverse_twice() == "30 20 10 ", "two walks: {reverse_twice()}");
+  assert(written_source() == "1 2 3 99", "a written source keeps the copy: {written_source()}");
+  l = Node { v: 1, next: Node { v: 2, next: Node { v: 7 } } };
+  e = last(l);
+  l.next.next.v = 8;
+  assert(e.v == 7 && l.next.next.v == 8, "the cursor handed out is a copy: {e.v}");
+  println("copy-view walk ok");
+}
