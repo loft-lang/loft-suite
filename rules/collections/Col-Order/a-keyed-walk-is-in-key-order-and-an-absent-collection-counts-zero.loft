@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Order` crossed with `@FR-Col-Hash`: a hash walks in KEY order whatever the
+// insertion order, after a removal and an add, at an integer and a text key, and as a field
+// read in a callee.  And `@FR-Col-Len` crossed with `@FR-N-Store`: an absent collection
+// counts 0, returned from a call or held in a nullable field.  Every cell held on both
+// backends when written; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct K { k: integer }
+struct T { t: text, n: integer }
+struct H { h: hash<K[k]> }
+struct O { h: hash<K[k]>? }
+
+fn walk(o: H) -> text { r = ""; for x in o.h { r += "{x.k}"; } r }
+fn mk(b: boolean) -> vector<integer>? { if b { [1, 2] } else { null } }
+
+fn test_a_hash_walks_in_key_order() {
+  h: hash<K[k]> = [K { k: 3 }, K { k: 1 }, K { k: 2 }];
+  r = "";
+  for x in h { r += "{x.k}"; }
+  assert(r == "123", "integer key: {r}");
+  g: hash<T[t]> = [T { t: "b", n: 1 }, T { t: "a", n: 2 }, T { t: "c", n: 3 }];
+  s = "";
+  for y in g { s += y.t; }
+  assert(s == "abc", "text key: {s}");
+  h[2] = null;
+  h += [K { k: 5 }, K { k: 4 }];
+  q = "";
+  for x in h { q += "{x.k}"; }
+  assert(q == "1345", "after a removal and an add: {q}");
+  o = H { h: [K { k: 9 }, K { k: 5 }, K { k: 1 }] };
+  assert(walk(o) == "159", "a field in a callee: {walk(o)}");
+}
+
+fn test_an_absent_collection_counts_zero() {
+  assert(len(mk(false)) == 0 && len(mk(true)) == 2, "returned: {len(mk(false))}");
+  a = O { h: null };
+  b = O { h: [K { k: 1 }] };
+  assert(len(a.h) == 0 && len(b.h) == 1, "a nullable field: {len(a.h)} {len(b.h)}");
+}

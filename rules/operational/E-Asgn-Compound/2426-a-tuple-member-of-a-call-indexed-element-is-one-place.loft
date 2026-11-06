@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `v[f()].i op= x` addresses its place EXACTLY ONCE (`@FR-E-Asgn-Compound`), and when the
+// element is a tuple that place is a member of the element's `__tuple<…>` record
+// (`@FR-T-Record`, `@FR-T-Ref-Rep`): the read and the write go through one binding of that
+// record, and the write lands in the container.
+//
+// Before loft#2426 the binding was typed as the by-value tuple while it held the record
+// reference, and named no container.  `--native-c` refused every such program ("a tuple
+// expected, a Ref found"); the interpreter got an integer member right by accident of layout
+// and lost a text member's append silently; and a `&vector` parameter written this way was
+// refused as never modified.
+//
+// The cells that can FAIL:
+//   c1  an integer member, `+=`                 — refused on C
+//   c2  a text member, `+=`                     — interpreter: the append is lost
+//   c3  a float member, `*=`                    — refused on C
+//   c4  the vector in a struct field            — refused on C
+//   c5  a `&vector` parameter                   — refused as never modified
+//   c6  in a `for` loop, one call per pass      — refused on C
+//   c7  a struct inside the tuple               — refused on C
+//
+// The controls, each of which a too-wide fix would move:
+//   c8  a constant index                        — another route, always right
+//   c9  a variable index                        — another route, always right
+//   c10 the call count                          — one per statement, every cell
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: no instrument.  Ordinary assertions on every backend.
+//   WITNESS: the control refuses the file — c5's "Parameter 'v' has & but is never modified"
+//   — on both backends, before any assertion runs; with c5 removed, c2 answers `cd` and
+//   `--native-c` refuses the rest.
+//   HOLDS: leak, panic and free-refusal are clean on both trees and both backends; HERE
+//   passes every assertion.
+//
+// CHANNEL: the assertions; on `--native-c` the refusal is a plain run's exit code.
+
+struct H { rows: vector<(integer, integer)> }
+struct P { y: integer }
+
+fn tick(c: &integer) -> integer { c += 1; c }
+fn bump(v: &vector<(integer, integer)>, n: &integer) { v[tick(n)].1 += 5; }
+
+fn test_a_call_indexed_tuple_member() {
+  v = [(1, 2), (3, 4)];
+  n = 0;
+  v[tick(n)].1 += 5;
+  assert(v[1].0 == 3 && v[1].1 == 9 && v[0].1 == 2 && n == 1, "c1: {v[1].1} {n}");
+  t = [("ab", 2), ("cd", 4)];
+  n = 0;
+  t[tick(n)].0 += "!";
+  assert(t[1].0 == "cd!" && t[0].0 == "ab" && n == 1, "c2: {t[1].0} {n}");
+  f = [(1, 0.5), (3, 1.25)];
+  n = 0;
+  f[tick(n)].1 *= 2.0;
+  assert(f[1].1 == 2.5 && n == 1, "c3: {f[1].1}");
+  h = H { rows: [(1, 2), (3, 4)] };
+  n = 0;
+  h.rows[tick(n)].1 += 5;
+  assert(h.rows[1].1 == 9 && n == 1, "c4: {h.rows[1].1}");
+  w = [(1, 2), (3, 4)];
+  n = 0;
+  bump(w, n);
+  assert(w[1].1 == 9 && n == 1, "c5: {w[1].1}");
+  l = [(0, 0), (0, 1), (0, 2), (0, 3)];
+  n = 0;
+  for i in 0..3 { l[tick(n)].0 += i * 3; }
+  assert(l[1].0 == 0 && l[2].0 == 3 && l[3].0 == 6 && n == 3, "c6: {l[2].0} {l[3].0} {n}");
+  s = [(1, P { y: 2 }), (3, P { y: 4 })];
+  n = 0;
+  s[tick(n)].1.y += 5;
+  assert(s[1].1.y == 9 && n == 1, "c7: {s[1].1.y}");
+}
+
+fn test_the_controls() {
+  v = [(1, 2), (3, 4)];
+  v[0].1 += 5;
+  assert(v[0].1 == 7, "c8: {v[0].1}");
+  i = 1;
+  v[i].1 += 5;
+  assert(v[1].1 == 9, "c9: {v[1].1}");
+}
