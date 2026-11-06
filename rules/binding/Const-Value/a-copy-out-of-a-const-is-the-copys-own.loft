@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Copy` crossed with `@FR-Const-Value` and `@FR-Const-Bind`: a plain bind out of a
+// value-const parameter is a COPY, independent and writable, and the parameter's value is
+// untouched; a binding-const local keeps its slot but not its contents, which stay writable.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct S { n: integer }
+struct T { n: integer, v: vector<integer> }
+
+fn bump(p: const S) -> S { q = p; q.n = 9; q }
+
+fn test_a_copy_out_of_a_const() {
+  s = S { n: 1 };
+  r = bump(s);
+  assert(r.n == 9 && s.n == 1, "{r.n} {s.n}");
+  const x = T { n: 1, v: [1, 2] };
+  x.n = 2;
+  x.v += [3];
+  assert(x.n == 2 && len(x.v) == 3, "contents: {x.n} {len(x.v)}");
+}

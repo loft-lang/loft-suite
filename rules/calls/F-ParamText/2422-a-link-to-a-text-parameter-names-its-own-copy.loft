@@ -32,6 +32,11 @@
 //   c13 a local text link handed to a `&text` parameter (loft#2423 alone)
 //
 // @falsified-at: 0e95172cd — interpret exit 138 -> 0, native exit 1 -> 0
+//   ARMED: no instrument.  Ordinary assertions on every backend.
+//   WITNESS: the control's interpreter exits on SIGBUS (138) at c2, after c1 answered an
+//   empty text; `--native` does not compile c9 (E0308, `*mut *mut String`).
+//   HOLDS: leak and free-refusal are clean on both trees and both backends; the EXIT channel
+//   is the whole measurement, and HERE passes every assertion.
 //
 // CHANNEL: the assertions; on the interpreter also the crash.
 

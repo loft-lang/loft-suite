@@ -14,6 +14,13 @@
 // dispatched one is a statement sequence, and a text arm wrapped it in bare parentheses — the
 // program did not compile there.
 //
+// @falsified-at: 0e95172cd — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   scored with FALSIFY_NATIVE=rust: the defect is the rustc writer's alone.
+//   ARMED: the suite's leak gate for the record results; the rest is ordinary assertions.
+//   WITNESS: the control's `--native` does not compile the file (`expected one of `)`, … found `;``).
+//   HOLDS: the interpreter and `--native-c` answer every assertion on both trees.
+//
 // CHANNEL: the assertions and the leak gate.
 
 enum DEnt { DFire { n: integer }, DIce { n: integer } }

@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-For` crossed with `@FR-G-Done` and `@FR-G-Call`: a call to a generator runs none of its
+// body (`G-Call`) until the first advance; exhaustion is idempotent (`G-Done`), so every later
+// `next` is null and a `for` over the spent frame runs zero times; and a `for` over a frame
+// already advanced — or left by a `break` — continues from where that frame stands.  Every cell
+// held on both backends when written; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct Box { n: integer }
+
+fn two() -> iterator<integer> { yield 1; yield 2; }
+fn three() -> iterator<integer> { yield 1; yield 2; yield 3; }
+fn writes(b: Box) -> iterator<integer> { b.n = 5; yield 1; }
+
+fn test_exhaustion_and_laziness() {
+  it = two();
+  a = next(it) ?? -1;
+  b = next(it) ?? -1;
+  c = next(it) ?? -1;
+  d = next(it) ?? -1;
+  n = 0;
+  for x in it { n += 1; }
+  assert("{a} {b} {c} {d} {n}" == "1 2 -1 -1 0", "done: {a} {b} {c} {d} {n}");
+  bx = Box { n: 0 };
+  w = writes(bx);
+  before = bx.n;
+  v = next(w) ?? -1;
+  assert(before == 0 && bx.n == 5 && v == 1, "lazy: {before} {bx.n}");
+}
+
+fn test_a_for_continues_a_started_frame() {
+  it = three();
+  a = next(it) ?? -1;
+  r = "";
+  for x in it { r += "{x}"; }
+  assert(a == 1 && r == "23", "advanced: {r}");
+  jt = three();
+  s = "";
+  for x in jt { s += "{x}"; break; }
+  next(jt);
+  t = "";
+  for y in jt { t += "{y}"; }
+  assert(s == "1" && t == "3", "after a break: {s} {t}");
+}
