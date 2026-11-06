@@ -19,6 +19,7 @@
 // CHANNEL: the assertions, the time bound, and the leak gate.
 //
 // @falsified-at: 0e95172cd — interpret exit 124 -> 0, native exit 1 -> 0
+// HOLDS: every assertion, the leak gate and the refusals are clean on this tree, both backends.
 
 struct Tree { k: integer, left: Tree?, right: Tree? }
 
