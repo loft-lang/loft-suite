@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN `&&` OF TESTS PROVES EACH WHERE IT HOLDS, AN `||` EACH WHERE IT FAILS (`@FR-N-Guard`).  The
+// THEN side of `if a != null && b != null` is where both tests held, so `a` and `b` read as
+// present there; the ELSE side of `if a == null || b == null` is where both failed, so they read
+// as present there too; a `while` whose condition is such an `&&` reads its body the same way.
+// A test that is not a null test beside them (`k > 5`) proves nothing and stops nothing.
+//
+// Values hand-computed.
+//
+// @falsified-at: 0e95172cd — under LOFT_DENY_WARNINGS, FAIL (6 unexpected warnings, one per
+//   proven read) -> ok; `make falsify` reads INERT, as it scores no warning.
+// CHANNEL: no warning (`LOFT_DENY_WARNINGS`), and the asserts.
+// ARMED: no instrument.
+// WITNESS: each assert message names the values.
+// HOLDS: every cell on both backends.
+
+fn need(n: integer) -> integer {
+  n + 1
+}
+
+fn both(a: integer?, b: integer?) -> integer {
+  if a != null && b != null { return need(a) + need(b); }
+  0
+}
+
+fn beside_another_test(k: integer, t: integer?) -> integer {
+  if k > 5 && t != null { return need(t); }
+  -1
+}
+
+fn else_of_an_or(a: integer?, b: integer?) -> integer {
+  if a == null || b == null { 0 } else { need(a) + need(b) }
+}
+
+fn a_loop_condition(v: vector<integer?>) -> integer {
+  i = 0;
+  s = 0;
+  x = v[0];
+  while i < len(v) && x != null {
+    s += need(x);
+    i += 1;
+    x = v[i];
+  }
+  s
+}
+
+fn main() {
+  assert(both(1, 2) == 5 && both(null, 2) == 0 && both(1, null) == 0, "2 + 3; one absent: {both(1, 2)}");
+  assert(beside_another_test(9, 4) == 5 && beside_another_test(1, 4) == -1 && beside_another_test(9, null) == -1, "4 + 1; k too small; absent");
+  assert(else_of_an_or(3, 4) == 9 && else_of_an_or(null, 4) == 0, "4 + 5; one absent: {else_of_an_or(3, 4)}");
+  assert(a_loop_condition([1, 2, null, 7]) == 5, "2 + 3, stopped at the absent element: {a_loop_condition([1, 2, null, 7])}");
+}
