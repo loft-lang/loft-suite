@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD LENT TO A TWIN, OR FROM A WRAPPED BODY, REACHES ITS CALLEE (`@FR-R-ValueRecord`'s
+// lend: a tuple carrier handed to a plain record parameter its callee only reads is written
+// into one record per carrier, and that record is what the call receives).  Two places the
+// lend went missing, each found by dryopea's own tests on the interpreter:
+//
+// * the call is to a TWIN — the tuple-returning copy of a function some other site still calls
+//   for a record.  The twin's parameters were never registered as lendable, so the bare tuple
+//   reached a record parameter: a null record (dryopea's relabel read `(null, null)`) or a
+//   wild one (an index panic in the store allocator).
+// * the caller's body is the `Insert([Set(w, null), Block])` a hoisted result reference wraps
+//   it in.  The lend records were declared only into a bare `Block`, so here they were not
+//   declared at all and had no frame slot: "Incorrect var _vr_lend_N[65535]" at codegen.
+//
+// Values hand-computed:
+//   relabel({q, r}) = {q + 10 r, r};  step({q, r}, 0) = {q, r + 1}
+//   owes_a_record() = relabel({1,0}).q + relabel({1,1}).q + relabel({1,2}).q = 1 + 11 + 21 = 33
+//   twin cell: a = {3, 4}, b = step(a, 0) = {3, 5}, c = relabel(b) = {53, 5}
+//   wrapped cell: places(3).routes[0] = route(0, work() = {11, 6}, {0, 0}, 3), 3 mobs;
+//     the element call route(4, hs[0], hs[1], 1) = a {5, 7}, b {8, 9}
+//   both: route_of(places2(2), 0).a = {11, 6}
+//
+// @falsified-at: 0de1794d4 — interpret exit 1 -> 0, native exit 101 -> 0
+// @falsified-by: tests/falsified/a-record-lent-to-a-twin-or-from-a-wrapped-body-reaches-its-callee.patch — interpret exit 1 -> 0, native exit 101 -> 0
+//   CHANNEL: exit.  The twin cell panics in the store allocator on the interpreter; the wrapped
+//     cells abort at codegen on both backends ("Incorrect var _vr_lend_N[65535]").
+//   ARMED: nothing.  Each half of the fix was also reverted alone, on standalone `main` copies
+//     of the cells: the twin half moved the first and third, the wrapped-body half the second
+//     and third.
+//   HOLDS: every asserted value on both backends.
+struct Hex { q: integer, r: integer }
+
+fn from_axial(aq: integer, ar: integer) -> Hex { Hex { q: aq + 10 * ar, r: ar } }
+
+fn relabel(old: const Hex) -> Hex { from_axial(old.q, old.r) }
+
+fn step(h: const Hex, d: integer) -> Hex {
+  if d == 0 { return Hex { q: h.q, r: h.r + 1 }; }
+  Hex { q: h.q - 1, r: h.r + 1 }
+}
+
+// A site that owes `relabel` a RECORD (the element of a vector), so `relabel` gets a twin.
+fn owes_a_record() -> integer {
+  v: vector<Hex> = [];
+  for r in 0..3 { v += [relabel(Hex { q: 1, r: r })]; }
+  t = 0;
+  for h in v { t += h.q; }
+  t
+}
+
+fn test_a_carrier_lent_to_a_twin_is_the_callers_value() {
+  assert(owes_a_record() == 33, "owed {owes_a_record()}");
+  a = Hex { q: 3, r: 4 };
+  b = step(a, 0);
+  c = relabel(b);
+  assert(b.q == 3 && b.r == 5, "step ({b.q}, {b.r})");
+  assert(c.q == 53 && c.r == 5, "relabel through the twin ({c.q}, {c.r})");
+}
+
+struct Pt { q: integer, r: integer }
+struct Route { poi: integer, a: Pt, b: Pt, count: integer }
+struct Mob { route: integer, seat: integer }
+struct World { routes: vector<Route>, mobs: vector<Mob> }
+
+fn route(poi: integer, a: const Pt, b: const Pt, count: integer) -> Route {
+  Route { poi: poi, a: Pt { q: a.q, r: a.r }, b: Pt { q: b.q, r: b.r }, count: count }
+}
+
+fn mob(route: integer, seat: integer) -> Mob { Mob { route: route, seat: seat } }
+
+fn work() -> Pt { Pt { q: 11, r: 6 } }
+
+fn world_new() -> World { World { routes: [], mobs: [] } }
+
+// The result local is bound from a call and a loop follows: the body is the hoisted wrapper.
+fn places(count: integer) -> World {
+  w = world_new();
+  w.routes += [route(0, work(), Pt { q: 0, r: 0 }, count)];
+  i = 0;
+  while i < count {
+    w.mobs += [mob(0, i)];
+    i += 1;
+  }
+  w
+}
+
+fn test_a_carrier_lent_from_a_wrapped_body_is_declared() {
+  // An element argument makes `route`'s record parameters decline the tuple, so `work()`'s
+  // carrier in `places` is LENT.
+  hs: vector<Pt> = [Pt { q: 5, r: 7 }, Pt { q: 8, r: 9 }];
+  x = route(4, hs[0], hs[1], 1);
+  assert(x.a.q == 5 && x.a.r == 7 && x.b.q == 8 && x.b.r == 9, "element call");
+  w = places(3);
+  r = w.routes[0];
+  assert(r.a.q == 11 && r.a.r == 6, "lent a ({r.a.q}, {r.a.r})");
+  assert(r.b.q == 0 && r.b.r == 0 && r.count == 3, "b ({r.b.q}, {r.b.r}) count {r.count}");
+  assert(len(w.mobs) == 3, "mobs {len(w.mobs)}");
+}
+
+struct Cell { q: integer, r: integer }
+struct Leg { a: Cell, b: Cell, n: integer }
+struct Net { legs: vector<Leg>, seats: vector<Mob> }
+
+fn leg(a: const Cell, b: const Cell, n: integer) -> Leg {
+  Leg { a: Cell { q: a.q, r: a.r }, b: Cell { q: b.q, r: b.r }, n: n }
+}
+
+fn far() -> Cell { Cell { q: 11, r: 6 } }
+
+fn net_new() -> Net { Net { legs: [], seats: [] } }
+
+fn places2(count: integer) -> Net {
+  w = net_new();
+  w.legs += [leg(far(), Cell { q: 0, r: 0 }, count)];
+  i = 0;
+  while i < count {
+    w.seats += [mob(1, i)];
+    i += 1;
+  }
+  w
+}
+
+// Forwards `leg` for a record: `leg` gets a twin, and `places2` lends to it.
+fn leg_of(w: const Net, i: integer) -> Leg {
+  if i < 0 || i >= len(w.legs) { return leg(Cell { q: 0, r: 0 }, Cell { q: 0, r: 0 }, 0); }
+  l = w.legs[i];
+  if l == null { return leg(Cell { q: 0, r: 0 }, Cell { q: 0, r: 0 }, 0); }
+  leg(l.a, l.b, l.n)
+}
+
+fn test_a_carrier_lent_to_a_twin_from_a_wrapped_body() {
+  o = leg_of(places2(2), 0);
+  assert(o.a.q == 11 && o.a.r == 6 && o.n == 2, "both ({o.a.q}, {o.a.r}) n {o.n}");
+}
