@@ -1,0 +1,68 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A capture of a GROUP binds the sub-slice the group matched (`@FR-P-Cap`, @C161): a FRESH
+// vector, as `@FR-P-Rest` gives a rest.  An alternation binds the branch taken, an optional
+// group binds null when it matched nothing (`@FR-P-Opt`), and a repetition binds what it
+// collected (`@FR-P-Rep`) — the same vector `( g: V )*` binds, empty for a run of zero.
+//
+// Before @C161 a capture of a group did not parse: `(P-Cap)` bound "p's result" and no rule said
+// what a group's was.
+//
+// The cells:
+//   c1  `g:( Kw Op )?` present — the two elements; absent — null, `len` 0
+//   c2  `g:( Kw Op | End )` as the whole slice beside `..r` — the branch taken
+//   c3  `g:( Kw )*` — the run, and an empty vector for a run of zero
+//   c4  `g:( x: Kw )*` — both names take the run
+//   c5  the capture is fresh: writing it leaves the subject as it was
+//   c6  in a loop, present and absent alternating — the leak gate's cell
+//   c7  returned from the function that matched
+//   c8  a fixed tail after an optional group
+//
+// CHANNEL: the compile (a group capture did not parse), the assertions, and the leak gate.
+
+enum Tok { Num { n: integer }, Kw { k: integer }, Op { o: integer }, End }
+
+fn kk(t: Tok) -> integer { match t { Kw { k } => k, Op { o } => o, Num { n } => n, End => -9 } }
+
+fn opt(v: vector<Tok>) -> text {
+  match v {
+    [Num { n }, g:(Kw { k } Op { o })?, End] => if g == null { "absent {len(g)}" } else { "{len(g)} {kk(g[0])} {kk(g[1])}" },
+    _ => "x"
+  }
+}
+fn alt(v: vector<Tok>) -> text { match v { [g:(Kw { k } Op { o } | End), ..r] => "{len(g)}/{len(r)}", _ => "x" } }
+fn run(v: vector<Tok>) -> text {
+  match v {
+    [Num { n }, g:(Kw { k })*, End] => if len(g) > 0 { "{len(g)} {kk(g[1])}" } else { "{len(g)}" },
+    _ => "x"
+  }
+}
+fn both(v: vector<Tok>) -> text { match v { [g:(x: Kw)*] => "{len(g)} {len(x)}", _ => "x" } }
+fn count(v: vector<Tok>) -> integer { match v { [Num { n }, g:(Kw { k } Op { o })?, End] => len(g), _ => -1 } }
+fn grab(v: vector<Tok>) -> vector<Tok> { match v { [g:(Kw { k } Op { o }), ..r] => g, _ => [] } }
+fn tail(v: vector<Tok>) -> text { match v { [Num { n }, g:(Kw { k })?, last] => "{len(g)} {kk(last)}", _ => "x" } }
+
+fn test_a_group_capture() {
+  full = [Num { n: 3 }, Kw { k: 7 }, Op { o: 8 }, Tok.End];
+  bare = [Num { n: 3 }, Tok.End];
+  assert(opt(full) == "2 7 8" && opt(bare) == "absent 0", "c1: {opt(full)} | {opt(bare)}");
+  assert(alt([Kw { k: 1 }, Op { o: 2 }, Tok.End]) == "2/1" && alt([Tok.End, Num { n: 4 }]) == "1/1", "c2");
+  assert(run([Num { n: 1 }, Kw { k: 4 }, Kw { k: 5 }, Tok.End]) == "2 5" && run(bare) == "0", "c3");
+  assert(both([Kw { k: 1 }, Kw { k: 2 }, Kw { k: 3 }]) == "3 3", "c4");
+  assert(tail([Num { n: 1 }, Kw { k: 2 }, Num { n: 9 }]) == "1 9", "c8");
+}
+
+fn test_the_capture_is_fresh_and_owned() {
+  v = [Num { n: 3 }, Kw { k: 7 }, Op { o: 8 }, Tok.End];
+  r = match v { [Num { n }, g:(Kw { k } Op { o })?, End] => { g[0] = Tok.End; kk(g[0]) }, _ => 0 };
+  assert(r == -9 && kk(v[1]) == 7 && len(v) == 4, "c5: {r} {kk(v[1])}");
+  a = [Num { n: 3 }, Kw { k: 7 }, Op { o: 8 }, Tok.End];
+  b = [Num { n: 3 }, Tok.End];
+  s = "";
+  for i in 0..4 { s += "{count(if i % 2 == 0 { a } else { b })} "; }
+  assert(s == "2 0 2 0 ", "c6: {s}");
+  w = [Kw { k: 7 }, Op { o: 8 }, Tok.End];
+  g = grab(w);
+  assert(len(g) == 2 && kk(g[1]) == 8 && len(w) == 3, "c7");
+}

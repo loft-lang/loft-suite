@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Disp-Dynamic` crossed with `@FR-Disp-Select` and `@FR-Disp-Return`: a call whose
+// argument is held at an enum selects on the runtime variant — over two arguments, as a
+// `self` method, on a generator's yields, inside a lambda, inside a `match` arm, and with a
+// record result in a loop.  And `@FR-Disp-Specific` crossed with `@FR-C-Var`, `@FR-N-Intro`,
+// `@FR-N-Store` and `@FR-C-Int`: a variant beats its enum, `τ` beats `τ?` for a present value
+// and `τ?` takes a nullable, and the exact integer width wins.  Every cell held on both
+// backends when written, with the leak gate armed; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// The match-arm case is loft#2429's guard on `--native`: an arm that lifts a call ahead of a
+// dispatched one is a statement sequence, and a text arm wrapped it in bare parentheses — the
+// program did not compile there.
+//
+// CHANNEL: the assertions and the leak gate.
+
+enum DEnt { DFire { n: integer }, DIce { n: integer } }
+struct S { n: integer, t: text }
+
+fn mix(a: DFire, b: DIce) -> text { "fi" }
+fn mix(a: DEnt, b: DEnt) -> text { "any" }
+fn tag(self: DFire) -> text { "F{self.n}" }
+fn tag(self: DEnt) -> text { "E{self.n}" }
+fn dn(a: DFire) -> text { "fire{a.n}" }
+fn dn(a: DEnt) -> text { "any{a.n}" }
+fn mk2(a: DFire) -> S { S { n: 1, t: "f" } }
+fn mk2(a: DEnt) -> S { S { n: 2, t: "e" } }
+fn g() -> iterator<DEnt> { yield DFire { n: 1 }; yield DIce { n: 2 }; }
+fn pick(k: integer) -> DEnt { if k == 1 { DFire { n: 7 } } else { DIce { n: 8 } } }
+fn opt(a: integer) -> text { "int" }
+fn opt(a: integer?) -> text { "opt" }
+fn w(a: integer) -> text { "i" }
+fn w(a: u8) -> text { "u8" }
+
+fn test_a_runtime_selection_in_every_position() {
+  v: vector<DEnt> = [DFire { n: 1 }, DIce { n: 2 }];
+  r = "";
+  for a in v { for b in [DIce { n: 3 }, DFire { n: 4 }] { x: DEnt = b; r += "{mix(a, x)} "; } }
+  assert(r == "fi any any any ", "two arguments: {r}");
+  m: vector<DEnt> = [DFire { n: 1 }, DIce { n: 2 }, DFire { n: 3 }];
+  t = "";
+  for e in m { t += "{e.tag()} "; }
+  assert(t == "F1 E2 F3 ", "a method: {t}");
+  y = "";
+  for e in g() { y += "{dn(e)} "; }
+  assert(y == "fire1 any2 ", "a generator: {y}");
+  f = fn(e: DEnt) -> text { dn(e) };
+  p: DEnt = DFire { n: 3 };
+  q: DEnt = DIce { n: 4 };
+  assert(f(p) == "fire3" && f(q) == "any4", "a lambda");
+  s = "";
+  for k in 1..3 { s += match k { 1 => dn(pick(k)), _ => "|{dn(pick(k))}" }; }
+  assert(s == "fire7|any8", "a match arm: {s}");
+  o = "";
+  for e in m { rec = mk2(e); o += "{rec.n}"; }
+  assert(o == "121", "a record result: {o}");
+}
+
+fn test_the_most_specific_definition() {
+  x: DEnt = DFire { n: 5 };
+  y: DEnt = DIce { n: 6 };
+  assert("{dn(DFire { n: 5 })} {dn(x)} {dn(y)}" == "fire5 fire5 any6", "variant over enum");
+  i = 5;
+  a: integer? = 5;
+  n: integer? = null;
+  assert("{opt(i)} {opt(a)} {opt(n)}" == "int opt opt", "nullability");
+  b: u8 = 3;
+  j = 300;
+  assert("{w(b)} {w(i)} {w(j)}" == "u8 i i", "width");
+}
