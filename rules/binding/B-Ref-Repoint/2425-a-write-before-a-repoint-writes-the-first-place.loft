@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A write through a link reaches the place it names at that moment (`@FR-B-Ref-Write`), and a
+// later re-point (`@FR-B-Ref-Repoint`) does not take the write back: `p = &a; p = 4; p = &b`
+// wrote `a`.  So a `&` parameter written that way IS modified, and the program compiles.
+//
+// Before loft#2425 the check that refuses a `&` parameter never written kept ONE source per
+// link — the last — so the re-point credited the earlier write to `b` and refused the correct
+// `&a` with "has & but is never modified".
+//
+// The cells that can FAIL (the whole file was refused):
+//   c1  an `integer` parameter written, then the link re-pointed to a local
+//   c2  a `text` parameter appended to, then the link re-pointed
+//   c3  a record parameter's field written, then the link re-pointed
+//   c4  two parameters, the link re-pointed from one to the other with a write to each
+//
+// The control, which a too-wide fix would move: the refusal itself still fires for a link
+// that is only read, which is a diagnostic test in this repository's Rust suite.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: no instrument.  Ordinary assertions on every backend.
+//   WITNESS: the control refuses the file, "Parameter 'a' has & but is never modified", on both
+//   backends.
+//   HOLDS: leak, panic and free-refusal are clean on both trees and both backends; the
+//   compile is the whole measurement, and HERE passes every assertion.
+//
+// CHANNEL: the compile (the file was refused) and the assertions.
+
+struct B { n: integer }
+
+fn c1(a: &integer) -> integer { b = 10; p = &a; p = 4; p = &b; p += 1; b }
+fn c2(a: &text) -> text { b = "z"; p = &a; p += "!"; p = &b; b }
+fn c3(a: &B) -> integer { b = B { n: 1 }; p = &a; p.n = 7; p = &b; b.n }
+fn c4(a: &integer, c: &integer) { p = &a; p = 1; p = &c; p = 2; }
+
+fn test_a_write_before_a_repoint() {
+  x = 1;
+  assert(c1(x) == 11 && x == 4, "c1: {x}");
+  t = "hi";
+  assert(c2(t) == "z" && t == "hi!", "c2: {t}");
+  r = B { n: 0 };
+  assert(c3(r) == 1 && r.n == 7, "c3: {r.n}");
+  m = 0;
+  n = 0;
+  c4(m, n);
+  assert(m == 1 && n == 2, "c4: {m} {n}");
+}
