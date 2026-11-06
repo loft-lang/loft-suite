@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-OutOfLine` under two rewrites that must leave every value as the copy leaves it:
+//   * the MOVE — `h.f = <a child read rooted at h.f's own child>` (`cur = cur.left` through a
+//     field link, `t.left = t.left.right`) installs the child by its number instead of copying
+//     the surviving subtree; a view of the replaced child live across it reads the OLD value
+//     (the write may be null, so the view is copied at its bind);
+//   * the in-place LITERAL — `t.left = Tree { … }` is built in the field's child: a present
+//     child keeps its record, so a view OF it reads the NEW value, a view deeper reads the old.
+// Hand-computed.  CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with both rewrites and without
+//   them (`LOFT_NO_MOVE_CHILD=1 LOFT_NO_CHILD_LITERAL=1`).
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn size(t: Tree?) -> integer { if t == null { return 0; } 1 + size(t.left) + size(t.right) }
+fn total(t: Tree?) -> integer { if t == null { return 0; } t.k + total(t.left) + total(t.right) }
+fn keys(t: Tree?) -> text {
+  if t == null { return ""; }
+  "{keys(t.left)}{t.k} {keys(t.right)}"
+}
+fn sample() -> Tree {
+  Tree { k: 50, left: Tree { k: 30, left: Tree { k: 20, right: Tree { k: 25 } }, right: Tree { k: 40 } }, right: Tree { k: 70 } }
+}
+fn unlink(t: Tree, k: integer) {
+  cur = &t.left;
+  while cur != null && cur.k != k { if k < cur.k { cur = &cur.left; } else { cur = &cur.right; } }
+  if cur == null { return; }
+  if cur.left == null { cur = cur.right; } else { cur = cur.left; }
+}
+fn insert(t: Tree, k: integer) {
+  cur = &t.left;
+  if k > t.k { cur = &t.right; }
+  while cur != null { if k < cur.k { cur = &cur.left; } else { cur = &cur.right; } }
+  cur = Tree { k: k, left: null, right: null };
+}
+
+fn main() {
+  t1 = sample();
+  unlink(t1, 20);
+  assert(keys(t1) == "25 30 40 50 70 ", "unlink a node with one child: {keys(t1)}");
+  unlink(t1, 40);
+  assert(keys(t1) == "25 30 50 70 ", "unlink a leaf (the move of null): {keys(t1)}");
+  t2 = sample();
+  t2.left = t2.left.left.right;
+  assert(keys(t2) == "25 50 70 ", "a deep chain: {keys(t2)}");
+  t3 = sample();
+  v = t3.left;
+  t3.left = t3.left.right;
+  assert(v.k == 30 && keys(t3) == "40 50 70 ", "a view across the move reads the old child: {v.k}");
+  t4 = sample();
+  w = t4.left;
+  deep = t4.left.left;
+  t4.left = Tree { k: 33 };
+  assert(w.k == 33 && deep.k == 20 && keys(t4) == "33 50 70 ", "a literal in a present child: {w.k} {deep.k}");
+  t5 = Tree { k: 50 };
+  for i in 0..300 { insert(t5, (i * 37) % 101 + 1); }
+  assert(size(t5) == 301 && total(t5) == 15318, "300 inserts: {size(t5)} {total(t5)}");
+  t6 = sample();
+  t6.left = Tree { k: (t6.right.k ?? 0) + 1 };
+  assert(keys(t6) == "71 50 70 ", "a literal that reads a record keeps the copy: {keys(t6)}");
+  println("move and child literal ok");
+}
