@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `yield` of a `&τ` local yields the VALUE the link names (`@FR-B-Ref-Uniform`: a `&τ` is
+// used exactly like a `τ`), and that value is the consumer's (`@FR-G-Own`): an existing
+// record is yielded as a copy, so a later write through the link does not reach what the
+// consumer already holds.
+//
+// Before loft#2420 the yield site read neither rule.  At a RECORD link it saw the link's
+// type, which `coroutine_layout::yield_handed_over` does not name as a heap value, so no
+// copy was made and the consumer's first record tracked the generator's later write — `5 5`
+// for `1 5`, silently, on both backends.  At a SCALAR link the interpreter sized the
+// channel by the link (12 bytes) while `generate_var` had pushed the 8-byte value through
+// it: no value came out, a `BUG (#306)` free was refused and the run ended in SIGBUS, while
+// `--native-c` answered correctly (`@FR-O-NoDiverge`).
+//
+// The cells that can FAIL:
+//   c1  an `integer` link                       — interpreter yielded nothing / crashed
+//   c2  a `float` link                          — likewise
+//   c3  a record link to a PARAMETER            — `5 5 5`: the consumer's value aliased
+//   c4  a record link to a LOCAL                — `5 5`
+//   c5  a struct-enum link written through      — the hand-over the record cells share
+//
+// The controls, each of which a too-wide fix would move:
+//   c6  a text link to a local                  — already correct
+//   c7  a vector link                           — already correct
+//   c8  a tuple link                            — already correct
+//   c9  a record link to a FIELD                — already correct
+//   c10 a record link written in a loop         — each pass yields its own copy
+//   c11 the bound workaround `x = c; yield x`   — the shape that always worked
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 2 assertion failures -> 0
+//
+// CHANNEL: the assertions; on the interpreter also the crash and the `BUG (#306)` line.
+
+struct Box { n: integer }
+struct O { b: Box }
+enum E { A { n: integer }, B }
+
+fn ints(b: integer) -> iterator<integer> { c = &b; yield c; c += 3; yield c; }
+fn floats() -> iterator<float> { t = 1.5; c = &t; yield c; c += 1.0; yield c; }
+fn rec_param(b: Box) -> iterator<Box> { r = &b; yield r; r.n = 5; yield r; }
+fn rec_local() -> iterator<Box> { b = Box { n: 1 }; r = &b; yield r; r.n = 5; yield r; }
+fn enums() -> iterator<E> { e: E = A { n: 1 }; c = &e; yield c; c = A { n: 7 }; yield c; }
+fn texts() -> iterator<text> { t = "hi"; c = &t; yield c; c += "!"; yield c; }
+fn vecs() -> iterator<vector<integer>> { t = [1]; c = &t; yield c; c += [2]; yield c; }
+fn tuples() -> iterator<(integer, integer)> { t = (1, 2); c = &t; yield c; c.0 = 5; yield c; }
+fn fields() -> iterator<Box> { o = O { b: Box { n: 1 } }; r = &o.b; yield r; r.n = 9; yield r; }
+fn looped() -> iterator<Box> { b = Box { n: 0 }; r = &b; for i in 0..3 { r.n = i; yield r; } }
+fn bound(b: integer) -> iterator<integer> { c = &b; x = c; yield x; c += 3; x = c; yield x; }
+
+fn ints_of(g: iterator<integer>) -> text { r = ""; for v in g { r += "{v} "; } r }
+
+fn test_scalar_links() {
+  assert(ints_of(ints(200)) == "200 203 ", "c1: {ints_of(ints(200))}");
+  r = ""; for v in floats() { r += "{v} "; }
+  assert(r == "1.5 2.5 ", "c2: {r}");
+  assert(ints_of(bound(200)) == "200 203 ", "c11: {ints_of(bound(200))}");
+}
+
+fn test_record_links_yield_a_copy() {
+  bx = Box { n: 1 };
+  it = rec_param(bx);
+  x = next(it);
+  y = next(it);
+  assert(x.n == 1 && y.n == 5 && bx.n == 5, "c3: {x.n} {y.n} {bx.n}");
+  it2 = rec_local();
+  x2 = next(it2);
+  y2 = next(it2);
+  assert(x2.n == 1 && y2.n == 5, "c4: {x2.n} {y2.n}");
+  r = ""; for v in enums() { r += match v { A { n } => "A{n} ", B => "B " }; }
+  assert(r == "A1 A7 ", "c5: {r}");
+}
+
+fn test_the_controls() {
+  r = ""; for v in texts() { r += "{v} "; }
+  assert(r == "hi hi! ", "c6: {r}");
+  iv = vecs();
+  a = next(iv);
+  b = next(iv);
+  assert(len(a) == 1 && len(b) == 2, "c7: {len(a)} {len(b)}");
+  it = tuples();
+  t1 = next(it);
+  t2 = next(it);
+  assert(t1.0 == 1 && t2.0 == 5 && t2.1 == 2, "c8: {t1.0} {t2.0} {t2.1}");
+  itf = fields();
+  f1 = next(itf);
+  f2 = next(itf);
+  assert(f1.n == 1 && f2.n == 9, "c9: {f1.n} {f2.n}");
+  keep: vector<Box> = [];
+  for v in looped() { keep += [v]; }
+  assert(keep[0].n == 0 && keep[1].n == 1 && keep[2].n == 2, "c10: {keep[0].n} {keep[1].n} {keep[2].n}");
+}
