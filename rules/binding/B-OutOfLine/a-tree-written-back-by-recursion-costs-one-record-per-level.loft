@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// The textbook recursion over a search tree — `t.left = insert(t.left, k)`, `t.right =
+// delete(t.right, k)` — writes back into an out-of-line field (`@FR-B-OutOfLine`) the record
+// the callee hands back: its argument, a child of its argument, or a fresh leaf.  The write
+// copies only what is new: the child the field already holds stays as it is, and a fresh leaf's
+// store is released after its one record is copied in.  So an insert or a delete costs one record
+// per level, never the subtree below it.
+//
+// Before, the result was lifted into an owned temp whose bind deep-copied the argument's whole
+// subtree, and the write copied it again — a tree built this way cost O(n²): 2,000 keys took
+// three times as long as 1,000 on both backends.  This cell inserts 100,000 keys and deletes a
+// third of them; on the old build that does not finish inside the suite's time limit.
+//
+// The small tree is hand-checked; the large one's size and in-order checksum come from an
+// independent Python run of the same code.
+//
+// CHANNEL: the assertions, the time bound, and the leak gate.
+//
+// @falsified-at: 0e95172cd — interpret exit 124 -> 0, native exit 1 -> 0
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn key(i: integer) -> integer { ((i * 1103515245 + 12345) % 2147483648) % 100000 }
+
+fn insert(t: Tree?, k: integer) -> Tree {
+  if t == null { return Tree { k: k, left: null, right: null }; }
+  if k < t.k { t.left = insert(t.left, k); } else if k > t.k { t.right = insert(t.right, k); }
+  t!
+}
+
+fn min_key(t: Tree) -> integer { if t.left == null { t.k } else { min_key(t.left!) } }
+
+fn remove(t: Tree?, k: integer) -> Tree? {
+  if t == null { return null; }
+  if k < t.k { t.left = remove(t.left, k); return t; }
+  if k > t.k { t.right = remove(t.right, k); return t; }
+  if t.left == null { return t.right; }
+  if t.right == null { return t.left; }
+  m = min_key(t.right!);
+  t.k = m;
+  t.right = remove(t.right, m);
+  t
+}
+
+fn show(t: Tree?) -> text { if t == null { "." } else { "({show(t.left)} {t.k} {show(t.right)})" } }
+fn size(t: Tree?) -> integer { if t == null { 0 } else { 1 + size(t.left) + size(t.right) } }
+fn walk(t: Tree?, acc: integer) -> integer { if t == null { acc } else { walk(t.right, (walk(t.left, acc) * 31 + t.k) % 1000000007) } }
+
+fn test_a_small_tree() {
+  t: Tree? = null;
+  for k in [50, 30, 70, 20, 40, 60, 80] { t = insert(t, k); }
+  assert(show(t) == "(((. 20 .) 30 (. 40 .)) 50 ((. 60 .) 70 (. 80 .)))", "built: {show(t)}");
+  for k in [20, 30, 50] { t = remove(t, k); }
+  assert(show(t) == "((. 40 .) 60 (. 70 (. 80 .)))", "after removal: {show(t)}");
+}
+
+fn test_a_large_tree_in_linear_time() {
+  t: Tree? = null;
+  for i in 0..100000 { t = insert(t, key(i)); }
+  assert(size(t) == 75052 && walk(t, 7) == 708858689, "built: {size(t)} {walk(t, 7)}");
+  for i in 0..100000 { if i % 3 == 0 { t = remove(t, key(i)); } }
+  assert(size(t) == 50034 && walk(t, 7) == 979708242, "thinned: {size(t)} {walk(t, 7)}");
+}
