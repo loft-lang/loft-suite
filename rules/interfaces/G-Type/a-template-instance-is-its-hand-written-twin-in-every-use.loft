@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-Type` crossed with `@FR-G-Mono` and `@FR-L-OutOfLine`: a template instance behaves as
+// its hand-written twin — a recursive `List<T>` holds its tail out of line at `text` and at
+// `integer`, a generic function over it specialises per instance, a template built inside a
+// generic function takes the caller's instance.  And `@FR-G-Select`: a concrete definition beats
+// a generic one for its own type, the generic takes every other.  Every cell held on both
+// backends when written; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+
+struct List<T> { v: T, next: List<T>? }
+struct Pair<T> { a: T, b: T }
+struct P { n: integer }
+
+fn len_of<T>(l: List<T>) -> integer { c = 0; cur: List<T>? = l; while cur != null { c += 1; cur = cur.next; } c }
+fn swap<T>(p: Pair<T>) -> Pair<T> { Pair { a: p.b, b: p.a } }
+fn show<T>(x: T) -> text { "gen" }
+fn show(x: integer) -> text { "int" }
+
+fn test_a_recursive_template() {
+  a: List<text> = List { v: "a", next: List { v: "b", next: List { v: "c", next: null } } };
+  b: List<integer> = List { v: 1, next: List { v: 2, next: null } };
+  assert(len_of(a) == 3 && (a.next.next.v ?? "-") == "c" && len_of(b) == 2, "lists");
+  pi: Pair<integer> = Pair { a: 1, b: 2 };
+  pt: Pair<text> = Pair { a: "x", b: "y" };
+  i = swap(pi);
+  t = swap(pt);
+  assert("{i.a} {i.b} {t.a} {t.b}" == "2 1 y x", "swap");
+}
+
+fn test_a_concrete_definition_beats_the_generic() {
+  assert("{show(1)} {show("a")} {show(P { n: 1 })}" == "int gen gen", "select");
+}

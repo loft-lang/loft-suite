@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-OutOfLine` crossed with `@FR-B-View` and `@FR-L-OutOfLine`: a read of an out-of-line
+// field is a VIEW of the child; a write of a record into a present child lands IN PLACE, so the
+// view reads the new value; a write of null releases the child and DISTURBS the field, so the
+// view keeps what it had (`@FR-B-Disturb`); `h.f = h.f.g` reads before it releases.  A copy of
+// the whole list is deep (`@FR-B-Copy`), equality walks it (`@FR-E-Eq`), and it renders nested
+// (`@FR-F-Render-Child`).  Every cell held on both backends when written, with the leak gate
+// armed; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct Node { v: integer, next: Node? }
+
+fn mk3() -> Node { Node { v: 1, next: Node { v: 2, next: Node { v: 3, next: null } } } }
+fn count(n: Node) -> integer { c = 0; cur: Node? = n; while cur != null { c += 1; cur = cur.next; } c }
+
+fn test_a_view_across_writes() {
+  h = mk3();
+  c = h.next;
+  h.next = Node { v: 9, next: null };
+  assert((c.v ?? -1) == 9 && count(h) == 2, "in place: {c.v ?? -1}");
+  g = mk3();
+  d = g.next;
+  g.next = null;
+  assert((d.v ?? -1) == 2 && count(g) == 1, "null: {d.v ?? -1}");
+  k = mk3();
+  k.next = k.next.next;
+  assert(count(k) == 2 && (k.next.v ?? -1) == 3, "self-referential: {count(k)}");
+}
+
+fn test_copy_compare_render() {
+  a = mk3();
+  b = a;
+  b.next.v = 99;
+  c = mk3();
+  assert((a.next.v ?? -1) == 2 && (b.next.v ?? -1) == 99 && a != b && a == c, "copy and compare");
+  assert("{a}" == "{{v:1,next:{{v:2,next:{{v:3,next:null}}}}}}", "render: {a}");
+}

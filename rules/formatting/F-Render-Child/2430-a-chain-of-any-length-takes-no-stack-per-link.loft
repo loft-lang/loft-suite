@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A record's LAST field's out-of-line child is parsed, rendered, copied, compared and RELEASED
+// as a loop (`@FR-F-Render-Child`, over `@FR-L-OutOfLine`), so a list of any length takes no
+// stack per link.
+//
+// Before loft#2430 the release was the one walk left recursive — `remove_claims_mode` →
+// `remove_struct_claims` → … once per link — and displacing a list of 20 000 records overflowed
+// the interpreter's stack.  The chains here are built by a text parse, which takes linear time;
+// a list grown by `h = Node { v: i, next: h }` copies the whole tail every round.
+//
+// The cells (200 000 links each — 20 000 sat at the edge of an 8 MB stack, crashing on one run
+// of the old build and not the next):
+//   c1  a parsed chain displaced by a rebind    — SIGSEGV
+//   c2  a parsed chain released by a null write into the field that holds it
+//   c3  a copy of a chain, compared with it, both released at the end
+//   c4  a chain rendered back to text
+//
+// @falsified-at: 0e95172cd — interpret exit 139 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move): `--native-c` released the chain as a loop.
+//   ARMED: no instrument; the stack overflow is a plain run's exit.
+//   WITNESS: the control exits 139 (SIGSEGV) at c1, in `release_by_plan` 200 000 frames deep.
+//   HOLDS: leak and free-refusal are clean on both trees; HERE passes every assertion.
+//
+// A `main` program, not `test_*` functions: the test runner runs a test on a larger stack, where
+// 20 000 links fit, and the defect is the release's depth on an ordinary run.
+//
+// CHANNEL: the exit (a stack overflow), the assertions, and the leak gate.
+
+struct Node { v: integer, next: Node? }
+
+fn text_of(n: integer) -> text {
+  s = "";
+  for i in 0..n { s += "{{v:{i},next:"; }
+  s += "null";
+  for i in 0..n { s += "}}"; }
+  s
+}
+
+fn main() {
+  t = text_of(200000);
+  a = Node.parse(t);
+  first = a.v;
+  a = Node { v: -1, next: null };
+  assert(first == 0 && a.v == -1, "c1: {first} {a.v}");
+  h = Node { v: 7, next: Node.parse(t) };
+  h.next = null;
+  assert(h.v == 7 && h.next == null, "c2");
+  b = Node.parse(t);
+  c = b;
+  assert(b == c, "c3");
+  r = "{b}";
+  assert(len(r) == len(t), "c4: {len(r)} {len(t)}");
+  println("a chain of any length takes no stack per link");
+}
