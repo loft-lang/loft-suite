@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// The library half of 2436-a-programs-vector-of-a-library-droppable-is-released-once.loft: a
+// The library half of 2436-a-programs-vector-of-a-library-droppable-is-released-once.loft
+// (`@FR-H-Drop`): a
 // droppable `H`, a `Pair` that holds one, and two functions over `vector<Pair>`, so the
 // library declares its own `vector<Pair>` beside the program's `vector<hdrop_2436_lib::Pair>`.
 // Each drop appends its id to a trace file the program reads back.
