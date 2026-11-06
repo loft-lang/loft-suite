@@ -1,0 +1,110 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `&` link (`@FR-B-Ref-Alias`) crossed with the rules it meets most often and that no cell
+// cited together: a tuple literal built from a link (`@FR-T-Cons`), a link to a tuple member
+// (`@FR-B-Ref-Lvalue` with `@FR-T-Record`), a `&(…)` local destructured (`@FR-B-Ref-Intro`
+// with `@FR-T-Ref`), a re-point followed by a write (`@FR-B-Ref-Repoint` with
+// `@FR-B-Ref-Write`) in straight code, a branch, a loop, at an element and at a field, a
+// heap write through a link to a field or an element (`@FR-B-Ref-Write` with
+// `@FR-B-Ref-Lvalue`), and a link handed on to a `&` parameter
+// (`@FR-F-ParamRef`).  Every cell held on both backends when written; each expected value is
+// hand-computed from the rule it cites, and the leak gate covers the heap writes that
+// displace a value.  The ledger row for each pair is in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer }
+struct O { s: S, k: integer }
+struct T { s: text }
+struct V { v: vector<integer> }
+struct Q { s: text }
+
+fn add(v: &vector<integer>, x: integer) { v += [x]; }
+
+fn test_a_tuple_literal_copies_what_a_link_names() {
+  // T-Cons: a member read through a link is copied in; the later write reaches the source only.
+  a = (1, "x");
+  c = &a.1;
+  c = "yy";
+  t = (a.1, 5);
+  c = "zzz";
+  assert(a.1 == "zzz" && t.0 == "yy", "c01: {a.1} {t.0}");
+  v = [1, 2];
+  p = &v;
+  t2 = (p, 3);
+  p += [9];
+  assert(len(v) == 3 && len(t2.0) == 2, "c02: {len(v)} {len(t2.0)}");
+}
+
+fn test_a_link_to_a_tuple_member() {
+  a = ([1], 2);
+  c = &a.0;
+  c += [5];
+  assert(len(a.0) == 2 && a.1 == 2, "c19: {len(a.0)} {a.1}");
+  b = (1, 2);
+  r = &b;
+  (x, y) = r;
+  r.0 = 9;
+  assert(x == 1 && y == 2 && b.0 == 9, "c16: {x} {y} {b.0}");
+}
+
+fn pick(c: boolean) -> text { a = S { n: 1 }; b = S { n: 2 }; p = &a; if c { p = &b; } p.n = 9; "{a.n} {b.n}" }
+
+fn test_a_repoint_then_a_write() {
+  a = "ab";
+  b = "cde";
+  p = &a;
+  p = &b;
+  p = "Z";
+  assert(a == "ab" && b == "Z", "c03: {a} {b}");
+  i1 = 1;
+  i2 = 2;
+  q = &i1;
+  for i in 0..3 { if i == 1 { q = &i2; } q += 10; }
+  assert(i1 == 11 && i2 == 22, "c04: {i1} {i2}");
+  assert(pick(true) == "1 9" && pick(false) == "9 2", "c05: {pick(true)} {pick(false)}");
+  v = [S { n: 1 }, S { n: 2 }];
+  e = &v[0];
+  e = &v[1];
+  e.n = 8;
+  assert(v[0].n == 1 && v[1].n == 8, "c09: {v[0].n} {v[1].n}");
+  o1 = V { v: [1] };
+  o2 = V { v: [2, 3] };
+  f = &o1.v;
+  f = &o2.v;
+  f += [4];
+  assert(len(o1.v) == 1 && len(o2.v) == 3, "c22: {len(o1.v)} {len(o2.v)}");
+  q1 = Q { s: "q" };
+  q2 = Q { s: "r" };
+  t = &q1.s;
+  t = &q2.s;
+  t = "zz";
+  assert(q1.s == "q" && q2.s == "zz", "c25: {q1.s} {q2.s}");
+}
+
+fn test_a_heap_write_through_a_link() {
+  o = O { s: S { n: 1 }, k: 7 };
+  p = &o.s;
+  p = S { n: 5 };
+  assert(o.s.n == 5 && o.k == 7, "c07: {o.s.n} {o.k}");
+  v = [S { n: 1 }, S { n: 2 }];
+  e = &v[1];
+  e.n = 7;
+  assert(v[0].n == 1 && v[1].n == 7, "c08: {v[0].n} {v[1].n}");
+  w = [1];
+  pw = &w;
+  for i in 0..3 { pw = [i, i]; }
+  assert(len(w) == 2 && w[1] == 2, "c06: {len(w)} {w[1]}");
+  d = T { s: "a" };
+  pd = &d;
+  for i in 0..3 { pd = T { s: "x{i}" }; }
+  assert(d.s == "x2", "c21: {d.s}");
+}
+
+fn test_a_link_handed_to_a_ref_parameter() {
+  v: vector<integer> = [];
+  p = &v;
+  for i in 0..3 { add(p, i); }
+  assert(len(v) == 3 && v[2] == 2, "c18: {len(v)}");
+}
