@@ -13,6 +13,7 @@
 // be passed at all ("Cannot pass a literal or expression to a '&' parameter").
 //
 // A view live across such a call is copied at its bind, as for the direct possibly-null write.
+// A `&` variable drained to null by its callee releases its store with the last write.
 // Hand-computed on t = 50(30(_, 40), 70(60, _)) unless a cell builds its own tree.
 //
 // CHANNEL: the assertions and the leak gate.
@@ -81,6 +82,12 @@ fn main() {
   for i in 0..20 { add(u, (i * 37) % 101); }
   e = take_min(u);
   assert("{e} {u.k} {size(u)}" == "0 5 20", "variable {e} {u.k} {size(u)}");
+  // a whole variable drained to null by its callee: each write keeps the store (a view of its
+  // own child) until the last, which releases it — the leak gate reads the release
+  w: Tree? = sample();
+  drained = 0;
+  while w != null { drained += take_min(w); }
+  assert(drained == 50 + 30 + 40 + 70 + 60, "every key taken: {drained}");
   // a callee declared after its caller is handed the field too
   assert(late() == "2 120", "late {late()}");
   // a view live across the call is disturbed as by a write that may be null: copied at its bind
