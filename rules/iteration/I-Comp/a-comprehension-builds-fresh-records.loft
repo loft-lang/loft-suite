@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Comp` crossed with `@FR-H-Alloc` and `@FR-H-NewRec`: a comprehension's result is a
+// FRESH vector of fresh records — built from a literal, copied from another vector's records,
+// filtered from texts — so writing it leaves the source as it was, and rebuilding it in a loop
+// releases what the last round built.  Every cell held on both backends when written, with the
+// leak gate armed; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, t: text }
+struct V { n: integer, v: vector<integer> }
+
+fn test_fresh_records() {
+  xs = [for i in 0..3 { S { n: i, t: "x{i}" } }];
+  ys = [for x in xs { x }];
+  ys[0].n = 99;
+  assert(xs[0].n == 0 && ys[0].n == 99 && xs[2].t == "x2" && len(ys) == 3, "records");
+  ts = ["a", "b", "c", "d"];
+  us = [for x in ts if x == "b" || x == "d" { x }];
+  us[0] += "!";
+  assert(len(us) == 2 && us[0] == "b!" && ts[1] == "b" && len(ts) == 4, "texts");
+  r: vector<V> = [];
+  for k in 0..5 { r = [for i in 0..k { V { n: i, v: [i, i] } }]; }
+  assert(len(r) == 4 && r[3].n == 3 && len(r[3].v) == 2, "rebuilt in a loop");
+}
