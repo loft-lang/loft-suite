@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Rest` crossed with `@FR-P-Seq` and `@FR-P-Cap`: a rest takes what the fixed patterns
+// around it leave, wherever it stands in the sequence, and it is a FRESH vector — writing it
+// changes nothing in the subject, at scalar, record and text elements, returned from a
+// function and taken in a loop.  `@FR-P-Rep-Scalar`'s typed repetition is the same rest.  A
+// field is a subject like a local.  Every cell held on both backends when written, with the
+// leak gate armed; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer }
+struct O { v: vector<integer> }
+
+fn middle(v: vector<integer>) -> text { match v { [a, ..m, z] => "{a} {len(m)} {z}", _ => "x" } }
+fn tail(v: vector<text>) -> vector<text> { match v { [_, ..t] => t, _ => [] } }
+fn typed(v: vector<integer>) -> text { match v { [xs:integer*, last] => "{len(xs)} {last}", _ => "x" } }
+
+fn test_where_a_rest_stands() {
+  assert(middle([1, 2, 3, 5]) == "1 2 5", "middle: {middle([1, 2, 3, 5])}");
+  assert(typed([1, 2, 3, 7]) == "3 7", "typed: {typed([1, 2, 3, 7])}");
+  o = O { v: [4, 5, 6] };
+  r = match o.v { [h, ..t] => "{h} {len(t)}", _ => "x" };
+  assert(r == "4 2", "a field: {r}");
+}
+
+fn test_a_rest_is_fresh() {
+  v = [1, 2, 3];
+  r = match v { [_, ..t] => t, _ => [] };
+  r[0] = 9;
+  assert(r[0] == 9 && v[1] == 2 && len(v) == 3, "scalars: {v[1]}");
+  w = [S { n: 1 }, S { n: 2 }];
+  q = match w { [_, ..t] => t, _ => [] };
+  q[0].n = 9;
+  assert(q[0].n == 9 && w[1].n == 2, "records: {w[1].n}");
+  x = ["a", "b", "c"];
+  s: vector<text> = [];
+  for i in 0..3 { s = tail(x); }
+  assert(s[0] == "b" && s[1] == "c" && len(x) == 3, "texts, returned in a loop: {s[0]}{s[1]}");
+}
