@@ -1,0 +1,97 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Version`'s NEST CLAUSE — a counted loop holding one innermost counted loop, whose seed
+// and end are invariant over it, decides that inner loop's versioned calls once per entry of
+// the OUTER loop: the leaf's precondition asked at every corner of the two counters' box (a
+// linear test takes its extremes there).  Every sum below is computed by hand.
+//
+// @falsified-at: a build asking only the box's two diagonal corners — native-c failed n2
+//   (824633721055: the fast `diff` read before the vector where x < y), and its -DLOFT_VERIFY
+//   build aborted at the proven index -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with versioning and without it
+//   (`LOFT_NO_VERSION=1`).
+
+struct Grid { w: integer, h: integer, cells: vector<integer> }
+
+fn at(self: const Grid, x: integer, y: integer) -> integer {
+  if x < 0 or x >= self.w or y < 0 or y >= self.h {
+    0
+  } else {
+    i = y * self.w + x;
+    d = &self.cells;
+    if i < len(d) { d[i] ?? 0 } else { 0 }
+  }
+}
+
+fn put(self: Grid, x: integer, y: integer, v: integer) {
+  if x >= 0 and x < self.w and y >= 0 and y < self.h {
+    i = y * self.w + x;
+    d = &self.cells;
+    if i < len(d) { d[i] = v; }
+  }
+}
+
+// The element `x - y` places past the first, or -1: a test whose least value over a box of
+// (x, y) lies at the corner (least x, greatest y).
+fn diff(self: const Grid, x: integer, y: integer) -> integer {
+  if x - y >= 0 and x - y < self.w {
+    d = &self.cells;
+    d[x - y] ?? 0
+  } else {
+    -1
+  }
+}
+
+fn grid(w: integer, h: integer, base: integer) -> Grid {
+  g = Grid { w: w, h: h, cells: [] };
+  for k in 0..w * h { g.cells += [base + k]; }
+  g
+}
+
+// Copies the w × h box at (sx, sy) of `src` to row 0, column dx of `dst`; answers the sum read.
+fn blit(dst: Grid, src: const Grid, sx: integer, sy: integer, dx: integer, w: integer,
+        h: integer) -> integer {
+  s = 0;
+  for py in 0..h {
+    for px in 0..w {
+      v = src.at(sx + px, sy + py);
+      dst.put(dx + px, py, v);
+      s += v;
+    }
+  }
+  s
+}
+
+fn diffs(g: const Grid, n: integer) -> integer {
+  s = 0;
+  for y in 0..n {
+    for x in 0..n { s += g.diff(x, y); }
+  }
+  s
+}
+
+fn main() {
+  src = grid(8, 8, 0);
+  // n1 — the 4 × 3 box at (2, 1): rows 1..3 read 8r+2 .. 8r+5, 4 × 8r + 14 each;
+  //   (32 + 14) + (64 + 14) + (96 + 14) = 234.  dst (0, 0) gets src (2, 1) = 10.
+  d1 = grid(8, 8, 1000);
+  s1 = blit(d1, src, 2, 1, 0, 4, 3);
+  assert(s1 == 234 && d1.cells[0] == 10 && d1.cells[19] == 29 && d1.cells[4] == 1004,
+         "n1 {s1} {d1.cells[0]} {d1.cells[19]} {d1.cells[4]}");
+  // n2 — x and y over 0..4 with cells 0..7 (w = 8): x - y = k >= 0 for 4 - k pairs, reading k:
+  //   0·4 + 1·3 + 2·2 + 3·1 = 10; the 6 pairs with x < y answer -1: 10 - 6 = 4.
+  assert(diffs(src, 4) == 4, "n2 {diffs(src, 4)}");
+  // n3 — the box at (6, 6), 4 × 4, runs off the grid: only (6..7, 6..7) are in it,
+  //   54 + 55 + 62 + 63 = 234; every dst cell of the box is written, 0 where the source is
+  //   off the grid (dst (2, 0)), and dst (4, 0) is past the box.
+  d3 = grid(8, 8, 1000);
+  s3 = blit(d3, src, 6, 6, 0, 4, 4);
+  assert(s3 == 234 && d3.cells[0] == 54 && d3.cells[9] == 63 && d3.cells[2] == 0
+         && d3.cells[4] == 1004, "n3 {s3} {d3.cells[0]} {d3.cells[9]} {d3.cells[2]} {d3.cells[4]}");
+  // n4 — an empty inner range: nothing read or written.
+  d4 = grid(8, 8, 1000);
+  assert(blit(d4, src, 0, 0, 0, 0, 5) == 0 && d4.cells[0] == 1000, "n4");
+  println("nest version ok");
+}
