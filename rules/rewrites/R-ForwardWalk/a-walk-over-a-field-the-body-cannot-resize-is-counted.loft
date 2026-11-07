@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-ForwardWalk` field clause — `for p in d.f` over a field the body cannot resize runs as
+// a counted loop, the length read once; a body that hands `d` whole to a call, a second record
+// parameter that may be `d`, or a rebind of `d` keep the walk re-reading.  A record parameter of
+// scalars only (a `Cell` result, a `&Cell` accumulator) is not one that may be `d`.  Every
+// expected value is computed by hand from the walk as written.
+//
+// @falsified-at: a build admitting every field walk without the record check — native-c and
+//   interpret m3 failed (`wipe(w)` clears the walked field after round one; the counted walk
+//   read on past it) -> ok; and one exempting every record parameter, not only scalar ones —
+//   both backends answered null for m4 (`both(w4, w4)`) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends, with the clause and without it
+//   (`LOFT_NO_FORWARD_WALK=1`).
+
+struct Ck { a: integer, b: integer }
+struct W { cs: vector<Ck>, other: vector<Ck>, n: integer }
+struct Cell { x: integer, y: integer }
+
+fn mk() -> W {
+  W { cs: [Ck { a: 1, b: 10 }, Ck { a: 2, b: 20 }, Ck { a: 3, b: 30 }], other: [], n: 7 }
+}
+// m1: plain field walk, early return
+fn find(w: W, x: integer) -> integer {
+  for c in w.cs { if c.a == x { return c.b; } }
+  -1
+}
+// m2: body pushes onto ANOTHER field of the root: admitted, 3 rounds
+fn copy_other(w: &W) -> integer {
+  k = 0;
+  for c in w.cs { w.other += [Ck { a: c.a, b: c.b }]; k += 1; }
+  k * 100 + len(w.other)
+}
+// m3: the root handed whole to a call that clears the walked field: must stop after round 1
+fn wipe(w: &W) { w.cs.clear(); }
+fn walk_wipe(w: &W) -> integer {
+  k = 0;
+  for c in w.cs { k += c.b; wipe(w); }
+  k
+}
+// m4: two parameters naming one record: `b` clears `a.cs` part-way
+fn both(a: W, b: &W) -> integer {
+  k = 0;
+  for c in a.cs { k += c.b; b.cs.clear(); }
+  k
+}
+// m5: a scalar-record result written through a hidden buffer while walking
+fn pick(w: W, x: integer) -> Cell {
+  for c in w.cs { if c.a == x { return Cell { x: c.a, y: c.b }; } }
+  Cell { x: 0, y: 0 }
+}
+// m6: a scalar-record `&` parameter written in the body: admitted
+fn sum_into(w: W, out: &Cell) {
+  for c in w.cs { out.x += c.a; out.y += c.b; }
+}
+// m7: root reassigned in the body
+fn rebind(w: &W) -> integer {
+  k = 0;
+  for c in w.cs { k += c.b; w = W { cs: [], other: [], n: 0 }; }
+  k
+}
+fn main() {
+  w = mk();
+  assert(find(w, 2) == 20 && find(w, 4) == -1, "m1 {find(w, 2)}");
+  w2 = mk();
+  r2 = copy_other(w2);
+  assert(r2 == 303, "m2 {r2}");
+  w3 = mk();
+  r3 = walk_wipe(w3);
+  assert(r3 == 10, "m3 {r3}");
+  w4 = mk();
+  r4 = both(w4, w4);
+  assert(r4 == 10, "m4 {r4}");
+  p = pick(w, 3);
+  assert(p.x == 3 && p.y == 30, "m5 {p.x} {p.y}");
+  o = Cell { x: 0, y: 0 };
+  sum_into(w, o);
+  assert(o.x == 6 && o.y == 60, "m6 {o.x} {o.y}");
+  w7 = mk();
+  r7 = rebind(w7);
+  assert(r7 == 60, "m7 {r7}");
+  println("ok");
+}
