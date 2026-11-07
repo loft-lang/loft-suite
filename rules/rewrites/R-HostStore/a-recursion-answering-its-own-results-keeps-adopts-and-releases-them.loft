@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-HostStore`, the RESULT clause — `simplify` binds `a = simplify(l)`, `b = simplify(r)`
+// and answers `b`, `a`, a node over both or a fresh literal.  Every result is built in the store
+// of the first result on its path; a node adopts its children by number, a result answered is
+// answered as it is, and a result a path drops is released record by record while the store
+// lives on for the answer.  Each cell's value is computed by hand; the leak gate holds the
+// release of every dropped result, and the loop of rebinds holds it at scale.
+//
+// @falsified-at: a build of this clause that left the adopted local holding its record (no null
+//   after the adoption), so the exit released a record the node had adopted: interpret,
+//   native-c and native failed "a node kept" (the first assert) -> ok.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with the clause and without
+//   it (`LOFT_NO_HOST_RESULT=1`).
+
+enum Expr { Num { v: integer }, Add { l: Expr, r: Expr }, Mul { l: Expr, r: Expr } }
+struct H { e: Expr }
+
+fn is_num(e: Expr, n: integer) -> boolean {
+  match e {
+    Num { v } => v == n,
+    _ => false
+  }
+}
+
+fn simplify(e: Expr) -> Expr {
+  match e {
+    Num { v } => Num { v: v },
+    Add { l, r } => {
+      a = simplify(l);
+      b = simplify(r);
+      if is_num(a, 0) { return b; }
+      if is_num(b, 0) { return a; }
+      Add { l: a, r: b }
+    }
+    Mul { l, r } => {
+      a = simplify(l);
+      b = simplify(r);
+      if is_num(a, 0) || is_num(b, 0) { return Num { v: 0 }; }
+      if is_num(a, 1) { return b; }
+      if is_num(b, 1) { return a; }
+      Mul { l: a, r: b }
+    }
+  }
+}
+
+// hands one of its results to a call to itself: declined, the copies stay
+fn twice(e: Expr, k: integer) -> Expr {
+  if k == 0 { return simplify(e); }
+  a = twice(e, k - 1);
+  b = twice(a, k - 1);
+  if is_num(b, 0) { return a; }
+  b
+}
+
+fn render(e: Expr) -> text {
+  match e {
+    Num { v } => "{v}",
+    Add { l, r } => "({render(l)}+{render(r)})",
+    Mul { l, r } => "({render(l)}*{render(r)})"
+  }
+}
+
+fn size(e: Expr) -> integer {
+  match e {
+    Num { v } => 1,
+    Add { l, r } => 1 + size(l) + size(r),
+    Mul { l, r } => 1 + size(l) + size(r)
+  }
+}
+
+// depth d of Add; the leftmost leaf is 1 when `first`, every other leaf 0
+fn zeros(d: integer, first: boolean) -> Expr {
+  if d == 0 { return Num { v: if first { 1 } else { 0 } }; }
+  Add { l: zeros(d - 1, first), r: zeros(d - 1, false) }
+}
+
+// depth d of Mul over leaves 2: nothing simplifies
+fn twos(d: integer) -> Expr {
+  if d == 0 { return Num { v: 2 }; }
+  Mul { l: twos(d - 1), r: twos(d - 1) }
+}
+
+fn main() {
+  assert(render(simplify(Add { l: Num { v: 3 }, r: Num { v: 4 } })) == "(3+4)", "a node kept");
+  assert(render(simplify(Add { l: Num { v: 0 }, r: Num { v: 4 } })) == "4", "the left dropped");
+  assert(render(simplify(Add { l: Num { v: 5 }, r: Num { v: 0 } })) == "5", "the right dropped");
+  // Mul(Add(2, 0), Mul(1, 7)): Add -> 2, Mul(1, 7) -> 7, so Mul(2, 7)
+  t4 = Mul { l: Add { l: Num { v: 2 }, r: Num { v: 0 } }, r: Mul { l: Num { v: 1 }, r: Num { v: 7 } } };
+  assert(render(simplify(t4)) == "(2*7)", "both children simplified: {render(simplify(t4))}");
+  // Mul(9, Add(0, 0)): Add(0, 0) -> 0, so the Mul is a fresh 0 and both results are dropped
+  assert(render(simplify(Mul { l: Num { v: 9 }, r: Add { l: Num { v: 0 }, r: Num { v: 0 } } })) == "0", "a fresh literal");
+  // the argument is left as it was
+  t6 = Add { l: Mul { l: Num { v: 2 }, r: Num { v: 3 } }, r: Add { l: Num { v: 4 }, r: Num { v: 0 } } };
+  s6 = simplify(t6);
+  assert(render(s6) == "((2*3)+4)", "a mixed tree: {render(s6)}");
+  assert(render(t6) == "((2*3)+(4+0))", "the argument unchanged: {render(t6)}");
+  // Add(Mul(1, Add(5, 6)), Mul(Num 8, 1)) -> Add(Add(5, 6), 8)
+  m = Add { l: Mul { l: Num { v: 1 }, r: Add { l: Num { v: 5 }, r: Num { v: 6 } } }, r: Mul { l: Num { v: 8 }, r: Num { v: 1 } } };
+  assert(render(simplify(m)) == "((5+6)+8)", "a node over answered results: {render(simplify(m))}");
+  // 2^13 - 1 nodes whose every right subtree is zero: one leaf is left
+  z = zeros(12, true);
+  assert(size(z) == 8191 && render(simplify(z)) == "1", "a deep collapse: {size(z)}");
+  // 2^13 - 1 nodes, nothing to drop
+  w = twos(12);
+  assert(size(simplify(w)) == 8191, "a deep keep: {size(simplify(w))}");
+  // a rebind of the result, many times over
+  s = Add { l: Mul { l: Num { v: 1 }, r: Num { v: 7 } }, r: Add { l: Num { v: 0 }, r: Num { v: 3 } } };
+  for _k in 0..200 {
+    s = simplify(s);
+  }
+  assert(render(s) == "(7+3)", "a rebind loop: {render(s)}");
+  h = H { e: Num { v: 0 } };
+  h.e = simplify(t4);
+  assert(render(h.e) == "(2*7)", "into a field: {render(h.e)}");
+  v: vector<Expr> = [];
+  v += [simplify(t6)];
+  assert(render(v[0]) == "((2*3)+4)", "into an element: {render(v[0])}");
+  assert(render(twice(t4, 2)) == "(2*7)", "a declined recursion: {render(twice(t4, 2))}");
+  println("result host store ok");
+}
