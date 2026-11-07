@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-StickySum` — a loop's integer sum (`acc = acc + e` / `acc - e`, nothing else in the
+// loop reading `acc`) runs the processor's operator, one flag per loop gathering every event the
+// checked sum answers null for; at the loop's exit a set flag makes the sum null.  The checked
+// sum is null from its first event on, so the answers are the same.  Each case is computed by
+// hand; the two declining shapes (a read inside the loop, a `break` past it) answer the same.
+//
+// @falsified-at: a build of the clause that skipped the exit's fix-up — native-c t2 answered a
+//   number for the sum that overflowed (null) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the clause and without it
+//   (`LOFT_NO_STICKY_SUM=1`).
+
+fn total(v: vector<integer>) -> integer {
+  s = 0;
+  for x in v { s = s + x; }
+  s
+}
+
+fn down(v: vector<integer>, start: integer) -> integer {
+  s = start;
+  for x in v { s = s - x; }
+  s
+}
+
+// a nested sum, reset per row
+fn rows(n: integer) -> integer {
+  t = 0;
+  for r in 0..n {
+    s = 0;
+    for c in 0..n { s = s + r * n + c; }
+    t += s;
+  }
+  t
+}
+
+// a `break` out of the loop itself: the sum up to the break
+fn until(v: vector<integer>, stop: integer) -> integer {
+  s = 0;
+  for x in v {
+    if x == stop { break; }
+    s = s + x;
+  }
+  s
+}
+
+// declined: the sum is read inside the loop
+fn capped(v: vector<integer>) -> integer {
+  s = 0;
+  for x in v {
+    if s > 10 { s = s - 1; }
+    s = s + x;
+  }
+  s
+}
+
+fn main() {
+  assert(total([1, 2, 3, 4]) == 10, "t1 {total([1, 2, 3, 4])}");
+  // 2^63 - 2 + 1 + 1 overflows at the second step: null from there on, though 1 - 5 follow
+  assert(total([9223372036854775806, 1, 1, -5]) == null, "t2 overflow");
+  n: integer? = null;
+  assert(total([1, n ?? 0, 2]) == 3, "t3 a defaulted null");
+  assert(down([1, 2], 10) == 7, "t4 {down([1, 2], 10)}");
+  assert(down([1, 2], -9223372036854775807) == null, "t5 underflow");
+  // rows(3): row r sums 3r*3 + 0+1+2 = 9r + 3 → 3 + 12 + 21 = 36
+  assert(rows(3) == 36, "t6 {rows(3)}");
+  assert(until([4, 5, 6, 7], 6) == 9, "t7 {until([4, 5, 6, 7], 6)}");
+  // capped: 5, 11, (11 > 10: 10) + 7 = 17, (17 > 10: 16) + 1 = 17
+  assert(capped([5, 6, 7, 1]) == 17, "t8 {capped([5, 6, 7, 1])}");
+  println("sticky sum ok");
+}
