@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-SpecChain` — an integer local assigned a chain of the silent checked operators (`+ - *`
+// and `& | ^`) runs the processor's operators, one flag gathering every event the checked chain
+// answers null for: a null operand, an overflow, an inner result equal to the sentinel.  On the
+// flag the chain is recomputed checked from the same operands.  Each cell exercises one event;
+// every value is computed by hand (the two loops also by an independent Python run).
+//
+// @falsified-at: a build of the clause without the inner-sentinel test — native-c s3 answered
+//   -9223372036854775807 for `(-2^62 * 2) + 1` (the product is the sentinel: null) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the clause and without it
+//   (`LOFT_NO_SPEC_CHAIN=1`).
+
+fn mix(count: integer, salt: integer) -> integer {
+  acc = salt;
+  for i in 0..count { acc = ((acc ^ i) + (i & 7)) & 16777215; }
+  acc
+}
+
+fn poly(count: integer, seed: integer) -> integer {
+  acc = seed;
+  for i in 0..count { acc = ((acc * 31) + i + 7) & 1048575; }
+  acc
+}
+
+fn drift(start: integer) -> integer {
+  acc = start;
+  for i in 0..10 { acc = (acc + i) ^ 0; }
+  acc
+}
+
+fn main() {
+  assert(mix(10, 3) == 35, "s1 {mix(10, 3)}");
+  assert(poly(1000, 12345) == 420525, "s1b {poly(1000, 12345)}");
+  // an overflow mid-chain: 2^63 - 1 + 1 is null, null & 7 is null
+  a = 9223372036854775807;
+  x = (a + 1) & 7;
+  assert(x == null, "s2 {x}");
+  // an inner result equal to the sentinel: -2^62 * 2 = -2^63 fits, and IS null
+  b = -4611686018427387904;
+  y = (b * 2) + 1;
+  assert(y == null, "s3 {y}");
+  // a null operand
+  n: integer? = null;
+  z = (n ^ 5) + 1;
+  assert(z == null, "s4 {z}");
+  // a bitwise inner result equal to the sentinel: (-2^63 + 1) & -2 = -2^63
+  p = -9223372036854775807;
+  q = -2;
+  w = (p & q) + 3;
+  assert(w == null, "s5 {w}");
+  // a loop-carried value that turns null stays null: 2^63 - 10 + 0 + 1 + … + 9 overflows at i = 5
+  assert(drift(9223372036854775797) == null, "s6 {drift(9223372036854775797)}");
+  assert(drift(100) == 145, "s6b {drift(100)}");
+  println("spec chain ok");
+}
