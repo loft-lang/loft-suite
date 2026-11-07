@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-PushFill`'s window clause, its FIELD case — `[for y { [for x { … }] }]`: the inner
+// comprehension pushes into the vector field of the record the outer one just carved, a field
+// of an owned local that the inner loop never names, so its pushes go through a window (one
+// reservation, plain stores, the length written once).  Each value is computed by hand.
+//
+// @falsified-at: none — a conformance guard; a window whose length were never written back
+//   answers every row's length 0 (rows(4) == "0 0 0 0").
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the window and without it
+//   (`LOFT_NO_PUSH_WINDOW=1`).
+
+fn grid(side: integer, salt: integer) -> vector<vector<integer>> {
+  [for y in 0..side { [for x in 0..side { x * y + salt }] }]
+}
+
+// row y holds 0..y: lengths 0, 1, 2, …
+fn tri(n: integer) -> vector<vector<integer>> {
+  [for y in 0..n { [for x in 0..y { x + 10 * y }] }]
+}
+
+fn lens(g: vector<vector<integer>>) -> text {
+  t = "";
+  for r in g {
+    if len(t) > 0 { t += " "; }
+    t += "{len(r)}";
+  }
+  t
+}
+
+fn main() {
+  g = grid(4, 3);
+  // g[y][x] = x*y + 3: g[2][3] = 9, g[3][3] = 12, g[0][2] = 3
+  assert(len(g) == 4 && lens(g) == "4 4 4 4", "s1 {lens(g)}");
+  assert(g[2][3] == 9 && g[3][3] == 12 && g[0][2] == 3, "s2 {g[2][3]} {g[3][3]} {g[0][2]}");
+  t = tri(4);
+  assert(lens(t) == "0 1 2 3", "s3 {lens(t)}");
+  // t[3] = [30, 31, 32]
+  assert(t[3][0] == 30 && t[3][2] == 32 && t[1][0] == 10, "s4 {t[3][0]} {t[3][2]} {t[1][0]}");
+  assert(len(grid(0, 1)) == 0, "s5 empty");
+  println("nested window ok");
+}
