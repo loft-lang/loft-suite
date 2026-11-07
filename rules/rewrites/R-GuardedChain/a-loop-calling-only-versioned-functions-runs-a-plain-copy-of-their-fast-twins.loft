@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-GuardedChain`'s VERSION CLAUSE, crossed with `@FR-R-Version` — a guarded loop that
+// would be written once because it calls loft functions, where every such call is a versioned
+// site, is written twice: under the chain guard AND every version flag, a plain copy calling the
+// fast twins; otherwise the loop as written.  Each row below runs one of the two copies; every
+// sum and cell is computed by hand from the grids `grid` builds (cell k holds k).
+//
+// @falsified-at: a build unswitching on the chain guard alone — native-c failed v3 (the fast
+//   `at` read past the grid: 435191836481, not 0) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the clause and without it
+//   (`LOFT_NO_GUARDED_CHAIN=1`).
+
+struct Grid { w: integer, h: integer, cells: vector<integer> }
+
+fn at(self: const Grid, x: integer, y: integer) -> integer {
+  if x < 0 or x >= self.w or y < 0 or y >= self.h {
+    0
+  } else {
+    i = y * self.w + x;
+    d = &self.cells;
+    if i < len(d) { d[i] ?? 0 } else { 0 }
+  }
+}
+
+fn put(self: Grid, x: integer, y: integer, v: integer) {
+  if x >= 0 and x < self.w and y >= 0 and y < self.h {
+    i = y * self.w + x;
+    d = &self.cells;
+    if i < len(d) { d[i] = v; }
+  }
+}
+
+fn grid(w: integer, h: integer) -> Grid {
+  g = Grid { w: w, h: h, cells: [] };
+  for k in 0..w * h { g.cells += [k]; }
+  g
+}
+
+// Row `ry` of `src` from column `ox` on, copied into row `ty + 1` of `dst`; answers the sum read.
+fn row_copy(dst: Grid, src: const Grid, ry: integer, ty: integer, ox: integer, n: integer) -> integer {
+  s = 0;
+  for x in 0..n {
+    v = src.at(x + ox, ry + 0);
+    dst.put(x + ox, ty + 1, v);
+    s += v;
+  }
+  s
+}
+
+fn main() {
+  src = grid(12, 4);
+  // v1 — rows 0..2 from column 1, ten cells each: row r reads 12r+1 .. 12r+10, 120r + 55;
+  //   55 + 175 + 295 = 525.  dst row r+1, column c (1..10) holds 12r + c.
+  dst = grid(12, 4);
+  t = 0;
+  for r in 0..3 { t += row_copy(dst, src, r, r, 1, 10); }
+  assert(t == 525 && dst.cells[13] == 1 && dst.cells[34] == 22 && dst.cells[24] == 24,
+         "v1 {t} {dst.cells[13]} {dst.cells[34]} {dst.cells[24]}");
+  // v2 — row 1 from column -2: x = -2, -1 read 0 and write nothing; columns 0..7 read 12..19,
+  //   8*12 + 28 = 124.  dst row 2: columns 0..7 hold 12..19, column 10 keeps 34, and the
+  //   cells before the row (22, 23 of row 1) keep theirs.
+  d2 = grid(12, 4);
+  s2 = row_copy(d2, src, 1, 1, -2, 10);
+  assert(s2 == 124 && d2.cells[24] == 12 && d2.cells[31] == 19 && d2.cells[34] == 34
+         && d2.cells[22] == 22 && d2.cells[23] == 23, "v2 {s2} {d2.cells[22]} {d2.cells[23]} {d2.cells[24]}");
+  // v3 — columns past the top of the integer range: the guard cannot bound `x + ox`, every
+  //   read is off the grid (0) and nothing is written.
+  d3 = grid(12, 4);
+  s3 = row_copy(d3, src, 0, 0, 9223372036854775800, 5);
+  assert(s3 == 0 && d3.cells[12] == 12, "v3 {s3} {d3.cells[12]}");
+  // v4 — an empty row.
+  assert(row_copy(d3, src, 0, 0, 1, 0) == 0, "v4");
+  println("versioned unswitch ok");
+}
