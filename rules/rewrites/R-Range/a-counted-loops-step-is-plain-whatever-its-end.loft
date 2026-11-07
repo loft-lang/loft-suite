@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Range`'s OPEN-END counter clause — an exclusive counted loop's `index + 1` is the
+// processor's add whatever the loop's end: the step runs only after the exit test saw the
+// index below the end, and the end is at most i64::MAX.  The loop variable is left unranged
+// (a counter ranged that wide would take it out of `(R-RangedCall)`'s guard).  Every count is
+// computed by hand, the boundary pair at the top of the integer range included.
+//
+// @falsified-at: none — a conformance guard; a step that overflowed answers c2's count wrong,
+//   and `-DLOFT_VERIFY` (C) and `LOFT_HOIST_VERIFY=1` (native) check every plain step.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the clause and without it
+//   (`LOFT_NO_OPEN_END=1`).
+
+fn trips(lo: integer, n: integer) -> integer {
+  c = 0;
+  for _ in lo..n { c += 1; }
+  c
+}
+
+fn sum_to(n: integer) -> integer {
+  s = 0;
+  for i in 0..n { s += i & 7; }
+  s
+}
+
+fn main() {
+  assert(trips(0, 5) == 5, "c1 {trips(0, 5)}");
+  // the top of the range: 9223372036854775805 and 806 run, the step to 807 meets the end
+  assert(trips(9223372036854775805, 9223372036854775807) == 2, "c2 {trips(9223372036854775805, 9223372036854775807)}");
+  assert(trips(3, 3) == 0 && trips(5, 2) == 0, "c3 empty");
+  n: integer? = null;
+  assert(trips(0, n ?? 0) == 0, "c4 a null end defaulted");
+  // 0..20: 0+1+…+7 twice (56) and 0+1+2+3 (6)
+  assert(sum_to(20) == 62, "c5 {sum_to(20)}");
+  println("open-end counter ok");
+}
