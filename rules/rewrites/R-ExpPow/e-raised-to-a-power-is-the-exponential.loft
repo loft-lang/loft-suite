@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-ExpPow` — `pow(E, x)` is `exp(x)`, computed by the platform's `exp`: every spelling
+// (`exp(x)`, `pow(E, x)`, `E.pow(x)`, the literal `E`, the `single` forms) answers the
+// reference's bits — Rust's `f64::exp` / `f32::exp`, C's `exp` / `expf` — and every special
+// value answers as `pow` does.  The expected values are the reference's (libm `exp`), written
+// out; the general `pow` answers -1.5, 10.25 and 3.3333 one or more bits away.  A base other
+// than `E` stays `pow`.
+//
+// @falsified-at: the switch off (`LOFT_NO_EXP_POW=1`, the general pow) — interpret and
+//   native-c t2 answered 0.22313016014842985 for exp(-1.5) -> ok; a build folding every
+//   literal base (`pow(2.0, x)` read as exp) — native-c t9 answered 33.11545195869231 -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the clause.
+
+fn e_lit(x: float) -> float { pow(2.718281828459045, x) }
+
+fn absent(b: boolean) -> float? { if b { null } else { 1.0 } }
+
+fn main() {
+  assert(exp(1.0) == 2.718281828459045, "t1 {exp(1.0)}");
+  assert(exp(-1.5) == 0.22313016014842982, "t2 {exp(-1.5)}");
+  assert(pow(E, 10.25) == 28282.541920334977, "t3 {pow(E, 10.25)}");
+  assert(E.pow(3.3333) == 28.0306905226026, "t4 {E.pow(3.3333)}");
+  assert(e_lit(3.3333) == 28.0306905226026, "t5 {e_lit(3.3333)}");
+  s = 3.3333 as single;
+  assert(exp(s) == 28.030693f, "t6 {exp(s)}");
+  assert((pow(E as single, s) ?? 0.0f) == 28.030693f, "t7 single pow");
+  // specials, as pow answers them
+  assert(exp(0.0) == 1.0 && exp(-0.0) == 1.0, "t8 zero");
+  assert(pow(2.0, 3.5) == 11.313708498984761, "t9 {pow(2.0, 3.5)}");
+  i = 1.0 / 0.0;
+  assert(exp(710.0) == i && exp(i) == i, "t10 overflow");
+  assert(exp(-i) == 0.0 && exp(-800.0) == 0.0, "t11 underflow");
+  n = absent(true);
+  assert(exp(n ?? 0.0) == 1.0, "t12 defaulted");
+  assert("{exp(absent(true) ?? (0.0 / 0.0))}" == "null", "t13 null operand");
+}
