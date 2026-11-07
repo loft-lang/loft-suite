@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Range`, the RELATIONAL STEP clause and the INDEX clause — `j = i; for _ in 0..i {
+// … j -= 1 }` with the step the last statement of its trip: trip t starts with at most t steps
+// taken and runs only while t < i, so before the step j >= 1 and after the loop j >= 0.  An
+// element index the proof shows non-negative is read without the from-the-end wrap (one
+// unsigned compare).  A read of `v[j - 1]` AFTER the step in the same trip can name -1, which
+// counts from the end; the clause declines that body.  Each value is computed by hand.
+//
+// @falsified-at: a build of the clause without its "the step is last on its path" test —
+//   `back_read` read v[-1] as out of range instead of v[2]: native-c `back_read [1, 2, 3]`
+//   failed (null for 6) -> ok.  `-DLOFT_VERIFY` aborts naming `R-Range:n_back_read` there.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the clause and without it
+//   (`LOFT_NO_RANGE_ARITH=1`), and the C unit built `-DLOFT_VERIFY`.
+
+fn insertion_sort(arr: vector<integer>) {
+  n = len(arr);
+  for is_i in 1..n {
+    key = arr[is_i];
+    j = is_i;
+    for _ in 0..is_i {
+      if arr[j - 1] > key {
+        arr[j] = arr[j - 1]!;
+        j -= 1;
+      } else {
+        break;
+      }
+    }
+    arr[j] = key;
+  }
+}
+
+// the step is not the last statement of its trip: `j - 1` reaches -1 and wraps to the end
+fn back_read(v: vector<integer>) -> integer {
+  x = len(v);
+  j = x;
+  s = 0;
+  for _ in 0..x {
+    j -= 1;
+    s += v[j - 1]!;
+  }
+  s
+}
+
+fn show(v: vector<integer>) -> text {
+  t = "";
+  for e in v {
+    if len(t) > 0 { t += " "; }
+    t += "{e}";
+  }
+  t
+}
+
+fn main() {
+  a = [5, 2, 9, 1, 7];
+  insertion_sort(a);
+  assert(show(a) == "1 2 5 7 9", "a mixed list: {show(a)}");
+  // every key walks to the front: j reaches 0, the last trip reads arr[0]
+  d = [5, 4, 3, 2, 1];
+  insertion_sort(d);
+  assert(show(d) == "1 2 3 4 5", "a descending list: {show(d)}");
+  one = [3];
+  insertion_sort(one);
+  assert(show(one) == "3", "one element: {show(one)}");
+  none: vector<integer> = [];
+  insertion_sort(none);
+  assert(len(none) == 0, "no element");
+  // trips: j=2 reads v[1]=2, j=1 reads v[0]=1, j=0 reads v[-1]=v[2]=3
+  assert(back_read([1, 2, 3]) == 6, "a read after the step: {back_read([1, 2, 3])}");
+  assert(back_read([]) == 0, "no trip");
+  println("step-down index ok");
+}
