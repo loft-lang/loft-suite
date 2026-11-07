@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-TypedRead`'s FLOAT clause, crossed with `@FR-R-FileHold` — `f#read(8) as float` into a
+// float local is decoded at its site through the held cursor, as the record's read decodes it:
+// the eight bytes in the file's byte order, a short read leaving the local and `#next` as they
+// were.  Every value below is written by the cell itself and read back; the sums are computed by
+// hand from the values written.
+//
+// @falsified-at: a build of the clause decoding the eight bytes little-endian whatever the
+//   file's format — native-c failed g2 (big-endian: the sum came out 1.5, not 9999999999.25) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the hold and without it
+//   (`LOFT_NO_FILE_HOLD=1`).
+
+fn path(tag: text) -> text { "{temp_dir() ?? "/tmp"}/loft_suite_float_read_{tag}.bin" }
+
+fn written(tag: text, little: boolean, extra: integer) -> File {
+  p = path(tag);
+  w = file(p);
+  w.set_file_size(0);
+  if little { w#format = LittleEndian; } else { w#format = BigEndian; }
+  for x in [1.5, -2.25, 10000000000.0] { w += x; }
+  for _ in 0..extra { w += 7 as u8; }
+  f = file(p);
+  if little { f#format = LittleEndian; } else { f#format = BigEndian; }
+  f
+}
+
+// g1 — 1.5 - 2.25 + 1e10 = 9999999999.25, little-endian; #next 24.
+fn test_three_floats_little_endian() {
+  f = written("g1", true, 0);
+  s = 0.0;
+  for _ in 0..3 { x = f#read(8) as float; s += x; }
+  assert(s == 9999999999.25 && f#next == 24, "g1 {s} {f#next}");
+}
+
+// g2 — the same values big-endian.
+fn test_three_floats_big_endian() {
+  f = written("g2", false, 0);
+  s = 0.0;
+  for _ in 0..3 { x = f#read(8) as float; s += x; }
+  assert(s == 9999999999.25 && f#next == 24, "g2 {s} {f#next}");
+}
+
+// g3 — four reads over 24 bytes and 4 more: three present, the fourth short (null), #next 24.
+fn test_a_short_read_at_the_end() {
+  f = written("g3", true, 4);
+  present = 0;
+  last = 0.0;
+  for _ in 0..4 {
+    x = f#read(8) as float;
+    if x != null { present += 1; last = x; }
+  }
+  assert(present == 3 && last == 10000000000.0 && f#next == 24, "g3 {present} {last} {f#next}");
+}
+
+// g4 — a float read beside an integer read in one held loop: 1.5 then the next 8 bytes as an
+// integer (the bits of -2.25: 0xC002000000000000 = -4611123068473966592), then 1e10.
+fn test_beside_an_integer_read() {
+  f = written("g4", true, 0);
+  a = f#read(8) as float;
+  b = 0;
+  for _ in 0..1 { b = f#read(8) as integer; }
+  c = 0.0;
+  for _ in 0..1 { c = f#read(8) as float; }
+  assert(a == 1.5 && b == -4611123068473966592 && c == 10000000000.0, "g4 {a} {b} {c}");
+}
+
+fn main() {
+  test_three_floats_little_endian();
+  test_three_floats_big_endian();
+  test_a_short_read_at_the_end();
+  test_beside_an_integer_read();
+  println("float read ok");
+}
