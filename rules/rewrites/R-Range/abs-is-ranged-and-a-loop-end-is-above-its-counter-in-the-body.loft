@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Range`'s ABS clause and END clause — `abs(x)` of a ranged x lies in `0 ..= max(|lo|,
+// |hi|)` (narrower where x keeps one sign), and inside `for k in s..x` the body runs only while
+// `k < x`, so there `x >= s + 1`: `for k in 1..n { … / n }` divides by an `n >= 2`, written
+// plain.  Every value is computed by hand, the loops that run no trip (n = 0, n = 1) included.
+//
+// @falsified-at: none — a conformance guard; `-DLOFT_VERIFY` (C) checks every plain division and
+//   `LOFT_HOIST_VERIFY=1` (native) every plain operator.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, with the range proof and without it
+//   (`LOFT_NO_RANGE_ARITH=1`).
+
+fn steps(dq: integer, dr: integer) -> integer {
+  n = max(abs(dq), abs(dr));
+  s = 0;
+  for k in 1..n { s += (dq * k + n / 2) / n; }
+  s
+}
+
+fn spread(a: integer) -> integer {
+  t = 0;
+  for x in (a - 3)..(a + 3) { t += abs(x); }
+  t
+}
+
+fn main() {
+  // n = 4: k = 1, 2, 3 → (3k + 2) / 4 = 1, 2, 2 → 5
+  assert(steps(3, -4) == 5, "a1 {steps(3, -4)}");
+  // n = 5: k = 1..4 → (-5k + 2) / 5 = -0 (−3/5 truncates to 0), -1, -2, -3 → -6
+  assert(steps(-5, 2) == -6, "a2 {steps(-5, 2)}");
+  assert(steps(0, 0) == 0 && steps(1, 0) == 0, "a3 no trip");
+  // a = 0: x in -3..3 → 3+2+1+0+1+2 = 9;  a = -10: -13..-7 → 13+12+11+10+9+8 = 63
+  assert(spread(0) == 9 && spread(-10) == 63, "a4 {spread(0)} {spread(-10)}");
+  println("abs and end ok");
+}
