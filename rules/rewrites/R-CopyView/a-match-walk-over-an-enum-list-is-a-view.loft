@@ -1,0 +1,130 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-CopyView`, the WALK clause over a struct-enum — `cur = l; … match cur { Cons { v, next }
+// => cur = next }` copies `l` at the bind and the payload `next` at every step (`@FR-B-Copy`).
+// The payload is a STEP of the cursor: where it is only read and handed back to the cursor, and
+// nothing in the walk can change what it walks, the cursor and the payload are views of the
+// list — no program can tell.  Each cell computes the value the copy gives, by hand.  The
+// declined cells pin the copy's meaning where a view would differ: a walk whose source is
+// rebuilt or pushed to during it reads the list it copied; a payload kept past its step or
+// handed to a function keeps its copy.
+//
+// @falsified-at: a build of this tree whose walk clause asked no disturbance question — the
+//   walk over a list rebuilt during it read the freed cells: `rebuilt_during` answered 3 for
+//   321, interpret and native-c -> ok.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with the clause and without
+//   it (`LOFT_NO_COPY_VIEW_WALK=1`).
+
+enum List { Nil, Cons { v: integer, next: List } }
+
+fn digits(l: List) -> integer {
+  t = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { t = t * 10 + v; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  t
+}
+
+fn len_of(l: List) -> integer {
+  match l {
+    Cons { v, next } => 1 + len_of(next),
+    Nil => 0
+  }
+}
+
+fn three() -> List {
+  l = Nil;
+  for i in 1..4 { l = Cons { v: i, next: l }; }
+  l
+}
+
+// the walk over an owned local, twice, the second from another source
+fn two_walks() -> integer {
+  l = three();
+  r = Nil;
+  s = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { s = s * 10 + v; r = Cons { v: v + 5, next: r }; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  b = 0;
+  cur = r;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { b = b * 10 + v; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  s * 1000 + b
+}
+
+// the source rebuilt in place during the walk: the walk reads the list it copied
+fn rebuilt_during() -> integer {
+  l = three();
+  s = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => {
+        s = s * 10 + v;
+        l = Cons { v: 8, next: Cons { v: 8, next: Nil } };
+        cur = next;
+      }
+      Nil => { more = false; }
+    }
+  }
+  s * 1000 + digits(l)
+}
+
+// the source pushed to during the walk
+fn pushed_during() -> integer {
+  l = three();
+  s = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { s = s * 10 + v; l = Cons { v: 9, next: l }; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  s * 1000000 + digits(l)
+}
+
+// the payload kept past its step, and handed to a function
+fn payload_escapes() -> integer {
+  l = three();
+  keep = Nil;
+  s = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { s += len_of(next); keep = next; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  s * 10 + len_of(keep)
+}
+
+fn main() {
+  assert(digits(three()) == 321, "a walk over a parameter: {digits(three())}");
+  assert(two_walks() == 321678, "two walks: {two_walks()}");
+  assert(rebuilt_during() == 321088, "rebuilt during the walk: {rebuilt_during()}");
+  assert(pushed_during() == 321999321, "pushed during the walk: {pushed_during()}");
+  assert(payload_escapes() == 30, "the payload escapes: {payload_escapes()}");
+  println("enum walk ok");
+}
