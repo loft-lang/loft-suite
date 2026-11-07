@@ -5,10 +5,11 @@
 // loop reading `acc`) runs the processor's operator, one flag per loop gathering every event the
 // checked sum answers null for; at the loop's exit a set flag makes the sum null.  The checked
 // sum is null from its first event on, so the answers are the same.  Each case is computed by
-// hand; the two declining shapes (a read inside the loop, a `break` past it) answer the same.
+// hand; a sum read inside its loop and one staged through a temp keep their own checked values.
 //
 // @falsified-at: a build of the clause that skipped the exit's fix-up — native-c t2 answered a
-//   number for the sum that overflowed (null) -> ok.
+//   number for the sum that overflowed (null) -> ok; and one that read the sum through its staged
+//   temp's flag — native-c t10 answered null for cum's 9223372036854775806 -> ok.
 // CHANNEL: the asserts.
 // HOLDS: every assertion on all three backends, with the clause and without it
 //   (`LOFT_NO_STICKY_SUM=1`).
@@ -56,6 +57,29 @@ fn capped(v: vector<integer>) -> integer {
   s
 }
 
+// a sum read inside its loop, staged through a temp (`t = cum + x; …; cum = t`)
+fn find(v: vector<integer>, a: integer) -> integer {
+  cum = 0;
+  for x in v {
+    if a < cum + x { return a - cum; }
+    cum += x;
+  }
+  -1
+}
+
+// the staged temp and the sum answer their own checked values: the step overflows (nxt is
+// null) while cum still holds a number
+fn guarded(v: vector<integer>) -> integer {
+  cum = 0;
+  r = -1;
+  for x in v {
+    nxt = cum + x;
+    if nxt == null { r = cum; }
+    cum = nxt;
+  }
+  r
+}
+
 fn main() {
   assert(total([1, 2, 3, 4]) == 10, "t1 {total([1, 2, 3, 4])}");
   // 2^63 - 2 + 1 + 1 overflows at the second step: null from there on, though 1 - 5 follow
@@ -69,5 +93,10 @@ fn main() {
   assert(until([4, 5, 6, 7], 6) == 9, "t7 {until([4, 5, 6, 7], 6)}");
   // capped: 5, 11, (11 > 10: 10) + 7 = 17, (17 > 10: 16) + 1 = 17
   assert(capped([5, 6, 7, 1]) == 17, "t8 {capped([5, 6, 7, 1])}");
+  // find: 5 < 0 + 3? no; 5 < 3 + 4: 5 - 3 = 2
+  assert(find([3, 4, 5], 5) == 2 && find([3, 4], 100) == -1, "t9 {find([3, 4, 5], 5)}");
+  // guarded: trip 1 nxt = 2^63 - 2, trip 2 nxt overflows → r = cum = 2^63 - 2
+  assert(guarded([9223372036854775806, 5]) == 9223372036854775806, "t10 {guarded([9223372036854775806, 5])}");
+  assert(guarded([1, 2]) == -1, "t11 no overflow");
   println("sticky sum ok");
 }
