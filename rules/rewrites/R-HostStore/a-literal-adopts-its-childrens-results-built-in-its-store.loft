@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-HostStore`, the LITERAL clause — `Add { l: gen(…), r: gen(…) }` built each child in a
+// store of its own and copied it into the node.  Where every answer of the callee is its return
+// buffer (its literal exits, a branch of variants too, are built there: `@FR-R-Place`'s callee
+// clause), the call is handed a buffer naming the node's store and the field adopts the answer
+// by number: the whole tree is built in the store its first caller names.  A callee answering
+// anything else — its argument's child, a local — keeps the copy.  Each cell's value is
+// computed by hand; the leak gate holds the release of every tree the program drops.
+//
+// @falsified-at: a build of this tree whose literal clause kept the answer's `OpFreeRef` after
+//   the adoption — it freed the node's own store.  Under `LOFT_POISON=1 LOFT_STRICT_STORES=1`:
+//   interpret read a poisoned record, native-c named the use after the free in `gen` -> ok.
+//   Without the instruments the freed store keeps its bytes and the values read right, so the
+//   nightly poison sweep is the leg that holds it.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with the clause and without
+//   it (`LOFT_NO_HOST_STORE=1`).
+
+enum E { Num { v: integer }, Add { l: E, r: E }, Mul { l: E, r: E } }
+struct T { v: integer, l: T?, r: T? }
+
+fn gen(d: integer, i: integer) -> E {
+  if d == 0 { return Num { v: i % 10 }; }
+  if i % 2 == 0 {
+    Add { l: gen(d - 1, 2 * i + 1), r: gen(d - 1, 2 * i + 2) }
+  } else {
+    Mul { l: gen(d - 1, 2 * i + 1), r: gen(d - 1, 2 * i + 2) }
+  }
+}
+
+fn ev(e: E) -> integer {
+  match e {
+    Num { v } => v,
+    Add { l, r } => ev(l) + ev(r),
+    Mul { l, r } => (ev(l) * ev(r)) % 1000
+  }
+}
+
+fn sz(e: E) -> integer {
+  match e {
+    Num { v } => 1,
+    Add { l, r } => 1 + sz(l) + sz(r),
+    Mul { l, r } => 1 + sz(l) + sz(r)
+  }
+}
+
+// answers its argument's child on one path: keeps the copy
+fn left_or_new(e: E, k: integer) -> E {
+  if k == 0 {
+    match e {
+      Add { l, r } => { return l; }
+      _ => {}
+    }
+  }
+  Num { v: k }
+}
+
+// answers a local on one path: keeps the copy
+fn via_local(k: integer) -> E {
+  x = Num { v: k };
+  if k > 5 { return x; }
+  Add { l: Num { v: k }, r: Num { v: 1 } }
+}
+
+fn mk(d: integer) -> T {
+  if d == 0 { return T { v: 1 }; }
+  T { v: d, l: mk(d - 1), r: mk(d - 1) }
+}
+
+fn tsum(t: T?) -> integer {
+  if t == null { return 0; }
+  t.v + tsum(t.l) + tsum(t.r)
+}
+
+fn main() {
+  // Add(Mul(Mul(7, 8), Add(9, 0)), Add(Mul(1, 2), Add(3, 4))) = 504 + 9
+  a = gen(3, 0);
+  assert(sz(a) == 15 && ev(a) == 513, "a variant tree: {sz(a)} {ev(a)}");
+  b = gen(2, 1);
+  b = gen(2, 2);
+  assert(ev(b) == 9, "a rebind: {ev(b)}");
+  // mk(2) = 2 + 2 * mk(1) = 2 + 2 * 3
+  t = T { v: 100 };
+  t.l = mk(2);
+  assert(tsum(t) == 108, "a struct recursion into a field: {tsum(t)}");
+  d = Add { l: left_or_new(gen(1, 0), 0), r: left_or_new(gen(1, 0), 3) };
+  assert(ev(d) == 4, "an argument's child: {ev(d)}");
+  e = Add { l: via_local(7), r: via_local(2) };
+  assert(ev(e) == 10, "a local answered: {ev(e)}");
+  v: vector<E> = [];
+  v += [Add { l: gen(1, 3), r: gen(1, 4) }];
+  assert(ev(v[0]) == 65, "an element node: {ev(v[0])}");
+  h = gen(4, 0);
+  h = Num { v: 9 };
+  assert(ev(h) == 9, "a rebuild over a tree: {ev(h)}");
+  big = gen(12, 0);
+  assert(sz(big) == 8191, "a deep tree: {sz(big)}");
+  println("literal host store ok");
+}
