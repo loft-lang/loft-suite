@@ -12,7 +12,7 @@
 //
 // @falsified-at: a build of this tree whose variant clause moved the old record as the
 //   LITERAL's variant (`tp` of `A`, the struct clause's choice) — the `B` under an `A` lost its
-//   tail: "A4 B1.2.0", interpret and native-c -> ok.
+//   tail: "A4 B1.0.0" (interpret), "A4 B1.3.47244640258" (native-c) -> ok.
 // CHANNEL: the asserts and the leak gate.
 // HOLDS: every assertion and the leak gate on all three backends, with the clause and without
 //   it (`LOFT_NO_DEMOTE=1`, `LOFT_NO_VARIANT_INPLACE=1`).

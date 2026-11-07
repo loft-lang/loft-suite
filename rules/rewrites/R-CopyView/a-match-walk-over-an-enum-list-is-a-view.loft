@@ -11,8 +11,8 @@
 // handed to a function keeps its copy.
 //
 // @falsified-at: a build of this tree whose walk clause asked no disturbance question — the
-//   walk over a list rebuilt during it read the freed cells: `rebuilt_during` answered 3 for
-//   321, interpret and native-c -> ok.
+//   walk over a list rebuilt during it read the cells the rebuild wrote: `rebuilt_during`
+//   answered 38088 for 321088, interpret and native-c -> ok.
 // CHANNEL: the asserts and the leak gate.
 // HOLDS: every assertion and the leak gate on all three backends, with the clause and without
 //   it (`LOFT_NO_COPY_VIEW_WALK=1`).
