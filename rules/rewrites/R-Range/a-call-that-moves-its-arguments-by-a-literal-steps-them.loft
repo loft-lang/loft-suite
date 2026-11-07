@@ -1,0 +1,103 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Range`'s CALLEE-STEP clause — `(q, r) = f(q, r, …)` in a counted loop, where every
+// result of `f` has element k equal to the parameter q (or r) is passed as, or that parameter
+// plus or minus a literal: each trip moves `q` by at most the largest literal, so `q` stays
+// within its seed's range widened by trips × that literal, and the operators reading it are
+// plain.  Every value below is computed by hand; the boundary cases sit at the top of the
+// integer range, where a bound that undercounted would let a plain add wrap.
+//
+// @falsified-at: a build of the clause answering 1 for every step (whatever the literal) —
+//   native-c failed c2 (`q + 5` answered -9223372036854775807, not null) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on all three backends, `-DLOFT_VERIFY` (C) and
+//   `LOFT_HOIST_VERIFY=1` (native) checking every plain operator.
+
+// Odd rows shift right: the hex grid's neighbour step.
+fn nb(q: integer, r: integer, dir: integer) -> (integer, integer) {
+  if (r & 1) == 0 {
+    if dir == 0 { return (q + 1, r); }
+    return (q, r + 1);
+  }
+  if dir == 1 { return (q + 1, r - 1); }
+  (q - 1, r + 1)
+}
+
+fn up3(q: integer) -> (integer, integer) { (q + 3, 0) }
+
+fn swap(q: integer, r: integer) -> (integer, integer) { (r, q) }
+
+fn twice(q: integer) -> (integer, integer) { (q * 2, 0) }
+
+// c1 — from (1, 0): d=(0+1+0)%6=1, r even → (1, 1); d=(1+1+1)%6=3, r odd → (0, 2);
+//   d=(2+0+2)%6=4, r even → (0, 3).  acc = (1*3+1) + (0*3+2) + (0*3+3) = 4 + 2 + 3 = 9.
+fn walk() -> (integer, integer, integer) {
+  q = 1;
+  r = 0;
+  acc = 0;
+  for i in 0..3 {
+    d = (i + (q & 7) + (r & 3)) % 6;
+    (q, r) = nb(q, r, d);
+    acc += q * 3 + r;
+  }
+  (q, r, acc)
+}
+
+// c2 — 9223372036854775795 + 3 trips of +3 = 9223372036854775804; `q + 3` is i64::MAX,
+//   `q + 5` overflows: null.  The bound the clause gives (+3 a trip, the trips counted
+//   through the loop end) reaches i64::MAX, so neither add is plain; a bound of 1 a trip
+//   would prove `q + 5` and let it wrap (to i64::MIN + 1: not the null sentinel, which a
+//   wrap of `q + 4` would land on and so pass unseen).
+fn near_top() -> (integer, integer?, integer?) {
+  q = 9223372036854775795;
+  for _ in 0..3 { (q, _z) = up3(q); }
+  (q, q + 3, q + 5)
+}
+
+// c2b — room below the top: 9223372036854775780 + 9 = 9223372036854775789, `q + 1` plain.
+fn below_top() -> integer {
+  q = 9223372036854775780;
+  for _ in 0..3 { (q, _z) = up3(q); }
+  q + 1
+}
+
+// c3 — element 0 is the OTHER parameter: no step bound, q takes r's value.
+fn swapped() -> integer? {
+  q = 0;
+  r = 9223372036854775806;
+  for _ in 0..1 { (q, r) = swap(q, r); }
+  q + 5
+}
+
+// c4 — a product is no step: 3, 6, 12, 24.
+fn doubled() -> integer {
+  q = 3;
+  for _ in 0..3 { (q, _z) = twice(q); }
+  q + 1
+}
+
+// c5 — the tuple read after a write in between is not the value moved once: 5 → t=(8, 0),
+//   q = 1005, q = 8; twice more: 11, 14.
+fn stale() -> integer {
+  q = 5;
+  for _ in 0..3 {
+    t = up3(q);
+    q += 1000;
+    q = t.0;
+  }
+  q
+}
+
+fn main() {
+  (a, b, c) = walk();
+  assert(a == 0 && b == 3 && c == 9, "c1 {a} {b} {c}");
+  (x, y, z) = near_top();
+  assert(x == 9223372036854775804 && y == 9223372036854775807 && z == null, "c2 {x} {y} {z}");
+  assert(below_top() == 9223372036854775790, "c2b {below_top()}");
+  s = swapped();
+  assert(s == null, "c3 {s}");
+  assert(doubled() == 25, "c4 {doubled()}");
+  assert(stale() == 14, "c5 {stale()}");
+  println("callee step ok");
+}
