@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Demote`, the VARIANT clause — `e = A { …, next: e }` for a struct-enum whose variant
+// holds the enum itself out of line MOVES the old record into a fresh child of `e`'s store and
+// writes the variant's fields and tag into `e`'s record, where the copy built the variant in a
+// store of its own, copied the whole list in and back.  The old record may be ANY variant, a
+// larger one too: every record of the enum is the enum's size, and the move takes all of it.
+// A field that reads the destination elsewhere declines the move and answers the copy's value;
+// a rebuild over the whole list releases it.  The literal is built in `e` itself
+// (`@FR-R-InPlaceLiteral`'s variant clause).
+//
+// @falsified-at: a build of this tree whose variant clause moved the old record as the
+//   LITERAL's variant (`tp` of `A`, the struct clause's choice) — the `B` under an `A` lost its
+//   tail: "A4 B1.2.0", interpret and native-c -> ok.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends, with the clause and without
+//   it (`LOFT_NO_DEMOTE=1`, `LOFT_NO_VARIANT_INPLACE=1`).
+
+enum E {
+  Nil,
+  A { x: integer, next: E },
+  B { a: integer, b: integer, c: integer, next: E },
+  T { s: text, tags: vector<integer>, next: E }
+}
+
+fn show(e: E) -> text {
+  out = "";
+  cur = e;
+  more = true;
+  while more {
+    match cur {
+      A { x, next } => { out += "A{x} "; cur = next; }
+      B { a, b, c, next } => { out += "B{a}.{b}.{c} "; cur = next; }
+      T { s, tags, next } => { out += "T{s}{len(tags)} "; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  out
+}
+
+fn depth(e: E) -> integer {
+  match e {
+    A { x, next } => 1 + depth(next),
+    B { a, b, c, next } => 1 + depth(next),
+    T { s, tags, next } => 1 + depth(next),
+    Nil => 0
+  }
+}
+
+fn main() {
+  e = Nil;
+  e = B { a: 1, b: 2, c: 3, next: e };
+  e = A { x: 4, next: e };
+  e = T { s: "tt", tags: [1, 2], next: e };
+  e = A { x: 5, next: e };
+  assert(show(e) == "A5 Ttt2 A4 B1.2.3 ", "pushes over every variant: {show(e)}");
+  e = A { x: depth(e), next: e };
+  assert(show(e) == "A4 A5 Ttt2 A4 B1.2.3 ", "a field that reads the list: {show(e)}");
+  e = B { a: 7, b: 8, c: 9, next: Nil };
+  assert(show(e) == "B7.8.9 ", "a rebuild over the list: {show(e)}");
+  l = Nil;
+  for i in 0..2000 { l = A { x: i, next: l }; }
+  s = 0;
+  n = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      A { x, next } => { s += x; n += 1; cur = next; }
+      _ => { more = false; }
+    }
+  }
+  assert(n == 2000 && s == 1999000, "2,000 pushes: {n} {s}");
+  println("variant demote ok");
+}
