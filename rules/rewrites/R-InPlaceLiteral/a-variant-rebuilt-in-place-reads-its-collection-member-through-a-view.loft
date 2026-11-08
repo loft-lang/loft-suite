@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-R-InPlaceLiteral` — A VARIANT REBUILT IN PLACE READS ITS COLLECTION MEMBER THROUGH A
+// VIEW.  `code = NdBlock { tag: […], block: [bl] }` rebuilds the whole local `code` in its own
+// store: the store is re-initialised, then each field is written.  The rule says every field
+// expression is evaluated before the first write, and that a field may read the old value
+// through a view of the same place.  Here `bl` is such a view: `block[0]` of a `match` on
+// `code` itself.  A collection member is written through its field after the re-init, so the
+// compiler watches for the member naming the destination and then builds the literal apart.
+// It watched for the destination's own name only, so a view of it slipped through: the
+// re-initialised store handed `bl`'s bytes to `tag`, and `bl` was copied from what `tag`
+// left there.  The name came out empty and `scope` read a `tag` element, on both backends,
+// with nothing reported.  The same happened where the view was rebound to another local on
+// one path only (`chosen`): a local's deps name its last bind, so the watch also has to count
+// every store the local viewed before.  loft-in-loft's elaborator (@PLN91) rebuilds its IR blocks this way,
+// and printed garbage block names.
+//
+// Every expected value is worked out by hand from the record before the rebuild.  The last
+// two cells are controls: a view of ANOTHER local, which needs no staging and keeps the
+// in-place build, and a rebuild after a read of the old record (`len("[] gone 0 1")` is 11).
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0,
+//   native 1 assertion failures -> 0
+// CHANNEL: the assertion count and the exit code, identically on both backends — a wrong value,
+//   with no diagnostic; `LOFT_STRICT_STORES` and `LOFT_POISON` stay silent (the store is
+//   re-initialised, not freed).
+// HOLDS: leak, panic and refusals are unmoved on both trees.
+
+enum Node {
+  NdInt { n: integer },
+  NdBlock { tag: vector<integer>, block: vector<Block> },
+}
+
+struct Block {
+  name: text,
+  scope: integer,
+}
+
+fn shown(n: Node) -> text {
+  match n {
+    NdBlock { tag, block } => "{tag} {block[0].name} {block[0].scope} {len(block)}",
+    NdInt { n } => "int {n}"
+  }
+}
+
+// The view goes straight into the collection member.
+fn rewrap(name: text) -> Node {
+  code = NdBlock { tag: [], block: [Block { name: name, scope: 5 }] };
+  match code {
+    NdBlock { block } => {
+      bl = block[0];
+      code = NdBlock { tag: [11, 12, 13, 14, 15, 16, 17, 18], block: [bl] };
+    },
+    _ => {}
+  }
+  code
+}
+
+// A field of the view is read inside a literal nested in the collection member.
+fn renamed(name: text) -> Node {
+  code = NdBlock { tag: [], block: [Block { name: name, scope: 8 }] };
+  match code {
+    NdBlock { block } => {
+      bl = block[0];
+      code = NdBlock { tag: [41, 42, 43, 44, 45, 46, 47, 48], block: [Block { name: bl.name + "!", scope: bl.scope + 1 }] };
+    },
+    _ => {}
+  }
+  code
+}
+
+// The view is taken twice, the second element after the first.
+fn doubled(name: text) -> Node {
+  code = NdBlock { tag: [1], block: [Block { name: name, scope: 3 }] };
+  match code {
+    NdBlock { block } => {
+      bl = block[0];
+      code = NdBlock { tag: [71, 72, 73, 74, 75, 76, 77, 78], block: [bl, bl] };
+    },
+    _ => {}
+  }
+  code
+}
+
+// The view of `code` is rebound to another local on one path only: on the other it still
+// views `code` at the rebuild, though the last bind in the source names `other`.
+fn chosen(c: boolean) -> Node {
+  code = NdBlock { tag: [], block: [Block { name: "own_path", scope: 6 }] };
+  other = NdBlock { tag: [], block: [Block { name: "other_path", scope: 7 }] };
+  match code {
+    NdBlock { block } => {
+      bl = block[0];
+      if c {
+        match other {
+          NdBlock { block: bb } => { bl = bb[0]; },
+          _ => {}
+        }
+      }
+      code = NdBlock { tag: [81, 82, 83, 84, 85, 86, 87, 88], block: [bl] };
+    },
+    _ => {}
+  }
+  code
+}
+
+// Control: the view is of another local, so the rebuild of `code` reads nothing it clears.
+fn from_other(name: text) -> Node {
+  other = NdBlock { tag: [], block: [Block { name: name, scope: 4 }] };
+  code = NdBlock { tag: [], block: [Block { name: "gone", scope: 0 }] };
+  match other {
+    NdBlock { block } => {
+      bl = block[0];
+      code = NdBlock { tag: [61, 62, 63, 64, 65, 66, 67, 68], block: [bl] };
+    },
+    _ => {}
+  }
+  code
+}
+
+// Control: the old record is read before the rebuild, never inside it.
+fn fresh(name: text) -> Node {
+  code = NdBlock { tag: [], block: [Block { name: "gone", scope: 0 }] };
+  before = len(shown(code));
+  code = NdBlock { tag: [91, before], block: [Block { name: name, scope: 2 }] };
+  code
+}
+
+fn main() {
+  assert(shown(rewrap("outer_block")) == "[11,12,13,14,15,16,17,18] outer_block 5 1", "the view in the member");
+  assert(shown(renamed("nested_read")) == "[41,42,43,44,45,46,47,48] nested_read! 9 1", "a field of the view in a nested literal");
+  assert(shown(doubled("twice")) == "[71,72,73,74,75,76,77,78] twice 3 2", "the view taken twice");
+  assert(shown(chosen(false)) == "[81,82,83,84,85,86,87,88] own_path 6 1", "a view rebound on the other path only");
+  assert(shown(chosen(true)) == "[81,82,83,84,85,86,87,88] other_path 7 1", "the view rebound to another local");
+  assert(shown(from_other("other_one")) == "[61,62,63,64,65,66,67,68] other_one 4 1", "control: a view of another local");
+  assert(shown(fresh("fresh_one")) == "[91,11] fresh_one 2 1", "control: the old record read before the rebuild");
+}
