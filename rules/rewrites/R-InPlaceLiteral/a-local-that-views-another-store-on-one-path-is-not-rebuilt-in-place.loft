@@ -1,0 +1,97 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-R-InPlaceLiteral` `@FR-R-Demote` — A LOCAL THAT VIEWS ANOTHER STORE ON ONE PATH IS NOT
+// REBUILT IN PLACE.  `r = T { … }` writes the literal into the store `r` already holds, and
+// `r = TyOpt { inner: r }` moves that store's record into a child of it (R-Demote); both are
+// admitted only for a local that OWNS its store.  After
+// `if pick { r = b.tp; } else { r = fresh(9); }` the last bind in the source owns, but on the
+// `pick` path `r` still names `b`'s record.  The compiler read ownership from the last bind's
+// deps only, so on that path the rebuild wrote into `b`: `b.tp` came out as the new literal,
+// or as the demoted `opt(…)`, and a caller's value changed through a parameter it passed by
+// value — on both backends, with nothing reported.  A local's earlier binds count as well as
+// its last (`Variable::viewed`).  loft-in-loft's elaborator (@PLN91) has this shape in
+// `match_expr`.
+//
+// Every expected value is worked out by hand from the values before the rebuild.  The `false`
+// calls and the last two functions are controls: the owning path, a view that IS the last
+// bind, and a view bound inside a loop.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0,
+//   native 1 assertion failures -> 0
+// CHANNEL: the assertion count and the exit code, identically on both backends — a wrong value,
+//   with no diagnostic; `LOFT_STRICT_STORES` stays silent (nothing is freed).
+// HOLDS: leak, panic and refusals are unmoved on both trees.
+
+enum Ty {
+  TyVoid,
+  TyInt { n: integer },
+  TyOpt { inner: Ty },
+}
+
+struct B {
+  tp: Ty,
+  k: integer,
+}
+
+fn show(t: Ty) -> text {
+  match t {
+    TyOpt { inner } => "opt({show(inner)})",
+    TyInt { n } => "int {n}",
+    _ => "void"
+  }
+}
+
+fn fresh(n: integer) -> Ty {
+  TyInt { n: n }
+}
+
+// The demote: the record `r` names is moved into the literal's `inner`.
+fn demoted(b: B, pick: boolean) -> text {
+  r = TyVoid;
+  if pick { r = b.tp; } else { r = fresh(9); }
+  r = TyOpt { inner: r };
+  "{show(r)} {show(b.tp)}"
+}
+
+// The plain rebuild: the literal is written into the record `r` names.
+fn rebuilt(pick: boolean) -> text {
+  b = B { tp: TyInt { n: 31 }, k: 1 };
+  r = fresh(1);
+  if pick { r = b.tp; } else { r = fresh(9); }
+  r = TyInt { n: 5 };
+  "{show(r)} {show(b.tp)}"
+}
+
+// Control: the view is the last bind, so the rebuild was already declined.
+fn view_last(pick: boolean) -> text {
+  b = B { tp: TyInt { n: 21 }, k: 1 };
+  r = fresh(1);
+  if !pick { r = fresh(9); } else { r = b.tp; }
+  r = TyOpt { inner: r };
+  "{show(r)} {show(b.tp)}"
+}
+
+// Control: the view is bound inside a loop.
+fn in_loop(xs: vector<integer>) -> text {
+  b = B { tp: TyInt { n: 51 }, k: 1 };
+  r = fresh(9);
+  for x in xs {
+    if x > 0 { r = b.tp; }
+  }
+  r = TyOpt { inner: r };
+  "{show(r)} {show(b.tp)}"
+}
+
+fn main() {
+  b = B { tp: TyInt { n: 7 }, k: 1 };
+  assert(demoted(b, true) == "opt(int 7) int 7", "the demote on the viewing path");
+  assert(show(b.tp) == "int 7", "the caller's value is unchanged");
+  assert(demoted(b, false) == "opt(int 9) int 7", "control: the demote on the owning path");
+  assert(rebuilt(true) == "int 5 int 31", "the rebuild on the viewing path");
+  assert(rebuilt(false) == "int 5 int 31", "control: the rebuild on the owning path");
+  assert(view_last(true) == "opt(int 21) int 21", "control: the view is the last bind");
+  assert(in_loop([3]) == "opt(int 51) int 51", "control: the view bound in a loop");
+  for i in 0..100 {
+    assert(rebuilt(i % 2 == 0) == "int 5 int 31", "repeated: no store goes astray");
+  }
+}
