@@ -32,3 +32,17 @@ fn OpDrop(self: H) { note("{self.h}"); }
 pub struct Pair { pub a: H }
 pub fn pairs_len(v: const vector<Pair>) -> integer { len(v) }
 pub fn add(v: vector<Pair>, n: integer) { v += [Pair { a: H { h: n } }]; }
+
+fn lib_pair() -> integer {
+  v: vector<Pair> = [];
+  add(v, 4);
+  add(v, 5);
+  return pairs_len(v);
+}
+
+fn test_the_library_releases_its_own_vector_once() {
+  _ = drain();
+  assert(lib_pair() == 2, "the library's vector holds two");
+  got = drain();
+  assert(got == "4,5", "the library's vector releases each once: {got}");
+}
