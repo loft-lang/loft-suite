@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-SameRead` filed clause — a lookup right after an insert into a hash with one integer key
+// answers the record the insert filed when its key is the one looked up: written through (f1);
+// another key looks up as written (f2); a replacing insert is the entry (f3); a statement between
+// the two keeps the lookup (f4); a hash of another type is not the one filed into (f5).  Every
+// value computed by hand.
+//
+// @falsified-at: a C emitter that answered the filed record without testing its key — native-c
+//   f2 answered key 42's record for key 40 -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends.
+
+struct E { key: integer, val: integer, name: text, link: reference<E>? }
+struct F { key: integer, val: integer }
+struct H { es: hash<E[key]>, other: hash<F[key]> }
+
+fn main() {
+  f = H { };
+  q = 41;
+  f.es += [E { key: q, val: 1, name: "a" }];
+  m = f.es[q];
+  if m != null { m.val = 77; }
+  assert(f.es[41]!.val == 77, "f1");
+  r = 40;
+  f.es += [E { key: 42, val: 2, name: "b" }];
+  m2 = f.es[r];
+  assert(m2 == null, "f2");
+  f.es += [E { key: 41, val: 3, name: "c" }];
+  m3 = f.es[q];
+  assert(m3!.val == 3 && len(f.es) == 2, "f3 {len(f.es)}");
+  f.es += [E { key: 50, val: 4, name: "d" }];
+  f.es[50] = null;
+  w = 50;
+  m4 = f.es[w];
+  assert(m4 == null, "f4");
+  f.es += [E { key: 60, val: 5, name: "e" }];
+  m5 = f.other[q];
+  assert(m5 == null && len(f.es) == 3, "f5");
+}
