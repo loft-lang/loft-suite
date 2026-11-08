@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WRITE through the enum to a field its variants lay out at different offsets has no one
+// place to land, so it is refused, naming the cure: declare the field first in every variant
+// (loft#2441).  Before, `e.n = 5` on a `KIce` wrote `KIce.m`, silently, on both backends.
+//
+// @falsified-at: d813c6115 — interpret: compiled with no diagnostic -> the refusal (the write
+//   landed in `KIce.m`); measured by hand against the build without the refusal.
+// @FR-C-Var.
+// @EXPECT_ERROR: this field sits at a different offset in each variant that declares it
+
+enum KEnt { KFire { n: integer, s: text }, KIce { m: integer, n: integer } }
+
+fn put(e: KEnt) { e.n = 5; }
+
+fn main() {
+  b = KIce { m: 1, n: 7 };
+  put(b);
+}
