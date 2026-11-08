@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-SameRead` filed clause — a lookup right after an insert answers the entry the TABLE
+// holds, which is not always the record handed to the insert: the first insert into an empty
+// table stages its entry in a record of its own, copies it into the table and deletes the stage.
+// Each cell inserts, looks the key up in the next statement and writes through the answer; the
+// table must hold the write.  Key 0 is the key a deleted stage still reads as its own.
+// - k1: an element holding a text, key 0 alone → 7;
+// - k2: the same element, keys 0..40 → sum of k*10+7 = 10*780 + 280 = 8080;
+// - k3: an element of integers only, keys 0..40 → 8080;
+// - k4: a key other than 0 first (key 3 alone) → 37.
+//
+// @falsified-at: 309999235 — native-c k1 answered 0 for 7 (the write went to the deleted stage).
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends.
+
+struct Q { k: integer, v: integer, s: text }
+struct P { k: integer, v: integer }
+struct HQ { es: hash<Q[k]> }
+struct HP { es: hash<P[k]> }
+
+fn put_q(h: HQ, k: integer) {
+  h.es += [Q { k: k, v: 0, s: "x" }];
+  m = h.es[k];
+  m.v = k * 10 + 7;
+}
+
+fn put_p(h: HP, k: integer) {
+  h.es += [P { k: k, v: 0 }];
+  m = h.es[k];
+  m.v = k * 10 + 7;
+}
+
+fn sum_q(h: HQ, n: integer) -> integer {
+  t = 0;
+  for k in 0..n { t += h.es[k]!.v; }
+  t
+}
+
+fn sum_p(h: HP, n: integer) -> integer {
+  t = 0;
+  for k in 0..n { t += h.es[k]!.v; }
+  t
+}
+
+fn test_a_lookup_after_the_first_insert_is_the_entry_the_table_holds() {
+  a = HQ { };
+  put_q(a, 0);
+  assert(a.es[0]!.v == 7, "k1 {a.es[0]!.v}");
+  b = HQ { };
+  for k in 0..40 { put_q(b, k); }
+  assert(sum_q(b, 40) == 8080, "k2 {sum_q(b, 40)}");
+  c = HP { };
+  for k in 0..40 { put_p(c, k); }
+  assert(sum_p(c, 40) == 8080, "k3 {sum_p(c, 40)}");
+  d = HQ { };
+  put_q(d, 3);
+  assert(d.es[3]!.v == 37, "k4 {d.es[3]!.v}");
+}
