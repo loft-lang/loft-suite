@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-D-Rec` — A SECOND VARIANT DEFAULT BUILDS IN A STORE OF ITS OWN.  An omitted field takes
+// its `= expr`.  A struct-enum unit variant default (`expect: Ty = TyVoid`) is a record built
+// in a work reference and copied into the field.  The default is parsed once, in the struct,
+// where each such default takes the next work reference of the struct's own table, and every
+// literal that omits the field replays it with a fresh one.  Only the first (`Var(0)`) was
+// replaced; the second kept `Var(1)` — at the construction site, whatever local 1 is.  In
+// `new_v(name, file)` that is the parameter `file`: the interpreter built the variant into
+// its slot and then crashed reading `file`, the C refused the program ("a reference
+// expected, a View found") and rustc did not compile it.  loft-in-loft's elaborator (@PLN91)
+// met it in `el_vars::new_vars`.  A variant WITH fields (`TyInt { n: 6 }`) builds in a work
+// reference the same way, and beside a struct default it wrote the variant's bytes over the
+// struct field: `P { px: 1, py: 2 }` read `2 6` on every backend, with nothing reported.
+//
+// Every expected value is worked out by hand.  `one_default` is the control: a single
+// variant default was always replayed right.
+//
+// @falsified-at: 309999235 — interpret exit 101 -> 0, interpret panicked -> clean, native exit 101 -> 0,
+//   native panicked -> clean
+// CHANNEL: the exit code — main's compiler panics on this cell (the `new_v` frame); the
+//   `beside_a_struct` assertion alone, where a build reaches it.
+// HOLDS: leak, panic and refusals are unmoved on both trees.
+
+enum Ty {
+  TyVoid,
+  TyInt { n: integer },
+}
+
+struct V {
+  name: text,
+  file: text,
+  expect: Ty = TyVoid,
+  hint: Ty = TyInt { n: 4 },
+  last: Ty = TyVoid,
+}
+
+struct W {
+  name: text,
+  only: Ty = TyVoid,
+}
+
+struct P {
+  px: integer,
+  py: integer,
+}
+
+struct X {
+  name: text,
+  p: P = P { px: 1, py: 2 },
+  t: Ty = TyInt { n: 6 },
+}
+
+fn show(t: Ty) -> text {
+  match t {
+    TyInt { n } => "int {n}",
+    _ => "void"
+  }
+}
+
+fn new_v(name: text, file: text) -> V {
+  v = V { name: name, file: file };
+  v.name = v.name + "+" + file;
+  v
+}
+
+fn one_default(name: text) -> W {
+  W { name: name }
+}
+
+fn beside_a_struct(name: text) -> X {
+  X { name: name }
+}
+
+fn main() {
+  v = new_v("nm", "fl");
+  assert("{v.name} {v.file} {show(v.expect)} {show(v.hint)} {show(v.last)}" == "nm+fl fl void int 4 void", "three variant defaults beside two parameters");
+  w = one_default("solo");
+  assert("{w.name} {show(w.only)}" == "solo void", "control: one variant default");
+  x = beside_a_struct("three");
+  assert("{x.name} {x.p.px} {x.p.py} {show(x.t)}" == "three 1 2 int 6", "a variant with fields beside a struct default");
+}

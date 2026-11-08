@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-B-Scope` — A NAME BOUND IN SIBLING LOOPS IS ONE BINDING PER LOOP, ON EVERY BACKEND.
+// `ops: vector<Nd> = […]` in one `for` body and again in the next spells a new binding each
+// time: the earlier one's scope has ended.  The scope pass makes each a variable of its own,
+// and runs twice where a vector store is confined to a block; the second run registered the
+// local at its stores' common block when the local's one dep named ANOTHER store (the last
+// loop's empty literal), so it never split, and one variable spanned all the loops.  The
+// interpreter and the C read that fine, but `--native` declares a local at its first write:
+// `var_ops` existed in the first loop only and rustc refused the second (E0425) — the program
+// did not build.  Here the match is on a LOCAL whose arm result is copied into the return
+// buffer, which is what puts the stores' null-inits inside the arm.  loft-in-loft's
+// elaborator (@PLN91) has this shape in `finish_body`.
+//
+// The expected list is worked out by hand: `[5]`, each loop prepends what it builds, the last
+// inserts `1007` before position 0.
+//
+// @falsified-at: 309999235 — native (FALSIFY_NATIVE=rust) exit 1 -> 0; interpret INERT (expected
+//   for a backend-divergence guard — only one side can move)
+// CHANNEL: the exit code on `--native` (a rustc E0425; no program runs); the interpreter and
+//   the C agree before and after.
+// HOLDS: leak, panic and refusals are unmoved on both trees.
+
+enum Nd {
+  NdInt { n: integer },
+  NdSet { v: integer, x: Nd },
+  NdBlock { block: vector<Bl> },
+}
+
+struct Bl {
+  name: text,
+  operators: vector<Nd>,
+}
+
+struct At {
+  at: integer,
+  r: integer,
+}
+
+fn sh(n: Nd) -> text {
+  match n {
+    NdInt { n } => "{n}",
+    NdSet { v } => "s{v}",
+    _ => "b"
+  }
+}
+
+fn ident(n: Nd) -> Nd {
+  n
+}
+
+fn fin(body: Nd, xs: vector<integer>, ys: vector<integer>) -> Nd {
+  code = if len(xs) > 5 { body } else { ident(body) };
+  match code {
+    NdBlock { block } => {
+      bl = block[0];
+      for p in xs {
+        ops: vector<Nd> = [NdSet { v: p, x: NdInt { n: 0 } }, NdInt { n: p + 100 }];
+        for op in bl.operators { ops += [op]; }
+        bl.operators = ops;
+      }
+      for q in ys {
+        ops: vector<Nd> = [NdInt { n: q }];
+        for op in bl.operators { ops += [op]; }
+        bl.operators = ops;
+      }
+      places: vector<At> = [];
+      for r in ys {
+        places += [At { at: 0, r: r }];
+      }
+      for x in places {
+        ops: vector<Nd> = [];
+        for op in bl.operators {
+          if op#index == x.at { ops += [NdInt { n: 1000 + x.r }]; }
+          ops += [op];
+        }
+        bl.operators = ops;
+      }
+      NdBlock { block: [bl] }
+    },
+    _ => code
+  }
+}
+
+fn main() {
+  r = fin(NdBlock { block: [Bl { name: "b", operators: [NdInt { n: 5 }] }] }, [1, 2], [7]);
+  res = "";
+  match r {
+    NdBlock { block } => { for o in block[0].operators { res += sh(o) + ","; } },
+    _ => {}
+  }
+  assert(res == "1007,7,s2,102,s1,101,5,", "each loop's own `ops`: {res}");
+}
