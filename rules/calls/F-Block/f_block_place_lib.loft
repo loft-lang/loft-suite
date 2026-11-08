@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for `a-match-at-a-tail-answers-its-arm-not-a-temporarys-free` (`@FR-F-Block`):
+// a pub value struct and a pub function that builds one through a vector local it uses in place
+// (a work buffer, `@FR-R-WorkBuffer`).  Run on its own it is a cell too.
+//
+// @falsified-at: none — the library's own call answered as hand-computed, interpret and native.
+// CHANNEL: the assert.
+
+pub value struct Place {
+  pub s: integer,
+  pub r: integer,
+  pub p: integer
+}
+
+// A place whose store is `n`, read back through a vector local filled in place.
+pub fn place_of(n: integer) -> Place {
+  e: vector<integer> = [0, 0, 0];
+  e[0] = n;
+  Place { s: e[0] ?? 0, r: 1, p: 2 }
+}
+
+fn main() {
+  assert(place_of(7).s == 7 && place_of(7).p == 2, "place_of(7)");
+}

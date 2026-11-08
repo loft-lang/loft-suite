@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// `@FR-F-Block` — A MATCH AT A FUNCTION'S TAIL ANSWERS ITS ARM, NOT A TEMPORARY'S FREE.  A block's
+// value is its tail expression, and the frees of what the block made run after it without being
+// it.  Here one arm compares two places a library function answers (`place_of(m) ==
+// place_of(m)`); across the package boundary the value struct is a record, so each operand is a
+// temporary the match block frees at its end — and since `place_of` takes a work buffer, the
+// free tests two buffers: `if OpDistinctStore(t, b1) { if OpDistinctStore(t, b2) { OpFreeRef(t)
+// } }`.  The tail's return took that `if` for the block's value: the function answered `false`
+// whichever arm ran, with nothing reported on the interpreter, and the C refused the program ("a
+// boolean expected, a Void found").  loft-in-loft's interpreter (@PLN91) met it in `eq.loft`'s
+// `walk`, written over a `Place`.
+//
+// Every expected value is worked out by hand.  The last two cells are controls: the same
+// comparison under an `if` tail, and bound to a local before the tail, which were right.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 2 -> 0
+// CHANNEL: the assertion count and the exit code on the interpreter; the refusal on the C.
+// HOLDS: leak, panic and refusals are unmoved on both trees.
+
+use f_block_place_lib::*;
+
+enum Part { PEq { m: integer }, POther }
+
+struct Ty { parts: vector<Part> }
+
+fn pick(t: Ty, n: integer) -> boolean {
+  if n < -100 { return false; }
+  match t.parts[0]! {
+    PEq { m } => place_of(m) == place_of(m),
+    POther => n > 0,
+  }
+}
+
+fn unequal(t: Ty) -> boolean {
+  match t.parts[0]! {
+    PEq { m } => place_of(m) == place_of(m + 1),
+    POther => true,
+  }
+}
+
+fn if_tail(c: boolean, m: integer) -> boolean {
+  if c { place_of(m) == place_of(m) } else { m > 100 }
+}
+
+fn bound(t: Ty) -> integer {
+  x = match t.parts[0]! {
+    PEq { m } => if place_of(m) == place_of(m) { 7 } else { 3 },
+    POther => 5,
+  };
+  x * 10
+}
+
+fn main() {
+  eq = Ty { parts: [PEq { m: 5 }] };
+  other = Ty { parts: [POther] };
+  assert(pick(eq, 5), "the equality arm answers true");
+  assert(pick(other, 5), "the other arm answers true");
+  assert(!pick(other, -5), "the other arm answers false");
+  assert(!unequal(eq), "two different places compare unequal");
+  assert(unequal(other), "the other arm of unequal");
+  assert(if_tail(true, 5) && !if_tail(false, 5), "control: an if tail");
+  assert(bound(eq) == 70 && bound(other) == 50, "control: bound before the tail");
+}
