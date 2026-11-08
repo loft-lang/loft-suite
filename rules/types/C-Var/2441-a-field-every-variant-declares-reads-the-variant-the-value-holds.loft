@@ -10,6 +10,10 @@
 //
 // @falsified-at: d813c6115 — interpret 1 assertion failures -> 0 (`get(b)` answered `KIce.m`, 1),
 //   native-c 1 assertion failures -> 0; measured by hand against the build without the getter.
+//   CHANNEL: assert — `get(b)` on the build without the getter.
+//   WITNESS: `get(b)`: 1 there (`KIce.m`), 7 here.
+//   HOLDS: the KFire read, the proven, captured and variant-typed reads and the partial `Ps`
+//   cells answered the same on both builds; only the KIce read through the enum moved.
 // @FR-C-Var.  Axes this file MOVES: the receiver (held at the enum, proven by `is`, a match
 // arm's capture, a variant-typed local); the variant (each offset); a field every variant
 // declares beside one only some declare (`Ps`, whose absent variant reads null, loft#980).

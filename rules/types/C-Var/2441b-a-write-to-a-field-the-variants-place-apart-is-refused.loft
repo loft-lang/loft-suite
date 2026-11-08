@@ -7,6 +7,9 @@
 //
 // @falsified-at: d813c6115 — interpret: compiled with no diagnostic -> the refusal (the write
 //   landed in `KIce.m`); measured by hand against the build without the refusal.
+//   CHANNEL: expect-error — the refusal's text.
+//   WITNESS: no diagnostic there (the program ran, writing `KIce.m`); the refusal here.
+//   HOLDS: nothing else in the file is measured.
 // @FR-C-Var.
 // @EXPECT_ERROR: this field sits at a different offset in each variant that declares it
 
