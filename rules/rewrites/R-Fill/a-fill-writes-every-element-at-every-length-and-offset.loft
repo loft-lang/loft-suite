@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Fill` — a fill writes exactly its elements at every length and every start: the
+// repeat literal `[c; n]` for 8-, 4- and 2-byte elements and a slice fill `z[i] = 9` over a
+// range starting anywhere in a larger vector.  The C runtime writes the elements before the
+// first 64-byte boundary one by one and the rest in an unrolled vector loop, so lengths 0..139
+// and starts 0..8 cover an empty run, a run inside the head, and a head plus a tail.
+//
+// @falsified-at: a C runtime whose head loop wrote one element short — native-c answered
+//   `z 1 0` (the one-element slice fill left its element unwritten) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends, under clang and gcc.
+
+struct P { a: vector<integer>, b: vector<i32>, c: vector<u16>, d: vector<single>, e: vector<float> }
+fn digest(v: vector<integer>) -> integer { t = 0; for x in v { t = t * 31 + x; t = t & 0xFFFFFFFF; } t }
+fn main() {
+  h = 0;
+  for n in 0..140 {
+    v = [n * 7 + 3; n];
+    w: vector<i32> = [((n * 5 + 1) & 65535) as i32; n];
+    u: vector<u16> = [((n * 3 + 2) & 65535) as u16; n];
+    f: vector<single> = [(n as single) * 0.5f; n];
+    assert(len(v) == n && len(w) == n && len(u) == n && len(f) == n, "len {n}");
+    for x in v { assert(x == n * 7 + 3, "v {n}"); }
+    for x in w { assert(x == n * 5 + 1, "w {n}"); }
+    for x in u { assert(x == n * 3 + 2, "u {n}"); }
+    for x in f { assert(x == (n as single) * 0.5f, "f {n}"); }
+    // a slice fill at every offset: R-Fill over a range inside a bigger vector
+    z = [0; 150];
+    for i in (n % 9)..(n % 9 + n) { z[i] = 9; }
+    c = 0;
+    for x in z { if x == 9 { c += 1; } }
+    assert(c == n, "z {n} {c}");
+    assert(z[n % 9 + n]! == 0 && (n % 9 == 0 || z[n % 9 - 1]! == 0), "z edge {n}");
+    h = (h * 17 + digest(v) + digest(z)) & 0xFFFFFFF;
+  }
+  println("ok {h}");
+}
