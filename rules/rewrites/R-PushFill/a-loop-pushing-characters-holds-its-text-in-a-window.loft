@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-PushFill` text clause — a loop that names a text only as the destination of character
+// pushes holds its length in a window for the loop and writes it back at the loop's end: with
+// multibyte characters through the growth path (t1), its own `break` (t3), nested loops on one
+// text (t5), a `&text` parameter (t6), two texts (t7), its own `continue` (t9).  A loop that
+// reads the text (t2), leaves by `return` (t4), appends a string to it (t8) or hands it to a
+// call (t10) pushes as written.  Every value computed by hand.
+//
+// @falsified-at: a C emitter that skipped the window's write-back — native-c t3 answered `b`
+//   for `bbbbb` -> ok; and one that admitted a loop naming the text elsewhere — native-c t2
+//   answered 10 for 55 -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends, under clang and gcc and the ship lane.
+
+fn mb(n: integer) -> text {
+  t = "";
+  for i in 0..n { c = if i % 3 == 0 { 'é' } else if i % 3 == 1 { 'a' } else { '😀' }; t += "{c}"; }
+  t
+}
+fn readlen(n: integer) -> integer {
+  t = ""; s = 0;
+  for i in 0..n { t += "{'x'}"; s += len(t); }
+  s
+}
+fn brk(n: integer) -> text {
+  t = "";
+  for i in 0..n { if i == 5 { break; } t += "{'b'}"; }
+  t
+}
+fn ret(n: integer) -> text {
+  t = "";
+  for i in 0..n { if i == 3 { return t; } t += "{'r'}"; }
+  t
+}
+fn nest(n: integer) -> text {
+  t = "";
+  for i in 0..n { t += "{'('}"; for j in 0..i { t += "{'.'}"; } t += "{')'}"; }
+  t
+}
+fn into(out: &text, n: integer) {
+  for i in 0..n { out += "{'z'}"; }
+}
+fn two(n: integer) -> text {
+  a = ""; b = "";
+  for i in 0..n { a += "{'a'}"; b += "{'b'}"; b += "{'c'}"; }
+  "{a}|{b}"
+}
+fn mixed(n: integer) -> text {
+  t = "";
+  for i in 0..n { t += "{'m'}"; t += "--"; }
+  t
+}
+fn cont(n: integer) -> text {
+  t = "";
+  for i in 0..n { if i % 2 == 0 { continue; } t += "{'c'}"; }
+  t
+}
+fn peek(t: text) -> integer { len(t) }
+fn call(n: integer) -> integer {
+  t = ""; s = 0;
+  for i in 0..n { t += "{'k'}"; s += peek(t); }
+  s
+}
+fn main() {
+  m = mb(300);
+  assert(len(m) == 300 && size(m) == 100 * 2 + 100 * 1 + 100 * 4, "t1 {len(m)} {size(m)}");
+  assert(readlen(10) == 55, "t2 {readlen(10)}");
+  assert(brk(20) == "bbbbb", "t3 {brk(20)}");
+  assert(ret(20) == "rrr", "t4 {ret(20)}");
+  assert(nest(4) == "()(.)(..)(...)", "t5 {nest(4)}");
+  o = "q";
+  into(o, 70);
+  assert(len(o) == 71, "t6 {len(o)}");
+  assert(two(3) == "aaa|bcbcbc", "t7 {two(3)}");
+  assert(mixed(3) == "m--m--m--", "t8 {mixed(3)}");
+  assert(cont(9) == "cccc", "t9 {cont(9)}");
+  assert(call(10) == 55, "t10 {call(10)}");
+  println("ok");
+}
