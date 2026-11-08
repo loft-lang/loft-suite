@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-PushFill` several clause — a counted loop whose whole body pushes ONE simple invariant
+// onto each of several vector variables is one fill per vector, each its own value the trip
+// count of times after what it held: integer and byte zeros (`(0 as u8?) ?? 0` is the literal),
+// float and i32 elements, an empty, a negative and an inclusive range, vectors holding elements
+// before the loop.  One vector pushed twice per round (s2), a value reading the counter (s3), a
+// third statement (s6) and a parameter vector (s9) run the loop as written.  Every value
+// computed by hand.
+//
+// @falsified-at: an IR rewrite that admitted a pushed value reading the loop's counter —
+//   interpret answered s3 [-1,-1,-1,-1], native-c [null,null,null,null] -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends, with the clause and without it (`LOFT_NO_FILL_LOOP=1`).
+
+fn total(v: vector<integer>) -> integer { t = 0; for x in v { t += x; } t }
+fn fill_param(p: vector<integer>, n: integer) -> integer {
+  q: vector<integer> = [];
+  for _ in 0..n { p += [4]; q += [5]; }
+  len(p) * 100 + len(q)
+}
+fn main() {
+  // s1: an integer and a byte vector of zeros
+  n = 7;
+  a: vector<integer> = [];
+  m: vector<u8> = [];
+  for _ in 0..n { a += [9]; m += [(0 as u8?) ?? 0]; }
+  assert(len(a) == 7 && total(a) == 63 && len(m) == 7 && m[6]! == 0, "s1");
+  // s2: one vector pushed twice per round keeps its order
+  b: vector<integer> = [];
+  c: vector<integer> = [];
+  for _ in 0..3 { b += [1]; b += [2]; c += [3]; }
+  assert("{b}" == "[1,2,1,2,1,2]" && len(c) == 3, "s2 {b}");
+  // s3: a value reading the counter
+  d: vector<integer> = [];
+  e: vector<integer> = [];
+  for i in 0..4 { d += [i]; e += [0]; }
+  assert("{d}" == "[0,1,2,3]" && len(e) == 4, "s3 {d}");
+  // s4: an empty and a negative range
+  f: vector<integer> = [];
+  g: vector<integer> = [];
+  for _ in 0..0 { f += [1]; g += [1]; }
+  z = -3;
+  for _ in 0..z { f += [1]; g += [1]; }
+  assert(len(f) == 0 && len(g) == 0, "s4");
+  // s5: vectors holding elements before the loop
+  h: vector<integer> = [10, 20];
+  k: vector<integer> = [30];
+  for _ in 0..2 { h += [7]; k += [8]; }
+  assert("{h}" == "[10,20,7,7]" && "{k}" == "[30,8,8]", "s5 {h} {k}");
+  // s6: a third statement in the body
+  cnt = 0;
+  p1: vector<integer> = [];
+  p2: vector<integer> = [];
+  for _ in 0..5 { p1 += [1]; p2 += [2]; cnt += 1; }
+  assert(cnt == 5 && len(p1) == 5 && total(p2) == 10, "s6");
+  // s7: float and i32 elements
+  fv: vector<float> = [];
+  iv: vector<i32> = [];
+  for _ in 0..3 { fv += [1.5]; iv += [(6 as i32?) ?? 0]; }
+  assert("{fv}" == "[1.5,1.5,1.5]" && "{iv}" == "[6,6,6]", "s7 {fv} {iv}");
+  // s8: an inclusive range
+  r1: vector<integer> = [];
+  r2: vector<integer> = [];
+  for _ in 1..=4 { r1 += [2]; r2 += [3]; }
+  assert(total(r1) == 8 && total(r2) == 12, "s8");
+  // s9: a parameter vector
+  pv: vector<integer> = [1];
+  assert(fill_param(pv, 3) == 403, "s9 {fill_param(pv, 3)}");
+  println("ok");
+}
