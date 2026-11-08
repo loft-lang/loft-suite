@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-TypedKeyed` removal clause — `h[k] = null` on a hash with one integer key removes the
+// entry its key names with one walk from the key's home: a key present, a key absent, a table
+// never filled, and a churn of 400 inserts and 400 removals whose backward shifts must keep every
+// other key reachable.  Expected values hand-computed (7919 and 104729 are prime to 1000, so
+// each key run is 400 distinct keys; 136 meet; the live values sum to 52800).
+//
+// @falsified-at: a C runtime whose typed removal started one bucket past the key's —
+//   native-c answered `r4 217 272 128 42141` (the churn lost reachable keys) -> ok.
+// CHANNEL: the asserts.
+// HOLDS: every assertion on both backends, under -DLOFT_KEYED_VERIFY too.
+
+struct E { key: integer, val: integer, name: text, link: reference<E>? }
+struct F { key: integer, val: integer }
+struct H { es: hash<E[key]>, other: hash<F[key]> }
+
+fn main() {
+  h = H { };
+  h.other[5] = null;
+  for i in 0..10 { h.es += [E { key: i * 3, val: i, name: "n{i}" }]; }
+  h.es[9] = null;
+  h.es[10] = null;
+  assert(len(h.es) == 9, "r1 len {len(h.es)}");
+  assert(h.es[9] == null && h.es[12]!.val == 4, "r1 lookups");
+  assert(len(h.other) == 0, "r3");
+  c = H { };
+  for i in 0..400 { c.es += [E { key: (i * 7919) % 1000, val: i, name: "x" }]; }
+  removed = 0;
+  for i in 0..400 {
+    k = (i * 104729) % 1000;
+    if c.es[k] != null { removed += 1; }
+    c.es[k] = null;
+  }
+  live = 0;
+  sum = 0;
+  for i in 0..1000 { e = c.es[i]; if e != null { live += 1; sum += e.val; } }
+  assert(live == 264 && len(c.es) == 264 && removed == 136 && sum == 52800,
+         "r4 {live} {len(c.es)} {removed} {sum}");
+}
