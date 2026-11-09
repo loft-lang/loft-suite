@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE STRUCT-ENUM ELEMENT READ OFF A CALL'S VECTOR BORROWS THE VECTOR (loft#2443,
+// `(L-Null-Which)`, the ownership oracle's `Borrowed`: a projection is a view of its base).
+//
+// `x = params(d)[i]` with a struct-enum element reads the slot twice — the tag and the value
+// — so the element read is named once.  That name took OWNERSHIP of what it named, as it must
+// for a slot of a record a call delivers (`fresh().e`); but `params(d)[i]` is an element of
+// the call's vector, a view into the vector's store, and freeing the name freed the vector.
+// Where that vector was a result buffer the CALLER lent (a pooled buffer reused across the
+// comparisons below), the next comparison's fresh vector took the freed store and the lent
+// buffer overwrote it: one element answered another's value, silently, on both backends.
+//
+// Axes it MOVES: which of two definitions each read takes (vector element / bare element),
+//   the order of the two reads, every ordered pair in a loop (the buffer lent again each turn).
+// Held FIXED: a variable index (a literal index is a repeatable place and is read twice
+//   instead of named), one element per list.
+//
+// @falsified-at: 7ab6b9677 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assert.
+// WITNESS: the message prints every pair.
+// HOLDS: a slot read off a FRESH record a call delivers still releases that record.
+
+enum Ty {
+  TInt,
+  TRef { n: integer },
+  TVec { inner: Ty },
+}
+struct A { tp: vector<Ty>, hidden: boolean }
+struct Def { attrs: vector<A> }
+
+fn params(defs: vector<Def>, d: integer) -> vector<Ty> {
+  [for a in defs[d].attrs? if !a.hidden { a.tp[0] }]
+}
+
+fn show(t: Ty?) -> text {
+  match t {
+    TInt => "int",
+    TRef { n } => "ref{n}",
+    TVec { inner } => "vec<{show(inner)}>",
+    _ => "null",
+  }
+}
+
+// One element from each definition's list, as a member comparison reads them.
+fn pair(defs: vector<Def>, a: integer, b: integer, i: integer) -> text {
+  pa = params(defs, a)[i];
+  pb = params(defs, b)[i];
+  if pa == null || pb == null {
+    return "null";
+  }
+  "{show(pa)}+{show(pb)}"
+}
+
+// Every ordered pair, as a minimal-member search compares them.
+fn all_pairs(defs: vector<Def>) -> text {
+  out = "";
+  for a in 0..len(defs) {
+    for b in 0..len(defs) {
+      out += "{pair(defs, a, b, 0)};";
+    }
+  }
+  out
+}
+
+struct H { e: Ty? }
+
+fn fresh_h(n: integer) -> H {
+  H { e: TRef { n: n } }
+}
+
+fn test_every_pair_reads_its_own_elements() {
+  defs = [
+    Def { attrs: [A { tp: [TVec { inner: TRef { n: 4 } }], hidden: false }] },
+    Def { attrs: [A { tp: [TRef { n: 4 }], hidden: false }] },
+  ];
+  r = all_pairs(defs);
+  assert(r == "vec<ref4>+vec<ref4>;vec<ref4>+ref4;ref4+vec<ref4>;ref4+ref4;", "pairs: {r}");
+}
+
+fn test_a_fresh_record_slot_is_still_released() {
+  s = "";
+  for k in 0..20 {
+    x = fresh_h(k).e;
+    s = show(x);
+  }
+  assert(s == "ref19", "fresh slot: {s}");
+}
+
+fn main() {
+  test_every_pair_reads_its_own_elements();
+  test_a_fresh_record_slot_is_still_released();
+}

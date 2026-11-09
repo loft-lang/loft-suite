@@ -1,0 +1,155 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FIELD OF A CALL'S RESULT, RETURNED, IS THE CALLER'S COPY (loft#2443, `formal/calls.md`
+// @FR-F-Ret: a whole heap value is handed out OWNED, never a view of something the frame
+// frees).
+//
+// A call used as the root of a projection (`def(e, h).bounds`) is lifted into a temporary
+// the frame owns and frees on the way out: a result that BORROWS an argument is copied at
+// that bind, a fresh one is adopted.  So the field is a view of the temporary, whatever the
+// call's return deps say — and a borrowing callee's deps name the ARGUMENT (`["e"]`), which
+// read as "this return borrows the caller's own record, hand it up as it is".  Every exit
+// below returns such a field: as the tail, bound to a local first and returned at the end,
+// returned early beside a tail that borrows the argument or projects another call, and
+// beside a literal tail.  Each must deliver a copy into the caller's buffer.
+//
+// Axes it MOVES: the callee (borrows its argument / builds a fresh record), the spelling
+//   (tail projection, view local at the end, view local returned early), the other exit
+//   (a call projection, a parameter projection, a view local, a literal, none), and which
+//   exit runs.
+// Held FIXED: a vector field (a text field and a record field take other legs, measured
+//   clean beside these), one projection level.
+//
+// Every result is read AFTER a filler allocation, so a handed-up view of a freed temporary
+// reads the filler's store or a poisoned one; the leak gate reads the file.
+//
+// @falsified-at: 7ab6b9677 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// WITNESS: each message prints the answers.
+// HOLDS: the parameter-view write-through of (B-View) is unchanged (`own = e.defs[1].bounds;
+//   own += [99]` still reaches `e`); a call's result written through stays independent.
+
+struct D { name: text, bounds: vector<integer> }
+struct E { defs: vector<D> }
+
+fn def(e: E, d: integer) -> D {
+  e.defs[d]
+}
+
+fn mk(n: integer) -> D {
+  D { name: "m{n}", bounds: [n, n + 1, n + 2] }
+}
+
+fn filler() -> integer {
+  v = [for k in 0..40 { D { name: "c{k}", bounds: [k, k + 1] } }];
+  len(v)
+}
+
+// The tail is a field of a borrowing call.
+fn tail_borrow(e: E, h: integer) -> vector<integer> {
+  def(e, h).bounds
+}
+
+// The view is bound first and returned at the end.
+fn last_return(e: E, h: integer) -> vector<integer> {
+  own = def(e, h).bounds;
+  return own;
+}
+
+// Returned early, beside a tail that projects another borrowing call.
+fn early_call_tail(e: E, h: integer) -> vector<integer> {
+  own = def(e, h).bounds;
+  if len(own) > 0 {
+    return own;
+  }
+  def(e, 0).bounds
+}
+
+// Returned early, beside a tail that borrows the parameter itself.
+fn early_param_tail(e: E, h: integer) -> vector<integer> {
+  own = def(e, h).bounds;
+  if len(own) > 0 {
+    return own;
+  }
+  e.defs[0].bounds
+}
+
+// The tail exit is the one that runs.
+fn tail_taken(e: E, h: integer) -> vector<integer> {
+  own = def(e, h).bounds;
+  if len(own) == 0 {
+    return own;
+  }
+  def(e, 1).bounds
+}
+
+// The bounds-lookup shape the loft front end met: a holder's own list, else the template's.
+fn var_bounds(e: E, h: integer, d: integer, first: boolean) -> vector<integer> {
+  own = def(e, h).bounds;
+  if len(own) > 0 || !first {
+    return own;
+  }
+  def(e, d).bounds
+}
+
+// A fresh callee, returned early beside a call-projection tail.
+fn fresh_early(n: integer) -> vector<integer> {
+  own = mk(n).bounds;
+  if len(own) > 0 {
+    return own;
+  }
+  mk(0).bounds
+}
+
+fn test_borrowing_callee() {
+  e = E { defs: [D { name: "a", bounds: [] }, D { name: "b", bounds: [7, 8, 9] }] };
+  t = tail_borrow(e, 1);
+  f1 = filler();
+  l = last_return(e, 1);
+  f2 = filler();
+  c = early_call_tail(e, 1);
+  f3 = filler();
+  p = early_param_tail(e, 1);
+  f4 = filler();
+  k = tail_taken(e, 1);
+  f5 = filler();
+  s = "{t}|{l}|{c}|{p}|{k}|{f1 + f2 + f3 + f4 + f5}";
+  assert(s == "[7,8,9]|[7,8,9]|[7,8,9]|[7,8,9]|[7,8,9]|200", "borrowing callee: {s}");
+}
+
+fn test_bounds_lookup() {
+  e = E { defs: [D { name: "a", bounds: [] }, D { name: "b", bounds: [7, 8, 9] }, D { name: "c", bounds: [] }] };
+  r1 = var_bounds(e, 1, 0, true);
+  f = filler();
+  r2 = var_bounds(e, 0, 1, false);
+  r3 = var_bounds(e, 0, 1, true);
+  s = "{r1}|{r2}|{r3}|{f}";
+  assert(s == "[7,8,9]|[]|[7,8,9]|40", "bounds lookup: {s}");
+}
+
+fn test_fresh_callee() {
+  r = fresh_early(7);
+  f = filler();
+  s = "{r}|{f}";
+  assert(s == "[7,8,9]|40", "fresh callee: {s}");
+}
+
+fn test_independence_holds() {
+  e = E { defs: [D { name: "a", bounds: [] }, D { name: "b", bounds: [7, 8, 9] }] };
+  own = def(e, 1).bounds;
+  own += [99];
+  through_call = len(e.defs[1].bounds);
+  view = e.defs[1].bounds;
+  view += [99];
+  through_param = len(e.defs[1].bounds);
+  s = "{through_call}|{through_param}";
+  assert(s == "3|4", "independence: {s}");
+}
+
+fn main() {
+  test_borrowing_callee();
+  test_bounds_lookup();
+  test_fresh_callee();
+  test_independence_holds();
+}
