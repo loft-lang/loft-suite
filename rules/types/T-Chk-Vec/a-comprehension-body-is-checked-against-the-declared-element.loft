@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-T-Chk-Vec` in a comprehension (loft#2439): `[for … { e }] ⇐ vector<τ>` checks each `e ⇐ τ`,
+// so a body that needs the element type to be typed reads it from the declared destination.
+// An untyped `[]` as the body of `rows: vector<vector<integer>> = [for _ in n { [] }]` was
+// refused as an EMPTY body ("comprehension body must produce a value"), and a nested
+// comprehension body into a `vector<vector<…>>` was refused the same way.
+//
+// The element type reaches the body as the literal hint, not as the block's expected type:
+// typed by it, the block answered the bare `τ`, and a body that VIEWS its destination
+// (`w.ns[i] ?? []` built into the field `w.ns`, loft#1195's buffer route) lost the dep that
+// says so — its element was freed as if the body owned it, `w`'s store with it, and the next
+// comprehension into `w` read two empty fields (the `view` cells).
+//
+// Axes this file MOVES:  the destination (typed local, return type, struct field reading
+//                        itself, a field built fresh), the body (`[]`, a nested comprehension,
+//                        an `if` with an empty arm, `?? []` and `?? [7]` over the field),
+//                        a statement after the build that writes another field, a loop.
+// Axes it HOLDS FIXED:   integer and text elements.
+// Control: an EMPTY body `{}` is still refused (attic 1067-style refusal, not here).
+
+struct W { ns: vector<vector<integer>>, ts: vector<vector<text>> }
+struct Pair { x: integer, t: text }
+struct V { ns: vector<vector<integer>>, ps: vector<Pair> }
+
+fn empties(k: integer) -> vector<vector<text>> { [for _ in 0..k { [] }] }
+
+fn test_an_empty_literal_body_into_a_typed_local() {
+  n = [1, 2, 3];
+  rows: vector<vector<integer>> = [for _ in n { [] }];
+  assert(len(rows) == 3 && "{rows}" == "[[],[],[]]", "rows {len(rows)} {rows}");
+}
+
+fn test_a_nested_comprehension_body() {
+  tri: vector<vector<integer>> = [for i in 0..4 { [for j in 0..i { j * 10 }] }];
+  assert("{tri}" == "[[],[0],[0,10],[0,10,20]]", "tri {tri}");
+}
+
+fn test_a_return_type_declares_the_element() {
+  e = empties(2);
+  assert(len(e) == 2 && len(e[0]) == 0 && len(e[1]) == 0, "empties {len(e)}");
+}
+
+fn test_an_if_body_with_an_empty_arm() {
+  h: vector<vector<integer>> = [for i in 0..3 { if i > 0 { [i, i] } else { [] } }];
+  assert("{h}" == "[[],[1,1],[2,2]]", "if body {h}");
+}
+
+fn test_a_field_built_fresh_then_appended() {
+  w = W { ns: [], ts: [] };
+  w.ts = [for _ in 0..2 { [] }];
+  w.ts[1] += ["x"];
+  assert(len(w.ts) == 2 && "{w.ts}" == "[[],[\"x\"]]", "ts {w.ts}");
+}
+
+fn test_a_field_reading_itself_with_an_empty_default() {
+  w = W { ns: [[1, 2], [3]], ts: [] };
+  w.ns = [for i in 0..w.ns.len() + 1 { w.ns[i] ?? [] }];
+  assert(len(w.ns) == 3 && "{w.ns}" == "[[1,2],[3],[]]", "ns {w.ns}");
+}
+
+// The view cells: the field rebuilt from itself, then ANOTHER field rebuilt.  Both read empty
+// when the body's element lost its view of `v`.
+fn test_view_an_empty_default_then_another_field() {
+  v = V { ns: [[1, 2], [3]], ps: [Pair { x: 1, t: "a" }, Pair { x: 2, t: "b" }] };
+  v.ns = [for i in 0..v.ns.len() { v.ns[i] ?? [] }];
+  v.ps = [for i in 0..v.ps.len() { Pair { x: (v.ps[i]?.x ?? 0) * 10, t: "z" } }];
+  assert("{v.ns}" == "[[1,2],[3]]", "view ns {v.ns}");
+  assert(len(v.ps) == 2 && (v.ps[1]?.x ?? -1) == 20, "view ps {v.ps}");
+}
+
+fn test_view_a_literal_default_then_another_field() {
+  v = V { ns: [[1, 2], [3]], ps: [Pair { x: 1, t: "a" }, Pair { x: 2, t: "b" }] };
+  v.ns = [for i in 0..v.ns.len() { v.ns[i] ?? [7] }];
+  v.ps = [for i in 0..v.ps.len() { Pair { x: 5 + i * 0, t: "z" } }];
+  assert("{v.ns}" == "[[1,2],[3]]", "view ns {v.ns}");
+  assert(len(v.ps) == 2 && (v.ps[0]?.x ?? -1) == 5, "view ps {v.ps}");
+}
+
+fn test_rebuilt_in_a_loop() {
+  t = 0;
+  for r in 0..200 {
+    z: vector<vector<integer>> = [for _ in 0..3 { [] }];
+    t += len(z) + r * 0;
+  }
+  assert(t == 600, "loop {t}");
+}
