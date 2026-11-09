@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // A NULLABLE STRUCT-ENUM ELEMENT READ OFF A CALL'S VECTOR BORROWS THE VECTOR (loft#2443,
-// `(L-Null-Which)`, the ownership oracle's `Borrowed`: a projection is a view of its base).
+// @FR-L-Null-Which, the ownership oracle's `Borrowed`: a projection is a view of its base).
 //
 // `x = params(d)[i]` with a struct-enum element reads the slot twice — the tag and the value
 // — so the element read is named once.  That name took OWNERSHIP of what it named, as it must
