@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BOUNDED TEMPLATE TAKES THE CALL ITS BOUND ADMITS (`@FR-D-Rank`, `@FR-G-Sat`, `@FR-Disp-Select`).
+// A template member of an overload set is a candidate only where its variables bind AND the
+// bound types satisfy its bounds — structurally, by the methods visible for the type.  So in
+// a set of a concrete member, a bounded template and a bare one: the concrete member takes
+// its own type, the bounded template takes a type that has the interface's method, and the
+// bare template takes a type that has none (its bound fails, so it is simply no candidate).
+//
+// Ranks hand-computed:
+//   rh(RB) concrete EXACT                         → x.n + 100     = 102
+//   rh(RA) RA has `tag`: the bounded one, `$0:RTagged` against `$0` by bound set → tag + 1 = 41
+//   rh(RC) RC has no `tag`: the bounded one is no candidate, the bare one → 3
+//   rh(5)  integer has no `tag`                   → 3
+//
+// Axes it MOVES: which member takes the call (concrete, bounded, bare), whether the type has
+//   the bound's method, a record and a scalar argument.
+// Held FIXED: one bound, a plain method member, integer results.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 1e0f8d2ed,
+//   interpret and native.  It is what the @PLN91 elaborator's `satisfies` port is gated on.
+// CHANNEL: the assert.
+// WITNESS: the message prints the four answers.
+// HOLDS: a type with the method still reaches the bounded member past the bare one.
+
+interface RTagged { fn tag(self: Self) -> integer }
+struct RA { n: integer }
+struct RB { n: integer }
+struct RC { n: integer }
+fn tag(self: RA) -> integer { self.n * 10 }
+
+fn rh(x: RB) -> integer { x.n + 100 }
+fn rh<T: RTagged>(x: T) -> integer { x.tag() + 1 }
+fn rh<T>(_x: T) -> integer { 3 }
+
+fn main() {
+  a = rh(RA { n: 4 });
+  b = rh(RB { n: 2 });
+  c = rh(RC { n: 9 });
+  d = rh(5);
+  assert(a == 41 && b == 102 && c == 3 && d == 3, "bounded selection: {a} {b} {c} {d}");
+}
