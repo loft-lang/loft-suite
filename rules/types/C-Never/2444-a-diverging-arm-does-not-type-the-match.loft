@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DIVERGING ARM DOES NOT TYPE THE MATCH (`@FR-C-Never`, loft#2444).  `Never ⤳ τ`: an arm
+// that never finishes converts to the type the other arms give; it never decides it.  On the
+// first pass an arm whose type is not settled yet reads `Unknown`, and a diverging arm after it
+// replaced that as the match's result, so the binding was typed `Never` there and a range index
+// on its field refused to parse ("Expect token ]") — a valid program refused on both backends.
+//
+// Answers hand-computed: the block holds three operators, so `[0..2]` has 2; a value that is no
+// block takes the diverging arm.
+//
+// Axes it MOVES: the diverging arm after the value arm and before it; a `null` arm beside it;
+//   a value function and a void one (`return;`).
+// Held FIXED: a struct-enum subject, a vector field of a record taken from a vector element.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the build (main refuses to parse), then the asserts.
+// WITNESS: each assert names its cell and its answer.
+// HOLDS: an `if` whose other arm diverges, and a match whose every arm diverges, type as before.
+
+enum Nd { NNull, NVar { v: integer }, NBlock { block: vector<Blk> } }
+struct Blk { operators: vector<Nd> }
+
+fn after(code: Nd) -> integer {
+  bl = match code { NBlock { block } => block[0], _ => { return -1; } };
+  len(bl.operators[0..2])
+}
+
+fn before(code: Nd) -> integer {
+  bl = match code { NNull => { return -1; }, NBlock { block } => block[0], _ => { return -2; } };
+  len(bl.operators[0..2])
+}
+
+fn beside_null(code: Nd) -> integer {
+  bl = match code { NVar { v: _ } => null, NBlock { block } => block[0], _ => { return -1; } };
+  if bl == null {
+    return -3;
+  }
+  len(bl.operators[0..2])
+}
+
+fn into(code: Nd, out: vector<integer>) {
+  bl = match code { NBlock { block } => block[0], _ => { return; } };
+  out += [len(bl.operators[0..2])];
+}
+
+fn every_arm(code: Nd) -> integer {
+  match code { NBlock { block: _ } => { return 5; }, _ => { return 6; } }
+}
+
+fn main() {
+  b = NBlock { block: [Blk { operators: [NVar { v: 1 }, NVar { v: 2 }, NVar { v: 3 }] }] };
+  assert(after(b) == 2, "after: {after(b)}");
+  assert(after(NNull) == -1, "after null: {after(NNull)}");
+  assert(before(b) == 2, "before: {before(b)}");
+  assert(before(NNull) == -1, "before null: {before(NNull)}");
+  assert(beside_null(b) == 2, "beside null: {beside_null(b)}");
+  assert(beside_null(NVar { v: 1 }) == -3, "beside null var: {beside_null(NVar { v: 1 })}");
+  o: vector<integer> = [];
+  into(b, o);
+  into(NNull, o);
+  assert("{o}" == "[2]", "void function: {o}");
+  assert(every_arm(b) == 5 && every_arm(NNull) == 6, "every arm diverges");
+}
