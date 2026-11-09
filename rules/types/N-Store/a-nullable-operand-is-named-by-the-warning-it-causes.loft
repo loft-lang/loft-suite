@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE OPERAND IS NAMED BY THE WARNING IT CAUSES (`@FR-N-Store`).  A sum is nullable
+// because one operand is, and storing it into a non-null return warns.  The warning names the
+// operand that brings the null — the call whose result is declared `τ?` — and puts the caret
+// on it, where it used to name only the sum and give the generic cure, so the reader had to
+// find `floor_mod`'s `-> integer?` alone.  Operands that cannot be null (`clamp`, `max`,
+// answering `integer`) are passed over.
+//
+// @EXPECT_WARNING: `floor_mod` may answer null
+// @falsified-at: 7ab6b9677 — scored by hand (falsify cannot read a warning, GUARDS.md): the
+//   installed 7ab6b9677 prints the warning with the generic cure and names no operand (0 reports
+//   naming `floor_mod`); this tree names it (1).
+// CHANNEL: the warning's text.
+// WITNESS: the control names no operand (the generic cure).
+// HOLDS: the program still runs; the value is the sum.
+
+fn mix(n: integer) -> integer {
+  n.clamp(0, 10) + n.floor_mod(7) + n.max(3)
+}
+
+fn main() {
+  assert(mix(12) == 10 + 5 + 12, "mix(12)");
+}
