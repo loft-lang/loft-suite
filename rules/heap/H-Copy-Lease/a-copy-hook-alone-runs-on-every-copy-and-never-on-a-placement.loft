@@ -7,6 +7,7 @@
 // append, a literal's field or tuple member — COPIES this one, the source stays live and
 // independent, and the copy runs the hook on the NEW structure.  A FRESH value (a constructor,
 // a call, a call hoisted into a temp) is placed where it is produced, not copied: no hook.
+// @FR-H-Copy-Lease, @FR-B-Copy.
 //
 // Before: `b = a` between owned locals, `v += [a]` and `S { h: a }` copied and skipped the
 // hook, silently, on both backends (`1 2` for `1 102`).  The first cure for the append also
