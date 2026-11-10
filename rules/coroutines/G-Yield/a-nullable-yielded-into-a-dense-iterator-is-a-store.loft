@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2462, `@FR-G-Yield` × `@FR-N-Store` — A NULLABLE YIELDED INTO A DENSE ITERATOR IS A STORE.
+//
+// `yield x` of an `integer?` into an `iterator<integer>` is N-Store's store into the yielded
+// value: warned, and the consumer reads the null it holds.  The cure names `x!` and a test, never
+// `iterator<integer?>`, which G-Yield refuses.
+//
+// @EXPECT_WARNING: a nullable `integer?` is stored into the yielded value of the non-null type `integer`
+// CHANNEL: the warning and the assertion.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+fn raw(xs: vector<integer?>) -> iterator<integer> {
+  for x in xs { yield x; }
+}
+
+fn main() {
+  u = "";
+  for v in raw([3, null, 4]) { u += "{v} "; }
+  assert(u == "3 null 4 ", u);
+}
