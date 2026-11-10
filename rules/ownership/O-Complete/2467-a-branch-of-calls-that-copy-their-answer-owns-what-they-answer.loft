@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BRANCH OF CALLS THAT COPY THEIR ANSWER OWNS WHAT THEY ANSWER (`@FR-O-Complete`,
+// `@FR-F-Ret`).  `base` answers a field of its argument or the argument itself, and both arms
+// are copied into its return buffer, so every call of it answers a fresh record.  Its signature
+// kept naming the parameter the copy was made FROM, so a local bound from a branch of two such
+// calls read as a borrow of the argument, and the record the taken arm minted was freed by
+// nobody — one per evaluation, on both backends.
+//
+// Axes it MOVES: the branch (`if`, `match`), the arm taken, the scrutinee (a temporary, a
+// local), the caller's place in the file.  Controls: a direct bind (always owned), a callee that
+// genuinely borrows on a mid-body `return`, and the branch in a loop — each must free exactly
+// what it owns and read the caller's record intact afterwards.
+//
+// Values hand-computed: every path reads the innermost `B { n: 5 }`, or 7 for the rebound one.
+//
+// @falsified-at: dbf8b05ae — interpret leaked kt=100 T×5 -> clean, native exit 1 -> 0, native leaked kt=100 T×5 -> clean
+// CHANNEL: the store-leak check at exit (the harness runs cells under `LOFT_STRICT_STORES=1`).
+// ARMED: no instrument.
+// WITNESS: the leak names `T`.
+// HOLDS: every value, and no leak, on both backends.
+
+fn main() {
+  t = T::Opt { inner: T::Opt { inner: T::B { n: 5 } } };
+  c = take(t) == 0;
+  r_if = if c { base(t) } else { base(t) };
+  r_match = match base(t) { Opt { inner } => base(inner), _ => base(t) };
+  u = base(t);
+  r_local = match u { Opt { inner } => base(inner), _ => base(t) };
+  flat = T::B { n: 5 };
+  r_wild = match base(flat) { Opt { inner } => base(inner), _ => base(flat) };
+  r_rebound = if c { base(t) } else { base(t) };
+  k = take(base(r_rebound));
+  r_rebound = T::B { n: 7 };
+  assert(take(base(r_if)) == 5 && take(r_match) == 5 && take(r_local) == 5, "the branch binds");
+  assert(take(r_wild) == 5 && k == 5 && take(r_rebound) == 7, "the wild arm and a rebind");
+  // Controls.
+  x = base(t);
+  a = pick(t, true);
+  b = pick(t, false);
+  r_pick = if c { pick(t, true) } else { pick(t, false) };
+  s = 0;
+  for i in 0..100 {
+    rl = if i % 2 == 0 { base(t) } else { base(base(t)) };
+    s += take(base(rl)) + take(rl);
+  }
+  assert(take(base(x)) == 5 && take(base(base(a))) == 5 && take(base(b)) == 5, "controls");
+  assert(take(base(base(r_pick))) == 5 && s == 50 * 5 + 100 * 5 && take(base(base(t))) == 5, "the caller's record");
+}
+
+enum T { A, B { n: integer }, Opt { inner: T } }
+fn base(t: T) -> T { match t { Opt { inner } => inner, _ => t } }
+fn take(t: T) -> integer { match t { B { n } => n, _ => 0 } }
+// Borrows `t` on its mid-body return: that answer is the caller's record and must stay one.
+fn pick(t: T, early: boolean) -> T {
+  if early {
+    return t;
+  }
+  match t { Opt { inner } => inner, _ => t }
+}
