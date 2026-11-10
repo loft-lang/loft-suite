@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE RETURN OF A TYPE DECLARED BELOW RESOLVES (`@FR-N-Intro`, loft#2450).  A type may be
+// named before its declaration: the first pass stands a stub in for it and the declaration
+// adopts it.  `S?` names the same type as `S`, so `-> S?` of a struct, a plain enum or a struct
+// enum declared further down is that type made nullable.  The return arm resolved a bare stub
+// only, so every `-> S?` above its type refused its own body (`expected unknown?, got S?`),
+// while `-> S` and a parameter `x: S?` compiled.
+//
+// Axes it MOVES: the declared kind (a struct, a plain enum, a struct enum) and the answer
+// (present, null).  Controls: `-> S` and a parameter `S?` of the same forward type.
+//
+// Values hand-computed: some(3) answers S { a: 3 }; some(0) and the others' 0 answer null.
+//
+// @falsified-at: dbf8b05ae — interpret exit 1 -> 0, C exit 1 -> 0
+//   CHANNEL: a compile error.
+//   WITNESS: "expected unknown?, got S? on return from block".
+//   HOLDS: the two controls compile on both trees.
+
+fn some(i: integer) -> S? { if i > 0 { S { a: i } } else { null } }
+fn plain(i: integer) -> E? { if i > 0 { Two } else { null } }
+fn variant(i: integer) -> V? { if i > 0 { Va { x: i } } else { null } }
+
+// Controls.
+fn dense(i: integer) -> S { S { a: i } }
+fn given(x: S?) -> integer { if x == null { -1 } else { x.a } }
+
+fn main() {
+  s = some(3);
+  assert((s.a ?? -1) == 3 && some(0) == null, "struct");
+  assert(plain(1) == Two && plain(0) == null, "plain enum");
+  assert(variant(4) != null && variant(0) == null, "struct enum");
+  assert(dense(7).a == 7 && given(S { a: 4 }) == 4 && given(null) == -1, "controls");
+}
+
+struct S { a: integer }
+enum E { One, Two }
+enum V { Va { x: integer }, Vb }
