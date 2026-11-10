@@ -1,0 +1,114 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// (H-Copy-Lease) with (B-Copy) for a type that declares `OpCopy` and NO `OpDrop` (loft#2442).
+// Such a type holds no lease (H-Lease: only a type owning a droppable does), so (H-Move) never
+// moves it: every position that would MOVE an owned local of a droppable type — a bind, an
+// append, a literal's field or tuple member — COPIES this one, the source stays live and
+// independent, and the copy runs the hook on the NEW structure.  A FRESH value (a constructor,
+// a call, a call hoisted into a temp) is placed where it is produced, not copied: no hook.
+// @FR-H-Copy-Lease, @FR-B-Copy.
+//
+// Before: `b = a` between owned locals, `v += [a]` and `S { h: a }` copied and skipped the
+// hook, silently, on both backends (`1 2` for `1 102`).  The first cure for the append also
+// ran the hook on fresh values placed in a literal (`T { h: H { id: 1 } }` answered 101,
+// `S { h: mk(4) }` 104) — the placement cells hold that boundary.
+//
+// Control: with an `OpDrop` beside the `OpCopy` the same bind is a MOVE (H-Move) and runs no
+// hook (`drop_control`).
+//
+// Axes this file MOVES:  the position (bind, bind with the source unread after, bind in a loop,
+//                        append, literal field, tuple member, whole vector, a by-value
+//                        parameter, a container without a hook of its own), the source (owned
+//                        local, constructor, call, call in a join arm), a heap member (text).
+// Axes it HOLDS FIXED:   one hook that adds a constant.
+
+struct H { id: integer }
+fn OpCopy(self: H) { self.id += 100; }
+struct S { h: H }
+struct T { h: H, n: integer }
+struct N { name: text, k: integer }
+fn OpCopy(self: N) { self.k += 1; self.name += "'"; }
+struct D { id: integer }
+fn OpCopy(self: D) { self.id += 100; }
+fn OpDrop(self: D) { }
+
+fn mk(i: integer) -> H { H { id: i } }
+fn kept() -> H { a = H { id: 1 }; a }
+fn byval(p: H) -> integer { x = p; x.id += 1; p.id * 10000 + x.id }
+
+fn test_a_bind_between_owned_locals_copies_and_runs_the_hook() {
+  a = H { id: 1 };
+  b = a;
+  b.id += 1;
+  assert(a.id == 1 && b.id == 102, "bind {a.id} {b.id}");
+  a2 = H { id: 1 };
+  b2 = a2;
+  assert(b2.id == 101, "bind, source unread after {b2.id}");
+  a3 = H { id: 1 };
+  b3 = a3;
+  a3.id += 5;
+  assert(a3.id == 6 && b3.id == 101, "independent {a3.id} {b3.id}");
+}
+
+fn test_a_bind_in_a_loop_runs_the_hook_each_pass() {
+  a = H { id: 1 };
+  t = 0;
+  for i in 0..3 { b = a; t += b.id + i * 0; }
+  assert(t == 303, "loop {t}");
+}
+
+fn test_placing_an_owned_local_in_a_structure_copies_it() {
+  a = H { id: 1 };
+  v: vector<H> = [];
+  v += [a];
+  assert(a.id == 1 && len(v) == 1 && v[0].id == 101, "append {a.id} {v[0].id}");
+  s = S { h: a };
+  assert(s.h.id == 101, "literal field {s.h.id}");
+  t = (a, 7);
+  assert(t.0.id == 101 && t.1 == 7, "tuple member {t.0.id}");
+  assert(a.id == 1, "the source is untouched {a.id}");
+}
+
+fn test_a_whole_vector_and_a_hookless_container_copy_their_members() {
+  v: vector<H> = [H { id: 1 }, H { id: 2 }];
+  w = v;
+  assert("{v[0].id} {v[1].id} {w[0].id} {w[1].id}" == "1 2 101 102", "vector {w[0].id} {w[1].id}");
+  t1 = T { h: H { id: 1 }, n: 5 };
+  t2 = t1;
+  assert(t1.h.id == 1 && t2.h.id == 101 && t2.n == 5, "container {t1.h.id} {t2.h.id}");
+}
+
+fn test_a_by_value_parameter_copied_into_a_local() {
+  assert(byval(H { id: 1 }) == 10102, "parameter {byval(H { id: 1 })}");
+}
+
+fn test_a_fresh_value_is_placed_not_copied() {
+  x = mk(1);
+  v: vector<H> = [];
+  v += [mk(2)];
+  v += [H { id: 3 }];
+  s = S { h: mk(4) };
+  w = [mk(5), H { id: 6 }];
+  y = if x.id > 0 { mk(7) } else { mk(8) };
+  c = 3;
+  s2 = S { h: if c > 1 { mk(9) } else { mk(10) } };
+  t = (mk(11), 2);
+  r = kept();
+  o = "{x.id} {v[0].id} {v[1].id} {s.h.id} {w[0].id} {w[1].id} {y.id} {s2.h.id} {t.0.id} {r.id}";
+  assert(o == "1 2 3 4 5 6 7 9 11 1", "fresh {o}");
+}
+
+fn test_a_heap_member_is_copied_once_per_bind() {
+  n0 = N { name: "x", k: 0 };
+  last = "";
+  for i in 0..50 { c = n0; last = "{c.name}{c.k}{i * 0}"; }
+  assert(n0.name == "x" && n0.k == 0 && last == "x'10", "text member {n0.name}{n0.k} {last}");
+}
+
+fn test_drop_control() {
+  a = D { id: 1 };
+  b = a;
+  b.id += 1;
+  assert(b.id == 2, "a droppable bind is a move: {b.id}");
+}
