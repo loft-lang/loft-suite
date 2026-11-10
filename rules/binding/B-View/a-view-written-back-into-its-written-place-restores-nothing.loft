@@ -1,0 +1,90 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW WRITTEN BACK INTO ITS WRITTEN PLACE RESTORES NOTHING (`@FR-B-View` crossed with
+// `@FR-B-Disturb`'s overwrite).  `keep = st.lib` is a view of the place `st.lib`; a write into
+// that place does not end it — an overwritten place stays — so the view reads what the place
+// holds now, and `st.lib = keep` copies the place onto itself.  The save-and-restore spelling
+// therefore leaves the new value in place, on every backend, and the compiler says so at the
+// write-back (`warning[view-written-back]`); `keep = Lib { ..st.lib }` is the backup that
+// restores.
+//
+// Axes it MOVES: what wrote the place (a whole record, a field inside it, an enclosing
+// record), the place (a struct field, a vector element, a nullable field), the path (straight,
+// an `if` arm, a loop).  Values hand-computed: each restore answers the value written last;
+// the copy restores "core".
+//
+// @EXPECT_WARNING: 'k_field' is a view of the place it is written back into
+// @EXPECT_WARNING: 'k_inner' is a view of the place it is written back into
+// @EXPECT_WARNING: 'k_arm' is a view of the place it is written back into
+// @EXPECT_WARNING: 'k_elem' is a view of the place it is written back into
+// @EXPECT_WARNING: 'k_loop' is a view of the place it is written back into
+// @EXPECT_WARNING: 'k_outer' is a view of the place it is written back into
+// @EXPECT_WARNING: 'k_slot' is a view of the place it is written back into
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on main
+//   309999235 and on the build that adds the warning, interpret and C.
+// CHANNEL: the asserts (the B-View values) and the seven warnings.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: c_copy restores "core" on both trees.
+
+struct Lib { name: text }
+struct A { lib: Lib, k: integer }
+struct State { lib: Lib, a: A, depth: integer }
+struct N { lib: Lib? }
+
+fn mk() -> State {
+  State { lib: Lib { name: "core" }, a: A { lib: Lib { name: "ai" }, k: 0 }, depth: 0 }
+}
+
+fn c_field() -> text { st = mk(); k_field = st.lib; st.lib = Lib { name: "g1" }; st.lib = k_field; st.lib.name }
+fn c_inner() -> text { st = mk(); k_inner = st.lib; st.lib.name = "g2"; st.lib = k_inner; st.lib.name }
+fn c_arm() -> text {
+  st = mk();
+  k_arm = st.lib;
+  if st.depth == 0 { st.lib = Lib { name: "g3" }; }
+  st.lib = k_arm;
+  st.lib.name
+}
+fn c_elem() -> text {
+  v = [Lib { name: "a" }, Lib { name: "b" }];
+  k_elem = v[0];
+  v[0] = Lib { name: "g4" };
+  v[0] = k_elem;
+  v[0].name
+}
+fn c_loop() -> text {
+  st = mk();
+  k_loop = st.lib;
+  for i in 0..3 { st.lib = Lib { name: "g5{i}" }; }
+  st.lib = k_loop;
+  st.lib.name
+}
+fn c_outer() -> text {
+  st = mk();
+  k_outer = st.a.lib;
+  st.a = A { lib: Lib { name: "g6" }, k: 1 };
+  st.a.lib = k_outer;
+  st.a.lib.name
+}
+fn c_slot() -> text {
+  n = N { lib: Lib { name: "core" } };
+  k_slot = n.lib;
+  n.lib = Lib { name: "g7" };
+  n.lib = k_slot;
+  n.lib!.name
+}
+// The backup that restores: a copy is not a view of the place.
+fn c_copy() -> text { st = mk(); keep = Lib { ..st.lib }; st.lib = Lib { name: "g8" }; st.lib = keep; st.lib.name }
+
+fn main() {
+  assert(c_field() == "g1", "c_field {c_field()}");
+  assert(c_inner() == "g2", "c_inner {c_inner()}");
+  assert(c_arm() == "g3", "c_arm {c_arm()}");
+  assert(c_elem() == "g4", "c_elem {c_elem()}");
+  assert(c_loop() == "g52", "c_loop {c_loop()}");
+  assert(c_outer() == "g6", "c_outer {c_outer()}");
+  assert(c_slot() == "g7", "c_slot {c_slot()}");
+  assert(c_copy() == "core", "c_copy {c_copy()}");
+}
