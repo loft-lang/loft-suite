@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — `rebuilt`'s `r` owns its store on one path and views `b`'s on the other, and the pre-witness form never releases the store it owned: one `Ty` record per call (103 at exit).
 // `@FR-R-InPlaceLiteral` `@FR-R-Demote` — A LOCAL THAT VIEWS ANOTHER STORE ON ONE PATH IS NOT
 // REBUILT IN PLACE.  `r = T { … }` writes the literal into the store `r` already holds, and
 // `r = TyOpt { inner: r }` moves that store's record into a child of it (R-Demote); both are

@@ -9,7 +9,8 @@
 // its writes its own); a view of an element slot across a `sort` (B-Disturb's OVERWRITING
 // event: the place itself does not end) re-reads the slot; a text and a vector bound from a
 // field are copies untouched by an append to the field; a `text` parameter keeps the value it
-// was handed when the callee appends to the field it was read from.
+// was handed when the callee appends to the field it was read from; and a vector parameter,
+// which shares its caller's store (F-ParamHeap), sees the callee's growth of that same vector.
 //
 // Every cell held on both backends when written; the ledger rows are in
 // doc/claude/RULE_CROSSINGS-history.md.
@@ -21,6 +22,11 @@ struct Pt { x: integer, nm: text }
 struct S { name: text, v: vector<integer>, pts: vector<Pt> }
 
 fn app(s: S) { s.name += "!"; s.v += [9]; }
+fn grow_through(v: vector<integer>, s: S) -> integer {
+  s.v += [9];
+  s.v[0] = 5;
+  len(v) * 100 + v[0] * 10 + v[len(v) - 1]
+}
 fn keep_text(t: text, s: S) -> text { s.name += "!"; "{t}/{s.name}" }
 
 fn test_an_element_view_across_growths_in_a_loop() {
@@ -54,6 +60,7 @@ fn test_copies_of_field_content_across_appends() {
 
 fn test_parameters_naming_field_content() {
   s = S { name: "ab", v: [1, 2], pts: [] };
+  k = grow_through(s.v, s);
   r = keep_text(s.name, s);
-  assert(r == "ab/ab!", "parameters: {r}");
+  assert(k == 359 && len(s.v) == 3 && r == "ab/ab!", "parameters: {k} {len(s.v)} {r}");
 }
