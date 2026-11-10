@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2455, `@FR-B-Ref-Write` / `@FR-O-Owner` — A CALL RESULT WRITTEN THROUGH A LINK TO A FIELD
+// REPLACES THE FIELD.
+//
+// `k = &g.p; k = mk9()` writes `g.p`, as a literal through the same link does: whether or not the
+// call reads the link, read before the write, through a link to an element or to a local, and
+// in a loop.  A plain view (`c = h.p; c = mk9()`, no `&`) rebinds and leaves the field: the
+// control.
+//
+// @falsified-at: loft main dbf8b05ae — the field kept its old record ("4 m4"); both backends.
+// CHANNEL: the assertions and the leak gate.
+
+struct P { n: integer, t: text }
+struct H { p: P }
+fn step(d: P, w: integer) -> P { P { n: d.n + w, t: "{d.t}." } }
+fn mk9() -> P { P { n: 9, t: "nine" } }
+fn main() {
+  h1 = H { p: P { n: 4, t: "m4" } };
+  l1 = &h1.p;
+  l1 = mk9();
+  assert("{h1.p.n} {h1.p.t}" == "9 nine", "k1 {h1.p.n}");
+  h2 = H { p: P { n: 4, t: "m4" } };
+  l2 = &h2.p;
+  l2 = step(l2, 3);
+  assert("{h2.p.n} {h2.p.t} {l2.n}" == "7 m4. 7", "k2 {h2.p.n} {h2.p.t}");
+  h3 = H { p: P { n: 4, t: "m4" } };
+  l3 = &h3.p;
+  seen = l3.n;
+  l3 = mk9();
+  assert(seen == 4 && h3.p.n == 9, "k3 {h3.p.n}");
+  v = [P { n: 1, t: "a" }, P { n: 2, t: "b" }];
+  l4 = &v[1];
+  l4 = mk9();
+  assert("{v[0].n} {v[1].n} {v[1].t}" == "1 9 nine", "k4 {v[1].n}");
+  a = P { n: 1, t: "a" };
+  l5 = &a;
+  l5 = mk9();
+  assert(a.n == 9 && a.t == "nine", "k5 {a.n}");
+  h6 = H { p: P { n: 4, t: "m4" } };
+  l6 = &h6.p;
+  for i in 0..3 { l6 = step(l6, 1); }
+  assert("{h6.p.n} {h6.p.t}" == "7 m4...", "k6 {h6.p.n} {h6.p.t}");
+  h8 = H { p: P { n: 4, t: "m4" } };
+  c = h8.p;
+  c = mk9();
+  assert(h8.p.n == 4 && c.n == 9, "k8 {h8.p.n} {c.n}");
+  println("field link ok");
+}

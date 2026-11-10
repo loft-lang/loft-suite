@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2451, `@FR-E-Left` / `@FR-E-Asgn` — THE PLACE IS REDUCED BEFORE THE VALUE, for a record too.
+//
+// A record value that writes a variable its place reads (`v[j] = It { n: bump(j) }`, `bump`
+// taking `&integer`) lands in the element the place named when the assignment began, every
+// field of it; a literal local copied into an element later (`w = It{…}; m = 1; u[m] = w`)
+// lands where the index is when the copy runs.  A scalar element, an index written before the
+// build, a compound write inside the value and the assignment in a loop are the other axes.
+//
+// @falsified-at: loft main dbf8b05ae — e1 "1a 200b 3z " (fields split across two elements),
+//   e3 "7z 2b 3c " (built into u[0]); both backends.
+// CHANNEL: the assertions and the leak gate.
+
+struct It { n: integer, t: text }
+struct O { f: It }
+fn bump(i: &integer) -> integer { i += 1; i * 100 }
+fn show(v: vector<It>) -> text { s = ""; for e in v { s += "{e.n}{e.t} "; } s }
+fn base() -> vector<It> { [It { n: 1, t: "a" }, It { n: 2, t: "b" }, It { n: 3, t: "c" }] }
+fn main() {
+  v = base(); j = 1;
+  v[j] = It { n: bump(j), t: "z" };
+  assert(show(v) == "1a 200z 3c ", "e1 {show(v)}");
+  os = [O { f: It { n: 1, t: "a" } }, O { f: It { n: 2, t: "b" } }]; k = 0;
+  os[k].f = It { n: bump(k), t: "z" };
+  assert("{os[0].f.n}{os[0].f.t} {os[1].f.n}{os[1].f.t}" == "100z 2b", "e2");
+  u = base(); m = 0;
+  w = It { n: 7, t: "z" };
+  m = 1;
+  u[m] = w;
+  assert("{show(u)}{m}" == "1a 7z 3c 1", "e3 {show(u)}");
+  s = [1, 2, 3]; i = 0;
+  s[i] = bump(i);
+  assert("{s[0]} {s[1]} {s[2]} {i}" == "100 2 3 1", "e4 {s[0]} {s[1]} {i}");
+  u2 = base(); m2 = 1;
+  w2 = It { n: 7, t: "z" };
+  u2[m2] = w2;
+  assert(show(u2) == "1a 7z 3c ", "e5 {show(u2)}");
+  v6 = base(); j6 = 1;
+  v6[j6] = It { n: { j6 += 1; j6 }, t: "z" };
+  assert(show(v6) == "1a 2z 3c " && j6 == 2, "e6 {show(v6)} {j6}");
+  v7 = base();
+  for ii in 0..3 { kk = ii; v7[kk] = It { n: bump(kk), t: "q" }; }
+  assert(show(v7) == "100q 200q 300q ", "e7 {show(v7)}");
+  println("e-left ok");
+}
