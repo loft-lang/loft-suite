@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Path-Utf8` crossed with `@FR-Path-Case`: a name that IS spelled with U+FFFD on disk is
+// its own exact spelling and is not refused (Path-Utf8 refuses only a spelling that names an
+// entry THROUGH a U+FFFD standing for bytes loft text cannot spell), and like every name it
+// means exactly its spelling (Path-Case) — so such a file is written, listed once by its own
+// spelling, and read back, while a second spelling of it that differs only in the case of an
+// ASCII or a non-ASCII letter is refused for reading and for writing.  The files live in a
+// fresh directory under the temp directory, removed after.  NOT crossed here: a name whose
+// bytes are not UTF-8 (a loft program cannot create one).
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn scratch(tag: text) -> text {
+  d = "{temp_dir() ?? "/tmp"}/loft_suite_path_utf8_{tag}_{now()}_{ticks()}";
+  mkdir_all(d);
+  d
+}
+
+fn clean(d: text) {
+  for n in list_dir(d) ?? [] { delete("{d}/{n}"); }
+  rmdir(d);
+}
+
+fn test_a_replacement_character_name_is_its_own_spelling() {
+  d = scratch("own");
+  name = "a\u{FFFD}é.txt";
+  assert(file("{d}/{name}").write("body").ok(), "written");
+  assert("{list_dir(d) ?? []}" == "[\"{name}\"]", "listed once by its own spelling: {list_dir(d) ?? []}");
+  assert((file("{d}/{name}").content() ?? "") == "body" && exists("{d}/{name}"), "read back");
+  clean(d);
+}
+
+fn test_a_second_spelling_of_it_is_refused() {
+  d = scratch("case");
+  name = "a\u{FFFD}é.txt";
+  file("{d}/{name}").write("body");
+  for other in ["A\u{FFFD}é.txt", "a\u{FFFD}É.txt", "a\u{FFFD}é.TXT"] {
+    assert(!exists("{d}/{other}") && file("{d}/{other}").content() == null, "{other} is not read");
+    assert(!file("{d}/{other}").write("x").ok(), "{other} is not written");
+  }
+  assert(len(list_dir(d) ?? []) == 1 && (file("{d}/{name}").content() ?? "") == "body", "one file, unchanged");
+  clean(d);
+}
