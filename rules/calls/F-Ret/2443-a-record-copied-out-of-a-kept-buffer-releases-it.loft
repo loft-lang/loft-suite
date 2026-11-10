@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD A CALL DELIVERS INTO THE CALLER'S KEPT BUFFER, COPIED OUT, LEAVES THE BUFFER
+// RELEASED (loft#2443, @FR-F-Ret's bind copy; @FR-O-Buffer).
+//
+// `va = arm(k)` in a loop: `arm` delivers its `VArm?` into a hidden result buffer the caller
+// keeps across iterations (minted once, cleared per call).  The bind copies the record out
+// and the copy's source-free bit releases the buffer's store — so the buffer must be released
+// and reset there, as the interpreter does (`release_caller_hidden_arg`).  On `--native` it
+// was not: the next iteration cleared and refilled a store number the copy of `va` or the
+// filler vector had since been given, and the view `cond = va!.cond` read another value's
+// bytes (a corrupt-reference panic) — only that backend.
+//
+// Axes it MOVES: four iterations of the bind, a view of a field and of a vector field of the
+//   bound record, a filler allocation between bind and read.
+// Held FIXED: the locals pre-declared and rebound in the loop (the reported shape), a
+//   nullable record return.
+//
+// @falsified-at: 7ab6b9677 — native exit 1 -> 0, native panicked -> clean; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move).  Scored with FALSIFY_NATIVE=rust: the
+//   fault is rustc-native only; the C backend answers right on both trees.
+// CHANNEL: the assert and the program's exit.
+// WITNESS: the message prints each iteration's reads.
+// HOLDS: the interpreter and the C backend answered right before and after.
+
+enum Nd { NdNull, NdInt { n: integer }, NdCall { d: integer, args: vector<Nd> } }
+struct VArm { cond: Nd?, binds: vector<Nd>, aliases: vector<text> }
+
+fn arm(k: integer) -> VArm? {
+  r = VArm { cond: null, binds: [], aliases: [] };
+  if k == 0 {
+    r.cond = null;
+    return r;
+  }
+  r.cond = NdCall { d: k, args: [NdInt { n: k * 10 }] };
+  r.binds += [NdInt { n: k }];
+  r
+}
+
+fn main() {
+  total = 0;
+  for k in 1..4 {
+    cond: Nd? = null;
+    wild = false;
+    binds: vector<Nd> = [];
+    va = arm(k);
+    if va == null {
+      return;
+    }
+    cond = va!.cond;
+    wild = cond == null;
+    binds = va!.binds;
+    filler = [for i in 0..20 { "x{i}" }];
+    total += len(filler);
+    assert(!wild && cond != null && len(binds) == 1, "arm {k}: wild={wild} null={cond == null} binds={len(binds)}");
+  }
+  assert(total == 60, "total {total}");
+}

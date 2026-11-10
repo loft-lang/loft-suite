@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WITNESSED LOCAL'S VIEW KEEPS ITS BASE ALIVE (loft#2443, @FR-O-Witness).
+//
+// `t` is bound three ways — a literal, a field of a loop-local record (`t = x.tp`, a view), a
+// fresh call result — so it carries an owner witness, and its one dep list named only the
+// LAST assignment's place.  The view's base `x` was then an ordinary per-iteration local:
+// where its record had a store of its own (the conditional rebind of `x` keeps it out of a
+// reused buffer, whether or not the rebind runs), the iteration's end released it while `t`
+// still viewed it, and the read after the loop answered `null` — silently, on both backends.
+//
+// Axes it MOVES: whether the rebind runs, whether the fresh call bind runs (which binding the
+//   read sees), a filler allocation between the loop and the read.
+// Held FIXED: a struct-enum field as the projection, one projection level.
+//
+// @falsified-at: 7ab6b9677 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assert.
+// WITNESS: the message prints the three answers.
+// HOLDS: an un-witnessed view (`t` bound only by views) was already kept alive by its deps.
+
+enum Ty {
+  TVoid,
+  TRef { n: integer },
+  TVec { inner: Ty },
+}
+struct Ex { code: integer, tp: Ty }
+
+fn mk(k: integer) -> Ex {
+  Ex { code: k, tp: TVec { inner: TRef { n: k } } }
+}
+
+fn ty_of(k: integer) -> Ty {
+  TRef { n: k }
+}
+
+fn rewrap(c: integer, t: Ty) -> Ex {
+  Ex { code: c + 1000, tp: t }
+}
+
+fn show(t: Ty) -> text {
+  match t {
+    TVoid => "void",
+    TRef { n } => "ref{n}",
+    TVec { inner } => "vec<{show(inner)}>",
+  }
+}
+
+fn filler() -> integer {
+  w = [for k in 0..30 { mk(900 + k) }];
+  len(w)
+}
+
+fn last_type(fresh: boolean, flip: boolean) -> text {
+  t = TVoid;
+  for k in 1..4 {
+    x = mk(k);
+    if flip {
+      x = rewrap(x.code, x.tp);
+    }
+    t = x.tp;
+  }
+  f = filler();
+  if fresh {
+    t = ty_of(77);
+  }
+  "{show(t)}/{f}"
+}
+
+fn main() {
+  s = "{last_type(false, false)}|{last_type(false, true)}|{last_type(true, true)}";
+  assert(s == "vec<ref3>/30|vec<ref3>/30|ref77/30", "witnessed view: {s}");
+}

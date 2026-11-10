@@ -1,0 +1,100 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FIELD BUILT FROM A VIEW OF ITSELF KEEPS THE COPY (`@FR-R-MoveLast`, the build-into clause,
+// loft#2445).  `a.f = y` may build `y` in `a.f` — the field cleared where `y`'s build begins —
+// only where nothing in that build names `a.f`'s container.  A local bound to the field (`l =
+// bl.v`) is that container under another name: walking it after the moved clear read an empty
+// vector, and the field kept only what was appended after the walk — `[9]` for `[10,20,30,9]`,
+// silently, on both backends.
+//
+// Answers hand-computed from `v = [1, 2, 3, 4]`: a comprehension over `l[0..3]` times ten, then
+// `9`, gives `[10,20,30,9]`; a `for` loop copying `l`, then `9`, gives `[1,2,3,4,9]`; texts
+// upper-cased with "?" then "z" give `["A?","B?","C?","z"]`.
+//
+// Axes it MOVES: how the source is built (comprehension, `for` loop); the element type
+//   (integer, text); how `bl` is a view (a vector element, a match capture); a view of the
+//   view; a source that reads no view (the rewrite still builds it in place).
+// Held FIXED: one vector field, the view bound right before the build.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0,
+//   native 1 assertion failures -> 0
+// CHANNEL: the asserts (main answers the appended tail only).
+// WITNESS: each assert names its cell and prints the field.
+// HOLDS: from an owned local record the bind copies (B-Copy), as before.
+
+struct R { v: vector<integer> }
+struct Rt { v: vector<text> }
+enum E { EB { rs: vector<R> }, EN }
+
+fn comprehension() {
+  rs = [R { v: [1, 2, 3, 4] }];
+  bl = rs[0];
+  l = bl.v;
+  ops = [for x in l[0..3] { x * 10 }];
+  ops += [9];
+  bl.v = ops;
+  assert("{rs[0].v}" == "[10,20,30,9]", "comprehension: {rs[0].v}");
+}
+
+fn loop_copy() {
+  rs = [R { v: [1, 2, 3, 4] }];
+  bl = rs[0];
+  l = bl.v;
+  ops: vector<integer> = [];
+  for x in l {
+    ops += [x];
+  }
+  ops += [9];
+  bl.v = ops;
+  assert("{rs[0].v}" == "[1,2,3,4,9]", "loop: {rs[0].v}");
+}
+
+fn texts() {
+  rs = [Rt { v: ["a", "b", "c"] }];
+  bl = rs[0];
+  l = bl.v;
+  ops = [for x in l { x.to_uppercase() + "?" }];
+  ops += ["z"];
+  bl.v = ops;
+  assert("{rs[0].v}" == "[\"A?\",\"B?\",\"C?\",\"z\"]", "texts: {rs[0].v}");
+}
+
+fn view_of_view() {
+  rs = [R { v: [1, 2, 3, 4] }];
+  bl = rs[0];
+  l = bl.v;
+  m = l;
+  ops = [for x in m[0..3] { x * 10 }];
+  ops += [9];
+  bl.v = ops;
+  assert("{rs[0].v}" == "[10,20,30,9]", "view of view: {rs[0].v}");
+}
+
+fn capture() {
+  e = EB { rs: [R { v: [1, 2, 3, 4] }] };
+  bl = match e { EB { rs } => rs[0], _ => R { v: [] } };
+  l = bl.v;
+  ops = [for x in l[0..3] { x * 10 }];
+  ops += [9];
+  bl.v = ops;
+  got = match e { EB { rs } => "{rs[0].v}", _ => "" };
+  assert(got == "[10,20,30,9]", "capture: {got}");
+}
+
+fn no_view() {
+  rs = [R { v: [1, 2, 3, 4] }];
+  bl = rs[0];
+  ops = [for x in 0..3 { x + 7 }];
+  bl.v = ops;
+  assert("{rs[0].v}" == "[7,8,9]", "no view: {rs[0].v}");
+}
+
+fn main() {
+  comprehension();
+  loop_copy();
+  texts();
+  view_of_view();
+  capture();
+  no_view();
+}

@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// (H-Copy-Lease) holds for a type that declares `OpCopy` and no `OpDrop`: a copy of a
+// parameter into a local runs the hook on the new structure (loft#2442).  The copy sites were
+// collected only for types owning a droppable, so the copy was made and the hook skipped —
+// `f(H { id: 1 })` answered 1002, silently, on both backends.
+//
+// @falsified-at: 4558f0382 — interpret 1 assertion failures -> 0 (answered 1002), native-c
+//   1 assertion failures -> 0; measured by hand against the build before `copy_observed`.
+//   CHANNEL: assert — `f(H { id: 1 })`.
+//   WITNESS: 1002 there (the hook skipped), 1102 here.
+//   HOLDS: the `OpDrop` control (`g`) answered 1102 on both builds.
+// @FR-H-Copy-Lease, @FR-B-Copy.  Axes this file MOVES: the type declares `OpCopy` alone, or
+// beside an `OpDrop` (the control).  Axes it HOLDS FIXED: a by-value parameter copied into a
+// local that is then written.
+
+struct H { id: integer }
+fn OpCopy(self: H) { self.id += 100; }
+fn f(p: H) -> integer { x = p; x.id += 1; p.id * 1000 + x.id }
+
+struct D { id: integer }
+fn OpDrop(self: D) { }
+fn OpCopy(self: D) { self.id += 100; }
+fn g(p: D) -> integer { x = p; x.id += 1; p.id * 1000 + x.id }
+
+fn main() {
+  assert(f(H { id: 1 }) == 1102, "OpCopy alone: {f(H { id: 1 })}");
+  assert(g(D { id: 1 }) == 1102, "OpCopy beside OpDrop (control): {g(D { id: 1 })}");
+  println("a copy hook without a drop hook runs on the copy: every cell holds");
+}

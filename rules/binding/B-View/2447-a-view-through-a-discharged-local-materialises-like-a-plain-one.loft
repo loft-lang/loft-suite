@@ -1,0 +1,137 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-View`'s materialise clause through a DISCHARGE: `c = va!.f` is the projection `va.f`
+// with the absence of `va` discharged, so it is a view of `va` on the same terms, and a
+// reassignment of `va` while it is live (`@FR-B-Disturb`) gives it its copy at the bind.  A
+// bare variable's `!` lowers to `{ if va is absent { <exit> }; va }` — the variable itself, no
+// temp — and nothing that names a view's place looked through it: the rebind released the
+// record the view still read, on both backends (loft#2447).  The `?? return` and `?? continue`
+// discharges are the same lowering with another exit, whose scope cleanup frees the bind's own
+// destination; the interpreter read that as the value reading it and kept an alias.
+//
+// The axes: the field type (a struct enum, a struct, a nullable struct — the tagged slot — and
+// a nested field), the spelling (`va!.f`, `(va!).f`, `(va ?? return …).f`, `(va ?? continue).f`)
+// and the trip count, each with values no other cell reuses.  Two controls: an UNDISTURBED view
+// still writes through to its container, and the plain `va.f` twin materialises as before.  A
+// live-record census holds the copies to no leak.
+//
+// Expected, by hand: c_loop builds `if(11,12)` from two rounds; c_line keeps 21 across the
+// rebind to 22 and two mints of 23; c_struct 31, c_paren 41, c_slot 51; c_nested 61; c_return
+// joins 71 and 72 and leaves on the third round; c_continue skips round 2 and joins 81 and 83;
+// c_alias writes 99 through the view into `va`; c_plain 101; c_census sums 0..n-1 and holds as
+// many records after 1 000 rounds as after 10.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: a halt, on both backends.
+//   WITNESS: "panic: cond is null" in c_loop — the view read the record the rebind released.
+//   HOLDS: c_alias (an undisturbed view writes through) and c_plain (the dense twin) on both
+//   trees; the rest score under LOFT_STRICT_STORES=1, which names each read of a freed store.
+
+enum Nd { NNull, NInt { n: integer }, NIf { c: Nd, t: Nd } }
+struct P { x: integer }
+struct VA { cond: Nd?, p: P, slot: P? }
+struct W { a: VA }
+
+fn mk(i: integer) -> VA? { VA { cond: NInt { n: i }, p: P { x: i }, slot: P { x: i } } }
+fn mkw(i: integer) -> W? { W { a: VA { cond: NInt { n: i }, p: P { x: i }, slot: P { x: i } } } }
+fn mkd(i: integer) -> VA { VA { cond: NInt { n: i }, p: P { x: i }, slot: P { x: i } } }
+fn maybe(i: integer, gone: integer) -> VA? { if i == gone { null } else { mk(i) } }
+
+fn show(n: Nd) -> text {
+  match n { NInt { n } => "{n}", NIf { c, t } => "if({show(c)},{show(t)})", _ => "null" }
+}
+
+fn census_records() -> integer {
+  cr_t = store_memory();
+  cr_i = cr_t.find("records ");
+  if !cr_i { return -1 }
+  cr_j = cr_i + 8;
+  cr_n = 0;
+  while cr_j < len(cr_t) && cr_t[cr_j] >= '0' && cr_t[cr_j] <= '9' {
+    cr_n = cr_n * 10 + (cr_t[cr_j] as integer - '0' as integer);
+    cr_j += 1;
+  }
+  cr_n
+}
+
+// The issue's shape: the view joins the accumulator across rounds of a loop.
+fn c_loop() -> text {
+  cond: Nd? = null;
+  for i in [11, 12] {
+    va = mk(i);
+    if va == null { continue; }
+    cond = if cond == null { va!.cond } else { NIf { c: cond!, t: va!.cond! } };
+  }
+  show(cond!)
+}
+
+// Straight-line, the freed record re-minted before the view is read.
+fn c_line() -> text {
+  va = mk(21);
+  cond = va!.cond;
+  va = mk(22);
+  other = mk(23);
+  again = mk(23);
+  "{show(cond!)} {other!.p.x + again!.p.x}"
+}
+
+fn c_struct() -> integer { va = mk(31); c = va!.p; va = mk(32); spare = mk(33); c.x + spare!.p.x - 33 }
+fn c_paren() -> integer { va = mk(41); c = (va!).p; va = mk(42); c.x }
+fn c_slot() -> integer { va = mk(51); c = va!.slot; va = mk(52); c!.x }
+fn c_nested() -> integer { w = mkw(61); c = w!.a.p; w = mkw(62); c.x }
+
+fn c_return() -> text {
+  r = "";
+  for i in [71, 72, 73] {
+    va = maybe(i, 73);
+    c = (va ?? return r).slot;
+    va = mk(79);
+    r += "{c!.x};";
+  }
+  r
+}
+
+fn c_continue() -> text {
+  r = "";
+  for i in [81, 82, 83] {
+    va = maybe(i, 82);
+    c = (va ?? continue).p;
+    va = mk(89);
+    r += "{c.x};";
+  }
+  r
+}
+
+// Control: nothing disturbs `va`, so the view aliases and the write reaches the container.
+fn c_alias() -> integer { va = mk(91); c = va!.p; c.x = 99; va!.p.x }
+
+// Control: the plain projection off a dense local, which materialised before the fix.
+fn c_plain() -> integer { va = mkd(101); c = va.p; va = mkd(102); c.x }
+
+fn c_census(n: integer) -> integer {
+  tot = 0;
+  for s in 0..n {
+    va = mk(s);
+    c = va!.slot;
+    va = mk(s + 1);
+    tot += c!.x;
+  }
+  assert(tot == n * (n - 1) / 2, "c_census total {tot}");
+  census_records()
+}
+
+fn main() {
+  assert(c_loop() == "if(11,12)", "c_loop {c_loop()}");
+  assert(c_line() == "21 46", "c_line {c_line()}");
+  assert(c_struct() == 31, "c_struct {c_struct()}");
+  assert(c_paren() == 41, "c_paren {c_paren()}");
+  assert(c_slot() == 51, "c_slot {c_slot()}");
+  assert(c_nested() == 61, "c_nested {c_nested()}");
+  assert(c_return() == "71;72;", "c_return {c_return()}");
+  assert(c_continue() == "81;83;", "c_continue {c_continue()}");
+  assert(c_alias() == 99, "c_alias {c_alias()}");
+  assert(c_plain() == 101, "c_plain {c_plain()}");
+  assert(census_records() >= 0, "the census answers");
+  assert(c_census(1000) == c_census(10), "c_census grows: {c_census(10)} -> {c_census(1000)}");
+}

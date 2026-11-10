@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONCATENATION READING ITS DESTINATION IN A LOOP READS WHAT IT HELD (`@FR-I-Comp`,
+// `@FR-Col-Concat`, loft#2446).  A build reads what its destination held when the statement
+// began.  `out = out[0..n] + [g]` let `out` adopt the slice's per-site buffer; the next pass of
+// the same site reset that buffer before the slice read `out`, so every pass read an empty
+// vector and only the last pass's element survived — `[2]` for `[1,2]`, silently, on both
+// backends.  The bounds alone reading the destination broke the same way.
+//
+// Answers hand-computed: appending 1 then 2 to `[]` gives `[1,2]`; inserting "b" then "a" in
+// order gives `["a","b"]`; `src[0..len(out)] + [9]` over `src = [5,6,7]` from `out = [1]` gives
+// `[5,9]`, then `[5,6,9]`.
+//
+// Axes it MOVES: the loop (`for`, `while`); the element (integer, record); who reads the
+//   destination (the slice's source, only its bounds); an insertion in the middle; a first
+//   operand that does not read the destination (still adopted).
+// Held FIXED: a vector local declared before the loop.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0,
+//   native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// WITNESS: each assert names its cell and prints the vector.
+// HOLDS: straight-line code, a literal and a call as the first operand answer as before.
+
+struct G { name: text }
+
+fn appended() {
+  out: vector<integer> = [];
+  for g in [1, 2] {
+    out = out[0..len(out)] + [g];
+  }
+  assert("{out}" == "[1,2]", "appended: {out}");
+}
+
+fn in_a_while() {
+  out: vector<integer> = [];
+  i = 0;
+  while i < 2 {
+    i += 1;
+    out = out[0..len(out)] + [i];
+  }
+  assert("{out}" == "[1,2]", "while: {out}");
+}
+
+fn sorted_insert() {
+  out: vector<G> = [];
+  for g in [G { name: "b" }, G { name: "a" }] {
+    at = len(out);
+    for o in out {
+      if at == len(out) && g.name < o.name {
+        at = o#index;
+      }
+    }
+    out = out[0..at] + [g] + out[at..len(out)];
+  }
+  r = "{[for x in out { x.name }]}";
+  assert(r == "[\"a\",\"b\"]", "sorted insert: {r}");
+}
+
+fn bounds_read() {
+  src: vector<integer> = [5, 6, 7];
+  out: vector<integer> = [1];
+  seen = "";
+  for _g in [1, 2] {
+    out = src[0..len(out)] + [9];
+    seen += "{out};";
+  }
+  assert(seen == "[5,9];[5,6,9];", "bounds: {seen}");
+}
+
+fn other_source() {
+  src: vector<integer> = [5, 6, 7];
+  out: vector<integer> = [];
+  for g in [1, 2] {
+    out = src[0..g] + [9];
+  }
+  assert("{out}" == "[5,6,9]", "other source: {out}");
+}
+
+fn main() {
+  appended();
+  in_a_while();
+  sorted_insert();
+  bounds_read();
+  other_source();
+}

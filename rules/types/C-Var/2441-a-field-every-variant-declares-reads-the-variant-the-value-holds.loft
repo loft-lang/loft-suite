@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `e.n` on a value held at its struct enum answers the `n` of the variant the value HOLDS,
+// wherever each variant lays `n` out (loft#2441).  Each variant is packed on its own, so
+// `KFire { n, s: text }` puts `n` at 8 and `KIce { m, n }` at 16; one read at the first
+// declaring variant's offset answered `KIce.m` for a `KIce`, silently, on both backends.  The
+// read is now a getter switching on the tag; code that already knows the variant — a match
+// arm's capture, a place an `is` test proved, a local of the variant's type — reads it directly.
+//
+// @falsified-at: d813c6115 — interpret 1 assertion failures -> 0 (`get(b)` answered `KIce.m`, 1),
+//   native-c 1 assertion failures -> 0; measured by hand against the build without the getter.
+//   CHANNEL: assert — `get(b)` on the build without the getter.
+//   WITNESS: `get(b)`: 1 there (`KIce.m`), 7 here.
+//   HOLDS: the KFire read, the proven, captured and variant-typed reads and the partial `Ps`
+//   cells answered the same on both builds; only the KIce read through the enum moved.
+// @FR-C-Var.  Axes this file MOVES: the receiver (held at the enum, proven by `is`, a match
+// arm's capture, a variant-typed local); the variant (each offset); a field every variant
+// declares beside one only some declare (`Ps`, whose absent variant reads null, loft#980).
+// Axes it HOLDS FIXED: integer fields; place receivers (a local or a parameter).
+
+enum KEnt { KFire { n: integer, s: text }, KIce { m: integer, n: integer } }
+enum Ps { PA { k: integer, x: integer }, PB { x: integer, j: integer }, PC { q: integer } }
+
+fn get(e: KEnt) -> integer { e.n }
+fn known(e: KEnt) -> integer { if e is KIce { e.n } else { -1 } }
+fn armed(e: KEnt) -> integer { match e { w: KIce { m } => w.n * 10 + m, _ => -1 } }
+fn px(p: Ps) -> integer { p.x ?? -9 }
+
+fn main() {
+  a = KFire { n: 4, s: "x" };
+  b = KIce { m: 1, n: 7 };
+  ice: KIce = KIce { m: 2, n: 9 };
+  assert(get(a) == 4, "held at the enum, KFire: {get(a)}");
+  assert(get(b) == 7, "held at the enum, KIce (read KIce.m before): {get(b)}");
+  assert(known(b) == 7, "proven by `is`: {known(b)}");
+  assert(armed(b) == 71, "a match arm's capture: {armed(b)}");
+  assert(ice.n == 9, "a variant-typed local: {ice.n}");
+  assert(a.n + b.n == 11, "locals held at the enum: {a.n + b.n}");
+  assert(px(PA { k: 1, x: 2 }) == 2, "partial field, PA: {px(PA { k: 1, x: 2 })}");
+  assert(px(PB { x: 3, j: 4 }) == 3, "partial field, PB: {px(PB { x: 3, j: 4 })}");
+  assert(px(PC { q: 5 }) == -9, "partial field, absent in PC: {px(PC { q: 5 })}");
+  println("a field every variant declares reads the variant the value holds: every cell holds");
+}

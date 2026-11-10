@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WRITE THE LOOP LEAVES RIGHT AFTER IS NOT REPORTED (`@FR-I-For`, `loop-source-written`).  The
+// notice says a write to the loop's source does not change what the loop walks — true, and only
+// worth saying while there is another round to walk.  A write followed at once by a `return`, or
+// by a `break` of the loop that read the place, runs no further round: the program computes
+// what it would compute if the loop did follow the write, so the notice is noise there (the
+// find-remove-return idiom: `for c in v.cs { if c.k == k { v.cs = without(v.cs, k); return c.n } }`).
+// A `break` of an INNER loop leaves an outer loop that read the place going round, and is still
+// reported — the cell beside this one.  Every value is hand-computed.
+//
+// @falsified-at: none — the channel is a warning, which `make falsify` (values only) cannot read.
+//   By hand: `loft-suite run --chapter iteration` with the installed main (loft 2026.11.0) FAILs
+//   both lanes with 4 unexpected warnings; the tree that settles the notice passes.  Found on
+//   the self-hosted elaborator's build (`selfhost/src/el_vars.loft` `pop_loop`).
+// CHANNEL: the absence of a warning — armed with `LOFT_DENY_WARNINGS=1`, any warning fails the
+//   cell (an unclaimed one is otherwise only printed).
+// WITNESS: the asserts below and a clean diagnostic stream.
+// HOLDS: the outer-loop cell beside it, which must still warn.
+// @ARMED: LOFT_DENY_WARNINGS=1
+
+struct Ent { k: integer, n: integer }
+struct Tab { es: vector<Ent>, removed: integer }
+
+fn without(es: vector<Ent>, k: integer) -> vector<Ent> { [for x in es if x.k != k { x }] }
+
+fn take(t: Tab, k: integer) -> integer {
+  for e in t.es {
+    if e.k == k {
+      t.es = without(t.es, k);
+      return e.n;
+    }
+  }
+  -1
+}
+
+fn take_break(t: Tab, k: integer) -> integer {
+  got = -1;
+  for e in t.es {
+    if e.k == k {
+      t.es = without(t.es, k);
+      break;
+    }
+    got = e.n;
+  }
+  got
+}
+
+// The right-hand side holds a block of its own (a comprehension's body): what follows the
+// write is still the `return` after it.
+fn take_inline(t: Tab, k: integer) -> integer {
+  for e in t.es {
+    if e.k == k {
+      t.es = [for x in t.es if x.k != k { x }];
+      return e.n;
+    }
+  }
+  -1
+}
+
+fn upto(n: integer) -> integer {
+  m = n;
+  t = 0;
+  for i in 0..m {
+    t += i;
+    if i == 2 {
+      m = 100;
+      return t;
+    }
+  }
+  t
+}
+
+fn main() {
+  t = Tab { es: [Ent { k: 1, n: 10 }, Ent { k: 2, n: 20 }, Ent { k: 3, n: 30 }], removed: 0 };
+  assert(take(t, 2) == 20, "take answers the removed entry");
+  assert(len(t.es) == 2 && t.es[1].k == 3, "take removed it: {len(t.es)}");
+  assert(take_break(t, 3) == 10, "break: the entry before the removed one");
+  assert(len(t.es) == 1, "break removed it: {len(t.es)}");
+  assert(upto(5) == 3, "a range bound written then returned: {upto(5)}");
+  u = Tab { es: [Ent { k: 4, n: 40 }, Ent { k: 5, n: 50 }], removed: 0 };
+  assert(take_inline(u, 4) == 40 && len(u.es) == 1, "a comprehension right-hand side");
+  println("a write the loop leaves right after is not reported");
+}
