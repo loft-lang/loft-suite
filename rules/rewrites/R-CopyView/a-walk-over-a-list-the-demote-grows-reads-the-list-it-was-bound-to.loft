@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-CopyView` crossed with `@FR-R-Demote`: a list grown by front pushes (R-Demote: the old
+// head record MOVES into the new node's child, the destination's record keeps its number) and
+// walked by a cursor whose every set is a bind from a variable or a step to a child (R-CopyView's
+// walk clause: a view of what it walks).  Both rewrite away a copy, and together they must
+// still answer what the copies answer: a walk of a struct list and of an enum list after the
+// pushes; a cursor bound to the head and then the head pushed again — the cursor is B-Copy's
+// copy of the list as it was, so it walks the old list, not the moved record nor the emptied
+// head; a list pushed onto inside the walk of another list; and a walk over an out-of-line
+// field grown by the place form.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct N { v: integer, next: N? }
+struct Host { tag: integer, g: N? }
+enum L { Nil, Cons { v: integer, next: L } }
+
+fn digits(n: N?) -> integer {
+  t = 0;
+  cur = n;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  t
+}
+
+fn ldigits(l: L) -> integer {
+  t = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { t = t * 10 + v; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  t
+}
+
+fn test_walks_after_front_pushes() {
+  h = N { v: 1 };
+  for i in 2..6 { h = N { v: i, next: h }; }
+  l = Nil;
+  for i in 1..5 { l = Cons { v: i, next: l }; }
+  assert(digits(h) == 54321 && ldigits(l) == 4321, "walks: {digits(h)} {ldigits(l)}");
+}
+
+fn test_a_cursor_bound_before_a_push_walks_the_old_list() {
+  h = N { v: 1, next: N { v: 2 } };
+  cur = h;
+  h = N { v: 9, next: h };
+  t = 0;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  assert(t == 12 && digits(h) == 912, "the cursor's copy: {t} {digits(h)}");
+  l = Cons { v: 1, next: Cons { v: 2, next: Nil } };
+  c = l;
+  l = Cons { v: 9, next: l };
+  assert(ldigits(c) == 12 && ldigits(l) == 912, "an enum list: {ldigits(c)} {ldigits(l)}");
+}
+
+fn test_a_push_inside_the_walk_of_another_list() {
+  src = N { v: 3, next: N { v: 2, next: N { v: 1 } } };
+  rev = N { v: 0 };
+  cur = src;
+  while cur != null { rev = N { v: cur.v, next: rev }; cur = cur.next; }
+  assert(digits(rev) == 1230 && digits(src) == 321, "reversed while walked: {digits(rev)} {digits(src)}");
+}
+
+fn test_a_walk_over_a_field_grown_by_the_place_form() {
+  o = Host { tag: 4 };
+  for i in 1..4 { o.g = N { v: i, next: o.g }; }
+  t = 0;
+  cur = o.g;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  assert(t == 321 && o.tag == 4 && digits(o.g) == 321, "the field's list: {t}");
+}

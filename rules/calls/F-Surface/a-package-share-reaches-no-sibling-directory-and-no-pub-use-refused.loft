@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Surface` crossed with `@FR-F-Package`: a `#package` library's unpublished items read
+// as `pub` only to files in its own directory and the one above, so from this SIBLING
+// directory (`--lib` reaches the library, membership is where the file is, never how it was
+// reached) the qualifier is refused for a function, and a relay that `pub use`s the package
+// passes on only its `pub` items, so the package's unpublished function is refused through the
+// relay too.  The published surface from here is
+// `a-package-publishes-only-its-pub-surface-to-a-sibling-directory.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code; each refusal was also checked alone
+//   (a later `@EXPECT_ERROR` can be credited without matching, loft#1261).
+// @ARGS: --lib rules/calls/F-Package
+
+use f_package_core_lib;
+use f_package_relay_lib;
+
+// @EXPECT_ERROR: `inner` is not `pub` in `f_package_core_lib`
+fn r1_the_package_from_a_sibling_directory() -> integer { f_package_core_lib::inner() }
+
+// @EXPECT_ERROR: `inner` is not `pub` in `f_package_relay_lib`
+fn r2_through_the_relay() -> integer { f_package_relay_lib::inner() }

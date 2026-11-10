@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-C-Order` crossed with `@FR-Col-Order`: a `par` loop consumes its results in the order of
+// its source's SEQUENTIAL walk (Col-Order) for every kind but a hash — a vector in index order,
+// a `sorted` and an `index` in key order, a descending key and a two-field key included — and
+// a hash in its bucket walk, which is not key order, so only the multiset is fixed there while
+// the sequential walk of the same hash stays key-ordered (a text key, and after a removal and
+// a re-add).  Each walk is taken at 1, 3 and 8 workers.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Kv { k: integer, v: text }
+struct Tk { name: text, n: integer }
+struct Two { a: integer, b: integer }
+
+fn tag(e: Kv) -> text { "{e.v}{e.k}" }
+fn ttag(e: Tk) -> text { "{e.name}{e.n}" }
+fn two(e: Two) -> text { "{e.a}.{e.b}" }
+
+fn test_ordered_kinds_keep_their_sequential_order_under_par() {
+  for n in [1, 3, 8] {
+    v = [Kv { k: 3, v: "c" }, Kv { k: 1, v: "a" }, Kv { k: 2, v: "b" }];
+    a = "";
+    for x in v par(r = tag(x), n) { a += "{r};"; }
+    d: sorted<Kv[-k]> = [Kv { k: 10, v: "x" }, Kv { k: 30, v: "z" }, Kv { k: 20, v: "y" }];
+    b = "";
+    for x in d par(r = tag(x), n) { b += "{r};"; }
+    sb = "";
+    for x in d { sb += "{tag(x)};"; }
+    ix: index<Two[a, -b]> = [Two { a: 2, b: 1 }, Two { a: 1, b: 5 }, Two { a: 2, b: 9 }, Two { a: 1, b: 7 }];
+    c = "";
+    for x in ix par(r = two(x), n) { c += "{r};"; }
+    s = "{a}|{b}|{c}";
+    assert(s == "c3;a1;b2;|z30;y20;x10;|1.7;1.5;2.9;2.1;", "N={n}: {s}");
+    assert(b == sb, "par and sequential agree on a sorted: {b} {sb}");
+  }
+}
+
+fn test_a_hash_keeps_its_multiset_under_par_and_key_order_without() {
+  for n in [1, 3, 8] {
+    h: hash<Tk[name]> = [Tk { name: "pear", n: 1 }, Tk { name: "apple", n: 2 }, Tk { name: "fig", n: 3 }, Tk { name: "", n: 4 }];
+    h["fig"] = null;
+    h += [Tk { name: "kiwi", n: 5 }];
+    o = ";";
+    cnt = 0;
+    for x in h par(r = ttag(x), n) { o += "{r};"; cnt += 1; }
+    all = o.contains(";pear1;") && o.contains(";apple2;") && o.contains(";4;") && o.contains(";kiwi5;") && !o.contains("fig");
+    assert(cnt == 4 && len(o) == 22 && all, "N={n}: the multiset {o} ({cnt})");
+    q = "";
+    for x in h { q += "{ttag(x)};"; }
+    assert(q == "4;apple2;kiwi5;pear1;", "the sequential walk is key-ordered: {q}");
+  }
+}

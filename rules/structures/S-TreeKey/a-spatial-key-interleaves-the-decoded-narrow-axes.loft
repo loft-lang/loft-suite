@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-S-TreeKey` crossed with `@FR-L-Narrow-Decode`: a spatial record's key string interleaves
+// its axes bit by bit, each axis the 64-bit value its declared type DECODES with its top bit
+// flipped — so axes held in two-byte slots over -1000..1000 (stored as `value + 1000`) order
+// by the values they mean, negative before positive, and not by their raw bytes.  The walk's
+// Morton order, a point lookup, a box query and a removal are each checked against the order
+// computed by hand from the decoded values.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+type Ax = integer limit(-1000, 1000) size(2);
+struct Mob { x: Ax, y: Ax, id: integer }
+
+fn test_the_walk_and_a_box_over_decoded_axes() {
+  xs: spatial<Mob[x, y]> = [];
+  xs += [Mob { x: -1000, y: 5, id: 1 }, Mob { x: 3, y: -2, id: 2 }, Mob { x: -1, y: -1, id: 3 }];
+  xs += [Mob { x: 999, y: 1000, id: 4 }, Mob { x: 0, y: 0, id: 5 }, Mob { x: -500, y: 600, id: 6 }];
+  xs += [Mob { x: 250, y: -750, id: 7 }];
+  walk = "";
+  for m in xs { walk += "{m.id}"; }
+  assert(walk == "3167254" && xs.len() == 7, "Morton order of the decoded values: {walk}");
+  assert((xs[-500, 600].id ?? -1) == 6 && xs[500, 600] == null, "a point lookup");
+  inside = "";
+  for m in xs[(-10, -800)..(300, 10)] { inside += "{m.id}"; }
+  assert(inside == "3725", "the box: {inside}");
+  xs[0, 0] = null;
+  rest = "";
+  for m in xs { rest += "{m.id}"; }
+  assert(rest == "316724" && xs.len() == 6, "after a removal: {rest}");
+}

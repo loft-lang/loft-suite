@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-InPlaceLiteral` crossed with `@FR-R-Switch` — the A/B half of
+// `an-in-place-literal-and-a-transient-read-of-its-place-answer-what-the-copies-would.loft`.
+// R-InPlaceLiteral is a parser rewrite with no checking form, so its falsifier is the SWITCH
+// A/B (R-Switch's both-backend clause): the same cells, armed with the element, nested and
+// variant clauses' switch-off forms, answer the same hand-computed values on both backends.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @ARMED: LOFT_NO_ELEMENT_IN_PLACE=1 LOFT_NO_NESTED_IN_PLACE=1 LOFT_NO_VARIANT_INPLACE=1
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct R { a: integer, b: integer, name: text }
+struct O { r: R, k: integer }
+struct Pt { x: integer, y: integer }
+
+fn mk(k: integer) -> Pt { Pt { x: k, y: k * 2 } }
+
+fn swap_el(v: vector<R>, i: integer) { v[i] = R { a: v[i].b, b: v[i].a, name: v[i].name + "!" }; }
+fn reset(o: O) { o.r = R { a: o.r.a + o.k, b: 0, name: "z{o.r.name}" }; }
+fn partial(v: vector<R>) { v[0] = R { a: 9 }; }
+
+fn rotate_then_read(v: vector<Pt>, i: integer) -> integer {
+  v[i] = Pt { x: v[i].y, y: 7 };
+  q = mk(v[i].x);
+  q.x + q.y + v[i].y
+}
+
+fn each(v: vector<Pt>) -> integer {
+  t = 0;
+  for i in 0..len(v) {
+    v[i] = Pt { x: v[i].y, y: v[i].x };
+    t = t * 100 + mk(v[i].x).y + mk(v[i].y).x;
+  }
+  t
+}
+
+fn test_a_literal_written_into_its_place_reads_the_old_value_first() {
+  v = [R { a: 1, b: 2, name: "p" }, R { a: 3, b: 4, name: "q" }];
+  swap_el(v, 1);
+  assert(v[1].a == 4 && v[1].b == 3 && v[1].name == "q!" && v[0].a == 1, "an element swapped: {v[1].a}{v[1].b}{v[1].name}");
+  o = O { r: R { a: 5, b: 6, name: "r" }, k: 10 };
+  reset(o);
+  assert(o.r.a == 15 && o.r.b == 0 && o.r.name == "zr" && o.k == 10, "a field: {o.r.a} {o.r.name}");
+  partial(v);
+  assert(v[0].a == 9 && v[0].b == 0 && v[0].name == "" && len(v) == 2, "omitted fields take their defaults: {v[0].b} [{v[0].name}]");
+}
+
+fn test_a_transient_built_from_the_written_place() {
+  w = [Pt { x: 1, y: 2 }];
+  assert(rotate_then_read(w, 0) == 13 && w[0].x == 2 && w[0].y == 7, "rotate: {w[0].x} {w[0].y}");
+  u = [Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }, Pt { x: 5, y: 6 }];
+  assert(each(u) == 51117 && u[2].x == 6 && u[2].y == 5, "each: {each([Pt { x: 1, y: 2 }, Pt { x: 3, y: 4 }, Pt { x: 5, y: 6 }])}");
+}

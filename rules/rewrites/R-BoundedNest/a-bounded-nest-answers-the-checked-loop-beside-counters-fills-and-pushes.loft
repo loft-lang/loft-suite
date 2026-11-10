@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-BoundedNest` crossed with `@FR-R-Counter`, `@FR-R-Fill` and `@FR-R-PushFill`.  An
+// innermost counted loop whose body is one accumulate over `?`-discharged reads runs with the
+// plain operators when a guard taken at its entry bounds every operation; otherwise the
+// checked loop runs.  Its counters are R-Counter's (an exclusive and an inclusive range); a
+// sibling loop in the same outer pass is an R-Fill of the vector the nest reads (so the
+// element bound is taken at a loop whose body does not write the vector); and the vector the
+// nest reads was built by a pushing loop R-PushFill reserves for.  Each answers the checked
+// value: reads past the end discharge to 0, and a sum past i64::MAX is null.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn taps(v: vector<integer>, w: vector<integer>, n: integer, m: integer) -> integer {
+  acc = 0;
+  for i in 0..n { for j in 0..m { acc = acc + v[i + j]? * w[j]?; } }
+  acc
+}
+
+fn taps_inclusive(v: vector<integer>, w: vector<integer>, m: integer) -> integer {
+  acc = 0;
+  for j in 0..=m { acc = acc + v[j]? * w[j]?; }
+  acc
+}
+
+fn refill(v: vector<integer>, w: vector<integer>, n: integer) -> integer {
+  t = 0;
+  for r in 0..3 {
+    for j in 0..n { w[j] = r + 1; }
+    acc = 0;
+    for j in 0..n { acc = acc + v[j]? * w[j]?; }
+    t = t * 100 + acc;
+  }
+  t
+}
+
+fn pushed(v: vector<integer>, n: integer) -> integer {
+  out: vector<integer> = [];
+  for r in 0..3 { out += [r * n + 1]; }
+  acc = 0;
+  for i in 0..len(out) { for j in 0..n { acc = acc + out[i]? * v[j]?; } }
+  acc * 10 + len(out)
+}
+
+fn test_counters_and_reads_past_the_end() {
+  assert(taps([1, 2, 3, 4], [5, 6], 3, 2) == 84, "in range: {taps([1, 2, 3, 4], [5, 6], 3, 2)}");
+  assert(taps([1, 2, 3, 4], [5, 6], 3, 3) == 84, "reads past both ends: {taps([1, 2, 3, 4], [5, 6], 3, 3)}");
+  assert(taps_inclusive([1, 2, 3], [4, 5, 6], 2) == 32 && taps_inclusive([1, 2, 3], [4, 5, 6], 5) == 32, "inclusive");
+  big = [4611686018427387904, 4611686018427387904];
+  assert(taps(big, [1, 1], 1, 2) == null, "past i64::MAX: {taps(big, [1, 1], 1, 2)}");
+}
+
+fn test_a_fill_beside_the_nest() {
+  w = [0, 0, 0];
+  assert(refill([1, 2, 3], w, 3) == 61218 && w[0] == 3 && len(w) == 3, "refill: {refill([1, 2, 3], [0, 0, 0], 3)}");
+}
+
+fn test_a_nest_over_a_pushed_vector() {
+  assert(pushed([2, 3], 2) == 453, "pushed: {pushed([2, 3], 2)}");
+}

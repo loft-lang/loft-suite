@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-ViewField` crossed with `@FR-B-Disturb`: a heap field of a returned record, assigned
+// from a vector whose owning destination is an element the callee appended to a PARAMETER's
+// container, MAY be delivered as a view of that element's field — but only where every call
+// site reads the field as a value and nothing between the call and the last read DISTURBS the
+// container, in the caller or in anything it calls.  Each builder below has exactly one call
+// site, and each site makes one of B-Disturb's events before its read: a growth of the
+// viewed vector itself, a value written into its elements, a removal from the container, a
+// run of growths of the container, the same growth one call down.  The result must read what
+// the owning copy holds — the vector as the callee built it — on every site; an undisturbed
+// site is the control.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Item { vals: vector<integer>, tag: integer }
+struct Cont { items: vector<Item> }
+struct Res { vals: vector<integer>, n: integer }
+
+fn b0(c: Cont, k: integer) -> Res { v = [k, k + 1]; c.items += [Item { vals: v, tag: k }]; Res { vals: v, n: k } }
+fn b1(c: Cont, k: integer) -> Res { v = [k, k + 1]; c.items += [Item { vals: v, tag: k }]; Res { vals: v, n: k } }
+fn b2(c: Cont, k: integer) -> Res { v = [k, k + 1]; c.items += [Item { vals: v, tag: k }]; Res { vals: v, n: k } }
+fn b3(c: Cont, k: integer) -> Res { v = [k, k + 1]; c.items += [Item { vals: v, tag: k }]; Res { vals: v, n: k } }
+fn b4(c: Cont, k: integer) -> Res { v = [k, k + 1]; c.items += [Item { vals: v, tag: k }]; Res { vals: v, n: k } }
+fn b5(c: Cont, k: integer) -> Res { v = [k, k + 1]; c.items += [Item { vals: v, tag: k }]; Res { vals: v, n: k } }
+
+fn grow_last(c: Cont) { c.items[len(c.items) - 1].vals += [7, 7, 7]; }
+
+fn mk() -> Cont { Cont { items: [Item { vals: [1], tag: 0 }] } }
+
+fn test_an_undisturbed_site_reads_the_built_vector() {
+  c = mk();
+  r = b0(c, 4);
+  assert(len(r.vals) == 2 && r.vals != null && len(c.items) == 2 && len(c.items[1].vals) == 2, "control: {len(r.vals)}");
+}
+
+fn test_the_viewed_vector_grown() {
+  c = mk();
+  r = b1(c, 4);
+  c.items[1].vals += [9, 9];
+  assert(len(r.vals) == 2 && len(c.items[1].vals) == 4, "grown: {len(r.vals)} {len(c.items[1].vals)}");
+}
+
+fn test_a_value_written_into_the_viewed_vector() {
+  c = mk();
+  r = b2(c, 4);
+  c.items[1].vals[0] = 40;
+  c.items[1].vals[1] = 50;
+  assert(len(r.vals) == 2 && c.items[1].vals[0] == 40, "written: {len(r.vals)}");
+  t = 0;
+  for x in r.vals { t = t * 10 + x; }
+  assert(t == 45, "the owning copy's elements: {t}");
+}
+
+fn test_a_removal_from_the_container() {
+  c = mk();
+  r = b3(c, 4);
+  c.items.remove(0);
+  c.items.remove(0);
+  assert(len(r.vals) == 2 && len(c.items) == 0, "removed: {len(r.vals)} {len(c.items)}");
+}
+
+fn test_a_run_of_growths_of_the_container() {
+  c = mk();
+  r = b4(c, 4);
+  for i in 0..40 { c.items += [Item { vals: [i, i, i], tag: i }]; }
+  assert(len(r.vals) == 2 && len(c.items) == 42, "grown container: {len(r.vals)} {len(c.items)}");
+}
+
+fn test_a_growth_one_call_down() {
+  c = mk();
+  r = b5(c, 4);
+  grow_last(c);
+  assert(len(r.vals) == 2 && len(c.items[1].vals) == 5, "a callee's growth: {len(r.vals)} {len(c.items[1].vals)}");
+}

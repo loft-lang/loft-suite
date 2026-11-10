@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE `#package` FIXTURE LIBRARY for this directory's cells (`@FR-F-Package`, `@FR-F-Surface`):
+// one `pub` function and, without `pub`, a function, a record type and its builder.  To a file
+// in this directory or the one above it every item reads as `pub`; to any other file only the
+// `pub` one does.  Run on its own it reaches all of its own items.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions.
+#package
+
+pub fn outer() -> integer { inner() + 1 }
+fn inner() -> integer { 41 }
+struct Box { k: integer }
+fn mkbox(k: integer) -> Box { Box { k: k * 2 } }
+
+fn test_the_package_reaches_its_own_items() {
+  assert(outer() == 42 && inner() == 41 && mkbox(3).k == 6, "own items: {outer()} {inner()}");
+}

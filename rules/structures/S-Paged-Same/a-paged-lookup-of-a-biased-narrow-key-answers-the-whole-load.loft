@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-S-Paged-Same` crossed with `@FR-L-Narrow-Decode`: a paged lookup of a persisted image
+// answers, for every key, the record a whole-image load of the same image answers, each key
+// field decoded by the reader of its declared type on both sides — so a narrow key with a
+// non-zero start (a one-byte slot over 1000..1250, a two-byte slot over -70000..-60000) is
+// fetched by the value it means, paged and whole alike, with the same field values, and a
+// value the image does not hold is absent on both.  The image is written to the temp directory
+// and removed after.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+type Lim = integer limit(1000, 1250) size(1);
+type Far = integer limit(-70000, -60000) size(2);
+struct A { k: Lim, v: integer, name: text }
+struct B { k: Far, v: integer }
+
+fn path(tag: text) -> text { "{temp_dir() ?? "/tmp"}/loft_suite_paged_narrow_{now()}_{ticks()}_{tag}.store" }
+fn done(p: text) { delete(p); delete("{p}.dschema"); }
+
+fn test_a_biased_one_byte_key() {
+  p = path("a");
+  h: hash<A[k]> = [A { k: 1000, v: 1, name: "lo" }, A { k: 1100, v: 2, name: "mid" }, A { k: 1250, v: 3, name: "hi" }];
+  assert(store_persist_copy(h, p), "written");
+  whole: hash<A[k]> = [];
+  assert(store_load(whole, p) && len(whole) == 3, "the whole load");
+  t = "";
+  ks: vector<Lim> = [1000, 1100, 1250];
+  for key in ks {
+    l: hash<A[k]> = [];
+    got = store_load_key(l, p, key);
+    t += "{got}:{l[key].v ?? -1}{l[key].name ?? "-"}={whole[key].v ?? -1}{whole[key].name ?? "-"} ";
+  }
+  assert(t == "true:1lo=1lo true:2mid=2mid true:3hi=3hi ", "paged = whole: {t}");
+  a: hash<A[k]> = [];
+  assert(!store_load_key(a, p, 1001) && !store_load_key(a, p, 100) && len(a) == 0 && whole[1001] == null, "absent on both");
+  done(p);
+}
+
+fn test_a_biased_two_byte_negative_key() {
+  p = path("b");
+  h: hash<B[k]> = [B { k: -70000, v: 7 }, B { k: -65000, v: 6 }, B { k: -60000, v: 5 }];
+  assert(store_persist_copy(h, p), "written");
+  whole: hash<B[k]> = [];
+  assert(store_load(whole, p), "the whole load");
+  s = 0;
+  ks: vector<Far> = [-70000, -65000, -60000];
+  for key in ks {
+    l: hash<B[k]> = [];
+    assert(store_load_key(l, p, key) && (l[key].v ?? -1) == (whole[key].v ?? -2), "key {key}");
+    s = s * 10 + (l[key].v ?? 0);
+  }
+  b: hash<B[k]> = [];
+  assert(s == 765 && !store_load_key(b, p, 5000) && !store_load_key(b, p, -59999), "paged: {s}");
+  done(p);
+}

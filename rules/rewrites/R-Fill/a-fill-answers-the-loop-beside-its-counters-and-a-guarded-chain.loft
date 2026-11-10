@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Fill` crossed with `@FR-R-Counter` and `@FR-R-GuardedChain`.  A counted loop whose body
+// is one in-place scalar set `v[base + i] = c` runs as one range test and one slice fill when
+// every index lands in [0, len), and as the per-element loop otherwise.  Its index is built
+// from the counter R-Counter seeds, and its value is a chain over invariants that
+// R-GuardedChain runs plain under a guard taken at the loop's entry — the fill is tried before
+// that guard, so both of the guard's copies are its fallback.  So: a fill over a shifted
+// range, the whole vector, and the guarded clause (`t = base + i; if t < N { v[t] = c }`);
+// and a base that makes every index NEGATIVE, which declines the fill and writes the last
+// elements (an index counts from the end) — each vector read back whole, by hand.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn zeros(n: integer) -> vector<integer> { v: vector<integer> = []; for _ in 0..n { v += [0]; } v }
+fn digits(v: vector<integer>) -> integer { s = 0; for x in v { s = s * 10 + x; } s }
+
+fn shifted(n: integer, base: integer, k: integer) -> integer {
+  v = zeros(n);
+  for i in 1..4 { v[base + i] = k * 3 + base; }
+  digits(v) * 10 + len(v)
+}
+
+fn whole(n: integer, base: integer, k: integer) -> integer {
+  v = zeros(n);
+  for i in 0..n { v[i] = k * base + 1; }
+  digits(v) * 10 + len(v)
+}
+
+fn guarded(n: integer, base: integer) -> integer {
+  v = zeros(n);
+  for i in 2..7 { v[base + i] = 9; }
+  for i in 0..n { t = base + i; if t < 6 { v[t] = 4; } }
+  digits(v)
+}
+
+fn test_a_fill_over_a_shifted_range_and_the_whole_vector() {
+  assert(shifted(6, 1, 2) == 77706, "shifted: {shifted(6, 1, 2)}");
+  assert(whole(4, 2, 3) == 77774 && whole(0, 2, 3) == 0, "whole: {whole(4, 2, 3)}");
+}
+
+fn test_negative_indexes_decline_the_fill() {
+  assert(shifted(6, -4, 2) == 2226, "from the end: {shifted(6, -4, 2)}");
+}
+
+fn test_the_guarded_clause() {
+  assert(guarded(8, 0) == 44444490 && guarded(8, 1) == 4444499, "guarded: {guarded(8, 0)} {guarded(8, 1)}");
+}

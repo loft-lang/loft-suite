@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Const-Value` crossed with `@FR-B-Ref-Alias`, `@FR-B-View` and `@FR-E-Asgn-Discharge`: a
+// value-const binding is read-only THROUGH EVERY NAME that names its place.  A `&` link
+// (B-Ref-Alias) to a field of a const parameter or a value-const local is refused a write, an
+// append included; a struct view (B-View) — a field projection, an element bound to a local,
+// a `for` loop variable — is refused a write; and a compound assignment whose target is a
+// DISCHARGE (`place? op= e`, E-Asgn-Discharge) writes `place`, so a discharge rooted in a
+// const binding is refused whether it is the whole target, a nested field's, a path inside a
+// nullable member, or reached through a view.  The read-only uses of the same shapes, and
+// the discharge writes on a writable binding, run in
+// `a-link-a-view-and-a-discharge-of-a-const-value-read-as-the-value.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code; each refusal was also checked alone
+//   (a later `@EXPECT_ERROR` can be credited without matching, loft#1261).
+
+struct In { k: integer, n: integer? }
+struct S { inner: In, items: vector<In>, v: vector<integer>, m: integer? }
+struct O { i: In?, tag: integer }
+
+// @EXPECT_ERROR: Cannot modify 'd': it is a view of const parameter 'p'
+fn a1_a_link_appended(p: const S) -> integer { d = &p.v; d += [1]; len(d) }
+
+// @EXPECT_ERROR: Cannot modify 'd': it is a view of const parameter 'p'
+fn a2_a_link_field_written(p: const S) -> integer { d = &p.inner; d.k = 4; d.k }
+
+// @EXPECT_ERROR: Cannot modify 'd': it is a view of const variable 'x'
+fn a3_a_link_into_a_const_local(q: S) -> integer { x: const S = q; d = &x.v; d[0] = 3; len(x.v) }
+
+// @EXPECT_ERROR: Cannot modify 'e': it is a view of const parameter 'p'
+fn v1_a_member_view_written(p: const S) -> integer { e = p.inner; e.k = 1; e.k }
+
+// @EXPECT_ERROR: Cannot modify 'e': it is a view of const parameter 'p'
+fn v2_a_loop_variable_written(p: const S) -> integer { for e in p.items { e.k = 1; } len(p.items) }
+
+// @EXPECT_ERROR: Cannot modify 'e': it is a view of const parameter 'p'
+fn v3_an_element_view_compound(p: const S) -> integer { e = p.items[0]; e.k += 2; e.k }
+
+// @EXPECT_ERROR: Cannot modify const parameter 'p'
+fn d1_a_discharge_target(p: const S) -> integer { p.m? += 1; p.m ?? 0 }
+
+// @EXPECT_ERROR: Cannot modify const parameter 'h'
+fn d2_a_path_through_a_nullable_member(h: const O) -> integer { h.i?.k += 1; h.tag }
+
+// @EXPECT_ERROR: Cannot modify const parameter 'p'
+fn d3_a_nested_discharge_target(p: const S) -> integer { p.inner.n? += 2; p.inner.k }
+
+// @EXPECT_ERROR: Cannot modify 'e': it is a view of const parameter 'p'
+fn d4_a_discharge_through_a_view(p: const S) -> integer { e = p.inner; e.n? += 2; e.k }

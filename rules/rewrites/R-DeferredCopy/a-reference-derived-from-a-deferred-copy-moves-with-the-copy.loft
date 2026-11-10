@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-DeferredCopy` crossed with `@FR-R-RecPtr`: a reference DERIVED from a deferred-copy
+// local (`op = prog.ops[i]`) is a plain-record view whose address R-RecPtr may hold for its
+// field reads; at the copy point, each derived reference live after it MOVES to the same
+// position in the copy and each address held for it is derived again.  So a field read of the
+// derived reference after the source's place was written reads the value the local was bound
+// to — straight, after a write at the very element the reference names, in a loop whose
+// every pass writes the source, and through a second view derived from the first.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Op { a: integer, b: integer }
+struct P { ops: vector<Op>, k: integer }
+
+fn mk(i: integer) -> P { P { ops: [Op { a: i, b: 1 }, Op { a: i, b: 2 }, Op { a: i, b: 3 }], k: 10 * i } }
+fn mks() -> vector<P> { [mk(0), mk(1), mk(2)] }
+
+fn same_element(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[1] ?? panic("in range");
+  a = op.a * 10 + op.b;
+  ps[1].ops[1].b = 77;
+  ps[1].ops[1].a = 66;
+  a * 100 + op.a * 10 + op.b
+}
+
+fn every_pass(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[2] ?? panic("in range");
+  prog = callee;
+  s = 0;
+  for step in 0..3 {
+    op = prog.ops[step] ?? panic("in range");
+    s = s * 10 + op.b + op.a;
+    ps[2].ops[step].b = 50;
+    ps[2].k += 1;
+  }
+  s * 100 + prog.k
+}
+
+fn second_view(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  op = prog.ops[2] ?? panic("in range");
+  w = op;
+  ps[1] = mk(8);
+  w.a * 100 + op.b * 10 + prog.k / 10
+}
+
+fn test_a_derived_reference_read_after_a_write_at_its_element() {
+  ps = mks();
+  r = same_element(ps);
+  assert(r == 1212 && ps[1].ops[1].b == 77 && ps[1].ops[1].a == 66, "same element: {r}");
+}
+
+fn test_a_derived_reference_in_a_loop_that_writes_the_source() {
+  ps = mks();
+  r = every_pass(ps);
+  assert(r == 34520 && ps[2].k == 23 && ps[2].ops[2].b == 50, "every pass: {r} {ps[2].k}");
+}
+
+fn test_a_second_view_of_the_derived_reference() {
+  ps = mks();
+  r = second_view(ps);
+  assert(r == 131 && ps[1].k == 80, "second view: {r} {ps[1].k}");
+}

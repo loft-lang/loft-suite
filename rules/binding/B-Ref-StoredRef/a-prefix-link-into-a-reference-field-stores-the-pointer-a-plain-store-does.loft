@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-StoredRef`, with binding.md B-Ref-AnnotationOnly's call-argument rule.  The prefix `&` admitted
+// into a `reference<τ>` field stores the SAME pointer the plain store does, in a literal and
+// by assignment: a write through either field reaches the pool element, a re-point by either
+// spelling moves the field to the new element, and the pointer is handed to a
+// `reference<R>` parameter WITHOUT a `&`, as AnnotationOnly asks.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct R { v: integer }
+struct L { link: reference<R>, k: integer }
+fn take(r: reference<R>) -> integer { r.v }
+
+fn test_both_spellings_store_one_pointer() {
+  pool = [R { v: 1 }, R { v: 2 }, R { v: 3 }];
+  a = L { link: &pool[1], k: 0 };
+  b = L { link: pool[1], k: 0 };
+  a.link.v += 10;
+  b.link.v += 100;
+  assert(pool[1].v == 112 && take(a.link) == 112 && take(b.link) == 112,
+         "one record behind both: {pool[1].v}");
+  a.link = &pool[2];
+  b.link = pool[0];
+  a.link.v = 30;
+  b.link.v = 10;
+  assert(pool[0].v == 10 && pool[1].v == 112 && pool[2].v == 30 && len(pool) == 3,
+         "re-pointed by both spellings: {pool[0].v} {pool[1].v} {pool[2].v}");
+  t = 0;
+  for i in 0..3 { c = L { link: &pool[i], k: i }; t += take(c.link) * (c.k + 1); }
+  assert(t == 10 + 224 + 90, "a link per pass of a loop: {t}");
+}

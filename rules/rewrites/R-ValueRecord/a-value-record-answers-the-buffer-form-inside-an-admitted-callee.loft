@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-ValueRecord` crossed with `@FR-R-Callee`: a function answering a plain no-heap record
+// of a few scalars returns it BY VALUE, and its return buffer is then DEAD — never minted —
+// which R-Callee reads as one of its allowances, so a callee that calls such a function and
+// writes only in place is still admitted into its caller's hoisting loop.  The answers are the
+// buffer form's: the callee's writes land in the record the loop reads when it is handed the
+// same record; a forward of another admitted function's result; a view leaf (`return v[i]?`)
+// and its default record past the end.  R-ValueRecord is a whole-program rewrite of a build
+// that ships no live tier, so the rewritten form runs under `--ship`, which a `loft --tests`
+// run does not take; `main` runs every cell so a `--ship` run reads the file.  The twin
+// `a-value-record-answers-the-same-with-its-switches-off.loft` runs the same cells with both
+// halves switched off.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct P { x: integer, y: integer }
+struct V { f: integer, g: integer }
+
+fn mkp(k: integer) -> P { P { x: k, y: k * 2 } }
+fn fwd(k: integer) -> P { mkp(k + 1) }
+fn pick(v: vector<P>, i: integer) -> P { return v[i]?; }
+fn bump(w: V, k: integer) { p = mkp(k); w.f += p.x + p.y; }
+
+fn hoisted(a: V, b: V, n: integer) -> integer {
+  s = 0;
+  for i in 0..n { s += a.f * 10 + a.g; bump(b, i); }
+  s
+}
+
+fn picked(v: vector<P>, n: integer) -> integer {
+  s = 0;
+  for i in 0..n { p = pick(v, i); s += p.x * 10 + p.y; }
+  s
+}
+
+fn test_an_admitted_callee_that_takes_a_value_record() {
+  a = V { f: 1, g: 2 };
+  b = V { f: 0, g: 0 };
+  assert(hoisted(a, b, 3) == 36 && b.f == 9, "another record: {b.f}");
+  c = V { f: 1, g: 2 };
+  assert(hoisted(c, c, 3) == 66 && c.f == 10, "the same record: {c.f}");
+}
+
+fn test_a_forward_a_view_leaf_and_its_default() {
+  q = fwd(2);
+  assert(q.x == 3 && q.y == 6, "forward: {q.x} {q.y}");
+  v = [P { x: 1, y: 2 }, P { x: 3, y: 4 }];
+  assert(picked(v, 3) == 46 && v[1].x == 3, "a view leaf, then the default record: {picked(v, 3)}");
+}
+
+fn main() {
+  test_an_admitted_callee_that_takes_a_value_record();
+  test_a_forward_a_view_leaf_and_its_default();
+}

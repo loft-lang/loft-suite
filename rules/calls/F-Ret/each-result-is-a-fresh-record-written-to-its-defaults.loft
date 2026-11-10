@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Ret` crossed with `@FR-H-Alloc`: a returned whole value is a FRESH, independent value,
+// and a fresh record is allocated with every field written to its type's default (H-Alloc) —
+// so a literal that names some fields answers the defaults for the rest (an integer 0, an
+// empty text, an empty vector, a null nullable, a nested record's own defaults), and writing
+// into one call's result reaches neither another call's result nor the next call, on the tail
+// and on an early return alike.  A result that borrows the argument is copied at the bind that
+// takes it, so writing the bound result leaves the caller's record as it was.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct In { k: integer, w: text }
+struct S { a: integer, b: integer, t: text, v: vector<integer>, n: integer?, inner: In }
+
+fn mk(a: integer) -> S { S { a: a } }
+fn mk_early(a: integer) -> S {
+  if a > 5 { return S { a: a, t: "big" }; }
+  S { a: a, b: 1 }
+}
+fn same(s: S) -> S { s }
+
+fn test_omitted_fields_answer_their_defaults() {
+  s = mk(3);
+  assert(s.a == 3 && s.b == 0 && s.t == "" && len(s.v) == 0 && s.n == null && s.inner.k == 0 && s.inner.w == "",
+         "defaults: {s.b} [{s.t}] {len(s.v)}");
+}
+
+fn test_each_result_is_independent() {
+  x = mk(1);
+  x.b = 9;
+  x.t += "x";
+  x.v += [4, 5];
+  x.n = 2;
+  x.inner.w = "in";
+  y = mk(1);
+  assert(y.b == 0 && y.t == "" && len(y.v) == 0 && y.n == null && y.inner.w == "", "the next call: {y.b} {len(y.v)}");
+  assert(x.b == 9 && x.t == "x" && len(x.v) == 2 && x.n == 2 && x.inner.w == "in", "the written one: {x.t}");
+  e = mk_early(8);
+  e.v += [1];
+  f = mk_early(8);
+  g = mk_early(2);
+  assert(len(f.v) == 0 && f.t == "big" && f.b == 0 && g.b == 1 && g.t == "" && len(e.v) == 1, "early and tail: {f.t} {g.b}");
+}
+
+fn test_a_borrowing_result_is_copied_at_its_bind() {
+  s = mk(4);
+  s.v = [1, 2];
+  r = same(s);
+  r.v += [3];
+  r.a = 40;
+  assert(len(s.v) == 2 && s.a == 4 && len(r.v) == 3 && r.a == 40, "a borrowed result: {len(s.v)} {s.a}");
+}

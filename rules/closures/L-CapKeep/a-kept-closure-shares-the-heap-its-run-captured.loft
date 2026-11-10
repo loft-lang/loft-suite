@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapKeep` crossed with `@FR-L-CapHeap`: each RUN of a closure build is its own record,
+// and a fn-ref kept from an earlier run (a local declared outside the loop) goes on answering
+// from THAT run's captures — and a captured heap value is SHARED, so what it answers is that
+// run's store as it is now: a write through the local after the capture, in the same pass, is
+// seen by the kept closure, while the next pass's fresh store is not.  The kept closure is read
+// after the loop, the store it holds outlives its pass, and each pass nobody kept releases what
+// it captured (the leak gate).
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, tags: vector<integer> }
+
+fn test_a_kept_run_sees_its_own_store() {
+  kept = fn() -> integer { -1 };
+  t = 0;
+  for i in 0..4 {
+    w = [i, i];
+    f = fn() -> integer { len(w) * 10 + w[0] ?? -1 };
+    if i == 1 { kept = f; }
+    w += [9];
+    w[0] = i + 5;
+    t = t * 100 + f();
+  }
+  assert(t == 35363738 && kept() == 36, "kept: {kept()} {t}");
+}
+
+fn test_a_kept_run_over_a_record() {
+  kept = fn() -> integer { -1 };
+  for i in 0..3 {
+    s = S { n: i, tags: [] };
+    f = fn() -> integer { s.n * 10 + len(s.tags) };
+    if i == 0 { kept = f; }
+    s.n += 100;
+    s.tags += [1, 2];
+  }
+  assert(kept() == 1002, "a record kept from the first pass: {kept()}");
+}

@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-StickySum` crossed with `@FR-R-Counter`, `@FR-R-Range` and `@FR-R-SameRead`.  A loop's
+// integer sum is updated with the processor's operator and one flag that makes it null after
+// the loop when the checked sum would have been; the operands beside it are the other rules'
+// — a counter R-Counter seeds as never the sentinel multiplying each element, an update whose
+// term R-Range proves (`x & 255`), and a sum STAGED through the temp R-SameRead's guard clause
+// shares with a leaving `if` (`if lim < cum + x { return cum }; cum += x`), which gives the
+// temp a flag of its own.  Each answers the checked value; the counter-weighted sum driven
+// past i64::MAX answers null, and the staged sum's early return answers the sum before it.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn weighted(v: vector<integer>) -> integer {
+  s = 0;
+  for i in 0..len(v) { s = s + (v[i] ?? 0) * i; }
+  s
+}
+
+fn masked(v: vector<integer>) -> integer {
+  s = 0;
+  for x in v { s = s + (x & 255); }
+  s
+}
+
+fn until(v: vector<integer>, lim: integer) -> integer {
+  cum = 0;
+  for x in v {
+    if lim < cum + x { return cum; }
+    cum += x;
+  }
+  cum
+}
+
+fn test_a_counter_weighted_sum() {
+  assert(weighted([3, 1, 4, 1, 5]) == 32, "weighted: {weighted([3, 1, 4, 1, 5])}");
+  big = [0, 4611686018427387904, 4611686018427387904];
+  assert(weighted(big) == null, "past i64::MAX: {weighted(big)}");
+  assert(weighted([]) == 0, "empty: {weighted([])}");
+}
+
+fn test_a_ranged_term() {
+  assert(masked([300, 7, 256, 1]) == 52, "masked: {masked([300, 7, 256, 1])}");
+  v: vector<integer> = [];
+  for i in 0..100 { v += [i * 1000 + 255]; }
+  assert(masked(v) == 13452, "a hundred terms: {masked(v)}");
+}
+
+fn test_a_staged_sum_with_a_leaving_guard() {
+  assert(until([4, 5, 6, 7], 12) == 9, "returns before the third: {until([4, 5, 6, 7], 12)}");
+  assert(until([1, 2], 100) == 3 && until([], 5) == 0 && until([6], 5) == 0, "the other exits");
+}

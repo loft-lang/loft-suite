@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-AnnotationOnly` beside binding.md B-Ref-StoredRef: the one position outside a `&τ`
+// binding where a prefix `&` is legal is a store into a field DECLARED `reference<τ>`.  The
+// same `&pool[0]` a `reference<R>` field takes is a parse error in the positions next to it:
+// written into a text field of the same literal, as an element of a vector literal, as a call
+// argument for a `reference<R>` parameter, and as a compound-assignment right-hand side.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code; each refusal was also checked alone
+//   (a later `@EXPECT_ERROR` can be credited without matching, loft#1261).
+
+struct R { v: integer }
+struct L { link: reference<R>, k: integer, t: text }
+fn take(r: reference<R>) -> integer { r.v }
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn r2_into_a_text_field_of_the_same_literal() -> integer {
+  pool = [R { v: 1 }];
+  s = "a";
+  n = L { link: &pool[0], k: 0, t: &s };
+  n.k
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn r3_as_an_element_of_a_vector_literal() -> integer {
+  pool = [R { v: 1 }];
+  more: vector<R> = [&pool[0]];
+  len(more)
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn r4_as_an_argument_for_a_reference_parameter() -> integer {
+  pool = [R { v: 1 }];
+  take(&pool[0])
+}
+
+// @EXPECT_ERROR: `&` is not a general operator
+fn r5_as_a_compound_right_hand_side() -> integer {
+  pool = [R { v: 1 }];
+  n = L { link: &pool[0], k: 0, t: "" };
+  x = 3;
+  n.k += &x;
+  n.k
+}

@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Transient` crossed with `@FR-R-Escape`: the contract is SEMANTICS (R-Escape) — a record
+// built, read and dropped may live outside the store with no identity, but every use answers
+// what the store path answers, and every use that would KEEP the value is where it is built
+// into the store as the value it always was.  So: read-only uses (a field of a call's result,
+// a local holding a record with a text and a nested record) answer the values; and each
+// keeping use R-Transient names — an append, a capture, a by-value parameter that stores it,
+// a `yield` — keeps a value equal to the one the reads saw, which a later read of the keeper
+// shows, and the reads after the keeping use still answer the same.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Pt { x: integer, y: integer }
+struct Tag { p: Pt, name: text }
+struct Bag { pts: vector<Pt>, tags: vector<Tag> }
+
+fn mk(k: integer) -> Pt { Pt { x: k, y: k * 2 } }
+fn mkt(k: integer, s: text) -> Tag { Tag { p: Pt { x: k, y: k + 1 }, name: s } }
+
+fn read_a_result(k: integer) -> integer { mk(k).x * 100 + mk(k + 1).y }
+fn read_a_local(k: integer) -> integer { t = mkt(k, "ab"); t.p.x * 100 + t.p.y * 10 + len(t.name) }
+fn appended(b: Bag, k: integer) -> integer { q = mk(k); s = q.x + q.y; b.pts += [q]; s * 10 + q.y }
+fn captured(k: integer) -> integer { q = mk(k); f = fn() -> integer { q.x * 3 + q.y }; f() * 10 + q.x }
+fn keep(b: Bag, t: Tag) { b.tags += [t]; }
+fn kept(b: Bag, k: integer) -> integer { t = mkt(k, "xyz"); keep(b, t); t.p.y * 10 + len(t.name) }
+fn gen(k: integer) -> iterator<Pt> { for i in 0..k { yield mk(i); } }
+fn yielded(k: integer) -> integer { s = 0; for p in gen(k) { s = s * 10 + p.y; } s }
+
+fn test_read_only_uses() {
+  assert(read_a_result(3) == 308 && read_a_local(4) == 452, "reads: {read_a_result(3)} {read_a_local(4)}");
+}
+
+fn test_every_keeping_use() {
+  b = Bag { pts: [], tags: [] };
+  assert(appended(b, 5) == 160 && len(b.pts) == 1 && b.pts[0].x == 5 && b.pts[0].y == 10, "appended: {b.pts[0].y}");
+  assert(captured(6) == 306, "captured: {captured(6)}");
+  assert(kept(b, 7) == 83 && len(b.tags) == 1 && b.tags[0].p.x == 7 && b.tags[0].name == "xyz", "kept: {b.tags[0].name}");
+  assert(yielded(4) == 246, "yielded: {yielded(4)}");
+}

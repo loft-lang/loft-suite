@@ -1,0 +1,100 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Cap-Fresh` crossed with `@FR-B-Copy`: a `..rest` sub-slice and a repetition
+// accumulator are FRESH vectors, and a fresh vector is a whole value like any other — so a
+// plain bind of it (`w = rest`) is B-Copy's copy, independent of the rest in both directions,
+// and the freshness is DEEP: a rest of records that own a text and a vector holds its own
+// copies of them, so a write to a rest element's heap field reaches neither the subject nor a
+// copy bound from the rest.  The subject is a local, a vector field and a parameter; the
+// rest is taken straight, in a `for` loop, and carried out of its arm.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Pt { x: integer, tags: vector<integer>, nm: text }
+struct Hold { pts: vector<Pt>, k: integer }
+enum Tok { Num { n: integer }, Op { o: integer } }
+
+fn mk() -> vector<Pt> {
+  [Pt { x: 1, tags: [1], nm: "a" }, Pt { x: 2, tags: [2, 2], nm: "bb" }, Pt { x: 3, tags: [], nm: "c" }]
+}
+
+fn sum_x(v: vector<Pt>) -> integer { s = 0; for p in v { s = s * 10 + p.x; } s }
+
+fn rest_of_param(v: vector<Pt>) -> integer {
+  match v { [_, ..rest] => { w = rest; w[0].x = 70; rest[1].x = 80; sum_x(w) * 1000 + sum_x(rest) }, _ => -1 }
+}
+
+fn test_a_bind_of_a_rest_is_a_copy_of_its_own() {
+  v = mk();
+  a = 0;
+  b = 0;
+  match v {
+    [_, ..rest] => {
+      w = rest;
+      w[0].x = 20;
+      w += [Pt { x: 9, tags: [], nm: "z" }];
+      rest[1].x = 30;
+      a = sum_x(w);
+      b = sum_x(rest);
+    },
+    _ => {}
+  }
+  assert(a == 2039 && b == 50 && sum_x(v) == 123 && len(v) == 3, "copy of a rest: {a} {b} {sum_x(v)}");
+}
+
+fn test_a_rest_is_fresh_all_the_way_down() {
+  h = Hold { pts: mk(), k: 0 };
+  t = "";
+  match h.pts {
+    [_, ..rest] => {
+      c = rest;
+      rest[0].tags += [7];
+      rest[0].nm += "!";
+      t = "{len(rest[0].tags)} {rest[0].nm} {len(c[0].tags)} {c[0].nm}";
+    },
+    _ => {}
+  }
+  assert(t == "3 bb! 2 bb", "heap fields of a rest: {t}");
+  assert(len(h.pts[1].tags) == 2 && h.pts[1].nm == "bb" && len(h.pts) == 3, "the subject: {h.pts[1].nm}");
+}
+
+fn test_a_rest_of_a_parameter() {
+  v = mk();
+  k = rest_of_param(v);
+  assert(k == 703100 && sum_x(v) == 123, "a parameter subject: {k} {sum_x(v)}");
+}
+
+fn test_a_rest_per_pass_and_out_of_its_arm() {
+  v = mk();
+  total = 0;
+  for i in 0..3 {
+    v[0].x = i;
+    match v { [_, ..rest] => { rest[0].x += 10 * i; total = total * 100 + sum_x(rest); }, _ => {} }
+  }
+  assert(total == 242523 && v[1].x == 2, "a fresh rest each pass: {total} {v[1].x}");
+  out = match v { [_, ..rest] => rest, _ => [] };
+  kept = out;
+  v[1].x = 99;
+  out[0].x = 55;
+  assert(sum_x(out) == 553 && sum_x(kept) == 23 && v[1].x == 99, "out of its arm: {sum_x(out)} {sum_x(kept)}");
+}
+
+fn test_a_repetition_accumulator_bound_is_a_copy() {
+  tk = [Num { n: 5 }, Num { n: 6 }, Op { o: 7 }];
+  r = "";
+  match tk {
+    [(x: Num)*, ..] => {
+      y = x;
+      x += [Num { n: 8 }];
+      y = [Num { n: 1 }];
+      r = "{len(x)} {len(y)}";
+    },
+    _ => {}
+  }
+  assert(r == "3 1" && len(tk) == 3, "a repetition and its copy: {r} {len(tk)}");
+}

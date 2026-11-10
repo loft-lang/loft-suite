@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-T-Destr` crossed with `@FR-T-Ret`: a function's returned tuple is an INDEPENDENT value
+// (T-Ret), and destructuring it evaluates the call ONCE, before any member is written, then
+// stores each member into its place with that store's own conversion and copy — a name, a
+// struct field, a nested field and a vector element; an integer, a text and a vector member;
+// a checked narrowing into a `u8?` field (300 does not fit: null); a swap of two places read
+// by the call itself.  A vector
+// member stored twice gives two independent copies, and the next call's tuple is fresh.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct In { t: text, v: vector<integer> }
+struct S { n: integer, small: u8?, inner: In }
+
+fn trio(log: vector<integer>, k: integer) -> (integer, text, vector<integer>) {
+  log += [k];
+  (k * 2, "t{k}", [k, k + 1])
+}
+fn pair(a: integer, b: integer) -> (integer, integer) { (a, b) }
+
+fn test_destructured_into_every_kind_of_place() {
+  log: vector<integer> = [];
+  s = S { n: 0, small: 0, inner: In { t: "", v: [] } };
+  w = [0, 0, 0];
+  (s.n, s.inner.t, s.inner.v) = trio(log, 3);
+  (w[1], name, vec) = trio(log, 4);
+  assert(len(log) == 2 && s.n == 6 && s.inner.t == "t3" && len(s.inner.v) == 2 && s.inner.v[1] == 4, "fields: {s.n} {s.inner.t}");
+  assert(w[1] == 8 && w[0] == 0 && name == "t4" && len(vec) == 2 && vec[0] == 4, "an element and names: {w[1]} {name}");
+  vec += [9];
+  s.inner.v[0] = 30;
+  (k, t2, v2) = trio(log, 3);
+  assert(len(v2) == 2 && v2[0] == 3 && len(vec) == 3 && s.inner.v[0] == 30 && k == 6 && t2 == "t3", "fresh each call: {len(v2)}");
+}
+
+fn test_a_narrowing_and_a_swap_through_the_call() {
+  s = S { n: 5, small: 7, inner: In { t: "", v: [] } };
+  (s.small, s.n) = pair(s.n, s.small ?? 0);
+  assert(s.small == 5 && s.n == 7, "a swap through the call: {s.small ?? -1} {s.n}");
+  s.n = 300;
+  (s.small, s.n) = pair(s.n, s.small ?? 0);
+  assert(s.small == null && s.n == 5, "a member that does not fit `u8?` reads null: {s.n}");
+  w = [1, 2, 3];
+  (w[2], w[0]) = pair(w[0], w[2]);
+  assert(w[0] == 3 && w[2] == 1 && w[1] == 2 && len(w) == 3, "an element swap: {w[0]} {w[2]}");
+}

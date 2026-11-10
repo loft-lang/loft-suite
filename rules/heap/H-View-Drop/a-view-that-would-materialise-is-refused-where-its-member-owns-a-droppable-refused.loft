@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-View-Drop` crossed with `@FR-B-View`: every shape where B-View MATERIALISES a view —
+// its container disturbed while the view is live — is refused at the disturbance when the
+// viewed member owns a droppable without `OpCopy`, because the materialised copy would be a
+// second structure.  The shapes are B-View's own: a `?`-discharged element view, a struct
+// member view whose container is given a new value, and a disturbance one call down (a
+// callee that grows or removes from the container it is handed).  The same four shapes over a
+// type with no droppable compile and materialise:
+// `a-view-of-a-member-without-a-droppable-materialises-where-one-with-is-refused.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code.
+
+struct H { id: integer, n: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+struct In { h: H, k: integer }
+struct O { inner: In, tag: integer }
+struct W { hs: vector<H> }
+fn grow(w: W) { w.hs += [H { id: 9, n: 0 }]; }
+fn drop_first(w: W) { w.hs.remove(0); }
+
+// @EXPECT_ERROR: cannot grow `v` while `e` references a place inside it
+fn r1_a_discharged_element_view_and_a_growth() -> integer {
+  v = [H { id: 1, n: 1 }];
+  e = v[0]?;
+  v += [H { id: 2, n: 2 }];
+  e.n
+}
+
+// @EXPECT_ERROR: cannot give `o` a new value while `x` references a place inside it
+fn r2_a_member_view_and_its_container_reassigned() -> integer {
+  o = O { inner: In { h: H { id: 1, n: 1 }, k: 1 }, tag: 0 };
+  x = o.inner;
+  o = O { inner: In { h: H { id: 2, n: 2 }, k: 2 }, tag: 1 };
+  x.k
+}
+
+// @EXPECT_ERROR: cannot call `grow` while `e` references a place inside `w`
+fn r3_a_growth_one_call_down() -> integer {
+  w = W { hs: [H { id: 1, n: 1 }] };
+  e = w.hs[0];
+  grow(w);
+  e.n
+}
+
+// @EXPECT_ERROR: cannot call `drop_first` while `e` references a place inside `w`
+fn r4_a_removal_one_call_down() -> integer {
+  w = W { hs: [H { id: 1, n: 1 }, H { id: 2, n: 2 }] };
+  e = w.hs[1];
+  drop_first(w);
+  e.n
+}

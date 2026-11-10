@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Surface` crossed with `@FR-F-Package` — the legal half of
+// `a-package-share-reaches-no-sibling-directory-and-no-pub-use-refused.loft`: from a sibling
+// directory a `#package` library reads as its `pub` surface, by the qualifier, and through a
+// relay's `pub use`; the relay's own `pub` function, which reads the package's unpublished
+// items inside the package's directory, answers as it does there.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+// @ARGS: --lib rules/calls/F-Package
+
+use f_package_core_lib;
+use f_package_relay_lib;
+
+fn test_the_pub_surface_from_a_sibling_directory() {
+  s = "{f_package_core_lib::outer()} {f_package_relay_lib::outer()} {f_package_relay_lib::relay()}";
+  assert(s == "42 42 412", "the surface: {s}");
+}
+
+fn main() { test_the_pub_surface_from_a_sibling_directory(); }
