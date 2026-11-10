@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-T-Absent` crossed with `@FR-N-Store`: a missing element read of a `vector<(τ₁, τ₂)>` is
+// the in-flight `(τ₁, τ₂)?`.  Stored into a slot whose members are each nullable it is the
+// sanctioned move — the nulls land and the slot holds a tuple that exists; a member read
+// `v[i].0` is `τ₁?`, discharged by `??` per member; stored into a dense member slot it keeps
+// N-Store's report (a warning for `integer` and `text`, the slot holding null).  (Held back: the
+// member stores below draw no warning.)
+//
+// CHANNEL: the assertions, the expected warnings, and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+// @EXPECT_WARNING: is stored into the local `y`
+// @EXPECT_WARNING: is stored into the local `w`
+
+fn get(v: vector<(integer, text)>, i: integer) -> (integer?, text?) { v[i] }
+
+fn main() {
+  v: vector<(integer, text)> = [(1, "a"), (2, "b")];
+  i = 5;
+  t: (integer?, text?) = v[i];
+  assert(t.0 == null && t.1 == null, "the nulls land");
+  g = get(v, 1);
+  h = get(v, 9);
+  assert((g.0 ?? -1) == 2 && (g.1 ?? "-") == "b" && h.0 == null && h.1 == null, "through a return");
+  a = v[i].0 ?? -1;
+  b = v[i + 2].1 ?? "none";
+  assert(a == -1 && b == "none", "per member");
+  y: integer = v[i].0;
+  w: (integer, text) = v[i];
+  assert(y == null && w.0 == null, "dense slots hold null");
+}
