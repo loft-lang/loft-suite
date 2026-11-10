@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Disp-Dynamic` crossed with `@FR-M-Exhaust`: a call with an enum-held argument is the
+// canonical `match` over the variants, so it is accepted exactly when that match would be
+// exhaustive — every variant by its own member, or an enum-level member standing as the `_`
+// arm — and then answers, for every runtime variant, what the written-out exhaustive match
+// answers.  Crossed with a set covering each variant one by one (no enum member), a set whose
+// enum member covers the rest, values coming from a vector walk, and a second argument.
+// The refusal half (a set missing a variant) is the sibling cell
+// `a-set-missing-two-variants-is-refused-at-the-call.loft`.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+enum K { A { n: integer }, B { n: integer }, C { n: integer } }
+
+fn each(a: A) -> text { "a{a.n}" }
+fn each(a: B) -> text { "b{a.n}" }
+fn each(a: C) -> text { "c{a.n}" }
+
+fn rest(a: B) -> text { "b{a.n}" }
+fn rest(a: K) -> text { "k{a.n}" }
+
+fn two(a: A, m: integer) -> integer { a.n * m }
+fn two(a: K, m: integer) -> integer { -m }
+
+fn by_match(k: K) -> text {
+  match k { A { n } => "a{n}", B { n } => "b{n}", C { n } => "c{n}" }
+}
+
+fn by_match_rest(k: K) -> text {
+  match k { B { n } => "b{n}", _ => "k{k.n}" }
+}
+
+fn test_every_variant_by_its_own_member() {
+  ks: vector<K> = [A { n: 1 }, B { n: 2 }, C { n: 3 }, B { n: 4 }];
+  s = "";
+  m = "";
+  for k in ks { s += each(k); m += by_match(k); }
+  assert(s == "a1b2c3b4" && s == m, "dispatch {s} match {m}");
+}
+
+fn test_an_enum_member_is_the_wildcard_arm() {
+  ks: vector<K> = [A { n: 5 }, B { n: 6 }, C { n: 7 }];
+  s = "";
+  m = "";
+  for k in ks { s += rest(k); m += by_match_rest(k); }
+  assert(s == "k5b6k7" && s == m, "dispatch {s} match {m}");
+}
+
+fn test_a_second_argument() {
+  x: K = A { n: 3 };
+  y: K = C { n: 3 };
+  assert(two(x, 4) == 12 && two(y, 4) == -4, "{two(x, 4)} {two(y, 4)}");
+}

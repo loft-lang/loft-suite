@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Latest` crossed with `@FR-O-Oracle`: ownership is a property of a binding's LATEST
+// assignment at the loop depth it was taken, the oracle answering own-or-borrow for each value
+// from the IR — a mint owns, a projection borrows its base.  A local assigned alternately a fresh
+// record and a view of a field, round by round, frees only what it owned when it moves on, reads
+// each round's value, and after the loop is the view its last assignment made: a write through it
+// reaches the field.  Assigned last from a mint instead, it is its own.
+//
+// CHANNEL: the assertions, strict stores and the leak gate.
+// @ARMED: LOFT_STRICT_STORES=1
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+struct H { p: P }
+
+fn mk(n: integer) -> P { P { n: n, t: "m{n}", xs: [n] } }
+
+fn test_the_last_assignment_a_view() {
+  hh = H { p: mk(6) };
+  x = hh.p;
+  s = "";
+  for i in 0..4 {
+    if i % 2 == 0 { x = mk(i * 10); } else { x = hh.p; }
+    s += "{x.n}{x.t},";
+  }
+  x.n = 77;
+  assert(s == "0m0,6m6,20m20,6m6," && hh.p.n == 77, "{s} {hh.p.n}");
+}
+
+fn test_the_last_assignment_a_mint() {
+  hh = H { p: mk(6) };
+  x = hh.p;
+  for i in 0..3 {
+    if i % 2 == 0 { x = mk(i * 10); } else { x = hh.p; }
+  }
+  x.n = 77;
+  x.xs += [1];
+  assert(x.n == 77 && hh.p.n == 6 && len(hh.p.xs) == 1 && x.t == "m20", "{hh.p.n} {x.t}");
+}

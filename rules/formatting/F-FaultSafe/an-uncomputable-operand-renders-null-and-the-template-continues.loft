@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-FaultSafe` crossed with `@FR-E-Uncomp`: an uncomputable operation inside an
+// interpolation — `/ 0`, `% 0`, an integer overflow, an index past the end, a field of an
+// absent record — yields null by E-Uncomp and renders as `null`, with the same width and
+// alignment any null gets; the template never stops.  A float `/ 0.0` is computable by IEEE
+// (`inf`, `-inf`), and `0.0 / 0.0` is the NaN that is the float null.  Crossed with a format
+// spec, a loop whose divisor passes through zero, and `single`.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, q: P? }
+
+fn test_every_fault_renders_null() {
+  z = 0;
+  big = 9223372036854775807;
+  v = [1, 2];
+  p = P { n: 3 };
+  s = "[{7 / z}] [{7 % z}] [{big + 1}] [{big * 2}] [{v[5]}] [{p.q.n}]";
+  assert(s == "[null] [null] [null] [null] [null] [null]", s);
+}
+
+fn test_floats_follow_ieee() {
+  f = 0.0;
+  s = "[{5.0 / f}] [{f / f}] [{-5.0 / f}]";
+  assert(s == "[inf] [null] [-inf]", s);
+  g: single = 0.0f;
+  t = "[{1.0f / g}] [{g / g}]";
+  assert(t == "[inf] [null]", t);
+}
+
+fn test_a_spec_pads_the_null() {
+  z = 0;
+  f = 0.0;
+  s = "[{7 / z:>6}] [{7 / z:<6}] [{f / f:5.2}]";
+  assert(s == "[  null] [null  ] [ null]" && len("{7 / z}") == 4, s);
+}
+
+fn test_a_loop_continues_past_the_fault() {
+  t = "";
+  for i in 0..3 { t += "{10 / (i - 1)},"; }
+  assert(t == "-10,null,10," && len(t) == 12, t);
+}

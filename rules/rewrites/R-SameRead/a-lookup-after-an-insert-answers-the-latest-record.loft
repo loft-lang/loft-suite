@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-SameRead` crossed with `@FR-Col-Insert`: R-SameRead's filed clause answers `m = h[k]`,
+// the statement right after an insert into the integer-keyed hash `h`, with the record just
+// filed — sound because a record whose key is present REPLACES the one there (Col-Insert), so
+// the latest insert is the entry under its key.  The lookup must answer what a plain lookup
+// answers: the new record for a new key, the REPLACING record for a key already present, null
+// for a key the insert did not file, and a view the program can write through.  Crossed with
+// a hash local, a hash field, and a loop that files and reads back every round.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct E { k: integer, v: text, n: integer }
+struct O { h: hash<E[k]>, id: integer }
+
+fn test_a_new_key_and_a_replaced_key() {
+  h: hash<E[k]> = [E { k: 1, v: "one", n: 10 }];
+  k = 2;
+  h += [E { k: k, v: "two", n: 20 }];
+  m = h[k];
+  assert((m.v ?? "-") == "two" && len(h) == 2, "new key: {m.v ?? "-"} {len(h)}");
+  j = 1;
+  h += [E { k: j, v: "uno", n: 11 }];
+  r = h[j];
+  assert((r.v ?? "-") == "uno" && (r.n ?? 0) == 11 && len(h) == 2, "replaced: {r.v ?? "-"} {len(h)}");
+}
+
+fn test_another_key_after_the_insert() {
+  h: hash<E[k]> = [E { k: 1, v: "one", n: 10 }];
+  k = 5;
+  h += [E { k: 4, v: "four", n: 40 }];
+  m = h[k];
+  assert(m == null && len(h) == 2, "an unfiled key reads null");
+}
+
+fn test_a_write_through_the_answer() {
+  o = O { h: [], id: 3 };
+  k = 7;
+  o.h += [E { k: k, v: "seven", n: 70 }];
+  m = o.h[k];
+  if m != null { m.n += 1; m.v += "!"; }
+  assert((o.h[7].n ?? 0) == 71 && (o.h[7].v ?? "-") == "seven!", "written through: {o.h[7].n ?? 0}");
+}
+
+fn test_file_and_read_back_in_a_loop() {
+  h: hash<E[k]> = [];
+  s = 0;
+  t = "";
+  for i in 0..6 {
+    k = i % 3;
+    h += [E { k: k, v: "r{i}", n: i * 100 }];
+    m = h[k];
+    s += m.n ?? -1000;
+    t += m.v ?? "-";
+  }
+  assert(s == 0 + 100 + 200 + 300 + 400 + 500 && t == "r0r1r2r3r4r5" && len(h) == 3, "{s} {t} {len(h)}");
+  assert((h[0].v ?? "-") == "r3" && (h[2].n ?? 0) == 500, "the latest per key");
+}

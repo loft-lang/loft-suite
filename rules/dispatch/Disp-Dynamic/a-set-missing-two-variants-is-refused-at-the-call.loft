@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Disp-Dynamic` crossed with `@FR-M-Exhaust`: a set that misses a variant and has no
+// enum-level member would be a non-exhaustive canonical `match`, so the enum-held call is a
+// static refusal at the call — never a run-time "no applicable method" — exactly where the
+// written-out match with the same arms is refused.  This file holds one refusal: the call
+// misses `C` and `D`.  (The message names the first uncovered variant; M-Exhaust's names both.)
+//
+// CHANNEL: the compile (the expected diagnostic).
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+// @EXPECT_ERROR: `dm(K)` has no definition for the variant (C) — declared: dm(A), dm(B)
+
+enum K { A { n: integer }, B { n: integer }, C { n: integer }, D { n: integer } }
+
+fn dm(a: A) -> text { "a{a.n}" }
+fn dm(a: B) -> text { "b{a.n}" }
+
+fn main() {
+  println(dm(A { n: 0 }));
+  x: K = B { n: 1 };
+  println(dm(x));
+}

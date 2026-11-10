@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-FnRefBuffer` crossed with `@FR-O-Unknown`: a call through a function value answering a
+// record is a `CallRef` the oracle may derive nothing about, so the bind DECIDES by the answer:
+// a store the call minted is adopted, an answer that predates the call (a parameter handed back,
+// a field of a parameter) is copied, and on the C backend an answer IN the handed store is the
+// binding already.  Each bind is an independent value: a write through it reaches neither the
+// argument nor another round's result.  Crossed with a minting target (a promoted local), a
+// literal target, an identity target, a field-of-parameter target, inside a loop that keeps the
+// binding across passes.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+struct H { p: P }
+
+fn mk(n: integer) -> P { o = P { n: n, t: "m{n}", xs: [n] }; o }
+fn lit(n: integer) -> P { P { n: n, t: "l{n}", xs: [n, n] } }
+fn same(p: P) -> P { p }
+fn field_of(h: H) -> P { h.p }
+
+fn test_targets_that_mint() {
+  f = mk;
+  g = lit;
+  s = "";
+  for i in 0..3 {
+    r = f(i);
+    s += "{r.t}{len(r.xs)},";
+    r2 = g(i);
+    r2.xs += [9];
+    s += "{r2.t}{len(r2.xs)},";
+  }
+  assert(s == "m01,l03,m11,l13,m21,l23,", s);
+}
+
+fn test_targets_that_answer_what_predates_the_call() {
+  base = mk(9);
+  id = same;
+  t = "";
+  for i in 0..2 { q = id(base); q.n += i; q.xs += [i]; t += "{q.n}:{len(q.xs)},"; }
+  assert(t == "9:2,10:2," && base.n == 9 && len(base.xs) == 1, "{t} {base.n}");
+  h = H { p: mk(4) };
+  fo = field_of;
+  w = fo(h);
+  w.n = 40;
+  w.t += "!";
+  assert(h.p.n == 4 && h.p.t == "m4" && w.n == 40 && w.t == "m4!", "{h.p.n} {w.n}");
+}

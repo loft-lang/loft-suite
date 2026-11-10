@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Guard` crossed with `@FR-N-Cast`: without a guard there is no implicit τ? ⤳ τ, so
+// `n as float` on an `integer?` that nothing proved present is refused at compile time, naming
+// the checked cast and the discharges as the cure.  The guarded twin is the sibling cell.
+//
+// CHANNEL: the compile (the expected diagnostic).
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+// @EXPECT_ERROR: cannot cast a possibly-null `integer?` to the non-null `float`
+
+fn unguarded(n: integer?) -> float {
+  x = n as float;
+  x
+}
+
+fn main() {
+  println("{unguarded(3)}");
+}

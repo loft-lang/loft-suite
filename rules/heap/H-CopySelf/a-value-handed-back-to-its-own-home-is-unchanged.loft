@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-CopySelf` crossed with `@FR-R-Rebind`, `@FR-R-Place` and `@FR-R-Compact`: a whole value
+// delivered onto the place that already holds it is a no-op — nothing released, nothing claimed
+// — so every rewrite that hands a value's own home as its destination writes exactly what a
+// fresh copy would have left.  R-Rebind's `d = step(d, …)` whose exit literal takes `buf: d.buf`
+// (the field onto itself) and one that grows that field first; R-Place's "the buffer IS the
+// place" with a callee answering its parameter (`o.items = id_items(o.items)`) and the plain
+// self-assignments `o.items = o.items`, `o.d = o.d`, `o.d.buf = o.d.buf`; R-Compact's identity
+// form (every element kept on its own slot) and a compaction that keeps a prefix in place.
+// Each repeated where a released handle would be read again: the store checkers catch a free.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Doc { buf: vector<text>, n: integer, name: text }
+struct O { items: vector<text>, d: Doc }
+
+fn step(d: Doc, w: text) -> Doc { Doc { buf: d.buf, n: d.n + 1, name: d.name } }
+fn grow(d: Doc, w: text) -> Doc { d.buf += [w]; Doc { buf: d.buf, n: d.n + len(w), name: "{d.name}+" } }
+fn id_items(v: vector<text>) -> vector<text> { v }
+
+fn test_a_rebind_through_a_callee() {
+  d = Doc { buf: ["a", "b"], n: 0, name: "d" };
+  for i in 0..5 { d = step(d, "w{i}"); }
+  assert(d.n == 5 && len(d.buf) == 2 && d.buf[1] == "b" && d.name == "d", "step: {d.n} {len(d.buf)}");
+  for i in 0..3 { d = grow(d, "x{i}"); }
+  assert(d.n == 11 && len(d.buf) == 5 && d.buf[4] == "x2" && d.buf[0] == "a" && d.name == "d+++", "grow: {d.n} {d.name}");
+}
+
+fn test_self_assignments_of_places() {
+  o = O { items: ["p", "q"], d: Doc { buf: ["z"], n: 1, name: "o" } };
+  for _ in 0..3 {
+    o.items = o.items;
+    o.d = o.d;
+    o.d.buf = o.d.buf;
+    o.items = id_items(o.items);
+  }
+  assert(len(o.items) == 2 && o.items[1] == "q" && len(o.d.buf) == 1 && o.d.buf[0] == "z" && o.d.name == "o", "{o.items} {o.d.name}");
+  o.items += ["r"];
+  assert(len(o.items) == 3 && o.items[0] == "p", "still its own: {o.items}");
+}
+
+fn test_a_compaction_onto_its_own_slots() {
+  v = ["k0", "k1", "k2", "k3"];
+  t: vector<text> = [];
+  for e in v { t += [e]; }
+  v = t;
+  assert(len(v) == 4 && v[0] == "k0" && v[3] == "k3", "identity: {v}");
+  u = ["m0", "m1", "m2", "m3"];
+  t2: vector<text> = [];
+  for e in u { if e != "m2" { t2 += [e]; } }
+  u = t2;
+  assert(len(u) == 3 && u[0] == "m0" && u[1] == "m1" && u[2] == "m3", "prefix kept: {u}");
+}

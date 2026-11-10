@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-RootExtent` crossed with `@FR-H-SwapIn` and `@FR-R-Place`: a store whose root is a vector
+// wrapper holds nothing but that collection, so a rebind `v = extend(v, i)` from a callee that
+// minted its result may EXCHANGE the two stores (H-SwapIn) — every reference to the destination
+// then reads the new records, a `&` link taken before the rebind included — and a clear may reset
+// the store whole; a record placed into the store from outside (R-Place's loop buffer, a call
+// result built into the field it is assigned to) blocks both until it is freed.  Each shape must
+// answer what the deep copy and the per-element release answer: text fields of records, a link to
+// the rebound local, a field assigned a call's vector every round, a cleared vector refilled, a
+// vector of vectors built from calls.
+//
+// CHANNEL: the assertions and the leak gate (`LOFT_NO_STORE_SWAP=1` answers the same: checked when
+// written).
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text }
+struct H { items: vector<P>, k: integer }
+
+fn extend(v: vector<P>, i: integer) -> vector<P> {
+  r: vector<P> = [];
+  for e in v { r += [e]; }
+  r += [P { n: i, t: "e{i}" }];
+  r
+}
+fn build(n: integer) -> vector<P> { r: vector<P> = []; for i in 0..n { r += [P { n: i, t: "b{i}" }]; } r }
+
+fn test_a_rebind_from_a_minting_callee() {
+  v: vector<P> = [];
+  for i in 0..5 { v = extend(v, i); }
+  assert(len(v) == 5 && v[4].t == "e4" && v[0].n == 0, "{len(v)}");
+  l = &v;
+  v = extend(v, 9);
+  assert(len(l) == 6 && l[5].t == "e9" && l[0].t == "e0", "a link sees the exchanged store");
+}
+
+fn test_a_call_built_into_a_field_and_a_clear() {
+  h = H { items: [], k: 0 };
+  for i in 1..4 { h.items = build(i); h.k += len(h.items); }
+  assert(len(h.items) == 3 && h.items[2].t == "b2" && h.k == 6, "{h.k}");
+  w = build(3);
+  w.clear();
+  w += [P { n: 7, t: "z" }];
+  assert(len(w) == 1 && w[0].t == "z", "{len(w)}");
+}
+
+fn test_a_vector_of_built_vectors() {
+  rows: vector<vector<P>> = [];
+  for i in 0..3 { rows += [build(i)]; }
+  assert(len(rows) == 3 && len(rows[0]) == 0 && len(rows[2]) == 2 && rows[2][1].t == "b1", "{len(rows)}");
+}
