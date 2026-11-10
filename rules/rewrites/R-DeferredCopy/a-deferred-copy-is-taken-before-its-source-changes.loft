@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-DeferredCopy` crossed with `@FR-O-Witness`: a record local bound by a COPY of a view
+// (`prog = e`, `e = v[i]`) that the function only reads may view the source until the source could
+// change, the copy taken at that point — and the owner witness records whether the local owns its
+// copy, so a deferred view is never released.  The value is B-Copy's either way: a write to the
+// SAME element after the bind leaves the local as it was bound; a write to ANOTHER element needs
+// no copy and changes nothing the local reads; a callee that writes the container is the flag
+// fallback; a rebind of the local in a loop between a view and a copy keeps each round's value.
+//
+// CHANNEL: the assertions, strict stores and the leak gate.
+// @ARMED: LOFT_STRICT_STORES=1
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+
+fn mk(n: integer) -> P { P { n: n, t: "m{n}", xs: [n] } }
+fn poke(v: vector<P>, i: integer) { v[i].n += 1000; v[i].t = "poked"; }
+
+fn same_element(v: vector<P>) -> text {
+  e = v[1];
+  prog = e;
+  v[1].n = 99;
+  v[1].xs += [5];
+  "{prog.n}{prog.t}{len(prog.xs)}"
+}
+fn other_element(v: vector<P>) -> text {
+  e = v[0];
+  prog = e;
+  v[1].t = "x";
+  "{prog.n}{prog.t}"
+}
+fn through_a_callee(v: vector<P>) -> text {
+  e = v[0];
+  prog = e;
+  poke(v, 0);
+  "{prog.n}{prog.t}"
+}
+
+fn test_the_copy_is_taken_in_time() {
+  a = [mk(1), mk(2), mk(3)];
+  assert(same_element(a) == "2m21" && a[1].n == 99 && len(a[1].xs) == 2, same_element([mk(1), mk(2)]));
+  b = [mk(1), mk(2)];
+  assert(other_element(b) == "1m1" && b[1].t == "x", "another element");
+  c = [mk(4), mk(5)];
+  assert(through_a_callee(c) == "4m4" && c[0].n == 1004 && c[0].t == "poked", "a callee writes");
+}
+
+fn test_rebound_in_a_loop() {
+  v = [mk(1), mk(2), mk(3)];
+  s = "";
+  for i in 0..3 {
+    e = v[i];
+    prog = e;
+    v[i].n = -1;
+    s += "{prog.n},";
+  }
+  assert(s == "1,2,3," && v[2].n == -1, s);
+}

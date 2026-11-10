@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-Arg-Rebind` crossed with `@FR-H-KeepRoom`: a whole rebind of a vector local after it
+// was handed to a generator re-mints the local's store, and H-KeepRoom's mint resets a vector
+// in place — but a buffer a live frame names is orphaned by the mint instead, so the frame
+// keeps the value it was handed.  An element write before the rebind is a mutation of the
+// shared value and reaches the frame; the rebind does not.  Crossed with a scalar element, a
+// record element with a text field, and a re-mint in a loop while the previous round's frame
+// is still live.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct R { name: text, n: integer }
+
+fn each(v: vector<integer>) -> iterator<integer> { for x in v { yield x; } }
+
+fn names(v: vector<R>) -> iterator<text> { for r in v { yield "{r.name}{r.n}"; } }
+
+fn test_a_rebind_after_the_call_is_a_new_binding() {
+  v = [1, 2, 3];
+  g = each(v);
+  a = next(g) ?? -1;
+  v[1] = 20;
+  v = [7, 8];
+  b = next(g) ?? -1;
+  c = next(g) ?? -1;
+  d = next(g) ?? -1;
+  assert("{a} {b} {c} {d}" == "1 20 3 -1", "the frame: {a} {b} {c} {d}");
+  assert(len(v) == 2 && v[0] == 7 && v[1] == 8, "the rebound local: {v}");
+}
+
+fn test_a_re_mint_in_a_loop() {
+  s = "";
+  w = [10, 11];
+  prev = each(w);
+  for r in 0..3 {
+    w = [r * 100 + 5, r * 100 + 6, r * 100 + 7];
+    s += "{next(prev) ?? -1},";
+    prev = each(w);
+  }
+  s += "{next(prev) ?? -1}";
+  assert(s == "10,5,105,205", "each round's frame: {s}");
+  assert(len(w) == 3 && w[2] == 207, "the last mint: {w}");
+}
+
+fn test_a_record_vector_re_minted() {
+  rs = [R { name: "a", n: 1 }, R { name: "b", n: 2 }];
+  h = names(rs);
+  x = next(h) ?? "-";
+  rs = [R { name: "z", n: 9 }];
+  y = next(h) ?? "-";
+  z = next(h) ?? "-";
+  assert("{x} {y} {z}" == "a1 b2 -", "the frame: {x} {y} {z}");
+  assert(len(rs) == 1 && rs[0].name == "z", "the rebound local: {rs[0].name}");
+}

@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-TailSelf` crossed with `@FR-O-Oracle`: a self-call in tail position becomes a jump; a
+// parameter held in a store (a vector, a record walked by its child field) is a pointer the frame
+// never owned, rebound at the jump to another caller store — and the oracle reads that pointer
+// write as one of the parameter's definitions, so the loop frees none of the caller's stores and
+// the caller reads them whole afterwards.  Crossed with a scalar accumulator over 100 000 rounds
+// (past any call depth), a vector walked by index, a list walked by its `next` field with a text
+// accumulator kept out of the parameters, and a text parameter (which stays a call, with its
+// warning, and still answers).
+//
+// CHANNEL: the assertions, strict stores and the leak gate.
+// @ARMED: LOFT_STRICT_STORES=1
+// @EXPECT_WARNING: `tjoin` calls itself in tail position, but this call stays an ordinary call
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct N { v: integer, name: text, next: N? }
+
+fn tsum(n: integer, acc: integer) -> integer { if n == 0 { return acc; } tsum(n - 1, acc + n) }
+fn walk(v: vector<integer>, i: integer, acc: integer) -> integer { if i >= len(v) { return acc; } walk(v, i + 1, acc + v[i]) }
+fn count(n: N?, acc: integer) -> integer { if n == null { return acc; } count(n.next, acc * 10 + n.v) }
+fn tjoin(v: vector<text>, i: integer, acc: text) -> text { if i >= len(v) { return acc; } tjoin(v, i + 1, "{acc}{v[i]}") }
+
+fn test_scalars_and_a_vector() {
+  assert(tsum(100000, 0) == 5000050000, "deep: {tsum(100000, 0)}");
+  v = [1, 2, 3, 4];
+  assert(walk(v, 0, 0) == 10 && len(v) == 4 && v[3] == 4, "vector");
+}
+
+fn test_a_list_walked_by_its_child() {
+  l = N { v: 1, name: "a", next: N { v: 2, name: "b", next: N { v: 3, name: "c" } } };
+  assert(count(l, 0) == 123, "first walk: {count(l, 0)}");
+  assert(count(l, 0) == 123 && l.next.next.name == "c" && l.name == "a", "the list whole after");
+}
+
+fn test_a_text_parameter_stays_a_call() {
+  assert(tjoin(["a", "b", "c"], 0, "") == "abc", tjoin(["a", "b", "c"], 0, ""));
+}

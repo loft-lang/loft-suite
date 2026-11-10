@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Cap-View` crossed with `@FR-H-View`: a single structural capture of an interior place —
+// a struct field of a plain struct pattern, a struct field of a variant, a struct element of a
+// slice pattern, the whole subject at the arm root — is H-View's view: no store is allocated, a
+// write through it mutates the subject, and the subject's own write shows through it.  Crossed
+// with a text field and a vector field written through the capture, a nested struct field, a
+// struct-enum payload, and a capture taken every round of a loop.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Pt { x: integer, tag: text, xs: vector<integer> }
+struct Box { p: Pt, id: integer }
+struct Outer { b: Box, n: integer }
+enum Sh { Dot { at: Pt }, Line { a: Pt, b: Pt } }
+
+fn mk(x: integer) -> Pt { Pt { x: x, tag: "t{x}", xs: [x] } }
+
+fn test_a_struct_field_capture() {
+  bx = Box { p: mk(1), id: 7 };
+  match bx { Box { p, id } => { p.x = 10; p.tag += "!"; p.xs += [id]; } }
+  assert(bx.p.x == 10 && bx.p.tag == "t1!" && len(bx.p.xs) == 2 && bx.p.xs[1] == 7, "{bx.p.x} {bx.p.tag}");
+}
+
+fn test_a_nested_field_and_the_subjects_write() {
+  o = Outer { b: Box { p: mk(2), id: 1 }, n: 0 };
+  seen = 0;
+  match o { Outer { b, n } => { o.b.p.x = 22; seen = b.p.x; b.id = 5 + n; } }
+  assert(seen == 22 && o.b.id == 5, "{seen} {o.b.id}");
+}
+
+fn test_a_variant_payload_and_a_whole_capture() {
+  s: Sh = Line { a: mk(3), b: mk(4) };
+  match s { Line { a, b } => { a.x = b.x * 10; }, _ => {} }
+  r = match s { Line { a, b } => "{a.x} {b.x}", _ => "-" };
+  assert(r == "40 4", "payload: {r}");
+  bx = Box { p: mk(5), id: 1 };
+  match bx { whole: Box { p, id } => { whole.id = id + p.x; } }
+  assert(bx.id == 6, "whole: {bx.id}");
+}
+
+fn test_a_slice_element_capture_in_a_loop() {
+  v = [mk(1), mk(2), mk(3)];
+  for r in 0..3 {
+    match v { [_, mid, ..] => { mid.x += r; mid.xs += [r]; }, _ => {} }
+  }
+  assert(v[1].x == 2 + 0 + 1 + 2 && len(v[1].xs) == 4 && v[0].x == 1 && v[2].x == 3, "{v[1].x} {len(v[1].xs)}");
+}

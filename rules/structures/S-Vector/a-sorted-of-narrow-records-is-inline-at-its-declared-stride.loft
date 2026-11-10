@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-S-Vector` crossed with `@FR-H-Stride`: a vector's and a sorted's elements are inline,
+// size(T) bytes each, the stride fixed by the DECLARED element type — a record of a `u8`, an
+// `i16` and a `limit(…) size(1)` field is narrower than one of three `integer`s, whatever they
+// resolve to.  A sorted keeps its elements in key order: inserts out of order slide later
+// elements by that stride, a keyed removal slides them back, and a lookup finds each key by
+// binary search; a persisted image read back whole has the same records at the same strides.
+// A wrong stride reads a neighbour's bytes, so every survivor is read.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+type Small = integer limit(0, 200) size(1);
+
+struct Nr { k: i16, b: u8, s: Small }
+struct Wd { k: integer, b: integer, s: integer }
+
+fn walk(t: sorted<Nr[k]>) -> text { r = ""; for e in t { r += "{e.k}/{e.b}/{e.s},"; } r }
+
+fn build() -> sorted<Nr[k]> {
+  t: sorted<Nr[k]> = [];
+  t += [Nr { k: 300, b: 3, s: 30 }];
+  t += [Nr { k: -5, b: 255, s: 200 }];
+  t += [Nr { k: 40, b: 0, s: 0 }];
+  t += [Nr { k: -32000, b: 7, s: 70 }];
+  t
+}
+
+fn test_inserts_and_lookups() {
+  t = build();
+  assert(walk(t) == "-32000/7/70,-5/255/200,40/0/0,300/3/30," && len(t) == 4, walk(t));
+  assert((t[40].s ?? -1) == 0 && (t[-5].b ?? -1) == 255 && (t[300].s ?? -1) == 30 && t[41] == null, "lookups");
+  w: sorted<Wd[k]> = [Wd { k: 2, b: 1, s: 1 }, Wd { k: 1, b: 9, s: 9 }];
+  assert((w[1].b ?? -1) == 9 && len(w) == 2, "the wide twin");
+}
+
+fn test_a_keyed_removal_slides_back() {
+  t = build();
+  t[-5] = null;
+  assert(walk(t) == "-32000/7/70,40/0/0,300/3/30," && t[-5] == null && (t[300].b ?? -1) == 3, walk(t));
+  t += [Nr { k: 0, b: 128, s: 100 }];
+  assert(walk(t) == "-32000/7/70,0/128/100,40/0/0,300/3/30,", walk(t));
+}
+
+fn test_an_image_read_back_whole() {
+  dir = "{temp_dir() ?? "/tmp"}/loft_suite_svec_{now()}_{ticks()}";
+  assert(mkdir(dir) == FileResult.Ok, "make {dir}");
+  path = "{dir}/n.store";
+  assert(store_persist_copy(build(), path), "write");
+  back: sorted<Nr[k]> = [];
+  assert(store_load(back, path), "load");
+  assert(walk(back) == "-32000/7/70,-5/255/200,40/0/0,300/3/30," && (back[40].b ?? -1) == 0, walk(back));
+  for f in list_dir(dir) ?? [] { assert(delete("{dir}/{f}") == FileResult.Ok, "remove {f}"); }
+  assert(rmdir(dir) == FileResult.Ok, "remove {dir}");
+}

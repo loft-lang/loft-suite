@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-For` crossed with `@FR-G-Next`: a `for` over a generator frame is a loop of
+// `next(fr)` slices, so an explicit `next` on the same frame inside the body runs the next
+// slice of the same cursor — the loop variable then skips what the body took, and a body that
+// exhausts the frame ends the loop at its next round.  A fresh generator started in the body
+// each round is a frame of its own.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+fn count(n: integer) -> iterator<integer> { i = 0; while i < n { i += 1; yield i * 10; } }
+
+fn words() -> iterator<text> { yield "ab"; yield "cd"; yield "ef"; yield "gh"; yield "ij"; }
+
+fn test_the_body_takes_every_second_value() {
+  it = count(5);
+  s = "";
+  rounds = 0;
+  for x in it { y = next(it) ?? -1; s += "{x}:{y} "; rounds += 1; }
+  assert(s == "10:20 30:40 50:-1 " && rounds == 3, "pairs: {s} ({rounds})");
+}
+
+fn test_a_conditional_skip_of_text_values() {
+  w = words();
+  t = "";
+  for a in w { t += a; if a == "cd" { next(w); } }
+  assert(t == "abcdghij" && len(t) == 8, "skipped ef: {t}");
+}
+
+fn test_a_fresh_frame_per_round() {
+  u = 0;
+  for x in count(3) { for y in count(x / 10) { u += y; } }
+  assert(u == 10 + 30 + 60, "nested frames: {u}");
+}

@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Op-IntDivMod` crossed with `@FR-E-Uncomp`: a non-zero divisor answers the truncating
+// quotient and the dividend-signed remainder; a zero divisor answers null for BOTH `/` and `%`,
+// and evaluation continues — so the null is what lands wherever the expression is stored: a
+// nullable local, a nullable field, a `vector<integer?>` element, a compound `/=` / `%=` on an
+// element, a divisor that arrives null, and a running loop whose divisor passes through zero.
+// `?? d` then supplies the default on exactly the zero rounds.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Q { q: integer?, r: integer? }
+
+fn qr(a: integer, b: integer) -> Q { Q { q: a / b, r: a % b } }
+
+fn test_into_fields_and_elements() {
+  x = qr(-7, 2);
+  z = qr(-7, 0);
+  assert((x.q ?? 0) == -3 && (x.r ?? 0) == -1 && z.q == null && z.r == null, "fields");
+  d = 0;
+  v: vector<integer?> = [7 / 2, 7 % -2, 7 / d, -7 % d];
+  assert(len(v) == 4 && (v[0] ?? 0) == 3 && (v[1] ?? 0) == 1 && v[2] == null && v[3] == null, "elements");
+}
+
+fn test_compound_on_an_element() {
+  w: vector<integer?> = [-9, 9, 8];
+  z = 0;
+  w[0] /= 2;
+  w[1] %= -4;
+  w[2] /= z;
+  assert((w[0] ?? 0) == -4 && (w[1] ?? 0) == 1 && w[2] == null && len(w) == 3, "compound");
+}
+
+fn test_a_null_divisor_and_a_null_dividend() {
+  n: integer? = null;
+  a = 7 / n;
+  b = n % 3;
+  assert(a == null && b == null, "null operands");
+}
+
+fn test_a_divisor_passing_through_zero() {
+  s = 0;
+  nulls = 0;
+  for i in 0..5 {
+    k = i - 2;
+    q = -9 / k;
+    r = -9 % k;
+    if q == null { nulls += 1; }
+    s += (q ?? 100) * 10 + (r ?? 7);
+  }
+  // k = -2, -1, 0, 1, 2: q 4, 9, null, -9, -4 and r -1, 0, null, 0, -1
+  assert(nulls == 1 && s == (40 - 1) + 90 + (1000 + 7) + (-90) + (-40 - 1), "running: {s} {nulls}");
+}

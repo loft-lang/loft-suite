@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-S-Hash` crossed with `@FR-S-Digest`: a lookup lands where the writer filed the entry
+// because both read the digest the same way from the table's own bytes.  The digest is fed each
+// key field in key order — a text with a 0xFF after it, so ("ab", "c") and ("a", "bc") are two
+// keys — an integer-class field as its DECODED value (a biased `limit` key is found by the
+// literal), a float field adds nothing (every float key lands in one probe run, each still found
+// by comparison), and the seed is stored in the table, so a copy finds every entry.  A table
+// of 500 linked entries with a third removed and 100 filed after finds every present key and
+// answers null for each removed one, under any `LOFT_HASH_SEED`.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct G { k: integer, v: text }
+struct Holder { r: reference<G>? }
+struct P { a: text, b: text, n: integer }
+struct F { f: float, n: integer }
+type Yr = integer limit(1000, 1100) size(1);
+struct Y { k: Yr, n: integer }
+
+fn build() -> hash<G[k]> {
+  h: hash<G[k]> = [];
+  for i in 0..500 { h += [G { k: i * 7, v: "v{i}" }]; }
+  for i in 0..500 { if i % 3 == 0 { h[i * 7] = null; } }
+  for i in 0..100 { h += [G { k: 100000 + i, v: "n{i}" }]; }
+  h
+}
+
+fn test_lookups_after_removals() {
+  h = build();
+  ok = 0;
+  for i in 0..500 {
+    e = h[i * 7];
+    if i % 3 == 0 { if e == null { ok += 1; } } else { if (e.v ?? "-") == "v{i}" && (e.k ?? 0) == i * 7 { ok += 1; } }
+  }
+  for i in 0..100 { if (h[100000 + i].v ?? "-") == "n{i}" && (h[100000 + i].k ?? 0) == 100000 + i { ok += 1; } }
+  assert(ok == 600 && len(h) == 333 + 100, "{ok} {len(h)}");
+  hold = Holder { };
+  assert(hold.r == null, "the reference field");
+}
+
+fn test_digests_of_each_key_shape() {
+  p: hash<P[a, b]> = [P { a: "ab", b: "c", n: 1 }, P { a: "a", b: "bc", n: 2 }];
+  assert(len(p) == 2 && (p["ab", "c"].n ?? -1) == 1 && (p["a", "bc"].n ?? -1) == 2 && p["abc", ""] == null, "text keys");
+  f: hash<F[f]> = [];
+  for i in 0..40 { f += [F { f: i as float * 0.5, n: i }]; }
+  fo = 0;
+  for i in 0..40 { if (f[i as float * 0.5].n ?? -1) == i { fo += 1; } }
+  assert(fo == 40 && len(f) == 40 && f[0.25] == null, "float keys: {fo}");
+  y: hash<Y[k]> = [Y { k: 1000, n: 1 }, Y { k: 1100, n: 2 }, Y { k: 1050, n: 3 }];
+  assert((y[1050].n ?? -1) == 3 && (y[1100].n ?? -1) == 2 && y[1001] == null, "a biased key");
+  h = build();
+  c = h;
+  co = 0;
+  for i in 0..100 { if (c[100000 + i].v ?? "-") == "n{i}" { co += 1; } }
+  assert(co == 100 && len(c) == 433, "a copy's seed: {co}");
+}

@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Order` crossed with `@FR-I-For`: a vector walks in index order 0,1,2,… and I-For
+// reads `elem(src, i)` when the cursor reaches i — so an element written ahead of the cursor in
+// the body is read with that write, one written behind it is not read again, and a filtered
+// `#remove` renumbers the rest without skipping or repeating one.  Keyed order is `<` on the
+// key: a null text key walks first in a sorted.  Crossed with integer, text and record
+// elements, a vector field, and a slice.
+//
+// Hand-computed: [1,2,3,4] with `w[i+1] += x` walks 1, 3, 6, 10 (running sums), so
+// `c = c*10 + x` ends 1370.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct T { name: text?, n: integer }
+struct B { xs: vector<integer> }
+
+fn test_a_write_ahead_of_the_cursor_is_read() {
+  w = [1, 2, 3, 4];
+  c = 0;
+  for x in w { c = c * 10 + x; i = x#index; if i + 1 < len(w) { w[i + 1] += x; } }
+  assert(c == 1370 && len(w) == 4 && w[3] == 10, "{c} {w}");
+}
+
+fn test_a_write_behind_the_cursor_is_not_read_again() {
+  w = ["a", "b", "c"];
+  s = "";
+  for x in w { s += x; i = x#index; if i > 0 { w[i - 1] = "Z"; } }
+  assert(s == "abc" && w[0] == "Z" && w[1] == "Z" && w[2] == "c", "{s} {w}");
+}
+
+fn test_a_filtered_remove_keeps_index_order() {
+  t: vector<text> = ["p", "q", "r", "s", "u"];
+  seen = "";
+  for x in t if x == "q" || x == "r" || x == "u" { seen += x; x#remove; }
+  assert(seen == "qru" && len(t) == 2 && t[0] == "p" && t[1] == "s", "{seen} {t}");
+}
+
+fn test_a_field_and_a_slice() {
+  b = B { xs: [5, 6, 7, 8] };
+  s = "";
+  for x in b.xs { s += "{x}{x#index}"; }
+  assert(s == "50617283", "field: {s}");
+  u = "";
+  for x in b.xs[1..3] { u += "{x}"; }
+  assert(u == "67", "slice: {u}");
+}
+
+fn test_a_null_key_walks_first() {
+  nt: text? = null;
+  so: sorted<T[name]> = [T { name: "b", n: 1 }, T { name: nt, n: 2 }, T { name: "", n: 3 }, T { name: "a", n: 4 }];
+  s = "";
+  for e in so { s += "{e.n}"; }
+  assert(s == "2341" && len(so) == 4, "sorted: {s}");
+}

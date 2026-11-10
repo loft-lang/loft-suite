@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Rule` crossed with `@FR-P-Alt`: a rule element runs only when its arm is tried, in arm
+// order, and only once every element before it in the pattern matched; alternatives inside an
+// arm are tried left to right from the SAME position, the first success winning.  Each rule
+// records its call and the position it was called at in the cursor's `log`, so the order of
+// tries is the assertion: an arm that fails on a fixed element before its rule calls nothing, a
+// rule that answers null fails its arm, and a later arm calls the rule again from the start.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+enum Tok { Num { v: integer }, LP, RP, Plus, End }
+struct Cur { src: vector<Tok>, pos: integer, log: text }
+struct N { v: integer }
+
+fn num(c: Cur) -> N? { c.log += "n{c.pos}"; match c { [Num { v }] => N { v: v }, _ => null } }
+fn lp(c: Cur) -> N? { c.log += "l{c.pos}"; match c { [LP] => N { v: -1 }, _ => null } }
+
+fn pick(c: Cur) -> integer {
+  match c {
+    [Plus, a: num] => a.v * 10,
+    [a: num, Plus, b: num] => a.v + b.v,
+    [a: num] => a.v,
+    [x: lp] | [RP, x: num] => x.v * 1000,
+    _ => -1
+  }
+}
+
+fn run(src: vector<Tok>) -> text {
+  c = Cur { src: src, pos: 0, log: "" };
+  r = pick(c);
+  "{r} {c.pos} {c.log}"
+}
+
+fn test_the_first_arm_that_matches() {
+  assert(run([Num { v: 2 }, Plus, Num { v: 3 }, End]) == "5 3 n0n2", run([Num { v: 2 }, Plus, Num { v: 3 }, End]));
+  assert(run([Plus, Num { v: 6 }]) == "60 2 n1", run([Plus, Num { v: 6 }]));
+}
+
+fn test_a_later_arm_calls_the_rule_again() {
+  assert(run([Num { v: 7 }, End]) == "7 1 n0n0", run([Num { v: 7 }, End]));
+}
+
+fn test_alternatives_from_the_same_position() {
+  assert(run([RP, Num { v: 4 }, End]) == "4000 2 n0n0l0n1", run([RP, Num { v: 4 }, End]));
+  assert(run([LP, End]) == "-1000 1 n0n0l0", run([LP, End]));
+  assert(run([End]) == "-1 0 n0n0l0", run([End]));
+}

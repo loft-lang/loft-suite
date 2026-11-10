@@ -1,0 +1,55 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-W-Op` crossed with `@FR-E-Uncomp`: in a regime file an integer operation on two 32-bit
+// operands is a 32-bit operation, and a result outside [i32::MIN+1, i32::MAX] is uncomputable —
+// null, evaluation continuing, exactly as a 64-bit overflow is.  `+`, `-`, `*`, `<<`, unary `-`,
+// a compound `+=` on a local and on a field, `/ 0` and `% 0`; an `i64` operand makes the
+// operation 64-bit and the same value fits.  A result at the edge (`i32::MAX`, `-i32::MAX`)
+// is a value.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct R { n: integer, w: i64 }
+
+fn add(a: integer, b: integer) -> integer { a + b }
+
+fn test_out_of_range_is_null() {
+  a = 2147483647;
+  one = 1;
+  b = a + 1;
+  c = -a - 1;
+  d = a * 2;
+  f = one << 31;
+  assert(b == null && c == null && d == null && f == null, "{b} {c} {d} {f}");
+  assert(add(a, 1) == null && add(a, -1) == 2147483646, "a call: {add(a, -1)}");
+}
+
+fn test_the_edge_is_a_value() {
+  a = 2147483647;
+  one = 1;
+  g = one << 30;
+  x = -a;
+  assert(g == 1073741824 && x == -2147483647 && a - 1 == 2147483646, "{g} {x}");
+}
+
+fn test_compound_and_zero_divisors() {
+  a = 2147483647;
+  m = a;
+  m += 1;
+  r = R { n: a, w: 5 };
+  r.n += 1;
+  z = 0;
+  assert(m == null && r.n == null && a / z == null && a % z == null, "{m} {r.n}");
+}
+
+fn test_an_i64_operand_widens() {
+  a = 2147483647;
+  e = (a as i64) + 1;
+  r = R { n: 1, w: 5 };
+  q = r.w + a;
+  assert(e == 2147483648l && q == 2147483652l, "{e} {q}");
+}

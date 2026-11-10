@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Drop` crossed with `@FR-R-Compact`: an element type that owns a droppable makes
+// R-Compact decline — a release there is a resource release, which keeps the written order of
+// frees — so `t = []; for e in v { if keep { t += [e] } }; v = t` is the plain program: each
+// kept element copied into t (a second lease, `OpCopy` renumbering it +100), the old vector's
+// records released when `v = t` displaces them, in element order, after the new value, and the
+// copies released at the scope's end.  Every original is released exactly once, every copy that
+// was made is released (H-Elide may skip a copy together with its drop, so the pairs are
+// counted, not assumed), and the survivors are the kept ids.
+//
+// CHANNEL: the assertions on the hook trace and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_drop_compact.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn OpCopy(self: H) { note("C{self.id}"); self.id += 100; }
+fn mk(i: integer) -> H { H { id: i } }
+
+fn count(t: text, part: text) -> integer {
+  n = 0;
+  for p in t.split(',') { if p == part { n += 1; } }
+  n
+}
+
+fn prefixed(t: text, prefix: text) -> integer {
+  n = 0;
+  for p in t.split(',') { if p.starts_with(prefix) { n += 1; } }
+  n
+}
+
+fn compact() {
+  v = [mk(1), mk(2), mk(3), mk(4)];
+  t: vector<H> = [];
+  for e in v { if e.id % 2 == 1 { t += [e]; } }
+  v = t;
+  s = "";
+  for e in v { s += "{e.id % 100}"; }
+  note("K{s}");
+}
+
+fn test_every_record_released_once_in_written_order() {
+  drain();
+  compact();
+  t = drain();
+  assert(count(t, "D1") == 1 && count(t, "D2") == 1 && count(t, "D3") == 1 && count(t, "D4") == 1, "originals once: {t}");
+  assert(count(t, "K13") == 1, "the kept ids: {t}");
+  assert(prefixed(t, "C") + 4 == prefixed(t, "D"), "every copy released: {t}");
+  d1 = t.find("D1") ?? -1;
+  d2 = t.find("D2") ?? -1;
+  d3 = t.find("D3") ?? -1;
+  d4 = t.find("D4") ?? -1;
+  assert(d1 >= 0 && d1 < d2 && d2 < d3 && d3 < d4, "element order: {t}");
+}

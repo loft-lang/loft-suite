@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Guard` crossed with `@FR-N-Domain` and `@FR-N-Cast`.  N-Domain: a partial operation
+// types τ? — a division, an element read, a `sqrt` — unless its input is PROVABLY in-domain, and
+// a guard proves it: a leaving `if d == 0 { return … }` proves the divisor non-zero, `if i < 0 ||
+// i >= len(v)` the index in bounds, `if x < 0.0` the operand's sign, an `assert` its condition;
+// so the result stores into a dense slot with no discharge and no warning (the cell DENIES
+// warnings).  N-Cast: an `as τ` is an assertion that needs a non-null operand, and a variable a
+// guard proved present reads as τ — so `n as float` and a text parse `t as integer ?? d` compile
+// after `if n == null { return … }` / `if !t { return … }`, and answer the value.  The unguarded
+// cast is the sibling refusal cell.
+//
+// CHANNEL: the assertions, the compile with `LOFT_DENY_WARNINGS=1` (an undischarged τ? stored
+// into a dense slot would warn), and the leak gate.
+// @ARMED: LOFT_DENY_WARNINGS=1
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+fn div(a: integer, d: integer) -> integer {
+  if d == 0 { return -9; }
+  a / d
+}
+fn modulo(a: integer, d: integer) -> integer {
+  assert(d != 0, "a divisor");
+  a % d
+}
+fn at(v: vector<integer>, i: integer) -> integer {
+  if i < 0 || i >= len(v) { return -1; }
+  v[i] * 2
+}
+fn root(x: float) -> float {
+  if x < 0.0 { return -1.0; }
+  sqrt(x)
+}
+fn as_float(n: integer?) -> float {
+  if n == null { return -1.0; }
+  n as float
+}
+fn parse(t: text?) -> integer {
+  if !t { return -5; }
+  t as integer ?? -2
+}
+
+fn test_domain_facts_a_guard_proves() {
+  assert(div(7, 2) == 3 && div(-7, 2) == -3 && div(7, 0) == -9, "div");
+  assert(modulo(7, -2) == 1 && modulo(-7, 2) == -1, "mod");
+  assert(at([4, 5], 1) == 10 && at([4, 5], 2) == -1 && at([4, 5], -1) == -1, "index");
+  assert(root(9.0) == 3.0 && root(-4.0) == -1.0 && root(0.0) == 0.0, "sqrt");
+}
+
+fn test_a_cast_of_a_proven_present_value() {
+  assert(as_float(3) == 3.0 && as_float(null) == -1.0, "integer? to float");
+  assert(parse("42") == 42 && parse("x") == -2 && parse(null) == -5, "text? parse");
+}
+
+fn test_in_a_loop() {
+  s = 0;
+  for d in -2..3 { s += div(12, d); }
+  assert(s == -6 + -12 + -9 + 12 + 6, "divisors through zero: {s}");
+}

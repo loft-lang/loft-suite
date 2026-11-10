@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Trie` crossed with `@FR-E-NullArg`: a trie's absent key sits where `<` places a null
+// — at the low extreme, before `""` — so every consecutive pair a walk yields compares `<` in
+// the program's own comparison, null first; the absent key is found by an exact lookup with a
+// null `text?` (`null == null` is true), and lies in NO prefix slice, not even `""..`, which
+// holds every present key: an absent text begins with nothing.  Removing the absent key and
+// filing it again keeps all of that.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct W { w: text?, v: integer }
+
+fn build() -> trie<W[w]> {
+  nt: text? = null;
+  [W { w: "b", v: 4 }, W { w: nt, v: 1 }, W { w: "ab", v: 3 }, W { w: "", v: 2 }]
+}
+
+fn ordered(t: trie<W[w]>) -> boolean {
+  first = true;
+  prev: text? = null;
+  ok = true;
+  for e in t {
+    if !first && !(prev < e.w) { ok = false; }
+    first = false;
+    prev = e.w;
+  }
+  ok
+}
+
+fn test_the_walk_is_the_order_of_lt() {
+  t = build();
+  s = "";
+  for e in t { s += "{e.v},"; }
+  assert(s == "1,2,3,4," && len(t) == 4, "walk: {s}");
+  assert(ordered(t), "each walked key is below the next");
+  nt: text? = null;
+  assert(nt < "" && !("" < nt) && !(nt < nt), "null at the low extreme");
+}
+
+fn test_an_exact_lookup_and_no_prefix() {
+  t = build();
+  nt: text? = null;
+  assert((t[nt].v ?? -1) == 1 && (t[""].v ?? -1) == 2, "exact: {t[nt].v ?? -1} {t[""].v ?? -1}");
+  s = "";
+  for e in t[""..] { s += "{e.v},"; }
+  assert(s == "2,3,4,", "the empty prefix holds every present key: {s}");
+  p = "";
+  for e in t["a"..] { p += "{e.v},"; }
+  assert(p == "3,", "prefix a: {p}");
+}
+
+fn test_removed_and_filed_again() {
+  t = build();
+  nt: text? = null;
+  t[nt] = null;
+  assert(len(t) == 3 && t[nt] == null && (t[""].v ?? -1) == 2, "removed: {len(t)}");
+  t += [W { w: nt, v: 9 }];
+  s = "";
+  for e in t { s += "{e.v},"; }
+  assert(s == "9,2,3,4," && ordered(t), "filed again: {s}");
+}

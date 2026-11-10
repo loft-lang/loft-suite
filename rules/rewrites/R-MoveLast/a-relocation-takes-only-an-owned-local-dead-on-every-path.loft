@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-MoveLast` crossed with `@FR-O-Owner` and `@FR-O-Complete`: a field or element
+// assignment, or a record-literal field, takes its source by RELOCATION only where the source is
+// a local the oracle marks OWNED (never a parameter, a view, a `&` link) and DEAD on every path
+// after it.  Everywhere else the copy stands, so the destination and the source stay independent:
+// a source read on one path after the assignment, a parameter assigned into a field, a view of
+// another record's field, each written after through the destination.  An owned local moved into
+// a field, and one moved into an appended element's field every round of a loop, keep their text
+// and vector.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+struct H { p: P }
+struct W { p: P, k: integer }
+
+fn mk(n: integer) -> P { P { n: n, t: "m{n}", xs: [n, n + 1] } }
+fn put(o: H, p: P) { o.p = p; o.p.n += 100; }
+
+fn test_an_owned_dead_local_moves() {
+  o = H { p: mk(0) };
+  r = mk(1);
+  o.p = r;
+  o.p.n = 11;
+  assert(o.p.n == 11 && o.p.t == "m1" && len(o.p.xs) == 2 && o.p.xs[1] == 2, "{o.p.n} {o.p.t}");
+  out: vector<W> = [];
+  for i in 0..3 { rr = mk(i); out += [W { p: rr, k: i }]; }
+  assert(len(out) == 3 && out[2].p.t == "m2" && out[1].p.xs[1] == 2 && out[0].k == 0, "{out[2].p.t}");
+}
+
+fn test_a_source_live_on_one_path_is_copied() {
+  o = H { p: mk(0) };
+  r2 = mk(2);
+  o.p = r2;
+  seen = "";
+  if o.p.n > 0 { r2.n = 22; seen = "{r2.n}{r2.t}"; }
+  o.p.t = "changed";
+  assert(seen == "22m2" && o.p.n == 2 && o.p.t == "changed" && r2.t == "m2", "{seen} {o.p.n} {r2.t}");
+}
+
+fn test_a_parameter_and_a_view_are_copied() {
+  o = H { p: mk(0) };
+  a = mk(3);
+  put(o, a);
+  assert(a.n == 3 && o.p.n == 103, "a parameter: {a.n} {o.p.n}");
+  h2 = H { p: mk(4) };
+  v = h2.p;
+  o.p = v;
+  o.p.n = 44;
+  o.p.xs += [9];
+  assert(h2.p.n == 4 && len(h2.p.xs) == 2 && o.p.n == 44 && len(o.p.xs) == 3, "a view: {h2.p.n} {o.p.n}");
+}

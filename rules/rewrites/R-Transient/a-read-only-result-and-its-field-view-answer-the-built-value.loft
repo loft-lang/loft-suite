@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Transient` crossed with `@FR-O-ViewField`: a function whose result every call site only
+// READS may have a transient twin built outside the store, and a heap field of a returned record
+// may be delivered as a view of a place the frame does not own — at sites that read a length, a
+// null test or a `const` argument only.  Either way the site answers what the stored value
+// answers.  And a site that does anything more — iterates the field, appends to it, stores the
+// result into a vector — keeps the store-building form, the value an independent copy.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Dec { name: text, xs: vector<integer>, n: integer }
+struct Src { items: vector<integer> }
+struct Out { items: vector<integer>, tag: text }
+
+fn decode(s: text) -> Dec { xs: vector<integer> = []; for c in s { xs += [c as integer]; } Dec { name: s, xs: xs, n: len(s) } }
+fn total(v: const vector<integer>) -> integer { t = 0; for x in v { t += x; } t }
+fn wrap(s: Src, k: integer) -> Out { o = Out { items: [], tag: "w{k}" }; o.items = s.items; o }
+
+fn test_read_only_sites() {
+  d = decode("abc");
+  assert(d.n == 3 && len(d.xs) == 3 && d.name == "abc" && total(d.xs) == 97 + 98 + 99, "{d.n} {total(d.xs)}");
+  t = 0;
+  for w in ["xy", "hello", ""] { t += len(decode(w).xs); }
+  assert(t == 7, "{t}");
+}
+
+fn test_a_field_of_a_returned_record() {
+  s = Src { items: [4, 5, 6] };
+  o = wrap(s, 1);
+  assert(len(o.items) == 3 && o.tag == "w1" && total(o.items) == 15, "{len(o.items)}");
+  s.items += [7];
+  p = wrap(s, 2);
+  assert(len(p.items) == 4 && len(o.items) == 3, "{len(p.items)} {len(o.items)}");
+}
+
+fn test_a_site_that_keeps_the_result() {
+  all: vector<Dec> = [];
+  for w in ["ab", "c"] { all += [decode(w)]; }
+  all[0].xs += [0];
+  s = Src { items: [1] };
+  o = wrap(s, 3);
+  o.items += [2];
+  assert(len(all) == 2 && len(all[0].xs) == 3 && all[1].xs[0] == 99 && len(s.items) == 1 && len(o.items) == 2, "{len(all[0].xs)} {len(s.items)}");
+}

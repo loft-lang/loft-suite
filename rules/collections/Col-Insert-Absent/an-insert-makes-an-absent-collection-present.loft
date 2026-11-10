@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Insert-Absent` crossed with `@FR-N-Present`: `c += [ … ]` on an absent nullable
+// collection is the ONE write that discharges implicitly — it instantiates the empty collection
+// and inserts — so after it `c!` is present and holds exactly the inserted records; every other
+// position keeps the explicit discharge, and `c!` on a collection still absent halts.  Crossed
+// with a vector local, a hash field, a vector field, an insert in a loop, and a collection set
+// back to null and filled again.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct E { k: integer, v: text }
+struct O { h: hash<E[k]>?, xs: vector<integer>? }
+
+fn test_a_vector_local() {
+  c: vector<integer>? = null;
+  c += [4, 5];
+  d = c!;
+  assert(len(d) == 2 && d[0] == 4 && d[1] == 5, "after the insert: {d}");
+}
+
+fn test_fields_of_a_record() {
+  o = O { };
+  assert(o.h == null && o.xs == null, "absent at first");
+  o.h += [E { k: 3, v: "c" }, E { k: 3, v: "cc" }];
+  o.xs += [9];
+  hh = o.h!;
+  assert(len(hh) == 1 && (hh[3].v ?? "-") == "cc", "the hash: {len(hh)}");
+  assert(len(o.xs!) == 1 && o.xs![0] == 9, "the vector field");
+}
+
+fn test_in_a_loop_and_again_after_null() {
+  acc: vector<text>? = null;
+  for i in 0..3 { acc += ["w{i}"]; }
+  a = acc!;
+  assert(len(a) == 3 && a[2] == "w2", "the loop: {a}");
+  acc = null;
+  acc += ["z"];
+  b = acc!;
+  assert(len(b) == 1 && b[0] == "z", "after null: {b}");
+}
+
+// @EXPECT_FAIL: is null
+fn test_a_bang_on_a_collection_still_absent() {
+  e: vector<integer>? = null;
+  f = e!;
+  assert(len(f) == 0, "unreachable");
+}

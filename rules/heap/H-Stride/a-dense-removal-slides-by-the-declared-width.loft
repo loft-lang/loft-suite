@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Stride` crossed with `@FR-Col-RemoveDense`: removing index i from a vector shifts every
+// later element down one, and the shift moves by stride(τ) — the width the DECLARED element type
+// gives, never the definition it resolves to (`u8`, `i16`, `u32`, a `limit(…) size(1)` and a
+// `size(2)` alias all resolve to `integer`), and four bytes where the vector is LINKED (L,
+// named by a `reference<L>` field).  Each case removes one element and reads every survivor:
+// a wrong stride reads a neighbour's bytes.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+type Small = integer limit(0, 200) size(1);
+type Mid = integer limit(-1000, 1000) size(2);
+
+struct E { k: integer, v: text }
+struct L { e: E, b: u8 }
+struct Holder { r: reference<L>? }
+
+fn test_narrow_integer_widths() {
+  a: vector<u8> = [1, 2, 3, 255];
+  a.remove(1);
+  assert(len(a) == 3 && a[0] == 1 && a[1] == 3 && a[2] == 255, "u8: {a}");
+  b: vector<i16> = [-1, -300, 7, 32000];
+  b.remove(0);
+  assert(len(b) == 3 && b[0] == -300 && b[1] == 7 && b[2] == 32000, "i16: {b}");
+  e: vector<u32> = [4000000000, 1, 2];
+  e.remove(0);
+  assert(len(e) == 2 && e[0] == 1 && e[1] == 2, "u32: {e}");
+}
+
+fn test_aliases_of_one_definition() {
+  c: vector<Small> = [10, 200, 0, 5];
+  c.remove(2);
+  assert(len(c) == 3 && c[0] == 10 && c[1] == 200 && c[2] == 5, "size(1): {c}");
+  d: vector<Mid> = [-1000, 999, 0, -5];
+  d.remove(1);
+  assert(len(d) == 3 && d[0] == -1000 && d[1] == 0 && d[2] == -5, "size(2): {d}");
+  w: vector<single> = [1.5f, 2.5f, 3.5f];
+  w.remove(0);
+  assert(len(w) == 2 && w[0] == 2.5f && w[1] == 3.5f, "single");
+}
+
+fn test_records_inline_and_linked() {
+  f = [E { k: 1, v: "a" }, E { k: 2, v: "b" }, E { k: 3, v: "c" }];
+  f.remove(0);
+  assert(len(f) == 2 && f[0].v == "b" && f[1].k == 3, "records");
+  g = [L { e: E { k: 1, v: "x" }, b: 1 }, L { e: E { k: 2, v: "y" }, b: 2 }, L { e: E { k: 3, v: "z" }, b: 3 }];
+  g.remove(1);
+  assert(len(g) == 2 && "{g[0].e.v}{g[0].b} {g[1].e.v}{g[1].b}" == "x1 z3", "linked");
+  hold = Holder { };
+  assert(hold.r == null, "the reference field");
+}
+
+fn test_removals_in_a_loop() {
+  a: vector<i16> = [10, -20, 30, -40, 50, -60];
+  for x in a if x < 0 { x#remove; }
+  assert(len(a) == 3 && a[0] == 10 && a[1] == 30 && a[2] == 50, "i16 filtered: {a}");
+  b: vector<u8> = [9, 8, 7, 6, 5];
+  while len(b) > 2 { b.remove(1); }
+  assert(len(b) == 2 && b[0] == 9 && b[1] == 5, "u8 repeated: {b}");
+}

@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Buffer` crossed with `@FR-O-Complete`, `@FR-R-Rebind` and `@FR-R-WorkBuffer`: a hidden
+// return buffer is the CALLER's store, witnessed by the local that adopts it.  Per path
+// (O-Complete): a local bound from a value branch is witnessed by every arm's buffer, and an arm
+// that BORROWS (a parameter's field) is no buffer at all, so each path frees what it owns and no
+// other.  R-Rebind: `x = f(x, …)` hands x's own record as f's buffer — the destination clause
+// makes it no store of f's to release, whatever f's exit (a literal of x's fields, a growth
+// before it, an early `return d`).  R-WorkBuffer: a callee's scalar work vector is storage of the
+// caller's pool, cleared on entry, so calls from two sites, in a loop, through recursion and
+// through a function value (which declines and mints) each answer as a fresh local would.  The
+// cell runs under strict stores: a store freed twice, freed while read, or never freed fails it.
+//
+// CHANNEL: the assertions, strict stores and the leak gate.
+// @ARMED: LOFT_STRICT_STORES=1
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+struct H { p: P }
+
+fn mk(n: integer) -> P { o = P { n: n, t: "m{n}", xs: [n] }; o }
+fn lit(n: integer) -> P { P { n: n, t: "l{n}", xs: [n, n] } }
+fn pick(h: H, k: integer) -> integer {
+  r = if k == 0 { mk(5) } else if k == 1 { lit(6) } else { h.p };
+  r.n * 10 + len(r.xs)
+}
+
+fn step(d: P, w: integer) -> P { P { n: d.n + w, t: d.t, xs: d.xs } }
+fn grow(d: P, w: integer) -> P { d.xs += [w]; P { n: d.n, t: "{d.t}+", xs: d.xs } }
+fn maybe(d: P, w: integer) -> P {
+  if w < 0 { return d; }
+  P { n: w, t: d.t, xs: [] }
+}
+
+fn digits(n: integer) -> integer {
+  v: vector<integer> = [];
+  x = n;
+  while x > 0 { v += [x % 10]; x = x / 10; }
+  s = 0;
+  for d in v { s += d; }
+  s + len(v) * 100
+}
+fn digits_rec(n: integer) -> integer {
+  v: vector<integer> = [];
+  v += [n % 10];
+  if n >= 10 { return digits_rec(n / 10) + v[0]; }
+  v[0]
+}
+
+fn test_every_arm_its_own_witness() {
+  h = H { p: P { n: 7, t: "h", xs: [1, 2, 3] } };
+  s = "";
+  for k in 0..3 { s += "{pick(h, k)},"; }
+  assert(s == "51,62,73," && h.p.t == "h" && len(h.p.xs) == 3, s);
+}
+
+fn test_a_rebind_onto_its_own_buffer() {
+  d = P { n: 1, t: "d", xs: [0] };
+  for i in 0..4 { d = step(d, i); }
+  assert(d.n == 7 && d.t == "d" && len(d.xs) == 1, "step: {d.n}");
+  for i in 0..3 { d = grow(d, i); }
+  assert(d.t == "d+++" && len(d.xs) == 4 && d.xs[3] == 2, "grow: {d.t} {d.xs}");
+  d = maybe(d, -1);
+  assert(d.t == "d+++" && len(d.xs) == 4, "an early return of the parameter");
+  d = maybe(d, 9);
+  assert(d.n == 9 && len(d.xs) == 0 && d.t == "d+++", "a literal exit");
+}
+
+fn test_a_work_buffer_from_every_kind_of_site() {
+  a = digits(9071);
+  b = digits(55);
+  s = 0;
+  for i in 1..5 { s += digits(i * 111); }
+  f = digits;
+  c = f(321);
+  r = digits_rec(4096);
+  assert(a == 417 && b == 210 && s == (303 + 306 + 309 + 312) && c == 306 && r == 19, "{a} {b} {s} {c} {r}");
+}

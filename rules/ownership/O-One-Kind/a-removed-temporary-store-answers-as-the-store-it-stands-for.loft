@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-One-Kind` crossed with `@FR-R-ValueRecord`, `@FR-R-Place`, `@FR-R-InPlaceLiteral`,
+// `@FR-R-ElemFirst`, `@FR-O-ViewField`, `@FR-R-Transient` and `@FR-R-Apart`: the store is the
+// one kind of heap object, and a rewrite may remove a temporary store or hold a short-lived value
+// outside the store only where nothing tells: the value has no identity or release of its own and
+// becomes the store value it stands for wherever it reaches a store record.  So each rewrite's
+// shape answers what the plain store program answers — a small record returned by value then
+// stored into a vector (an independent copy, a distinct identity), a call result built into the
+// field it is assigned to, a literal written into an element while reading the old one, a local
+// vector built inside the appended element, a decoder's result read only, a `vector<float>`
+// local and a record of float vectors — and the leak gate sees no store left behind.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct V2 { x: integer, y: integer }
+struct Row { id: integer, cells: vector<integer> }
+struct Dec { name: text, xs: vector<integer>, n: integer }
+struct Box { p: V2, items: vector<integer> }
+struct Pts { xs: vector<float>, ys: vector<float> }
+
+fn add(a: V2, b: V2) -> V2 { V2 { x: a.x + b.x, y: a.y + b.y } }
+fn build(n: integer) -> vector<integer> { r: vector<integer> = []; for i in 0..n { r += [i * i]; } r }
+fn decode(s: text) -> Dec { xs: vector<integer> = []; for c in s { xs += [c as integer]; } Dec { name: s, xs: xs, n: len(s) } }
+fn mkpts() -> Pts { Pts { xs: [1.0, 2.0], ys: [3.0, 4.0] } }
+
+fn test_a_value_record_reaching_a_vector() {
+  a = add(V2 { x: 1, y: 2 }, V2 { x: 10, y: 20 });
+  vs = [a, add(a, a)];
+  vs[0].x = 99;
+  assert(a.x == 11 && vs[0].x == 99 && vs[1].y == 44 && !(&vs[0] == &vs[1]), "{a.x} {vs[0].x} {vs[1].y}");
+}
+
+fn test_a_call_built_into_its_field() {
+  b = Box { p: V2 { x: 0, y: 0 }, items: [] };
+  for i in 1..4 { b.items = build(i); }
+  assert(len(b.items) == 3 && b.items[2] == 4 && b.items[0] == 0, "{b.items}");
+}
+
+fn test_a_literal_written_into_its_element() {
+  rows = [Row { id: 0, cells: [] }, Row { id: 1, cells: [1] }];
+  rows[1] = Row { id: 5, cells: [len(rows[1].cells), 7] };
+  assert(rows[1].id == 5 && len(rows[1].cells) == 2 && rows[1].cells[0] == 1 && rows[0].id == 0, "{rows[1].id}");
+}
+
+fn test_a_local_vector_built_in_its_element() {
+  out: vector<Row> = [];
+  for i in 0..3 {
+    cs: vector<integer> = [];
+    for j in 0..i { cs += [j * 10]; }
+    out += [Row { id: i, cells: cs }];
+  }
+  assert(len(out) == 3 && len(out[2].cells) == 2 && out[2].cells[1] == 10 && len(out[0].cells) == 0, "{len(out)}");
+}
+
+fn test_a_result_read_only() {
+  d = decode("abc");
+  assert(d.n == 3 && len(d.xs) == 3 && d.xs[0] == 97 && d.name == "abc", "{d.n}");
+  t = 0;
+  for w in ["xy", "hello"] { t += len(decode(w).xs); }
+  assert(t == 7, "{t}");
+}
+
+fn test_a_transient_materialised_by_an_in_place_literal() {
+  // R-Transient's store use: the decoded value written into an element by a literal in place
+  ds = [decode("a"), decode("bc")];
+  d = decode("pq");
+  ds[1] = Dec { name: d.name, xs: d.xs, n: d.n + len(ds[1].xs) };
+  ds[1].xs += [0];
+  assert(ds[1].name == "pq" && ds[1].n == 4 && len(ds[1].xs) == 3 && len(d.xs) == 2 && ds[0].n == 1, "{ds[1].n} {len(d.xs)}");
+}
+
+fn test_float_vectors_outside_the_store() {
+  f: vector<float> = [];
+  for i in 0..5 { f += [i as float * 1.5]; }
+  f[1] = 10.0;
+  assert(len(f) == 5 && f[1] == 10.0 && f[4] == 6.0, "{f}");
+  f.clear();
+  assert(len(f) == 0, "cleared");
+  p = mkpts();
+  p.xs[0] = 5.0;
+  q = mkpts();
+  assert(p.xs[0] == 5.0 && q.xs[0] == 1.0 && p.ys[1] == 4.0 && len(p.xs) == 2, "{p.xs} {q.xs}");
+}
