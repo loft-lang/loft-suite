@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FOR RANGE PROVES ITS END AND ITS COUNTER NON-ZERO (`@FR-N-Guard` crossed with `@FR-N-Div`).
+// `for k in lo..n`, `lo` a constant, runs its body only where `lo <= k < n`: with `lo >= 0` the
+// end `n` is at least 1, and with `lo >= 1` the counter `k` is too, so `x / n` and `x / k` there
+// cannot divide by zero and type `integer`, as they do under `if n != 0`.  Without it the
+// division typed `integer?`, the accumulator widened, and its return drew the nullable-store
+// warning on a value that could not be null.
+//
+// Axes it MOVES: the divisor (the end, the counter), the start (0, 1), the range's kind
+// (`..`, `..=`).  Controls: a counter from 0, an end after a start below zero, an end the body
+// writes, and the end read after the loop — each still warns, once, naming its own local.
+//
+// Values hand-computed for n = 6: the end 60 / 6 over five or six rounds; the counter
+// 60/1 + 60/2 + 60/3 + 60/4 + 60/5 = 137, and 147 with 60/6.
+//
+// @falsified-at: dbf8b05ae — under `--tests --deny-warnings`, FAIL (4 unexpected warnings, one
+//   per proven division) -> ok; `make falsify` reads INERT, as it scores no warning.
+// CHANNEL: the expected warnings, and no other (`--deny-warnings`).
+// ARMED: no instrument.
+// WITNESS: each warning names its control's accumulator.
+// HOLDS: every value on both trees, interpret and C.
+// @EXPECT_WARNING: `from_zero` is `integer?`
+// @EXPECT_WARNING: `below_zero` is `integer?`
+// @EXPECT_WARNING: `written_end` is `integer?`
+// @EXPECT_WARNING: `after_loop` is `integer?`
+// @EXPECT_WARNING: the loop read `n` once
+
+fn end_from_one(n: integer) -> integer { s = 0; for _ in 1..n { s += 60 / n; } s }
+fn end_from_zero(n: integer) -> integer { s = 0; for _ in 0..n { s += 60 / n; } s }
+fn counter(n: integer) -> integer { s = 0; for k in 1..n { s += 60 / k; } s }
+fn counter_inclusive(n: integer) -> integer { s = 0; for k in 1..=n { s += 60 / k; } s }
+
+// Controls.
+fn counter_from_zero(n: integer) -> integer { from_zero = 0; for k in 0..n { from_zero += 60 / (k + 1) - 60 / k; } from_zero }
+fn end_below_zero(n: integer) -> integer { below_zero = 0; for _ in -1..n { below_zero += 60 / n; } below_zero }
+fn end_written(m: integer) -> integer {
+  n = m;
+  written_end = 0;
+  for k in 1..n { n = k - 1; written_end += 60 / n; }
+  written_end
+}
+fn end_after(n: integer) -> integer { after_loop = 0; for _ in 1..n { after_loop += 1; } after_loop += 60 / n; after_loop }
+
+fn main() {
+  assert(end_from_one(6) == 50 && end_from_one(1) == 0, "end from 1");
+  assert(end_from_zero(6) == 60, "end from 0");
+  assert(counter(6) == 137 && counter_inclusive(6) == 147, "counter");
+  assert(end_after(6) == 15, "after the loop");
+}
