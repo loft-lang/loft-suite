@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Write` × `@FR-F-ParamRebind` × `@FR-O-Owner` — A LINK TO A BORROWED PLACE RELEASES
+// NOTHING ITS OWNER HOLDS.
+//
+// A whole write through a local `&` link is the write of the variable it names
+// (`(B-OutOfLine)`), and the store that write displaces is released only by its owner.  A
+// by-value parameter borrows its caller's record (`(F-ParamRebind)`: replacing it is a local
+// rebind), and a view (`v = h.next`) borrows its container's.  So a cursor walk —
+// `cur = &n; while cur != null { …; cur = &cur.next }` — that steps the link to null leaves the
+// caller's list whole: a second walk reads the same list, and a record made between the walks
+// does not take its place.  A `&` parameter drained to null is the control: its caller owned
+// the list, so the drain releases it and the caller reads null.
+//
+// The cells vary one axis each: the borrowed place (a nullable parameter, a non-null parameter,
+// a local view), the record made between the walks, and the owner control (a `&` parameter, an
+// owned local walked through a link).  Every value is computed by hand.
+//
+// @falsified-at: main dbf8b05ae — interpret, native-c and native: the second walk answered the
+//   record made between the walks ("4q1 " for "1a1 9z3 ") and the view walk left `h.next` null;
+//   LOFT_POISON / LOFT_STRICT_STORES: a use after free.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: every assertion and the leak gate on all three backends.
+
+struct N { v: integer, name: text, tags: vector<integer>, next: N? }
+
+fn walk(n: N?) -> text {
+  out = "";
+  cur = &n;
+  while cur != null { out += "{cur.v}{cur.name}{len(cur.tags)} "; cur = &cur.next; }
+  out
+}
+
+fn walk_dense(n: N) -> integer {
+  s = 0;
+  cur = &n;
+  while cur != null { s = s * 10 + cur.v; cur = &cur.next; }
+  s
+}
+
+fn drain(l: &N?) -> integer {
+  k = 0;
+  while l != null { k += l.v; l = l.next; }
+  k
+}
+
+fn main() {
+  h = N { v: 1, name: "a", tags: [1], next: N { v: 9, name: "z", tags: [7, 7, 7] } };
+  assert(walk(h) == "1a1 9z3 ", "a first walk: {walk(h)}");
+  x = N { v: 4, name: "q", tags: [4] };
+  assert(walk(h) == "1a1 9z3 ", "a second walk after a new record: {walk(h)}");
+  assert(x.v == 4 && x.name == "q", "the new record: {x.v} {x.name}");
+
+  d = N { v: 2, name: "b", tags: [], next: N { v: 3, name: "c", tags: [3] } };
+  assert(walk_dense(d) == 23, "a non-null parameter: {walk_dense(d)}");
+  y = N { v: 8, name: "y", tags: [8] };
+  assert(walk_dense(d) == 23 && y.v == 8, "walked again: {walk_dense(d)}");
+
+  t = N { v: 1, name: "a", tags: [1], next: N { v: 9, name: "z", tags: [7], next: N { v: 3, name: "c", tags: [] } } };
+  v = t.next;
+  c = &v;
+  s = 0;
+  while c != null { s += c.v; c = &c.next; }
+  z = N { v: 4, name: "q", tags: [4] };
+  assert(s == 12, "a link to a view walked: {s}");
+  assert(t.v == 1 && t.next.v == 9 && t.next.next.v == 3 && z.v == 4,
+         "the viewed list whole: {t.v} {t.next.v} {t.next.next.v}");
+
+  o = N { v: 1, name: "a", tags: [1], next: N { v: 9, name: "z", tags: [7] } };
+  assert(drain(o) == 10 && o == null, "a & parameter drained: the owner reads null");
+  l = N { v: 1, name: "a", tags: [1], next: N { v: 9, name: "z", tags: [7] } };
+  q = 0;
+  k = &l;
+  while k != null { q += k.v; k = &k.next; }
+  assert(q == 10 && l == null, "an owned local walked through its link: {q}");
+  println("borrowed link ok");
+}
