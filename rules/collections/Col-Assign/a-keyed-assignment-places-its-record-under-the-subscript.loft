@@ -17,8 +17,8 @@
 // SAME collection, the same element — `c[30] = c[30]` —, an ABSENT element) × the collection's
 // root (local, struct field, `&` parameter) × the target key (absent, present) × a loop of
 // inserts.  Controls: a subscript equal to the key, and the value's own record after the write.
-// The absent-element cell is a pre-existing crash the same path owned: `c[5] = c[99]` panicked in
-// a store accessor, where the `K?`-into-`K` warning promises the store is skipped.
+// The absent-element cell: `c[5] = c[99]` leaves `c[5]` reading null, as `c[5] = null` does —
+// the record under 5 is removed and an absent key stays absent (loft#2470).
 //
 // @falsified-at: be2c6fe54 — interpret exit 1 -> 0, interpret 6 assertion failures -> 0, native exit 1 -> 0, native 12 assertion failures -> 0
 // @falsified-by: tests/falsified/a-keyed-assignment-places-its-record-under-the-subscript.patch — interpret exit 1 -> 0, interpret 6 assertion failures -> 0, native exit 1 -> 0, native 12 assertion failures -> 0
@@ -92,7 +92,7 @@ fn test_a_move_and_a_replace() {
   e: sorted<K[key]> = [K { key: 5, n: 1 }];
   e[5] = e[99];
   e[6] = e[99];
-  assert("{len(e)} {kn(e[5])} {kn(e[6])}" == "1 5:1 -", "an absent value stores nothing: {len(e)} {kn(e[5])} {kn(e[6])}");
+  assert("{len(e)} {kn(e[5])} {kn(e[6])}" == "0 - -", "an absent value removes the key: {len(e)} {kn(e[5])} {kn(e[6])}");
 }
 
 fn test_the_value_is_copied_and_untouched() {
