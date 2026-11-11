@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Guard` × `@FR-P-Multi`, @C162 — a guard on a multi-pattern arm is asked of each listed
+// pattern that matches, in order, under that pattern's own bindings: the first whose guard holds
+// commits, the arm fails only when none does, and the guard may run once per matching pattern.
+// An alternation NESTED in a pattern (a tuple element, a field sub-pattern, a slice element) has
+// committed to its first match before the guard runs, and a guard that rejects it rejects the arm.
+//
+// Values by hand, the subject Rect { w: 2, h: 9 } unless named:
+//   arm-level `Rect { w: v } | Rect { h: v } if v > 5`      w = 2 fails, h = 9 passes   -> 9
+//   the same on a plain struct `S { a: v } | S { b: v }`                                -> 9
+//   both pass (`if v > 0`): the first listed pattern wins                               -> 2
+//   none passes, Rect { w: 1, h: 3 }                                                    -> -1
+//   a counting guard: two runs when the first rejects; two when none passes             -> "9 2", "-1 2"
+//   nested in a tuple / a field / a slice element: w = 2 commits, the guard rejects     -> -1 each
+//
+// CHANNEL: the assertions.
+
+enum Sh { Rect { w: integer, h: integer }, Dot }
+struct S { a: integer, b: integer }
+struct Box { s: Sh, n: integer }
+
+fn arm(s: Sh) -> integer { match s { Rect { w: v } | Rect { h: v } if v > 5 => v, _ => -1 } }
+fn plain(s: S) -> integer { match s { S { a: v } | S { b: v } if v > 5 => v, S { a, b } => -(a * 10 + b) } }
+fn first_wins(s: Sh) -> integer { match s { Rect { w: v } | Rect { h: v } if v > 0 => v, _ => -1 } }
+fn bump(c: &integer, v: integer) -> boolean { c += 1; v > 5 }
+fn counted(s: Sh) -> text { c = 0; r = match s { Rect { w: v } | Rect { h: v } if bump(c, v) => v, _ => -1 }; "{r} {c}" }
+fn in_tuple(p: (Sh, integer)) -> integer { match p { (Rect { w: v } | Rect { h: v }, _) if v > 5 => v, _ => -1 } }
+fn in_field(b: Box) -> integer { match b { Box { s: Rect { w: v } | Rect { h: v }, n: _ } if v > 5 => v, _ => -1 } }
+fn in_slice(xs: vector<Sh>) -> integer { match xs { [(Rect { w: v } | Rect { h: v }), ..] if v > 5 => v, _ => -1 } }
+
+fn test_an_arm_level_alternation_tries_the_guard_on_each() {
+  r = Rect { w: 2, h: 9 };
+  assert(arm(r) == 9, "arm {arm(r)}");
+  assert(plain(S { a: 2, b: 9 }) == 9, "plain struct {plain(S { a: 2, b: 9 })}");
+  assert(first_wins(r) == 2, "first passing {first_wins(r)}");
+  assert(arm(Rect { w: 1, h: 3 }) == -1, "none passes");
+}
+
+fn test_the_guard_runs_once_per_matching_pattern() {
+  assert(counted(Rect { w: 2, h: 9 }) == "9 2", "first rejects {counted(Rect { w: 2, h: 9 })}");
+  assert(counted(Rect { w: 7, h: 9 }) == "7 1", "first passes {counted(Rect { w: 7, h: 9 })}");
+  assert(counted(Rect { w: 1, h: 3 }) == "-1 2", "none passes {counted(Rect { w: 1, h: 3 })}");
+}
+
+fn test_a_nested_alternation_commits_before_the_guard() {
+  r = Rect { w: 2, h: 9 };
+  assert(in_tuple((r, 0)) == -1, "tuple {in_tuple((r, 0))}");
+  assert(in_field(Box { s: r, n: 0 }) == -1, "field {in_field(Box { s: r, n: 0 })}");
+  assert(in_slice([r]) == -1, "slice {in_slice([r])}");
+}
