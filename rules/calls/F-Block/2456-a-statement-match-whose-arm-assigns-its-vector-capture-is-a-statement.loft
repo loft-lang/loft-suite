@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STATEMENT MATCH WHOSE ARM ASSIGNS ITS VECTOR CAPTURE IS A STATEMENT (`@FR-F-Block`, loft#2456).
+// A `match` that starts a statement discards its value, so its arms need yield nothing.  An arm
+// that ASSIGNS its own vector capture to an outer local (`P { f } => { other = f; }`) yields
+// nothing either; it was taken for one that yields the borrowed capture, rewritten into an owned
+// copy typed `vector`, and the statement then demanded a `;` after the `match`.
+//
+// Axes it MOVES: the arm's spelling (a block, a bare assignment), what follows (another
+// statement, the block's end), and the capture's place (the first arm, a later one).  Controls:
+// an arm that YIELDS its capture still copies it out owned (`Filled { items } => items`), and a
+// scalar capture assigned the same way.
+//
+// Values hand-computed: other takes P's vector ([1, 2], [4, 5], three elements) and keeps [0]
+// where the subject is Q; the yield arm answers 13 for [3]; the scalar arm 6.
+//
+// @falsified-at: dbf8b05ae — interpret exit 1 -> 0, C exit 1 -> 0
+//   CHANNEL: a compile error.
+//   WITNESS: "Expect token ;" after the first `match`.
+//   HOLDS: the controls compile on both trees.
+
+enum N { P { f: vector<integer> }, Q { k: integer } }
+
+// Each case is a function that returns nothing: there a statement whose value is not void is
+// dropped, which is where the `;` was demanded.
+fn block_arm(i: integer) {
+  q = P { f: [i, i + 1] };
+  other = [0];
+  match q { P { f } => { other = f; }, _ => {} }
+  assert(len(other) == 2 && other[0] == i, "block arm {other}");
+}
+
+fn bare_arm(i: integer) {
+  q = P { f: [i, i + 1] };
+  other = [0];
+  match q { P { f } => other = f, _ => {} }
+  assert(len(other) == 2 && other[1] == i + 1, "bare arm {other}");
+}
+
+fn later_arm(i: integer) {
+  q = P { f: [i, i + 1, i + 2] };
+  other = [5];
+  match q { Q { k } => { other = [k]; }, P { f } => { other = f; } }
+  assert(len(other) == 3, "later arm {other}");
+}
+
+fn missed(i: integer) {
+  q = Q { k: i };
+  other = [0];
+  match q { P { f } => { other = f; }, _ => {} }
+  assert(len(other) == 1 && other[0] == 0, "no P: other unchanged {other}");
+}
+
+// Controls.
+fn yielded(i: integer) -> integer {
+  q = P { f: [i] };
+  v = match q { P { f } => f, _ => [] };
+  len(v) * 10 + v[0] ?? -1
+}
+
+fn scalar(i: integer) {
+  q = Q { k: i };
+  n = 0;
+  match q { Q { k } => { n = k; }, _ => {} }
+  assert(n == i, "scalar arm {n}");
+}
+
+fn main() {
+  block_arm(1);
+  bare_arm(4);
+  later_arm(7);
+  missed(2);
+  assert(yielded(3) == 13, "yield control");
+  scalar(6);
+}

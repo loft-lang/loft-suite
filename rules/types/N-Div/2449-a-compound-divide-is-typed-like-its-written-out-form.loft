@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPOUND DIVIDE IS TYPED LIKE ITS WRITTEN-OUT FORM (`@FR-N-Div` crossed with `@FR-N-Join` and
+// `@FR-N-Store`).  `s /= n` writes what `s / n` answers, and that is `integer?` while `n` is not
+// proven non-zero: a zero divisor yields the reserved null (`@FR-E-Uncomp`).  So an inferred
+// local widens to `integer?`, as `s = s / n` widens it, and any other full-width slot — a
+// declared local, a parameter, a field, an element — is told it receives a nullable, as
+// `s = s / n` tells it.  The compound step skipped that typing (loft#2449): the local stayed
+// `integer`, held the null, and `return s` handed it back from an `integer` function with
+// nothing said.
+//
+// Axes it MOVES: the operator (`/=`, `%=`), the slot (an inferred local, a declared local, a
+// parameter, a field, an element).  Controls: a divisor a guard proves non-zero types the step
+// `integer` (quiet), and a declared narrow slot takes its default at run time
+// (`@FR-E-Uncomp-NN`), quiet too.
+//
+// Values hand-computed: 100 / 4 = 25, 100 % 7 = 2, 90 / 3 = 30, 50 % 8 = 2, 60 / 5 = 12,
+// 80 / 4 = 20; a zero divisor answers null, read here through `??` as -1; a `u8` holding 10
+// divided by zero takes its default 0.
+//
+// @falsified-at: dbf8b05ae — interpret FAIL (five expected warnings never fire) -> ok, both
+//   backends.
+// CHANNEL: the expected warnings.
+// ARMED: no instrument.
+// WITNESS: each warning names its slot.
+// HOLDS: every value on both trees; the two controls draw nothing on either.
+// @EXPECT_WARNING: `s_inferred` is `integer?`
+// @EXPECT_WARNING: `r_inferred` is `integer?`
+// @EXPECT_WARNING: stored into the local `d_declared` of the non-null type `integer`
+// @EXPECT_WARNING: stored into the parameter `p_arg` of the non-null type `integer`
+// @EXPECT_WARNING: stored into the assignment target of the non-null type `integer`
+
+struct Box { v: integer }
+
+fn inferred(n: integer) -> integer {
+  s_inferred = 100;
+  s_inferred /= n;
+  s_inferred
+}
+
+fn remaindered(n: integer) -> integer {
+  r_inferred = 100;
+  r_inferred %= n;
+  r_inferred
+}
+
+fn declared(n: integer) -> integer {
+  d_declared: integer = 90;
+  d_declared /= n;
+  d_declared ?? -1
+}
+
+fn parameter(p_arg: integer, n: integer) -> integer {
+  p_arg %= n;
+  p_arg ?? -1
+}
+
+fn field(n: integer) -> integer {
+  b = Box { v: 60 };
+  b.v /= n;
+  b.v ?? -1
+}
+
+fn element(n: integer) -> integer {
+  v = [80];
+  v[0] /= n;
+  v[0] ?? -1
+}
+
+// Controls.
+fn guarded(n: integer) -> integer {
+  g = 100;
+  if n != 0 {
+    g /= n;
+  }
+  g
+}
+
+fn narrow(n: integer) -> integer {
+  u: u8 = 10;
+  u /= n;
+  u as integer
+}
+
+fn main() {
+  assert(inferred(4) == 25 && (inferred(0) ?? -1) == -1, "inferred");
+  assert(remaindered(7) == 2 && (remaindered(0) ?? -1) == -1, "remainder");
+  assert(declared(3) == 30 && declared(0) == -1, "declared");
+  assert(parameter(50, 8) == 2 && parameter(50, 0) == -1, "parameter");
+  assert(field(5) == 12 && field(0) == -1, "field");
+  assert(element(4) == 20 && element(0) == -1, "element");
+  assert(guarded(4) == 25 && guarded(0) == 100, "guarded");
+  assert(narrow(2) == 5 && narrow(0) == 0, "narrow: the default");
+}

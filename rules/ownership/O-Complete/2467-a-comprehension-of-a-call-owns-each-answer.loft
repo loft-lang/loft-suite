@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPREHENSION OF A CALL OWNS EACH ANSWER (`@FR-O-Complete`, `@FR-F-Ret`).  `f` answers its
+// argument on one arm and the record `g` minted on the other, and its signature names only the
+// argument.  `[for a in xs { f(a) }]` bound each answer to the comprehension's slot as that
+// borrow — its braces' block hid the call from the single bind's lowering — and the record `g`
+// minted was copied into the vector and freed by nobody, one per element.  `v += [f(a)]` binds
+// the same call to an owned temp and was always clean.
+//
+// Axes it MOVES: the callee (a tail call that mints, a literal arm that mints, a recursive
+// rebuild), the element arm taken.  Controls: the append spelling, and the elements whose answer
+// is the argument itself — the source vector must read intact afterwards.
+//
+// Values hand-computed: 6 and 8 through `f`, 1 through `j`, and `bare` rebuilds the call
+// around 6.
+//
+// @falsified-at: dbf8b05ae — interpret leaked kt=100 Node×3, kt=101 NdInt×1 -> clean, native exit 1 -> 0, native leaked kt=100 Node×3, kt=101 NdInt×1 -> clean
+// CHANNEL: the store-leak check at exit (the harness runs cells under `LOFT_STRICT_STORES=1`).
+// ARMED: no instrument.
+// WITNESS: the leak names `Node` and `NdInt`.
+// HOLDS: every value, and no leak, on both backends.
+
+fn main() {
+  xs = [Node::NdInt { n: 6 }, Node::NdSpan { inner: Node::NdSpan { inner: Node::NdInt { n: 8 } } }];
+  w = [for a in xs { f(a) }];
+  ys = [Node::NdInt { n: 7 }];
+  lit = [for y in ys { j(y, false) }];
+  call = Node::NdSpan { inner: Node::NdCall { d: 1, args: [Node::NdSpan { inner: Node::NdInt { n: 6 } }] } };
+  b = bare(call);
+  assert(val(w[0]!) == 6 && val(w[1]!) == 8 && val(lit[0]!) == 1 && val(b) == 6, "the elements");
+  // Controls: the append spelling, and the sources read intact.
+  v: vector<Node> = [];
+  for a in xs {
+    v += [f(a)];
+  }
+  assert(val(v[0]!) == 6 && val(v[1]!) == 8, "append");
+  assert(val(xs[0]!) == 6 && val(xs[1]!) == 8 && val(ys[0]!) == 7 && val(call) == 6, "the sources");
+}
+
+enum Node { NdNull, NdInt { n: integer }, NdSpan { inner: Node }, NdCall { d: integer, args: vector<Node> } }
+fn val(n: Node) -> integer { match n { NdInt { n } => n, NdSpan { inner } => val(inner), NdCall { args } => val(args[0]!), _ => -1 } }
+fn g(n: Node) -> Node { match n { NdSpan { inner } => inner, _ => n } }
+fn f(n: Node) -> Node { match n { NdSpan { inner } => g(inner), _ => n } }
+fn j(n: Node, keep: boolean) -> Node { if keep { n } else { Node::NdInt { n: 1 } } }
+fn bare(n: Node) -> Node { match n { NdSpan { inner } => bare(inner), NdCall { d, args } => Node::NdCall { d: d, args: [for a in args { bare(a) }] }, _ => n } }

@@ -9,7 +9,11 @@
 //
 // @falsified-at: none — a conformance guard: the copy it replaces gave the same values; it
 //   holds the move to them.  The emitted C carries `loft_demote_rec` at each push (4 sites).
-// Hand-computed.  CHANNEL: the asserts and the leak gate.
+// Hand-computed.  CHANNEL: the asserts, the leak gate and the strict store checks.
+// @ARMED: LOFT_STRICT_STORES=1
+// `walk` drains its own parameter through a link (`cur = &n; cur = &cur.next`): that rebinds the
+// callee's name only (`@FR-F-ParamRebind`), and releasing the displaced store freed `main`'s list
+// before its next read — reported here by the strict checks.
 // HOLDS: every assertion and the leak gate on all three backends, with `OpDemoteRec` and with
 //   the five-op form it replaces (`LOFT_NO_DIRECT_DEMOTE=1`).
 

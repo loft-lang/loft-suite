@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ENUM JOIN OF A CALL AND A VIEW OWNS THE CALL'S RECORD (`@FR-O-Complete`, loft#1019 and
+// loft#1013 for the struct spelling).  A join whose arms disagree about ownership is a view,
+// and its owning call arm is bound into a buffer the frame frees.  That was asked of
+// `Reference` alone, so for a struct-`Enum` — the same heap record — `lo = if c { mk(7) } else
+// { l.code }` and `x = xs[5] ?? mk(3)` handed the binding the record `mk` minted with no owner:
+// one per evaluation, on both backends.
+//
+// Axes it MOVES: the join (`if`, `??`), the arm taken, a loop.  Controls: the view arm and the
+// present path, which must read the caller's record intact.
+//
+// Values hand-computed: 7 from the call, 4 from the view; in the loop 50 of each.
+//
+// @falsified-at: dbf8b05ae — interpret leaked kt=102 NdInt×2 -> clean, native exit 1 -> 0, native leaked kt=102 NdInt×2 -> clean
+// CHANNEL: the store-leak check at exit (the harness runs cells under `LOFT_STRICT_STORES=1`).
+// ARMED: no instrument.
+// WITNESS: the leak names `NdInt`.
+// HOLDS: every value, and no leak, on both backends.
+
+fn main() {
+  l = Ex { code: Node::NdInt { n: 4 }, k: 0 };
+  c = l.k == 0;
+  lo = if c { mk(7) } else { l.code };
+  view = if !c { mk(7) } else { l.code };
+  xs = [Node::NdInt { n: 4 }];
+  miss = xs[5] ?? mk(3);
+  hit = xs[0] ?? mk(3);
+  assert(val(lo) == 7 && val(view) == 4 && val(miss) == 3 && val(hit) == 4, "the joins");
+  s = 0;
+  for i in 0..100 {
+    e = Ex { code: Node::NdInt { n: 4 }, k: i % 2 };
+    r = if e.k == 0 { mk(7) } else { e.code };
+    s += val(r);
+  }
+  assert(s == 50 * 7 + 50 * 4 && val(l.code) == 4 && val(xs[0]!) == 4, "the loop and the sources");
+}
+
+enum Node { NdNull, NdInt { n: integer }, NdLong { n: integer } }
+struct Ex { code: Node, k: integer }
+fn val(n: Node) -> integer { match n { NdInt { n } => n, NdLong { n } => n, _ => -1 } }
+fn mk(n: integer) -> Node { if n >= 0 && n < 1000 { Node::NdInt { n: n } } else { Node::NdLong { n: n } } }

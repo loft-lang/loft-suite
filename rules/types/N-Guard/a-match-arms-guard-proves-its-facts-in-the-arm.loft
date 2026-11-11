@@ -1,0 +1,68 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MATCH ARM'S GUARD PROVES ITS FACTS IN THE ARM (`@FR-N-Guard` crossed with `@FR-P-Guard`).
+// `pat if t => body` runs the body only where `t` holds — a false guard fails the arm — so the
+// body reads with what `t` proves there, as the right operand of `t && b` does: a name tested
+// present, an index tested against `len(v)`, a divisor tested non-zero.  The nullable-store
+// warning stood on `take(v)` under `if v != null` and asked for the test already written.
+//
+// Axes it MOVES: the arm (a struct-enum variant, a scalar literal, a wildcard over an outer
+// local, a struct pattern, a multi-pattern arm), the fact (present, `&&` of two tests, an index,
+// a divisor).  The control: the arm AFTER a guarded one reads with nothing the guard proved,
+// so `take(unproven)` there still warns, once.
+//
+// Values hand-computed: take multiplies by ten, a miss answers -1.
+//
+// @falsified-at: dbf8b05ae — under `--tests --deny-warnings`, FAIL (8 unexpected warnings, one
+//   per guarded read) -> ok; `make falsify` reads INERT, as it scores no warning.
+// CHANNEL: the expected warning, and no other (`--deny-warnings`).
+// ARMED: no instrument.
+// WITNESS: the one warning names `unproven`, the control's local.
+// HOLDS: every value on both trees, interpret and C.
+// @EXPECT_WARNING: `unproven` is `integer?`
+
+enum Nd { NInt { n: integer }, NLong { n: integer? }, NOther { m: integer? } }
+struct S { x: integer? }
+
+fn take(a: integer) -> integer { a * 10 }
+fn pick(i: integer) -> integer? { if i > 0 { i } else { null } }
+
+fn variant(x: Nd) -> integer { match x { NLong { n: v } if v != null => take(v), _ => -1 } }
+fn scalar(i: integer) -> integer { p = pick(i); match i { 1 if p != null => take(p), _ => -1 } }
+fn wildcard(i: integer) -> integer {
+  p = pick(i);
+  x = NInt { n: 1 };
+  match x { _ if p != null => take(p), _ => -1 }
+}
+fn structure(s: S) -> integer { match s { S { x } if x != null => take(x), _ => -1 } }
+fn several(x: Nd) -> integer { match x { NLong { n: v } | NOther { m: v } if v != null => take(v), _ => -1 } }
+fn both(x: Nd) -> integer { match x { NLong { n: v } if v != null && v > 3 => take(v), _ => -1 } }
+fn indexed(v: vector<integer>, i: integer) -> integer {
+  x = NInt { n: 1 };
+  match x { _ if i < len(v) => take(v[i]), _ => -1 }
+}
+fn divided(a: integer, b: integer) -> integer {
+  x = NInt { n: 1 };
+  match x { _ if b != 0 => take(a / b), _ => -1 }
+}
+// The control: the second arm runs where the guard FAILED, so `unproven` is not proven there.
+fn after_the_guard(i: integer) -> integer {
+  unproven = pick(i);
+  x = NInt { n: 1 };
+  match x { _ if unproven != null => take(unproven), _ => take(unproven) }
+}
+
+fn main() {
+  assert(variant(NLong { n: 4 }) == 40 && variant(NLong { n: null }) == -1, "variant");
+  assert(variant(NInt { n: 1 }) == -1, "variant: another variant");
+  assert(scalar(1) == 10 && scalar(2) == -1 && scalar(0) == -1, "scalar");
+  assert(wildcard(3) == 30 && wildcard(0) == -1, "wildcard");
+  assert(structure(S { x: 5 }) == 50 && structure(S { x: null }) == -1, "structure");
+  assert(several(NLong { n: 6 }) == 60 && several(NOther { m: 7 }) == 70, "several");
+  assert(several(NOther { m: null }) == -1, "several: absent");
+  assert(both(NLong { n: 8 }) == 80 && both(NLong { n: 2 }) == -1, "both");
+  assert(indexed([1, 2, 3], 1) == 20 && indexed([1], 5) == -1, "indexed");
+  assert(divided(9, 3) == 30 && divided(9, 0) == -1, "divided");
+  assert(after_the_guard(3) == 30, "after the guard");
+}

@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Drop` × `@FR-I-Join` — a tuple bound from a value branch (`match`, `if`) whose arms
+// build a record member, one arm answering `null` there: the member is the binding's own on
+// every arm that built it, and released once.  The `null` arm owns nothing, so it does not
+// stop the arms' construction work-refs from being retired at the bind.  Left unjoined, on the
+// arm that built the record the member and the construction's work-ref both freed it — a
+// second free on that path only, so a run taking the `null` arm saw nothing.
+//
+// @ARMED: LOFT_REFREE_FAILS=1
+//
+// Values by hand: k = 1 answers (null, 11), 2 answers (Circle 1.5, 22), 3 answers (Sq 2.5, 33);
+// `q.0 ?? Sq { s: 9.5 }` reads 9.5, 1.5, 2.5.
+
+enum Shape { Circle { r: float }, Sq { s: float } }
+
+fn size(s: Shape) -> float {
+  match s { Circle { r } => r, Sq { s } => s }
+}
+
+fn pick(k: integer) -> float {
+  q = match k { 1 => (null, 11), 2 => (Circle { r: 1.5 }, 22), _ => (Sq { s: 2.5 }, 33) };
+  assert(q.1 == k * 11, "the scalar member: {q.1}");
+  size(q.0 ?? Sq { s: 9.5 })
+}
+
+fn pick_if(c: integer) -> float {
+  t = if c == 0 { (null, 1) } else { (Circle { r: 4.5 }, 2) };
+  size(t.0 ?? Sq { s: 0.5 })
+}
+
+fn test_every_arm_of_a_match() {
+  assert(pick(1) == 9.5 && pick(2) == 1.5 && pick(3) == 2.5, "match arms");
+}
+
+fn test_every_pass_of_a_loop() {
+  s = 0.0;
+  for k in 1..4 { s += pick(k); }
+  assert(s == 13.5, "three passes: {s}");
+}
+
+fn test_an_if_with_a_null_arm() {
+  assert(pick_if(0) == 0.5 && pick_if(1) == 4.5, "if arms");
+}
+
+fn main() {
+  test_every_arm_of_a_match();
+  test_every_pass_of_a_loop();
+  test_an_if_with_a_null_arm();
+}
