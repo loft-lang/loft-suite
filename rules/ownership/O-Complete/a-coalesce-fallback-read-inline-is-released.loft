@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Complete` — A COALESCE FALLBACK READ INLINE IS RELEASED.  `(g ?? nr_h(i))[i]` lowers to
+// `if present(g) g else nr_h(i)` as the operand of the read: when the fallback runs, its call
+// answers a store of its own that nothing held — the vector spelling gets a hidden buffer, a
+// keyed collection has none — so every taken fallback leaked its hash.  The call is lifted into
+// a temp inside its arm (`Scopes::lift_owned_coalesce_arm`), handed off where the operator
+// consumes its operand (`x = g ?? nr_h(i)`, `OpReplaceKeyed`).
+//
+// Axes it MOVES: the collection (hash read by key, vector by index, struct field), the spelling
+// (read inline, bound first), and the arm taken (the subject on passes 0-1, the fallback on 2-3).
+// Values are hand-computed: passes 0 and 1 read the subject's `v` (0, 10), passes 2 and 3 the
+// fallback's (20, 30), so every sum is 60.
+//
+// Found by the store records (loft2-83), from N-Road's every-shape cell, whose loop never takes
+// the fallback.  Falsified by its switch: `LOFT_NO_COALESCE_ARM_LIFT=1` leaks two hashes in
+// `keyed_inline` under the leak gate, on the interpreter and the C backend.
+
+struct NrE { k: integer, v: integer }
+struct Ms { a: integer }
+
+fn nr_h(n: integer) -> hash<NrE[k]> { h: hash<NrE[k]> = [NrE { k: n, v: n * 10 }]; h }
+fn nr_hn(n: integer) -> hash<NrE[k]>? { if n > 1 { return null; } h: hash<NrE[k]> = [NrE { k: n, v: n * 10 }]; h }
+fn mv(n: integer) -> vector<integer> { [n * 10, n * 10] }
+fn mvn(n: integer) -> vector<integer>? { if n > 1 { return null; } [n * 10, n * 10] }
+fn ms(n: integer) -> Ms { Ms { a: n * 10 } }
+fn msn(n: integer) -> Ms? { if n > 1 { return null; } Ms { a: n * 10 } }
+
+fn keyed_inline() {
+  t = 0;
+  for i in 0..4 { g = nr_hn(i); t += (g ?? nr_h(i))[i].v ?? -1000; }
+  assert(t == 60, "keyed inline: {t}");
+}
+
+fn keyed_bound() {
+  t = 0;
+  for i in 0..4 { g = nr_hn(i); x = g ?? nr_h(i); t += x[i].v ?? -1000; }
+  assert(t == 60, "keyed bound: {t}");
+}
+
+fn vector_inline() {
+  t = 0;
+  for i in 0..4 { g = mvn(i); t += (g ?? mv(i))[1]; }
+  assert(t == 60, "vector inline: {t}");
+}
+
+fn struct_inline() {
+  t = 0;
+  for i in 0..4 { g = msn(i); t += (g ?? ms(i)).a; }
+  assert(t == 60, "struct inline: {t}");
+}
+
+fn main() {
+  keyed_inline();
+  keyed_bound();
+  vector_inline();
+  struct_inline();
+  println("ok");
+}
