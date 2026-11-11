@@ -5,7 +5,7 @@
 // nullable text or record value is reported, as a field is.  Kept apart because an
 // expectation is matched file-wide and the field cells there emit the same texts.
 // Integer elements were already asked (loft#1660); these left the assignment before that ask.
-// A dense record element keeps the value it had; a text element holds null.  Values are
+// A dense record element takes `P`'s default, `P { a: 0 }` (@C163); a text element holds null.  Values are
 // hand-computed.
 //
 // @falsified-at: dab9050bb — interpret exit 1 -> 0, native exit 1 -> 0
@@ -17,8 +17,8 @@ struct P { a: integer }
 fn mp(i: integer) -> P? { if i == 0 { null } else { P { a: i } } }
 fn mt(i: integer) -> text? { if i == 0 { null } else { "x{i}" } }
 
-// @EXPECT_WARNING: a nullable `P?` is stored into the assignment target of the non-null type `P` — when it is null the store does not happen, so the slot keeps the value it had
-fn test_elem_record() { v: vector<P> = [P { a: 1 }, P { a: 2 }]; i = 1; v[i] = mp(0); assert(v[1].a == 2, "e {v[1].a}"); v[i] = mp(5); assert(v[1].a == 5, "e5 {v[1].a}"); }
+// @EXPECT_WARNING: a nullable `P?` is stored into the assignment target of the non-null type `P` — when it is null the slot takes `P`'s default, as `?` gives it
+fn test_elem_record() { v: vector<P> = [P { a: 1 }, P { a: 2 }]; i = 1; v[i] = mp(0); assert(v[1].a == 0 && len(v) == 2, "e {v[1].a}"); v[i] = mp(5); assert(v[1].a == 5, "e5 {v[1].a}"); }
 
 // @EXPECT_WARNING: a nullable `text?` is stored into the assignment target of the non-null type `text` — it becomes null there
 fn test_elem_text() { t: vector<text> = ["a", "b"]; i = 1; t[i] = mt(0); assert("{t[1]}" == "null", "et {t[1]}"); t[i] = mt(3); assert(t[1] == "x3", "et3 {t[1]}"); }

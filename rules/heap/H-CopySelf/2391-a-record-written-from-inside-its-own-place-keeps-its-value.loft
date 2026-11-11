@@ -45,11 +45,12 @@ fn main() {
   w: vector<T> = [Opt { inner: Leaf { n: 6 } }];
   w[0] = match w[0] { Opt { inner } => inner, _ => w[0] };
   assert(leaf(w[0]) == 6, "element {leaf(w[0])}");
-  // a borrowing call that answers null: the field keeps Opt { Leaf 4 } -> 40
+  // a borrowing call that answers null: the field takes T's default, its first variant
+  // Leaf { n: 0 } (@C163), so the Opt arm does not match -> -1, and leaf reads 0
   e = Ex { tp: Opt { inner: Leaf { n: 4 } }, k: 0 };
   e.tp = pick(e);
   r = match e.tp { Opt { inner } => leaf(inner) * 10, _ => -1 };
-  assert(r == 40, "null source {r}");
+  assert(r == -1 && leaf(e.tp) == 0, "null source {r} {leaf(e.tp)}");
   // the same call answering the field's own child: 5
   f = Ex { tp: Opt { inner: Leaf { n: 5 } }, k: 1 };
   f.tp = pick(f);
