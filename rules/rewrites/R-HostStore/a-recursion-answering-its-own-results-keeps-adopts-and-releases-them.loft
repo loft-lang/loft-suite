@@ -11,7 +11,11 @@
 // @falsified-at: a build of this clause that left the adopted local holding its record (no null
 //   after the adoption), so the exit released a record the node had adopted: interpret,
 //   native-c and native failed "a node kept" (the first assert) -> ok.
-// CHANNEL: the asserts and the leak gate.
+// CHANNEL: the asserts, the leak gate and the strict store checks.
+// @ARMED: LOFT_STRICT_STORES=1
+// A result's let-go after its adoption is a detach: freeing there released the store the
+// adopting node was built in, a use after free the values alone never showed (the freed bytes
+// still read right) — reported here by the strict checks.
 // HOLDS: every assertion and the leak gate on all three backends, with the clause and without
 //   it (`LOFT_NO_HOST_RESULT=1`).
 

@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-ParamRebind` — a whole write through a link to a PLAIN parameter (`cur = &n; cur =
+// &cur.next`) rebinds the callee's name only: the store the parameter held is the caller's, and
+// the caller keeps its list.  A link to a `&` parameter (`@FR-F-ParamRef`) and to an owned local
+// still release what they displace.  Every answer is hand-computed; the caller reads its list
+// after each call, under the store checks, where a release of the caller's store shows as a use
+// after free even while its bytes still read right.
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: the write-back of a slot move releasing whatever the link displaced
+//   (`slot_move`, `free_displaced`): interpret and native-c reported USE AFTER FREE in `main`
+//   after `walk_param` freed `h`'s store -> ok.
+// CHANNEL: the asserts, the strict store checks and the leak gate.
+
+struct N { v: integer, name: text, next: N? }
+
+fn chain(k: integer) -> N {
+  h = N { v: 1, name: "a" };
+  for i in 2..k + 1 { h = N { v: i, name: "n{i}", next: h }; }
+  h
+}
+
+fn total_of(n: N?) -> integer {
+  s = 0;
+  c = &n;
+  while c != null { s += c.v; c = &c.next; }
+  s
+}
+
+// a link to a plain parameter: the walk drains only the callee's name
+fn walk_param(n: N?) -> integer {
+  cur = &n;
+  k = 0;
+  while cur != null { k += cur.v * 10 + len(cur.name); cur = &cur.next; }
+  k
+}
+
+// a link to a plain parameter, null written through it
+fn null_param(n: N?) -> boolean {
+  cur = &n;
+  cur = null;
+  n == null
+}
+
+// a `&` parameter: the walk's write reaches the caller
+fn drop_head(n: &N?) {
+  cur = &n;
+  cur = &cur.next;
+}
+
+fn main() {
+  h = chain(4);
+  // 4*10+2 + 3*10+2 + 2*10+2 + 1*10+1
+  assert(walk_param(h) == 107, "walk: {walk_param(h)}");
+  assert(total_of(h) == 10 && h.v == 4, "the caller keeps its list after a walk: {total_of(h)}");
+  assert(null_param(h), "null through the link");
+  assert(total_of(h) == 10, "the caller keeps its list after a null: {total_of(h)}");
+  // an owned local drained through a link: its store is released at the end
+  l = chain(3);
+  c = &l;
+  t = 0;
+  while c != null { t += c.v; c = &c.next; }
+  assert(t == 6 && l == null, "an owned local drained: {t}");
+  // a `&` parameter: the caller's head is dropped
+  g = chain(3);
+  drop_head(g);
+  assert(g.v == 2 && total_of(g) == 3, "a & parameter's head dropped: {total_of(g)}");
+  println("link walks ok");
+}
