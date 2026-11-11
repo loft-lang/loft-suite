@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2465 — `@FR-B-Ref-Reshape` × `@FR-F-ParamHeap`: "LIVENESS is the condition, not
+// existence", and the disturbance "may be in this frame or in anything the frame CALLS".  A
+// plain element parameter aliases its caller's element as a `&` one does, so it is judged as
+// the in-frame link is: one whose last use precedes the callee's removal is dead there and the
+// call compiles.  One used after the removal stays refused (the sibling cells).
+//
+// Values by hand: w.a starts [1, 2, 3]; each call is handed w.a[1] (n = 2) and w itself.
+//   read then remove      -> k = 2, w.a = [2, 3]         "2 2 2"
+//   write then remove     -> w.a[1].n = 20, then [20, 3]  "2 20"
+//   read then grow        -> k = 2, w.a = [1, 2, 3, 9]    "2 4 9"
+//   a `&` element         -> as the first                 "2 2 2"
+//   removal in a callee   -> as the first                 "2 2 2"
+//   a copy taken first    -> g = e copies, g.n = 2        "2"
+//   a text-holding element-> k = "bb2", w.a[0].s = "bb"   "bb2 2 bb"
+//
+// @falsified-at: main dbf8b05ae — interpret and native-c: every call refused, "cannot pass
+//   both `w` and a reference into it to `f…`".
+// CHANNEL: exit (the refusal), then the asserts.
+// HOLDS: every assert and the leak gate on both backends.
+
+struct S { n: integer }
+struct W { a: vector<S> }
+struct T { n: integer, s: text }
+struct WT { a: vector<T> }
+
+fn inner(w: W) { w.a.remove(0); }
+fn read_remove(e: S, w: W) -> integer { k = e.n; w.a.remove(0); k }
+fn write_remove(e: S, w: W) { e.n = 20; w.a.remove(0); }
+fn read_grow(e: S, w: W) -> integer { k = e.n; w.a += [S { n: 9 }]; k }
+fn amp_remove(e: &S, w: W) -> integer { e.n += 0; k = e.n; w.a.remove(0); k }
+fn nested_remove(e: S, w: W) -> integer { k = e.n; inner(w); k }
+fn copy_first(e: S, w: W) -> integer { g = e; w.a.remove(0); g.n }
+fn text_remove(e: T, w: WT) -> text { k = "{e.s}{e.n}"; w.a.remove(0); k }
+
+fn fresh() -> W { W { a: [S { n: 1 }, S { n: 2 }, S { n: 3 }] } }
+
+fn main() {
+  w1 = fresh();
+  k1 = read_remove(w1.a[1], w1);
+  assert("{k1} {len(w1.a)} {w1.a[0].n}" == "2 2 2", "read then remove: {k1} {len(w1.a)} {w1.a[0].n}");
+  w2 = fresh();
+  write_remove(w2.a[1], w2);
+  assert("{len(w2.a)} {w2.a[0].n}" == "2 20", "write then remove: {len(w2.a)} {w2.a[0].n}");
+  w3 = fresh();
+  k3 = read_grow(w3.a[1], w3);
+  assert("{k3} {len(w3.a)} {w3.a[3].n}" == "2 4 9", "read then grow: {k3} {len(w3.a)} {w3.a[3].n}");
+  w4 = fresh();
+  k4 = amp_remove(w4.a[1], w4);
+  assert("{k4} {len(w4.a)} {w4.a[0].n}" == "2 2 2", "a & element: {k4} {len(w4.a)} {w4.a[0].n}");
+  w5 = fresh();
+  k5 = nested_remove(w5.a[1], w5);
+  assert("{k5} {len(w5.a)} {w5.a[0].n}" == "2 2 2", "removal in a callee: {k5} {len(w5.a)} {w5.a[0].n}");
+  w6 = fresh();
+  assert(copy_first(w6.a[1], w6) == 2 && len(w6.a) == 2, "a copy taken first");
+  wt = WT { a: [T { n: 1, s: "a" }, T { n: 2, s: "bb" }, T { n: 3, s: "ccc" }] };
+  kt = text_remove(wt.a[1], wt);
+  assert("{kt} {len(wt.a)} {wt.a[0].s}" == "bb2 2 bb", "a text-holding element: {kt} {len(wt.a)} {wt.a[0].s}");
+  println("dead element parameters ok");
+}
