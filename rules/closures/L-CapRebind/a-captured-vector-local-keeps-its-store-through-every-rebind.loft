@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2459 — `@FR-L-CapRebind` × `@FR-O-Detach` for a VECTOR local: a whole-value rebind is
+// not a mutation-through, so a closure record keeps the store it was built with.  The local
+// moves to a fresh store; the record's store is neither appended to (`a = a + [3]`) nor
+// released while the record still reads it (`a = [5, 5, 5]`, the next allocation reusing it).
+//
+// Values by hand: every closure is built over a = [1, 2] and answers len(a) (or len*10 + a[0]).
+//   a = a + [3]                     -> closure 21, a has 3
+//   a = a + [3]; a = a + [4]        -> closure 21, a has 4
+//   a = [7, 7, 7]; x = [5, 5, 5, 5] -> closure 2, a has 3, x has 4
+//   escaping, after a concat / a literal rebind -> 2
+//   a = a + [i] for i in 0..3       -> closure 2, a has 5
+//   a = [] / a = o / a = f()        -> closure 2; a has 0 / 1 / 4
+//   s = ["x"]; s = s + ["y"]        -> closure "x", s has 2
+//   called before and after         -> 2 2, a has 3
+//   no closure / built after        -> in place: 3; the closure sees 3
+//
+// @falsified-at: main dbf8b05ae — interpret and native-c: the concat reads 31 (the append
+//   reached the record), the literal rebind reads 4 (the freed store reused by `x`).
+// CHANNEL: the asserts, then the leak gate.
+// HOLDS: every assert and the leak gate on both backends.
+
+fn mkv() -> vector<integer> { [7, 8, 9, 10] }
+fn escape() -> fn() -> integer { a = [1, 2]; g = fn() -> integer { len(a) }; a = a + [3]; g }
+fn escape_lit() -> fn() -> integer { a = [1, 2]; g = fn() -> integer { len(a) }; a = [5, 5, 5]; g }
+
+fn test_a_concat_rebind_leaves_the_record_its_store() {
+  a = [1, 2];
+  g = fn() -> integer { len(a) * 10 + a[0] };
+  a = a + [3];
+  assert(g() == 21 && len(a) == 3, "once: {g()} {len(a)}");
+  a = a + [4];
+  assert(g() == 21 && len(a) == 4, "twice: {g()} {len(a)}");
+}
+
+fn test_a_literal_rebind_does_not_release_the_records_store() {
+  b = [1, 2];
+  g = fn() -> integer { len(b) };
+  b = [7, 7, 7];
+  x = [5, 5, 5, 5];
+  assert(g() == 2 && len(b) == 3 && len(x) == 4, "{g()} {len(b)} {len(x)}");
+}
+
+fn test_an_escaping_closure_keeps_its_store() {
+  e = escape();
+  el = escape_lit();
+  assert(e() == 2 && el() == 2, "{e()} {el()}");
+}
+
+fn test_a_rebind_in_a_loop() {
+  a = [1, 2];
+  g = fn() -> integer { len(a) };
+  for i in 0..3 { a = a + [i]; }
+  assert(g() == 2 && len(a) == 5, "{g()} {len(a)}");
+}
+
+fn test_every_rebind_spelling() {
+  a = [1, 2]; ga = fn() -> integer { len(a) }; a = [];
+  assert(ga() == 2 && len(a) == 0, "empty: {ga()} {len(a)}");
+  o = [9];
+  b = [1, 2]; gb = fn() -> integer { len(b) }; b = o;
+  assert(gb() == 2 && len(b) == 1 && len(o) == 1, "copy: {gb()} {len(b)}");
+  c = [1, 2]; gc = fn() -> integer { len(c) }; c = mkv();
+  assert(gc() == 2 && len(c) == 4, "call: {gc()} {len(c)}");
+}
+
+fn test_text_elements_and_a_call_before() {
+  s = ["x"];
+  gs = fn() -> text { s[0] };
+  s = s + ["y"];
+  assert(gs() == "x" && len(s) == 2 && s[1] == "y", "{gs()} {len(s)}");
+  a = [1, 2];
+  g = fn() -> integer { len(a) };
+  b0 = g();
+  a = a + [3];
+  assert(b0 == 2 && g() == 2 && len(a) == 3, "{b0} {g()} {len(a)}");
+}
+
+fn test_without_a_record_the_concat_is_in_place() {
+  a = [1, 2];
+  a = a + [3];
+  assert(len(a) == 3 && a[2] == 3, "control: {len(a)}");
+  g = fn() -> integer { len(a) };
+  assert(g() == 3, "built after: {g()}");
+}
