@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-CopyView` crossed with `@FR-O-Borrow`: a record local bound once by B-Copy's copy of a
+// record VIEW (`t = a`, `a = h.p`) may be a view of the source — its deps naming the source, no
+// store minted or freed (O-Borrow) — only where no program can tell: t only read, the view over
+// parameters only, and nothing in t's live range able to change the record.  A call in that range
+// that writes the record (a field bump through the parameter) makes the rule decline, so t keeps
+// the value of the bind; with no such write the read answers the same either way.  Crossed with a
+// value-`if` of two views, a read after the write, and a loop.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text }
+struct H { p: P, q: P }
+
+fn bump(h: H) { h.p.n += 1; h.q.n += 10; }
+fn read_twice(h: H) -> text {
+  a = h.p;
+  t = a;
+  r = "{t.n}";
+  bump(h);
+  r += "/{t.n}/{h.p.n}";
+  r
+}
+fn read_only(h: H, c: boolean) -> text {
+  a = h.p;
+  b = h.q;
+  t = if c { a } else { b };
+  "{t.n}{t.t}"
+}
+
+fn test_a_write_in_the_live_range() {
+  h = H { p: P { n: 5, t: "p" }, q: P { n: 50, t: "q" } };
+  assert(read_twice(h) == "5/5/6" && h.p.n == 6 && h.q.n == 60, "{h.p.n}");
+}
+
+fn test_read_only_views() {
+  h = H { p: P { n: 5, t: "p" }, q: P { n: 50, t: "q" } };
+  assert(read_only(h, true) == "5p" && read_only(h, false) == "50q", "{read_only(h, true)}");
+  s = "";
+  for i in 0..3 { s += "{read_twice(h)},"; }
+  assert(s == "5/5/6,6/6/7,7/7/8," && h.p.n == 8, s);
+}

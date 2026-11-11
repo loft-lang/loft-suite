@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2470, `@FR-Col-Assign` × `@FR-Col-Remove` — `c[k] = v` with a NULL `v` (an absent lookup,
+// a `K?` call answering null) leaves `c[k]` reading null, as `c[k] = null` does: the record
+// under the subscript is removed, and an absent key stays absent.  Every keyed kind, a struct
+// field and an `&` parameter as the root, a loop alternating null and present values, and a
+// present value as the control.
+//
+// Values by hand:
+//   sorted [5:1, 6:2]; s[5] = absent; s[7] = absent       -> 1, 5 gone, 6:2, 7 absent
+//   hash [5:1, 6:2]; h[6] = mk(0) (null); h[8] = mk(3)     -> 2, 5:1, 6 gone, 8:30
+//   index [5:1, 6:2]; x[5] = absent                        -> 1, 5 gone, 6:2
+//   text hash a/b; t["a"] = absent                          -> 1, a gone, b's n 2
+//   trie a/ab; tr["a"] = absent                             -> 1, a gone, ab's n 2
+//   spatial (1,2)/(3,4); sp[1, 2] = absent                  -> 1, (1,2) gone, (3,4)'s n 2
+//   a field's sorted [5:1, 6:2]; hd.s[6] = absent          -> 1, 5:1, 6 gone
+//   an `&` hash [5:1]; c[5] = c[99] in the callee          -> 0, 5 gone
+//   sorted 1..4; even i absent, odd i mk(i)                -> 2: 1:10, 3:30
+//
+// @falsified-at: e1c781d03 — interpret and native-c: a null write kept the record; measured on
+//   a one-element sorted, `e[5] = e[99]` read "1 5:1 -" (the skip `OpSetKeyed` made for a null
+//   value, in both runtimes).
+// CHANNEL: the asserts, then the leak gate.
+// ARMED: no instrument — the asserts read the values, and the leak gate is the plain run's.
+// HOLDS: both backends and --native.
+
+struct K { key: integer, n: integer }
+struct T { key: text, n: integer }
+struct P { x: integer, y: integer, n: integer }
+struct Hold { s: sorted<K[key]> }
+fn kn(k: K?) -> text { if k == null { "-" } else { "{k.key}:{k.n}" } }
+fn mk(i: integer) -> K? { if i == 0 { null } else { K { key: i, n: i * 10 } } }
+fn by_param(c: &hash<K[key]>) { c[5] = c[99]; }
+
+fn test_a_null_value_removes_the_key_in_every_kind() {
+  s: sorted<K[key]> = [K { key: 5, n: 1 }, K { key: 6, n: 2 }];
+  s[5] = s[99];
+  s[7] = s[99];
+  assert("{len(s)} {kn(s[5])} {kn(s[6])} {kn(s[7])}" == "1 - 6:2 -", "sorted {len(s)} {kn(s[5])}");
+  h: hash<K[key]> = [K { key: 5, n: 1 }, K { key: 6, n: 2 }];
+  h[6] = mk(0);
+  h[8] = mk(3);
+  assert("{len(h)} {kn(h[5])} {kn(h[6])} {kn(h[8])}" == "2 5:1 - 8:30", "hash {len(h)} {kn(h[6])}");
+  x: index<K[key]> = [K { key: 5, n: 1 }, K { key: 6, n: 2 }];
+  x[5] = x[99];
+  assert("{len(x)} {kn(x[5])} {kn(x[6])}" == "1 - 6:2", "index {len(x)} {kn(x[5])}");
+  t: hash<T[key]> = [T { key: "a", n: 1 }, T { key: "b", n: 2 }];
+  t["a"] = t["zz"];
+  assert(len(t) == 1 && t["a"] == null && t["b"].n == 2, "text hash {len(t)}");
+  tr: trie<T[key]> = [T { key: "a", n: 1 }, T { key: "ab", n: 2 }];
+  tr["a"] = tr["q"];
+  assert(len(tr) == 1 && tr["a"] == null && tr["ab"].n == 2, "trie {len(tr)}");
+  sp: spatial<P[x, y]> = [P { x: 1, y: 2, n: 1 }, P { x: 3, y: 4, n: 2 }];
+  sp[1, 2] = sp[9, 9];
+  assert(len(sp) == 1 && sp[1, 2] == null && sp[3, 4].n == 2, "spatial {len(sp)}");
+}
+
+fn test_a_field_a_parameter_and_a_loop() {
+  hd = Hold { s: [K { key: 5, n: 1 }, K { key: 6, n: 2 }] };
+  hd.s[6] = hd.s[99];
+  assert("{len(hd.s)} {kn(hd.s[5])} {kn(hd.s[6])}" == "1 5:1 -", "field {len(hd.s)}");
+  ph: hash<K[key]> = [K { key: 5, n: 1 }];
+  by_param(ph);
+  assert("{len(ph)} {kn(ph[5])}" == "0 -", "param {len(ph)}");
+  l: sorted<K[key]> = [K { key: 1, n: 1 }, K { key: 2, n: 2 }, K { key: 3, n: 3 }, K { key: 4, n: 4 }];
+  for i in 1..5 { if i % 2 == 0 { l[i] = l[99] } else { l[i] = mk(i) } }
+  assert("{len(l)} {kn(l[1])} {kn(l[2])} {kn(l[3])} {kn(l[4])}" == "2 1:10 - 3:30 -", "loop {len(l)}");
+}

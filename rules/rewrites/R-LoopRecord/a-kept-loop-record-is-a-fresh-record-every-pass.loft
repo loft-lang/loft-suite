@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-LoopRecord` crossed with `@FR-R-CompleteWrite`: a no-heap record local minted by a
+// literal inside a loop keeps one store across the passes, and a COMPLETE literal skips the
+// default prefill because it writes every field — so each pass must still see a record exactly
+// as fresh as a new one.  A complete literal over a record a previous pass wrote into; a
+// PARTIAL literal whose omitted fields a previous pass set (they must read their defaults
+// again, a declared default included); a nested record field; and a nest of two loops (the
+// record kept by the outermost).
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct In { p: integer, q: integer }
+struct Spec { a: integer, b: integer, c: integer = 7, flag: boolean, inner: In }
+
+fn complete(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    s = Spec { a: i, b: i * 2, c: 1, flag: i % 2 == 0, inner: In { p: i, q: -i } };
+    t = t * 10 + s.a + s.b + s.c + s.inner.p + s.inner.q + (if s.flag { 1 } else { 0 });
+    s.b = 100;
+    s.inner.q = 50;
+  }
+  t
+}
+
+fn partial(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    s = Spec { a: i };
+    t = t * 1000 + s.b * 100 + s.c * 10 + s.inner.p + (if s.flag { 5 } else { 0 });
+    s.b = 9;
+    s.c = 3;
+    s.flag = true;
+    s.inner.p = 4;
+  }
+  t
+}
+
+fn nested(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    for j in 0..n {
+      s = Spec { a: i, b: j };
+      t += s.a * 10 + s.b + s.c;
+      s.c = 0;
+    }
+  }
+  t
+}
+
+fn test_a_complete_literal_each_pass() {
+  assert(complete(4) == 2490, "complete: {complete(4)}");
+}
+
+fn test_a_partial_literal_each_pass() {
+  assert(partial(3) == 70070070 && partial(1) == 70, "partial: {partial(3)}");
+  assert(nested(3) == 162, "nested: {nested(3)}");
+}

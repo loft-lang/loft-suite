@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2468 — `@FR-L-Apply`: a call through a fn-ref is a call, wherever it stands.  A text
+// closure called inside a `t += c() + "…"` concat, in a function that returns text, yields its
+// text like any call, and the function's own returned text stays its own.  The two parser
+// passes must read the call as the same expression, or they number the function's text
+// buffers apart and a later call writes into the return buffer.
+//
+// Values by hand: each pass rebuilds the closure over a = [9], then [0, 0, 0], then [1, 1, 1].
+//   in-loop calls read the build of their own pass:   "19 30 31 "
+//   the call after the loop reads the last build:     "31", with len(a) = 3
+//   with an argument k: a[0] + k                      "110 31 32 " then "33"
+//   the `t = t + c()` spelling answers as `+=` does
+//   a non-capturing fn-ref and a call inside a lambda answer the same
+//
+// @falsified-at: main dbf8b05ae — interpret: SIGSEGV in OpFormatStackInt (the post-loop call's
+//   buffer was the promoted return buffer); native-c already right.
+// CHANNEL: exit (the crash), then the asserts.
+// HOLDS: every assert and the leak gate on both backends.
+
+fn kept() -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for i in 0..3 { g = fn() -> text { "{len(a)}{a[0]}" }; a = [i, i, i]; t += g() + " "; }
+  t += g();
+  "{t} | {len(a)}"
+}
+
+fn with_arg() -> text {
+  a = [9]; g = fn(k: integer) -> text { "" }; t = "";
+  for i in 0..3 { g = fn(k: integer) -> text { "{len(a)}{a[0] + k}" }; a = [i, i, i]; t += g(1) + " "; }
+  t += g(2);
+  "{t} | {len(a)}"
+}
+
+fn plus_form() -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for i in 0..3 { g = fn() -> text { "{len(a)}{a[0]}" }; a = [i, i, i]; t = t + g() + " "; }
+  t = t + g();
+  "{t} | {len(a)}"
+}
+
+fn plain() -> text { g = fn() -> text { "x" }; t = ""; for i in 0..3 { t += g() + "{i} "; } t += g(); "{t} | {len(t)}" }
+
+fn inner() -> text { g = fn() -> text { "q" }; h = fn() -> text { g() + "!" }; t = ""; t += h() + " "; t += h(); "{t} | {len(t)}" }
+
+fn test_a_closure_rebuilt_in_a_loop_and_called_after_it() {
+  assert(kept() == "19 30 31 31 | 3", "kept: {kept()}");
+  assert(with_arg() == "110 31 32 33 | 3", "with an argument: {with_arg()}");
+  assert(plus_form() == "19 30 31 31 | 3", "plus form: {plus_form()}");
+}
+
+fn test_a_plain_fn_ref_and_a_call_inside_a_lambda() {
+  assert(plain() == "x0 x1 x2 x | 10", "plain: {plain()}");
+  assert(inner() == "q! q! | 5", "inner: {inner()}");
+}

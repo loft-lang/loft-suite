@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2452, `@FR-L-Null-Which` / `@FR-B-Copy` / `@FR-O-NoDiverge` — A RETURNED JOIN OF TWO
+// NULLABLE FIELDS IS A WHOLE COPY.
+//
+// `fn pick(h: H, k) -> R? { if k == 0 { h.a } else { h.b } }` over two `R?` fields answers a
+// copy of the chosen record — its text and vector included — and null where the field is
+// absent; the copy is independent of the argument, and fifty joins in a loop leak nothing.
+//
+// @falsified-at: loft main dbf8b05ae — the text read "", the vector a garbage length (29400 on
+//   the interpreter, 0 on C); a fault in OpCopyRefOrNull under the checkers.
+// CHANNEL: the assertions and the leak gate.
+
+struct R { n: integer, t: text }
+struct V { n: integer, v: vector<integer> }
+struct H { a: R?, b: R? }
+struct G { a: V?, b: V? }
+enum Pick { First, Second }
+fn pick(h: H, k: integer) -> R? { if k == 0 { h.a } else { h.b } }
+fn pickv(g: G, k: integer) -> V? { if k == 0 { g.a } else { g.b } }
+fn pickm(h: H, p: Pick) -> R? { match p { First => h.a, Second => h.b } }
+fn pickn(h: H, k: integer) -> R? { if k == 0 { h.a } else { null } }
+fn main() {
+  h = H { a: R { n: 1, t: "a" }, b: R { n: 2, t: "b" } };
+  r = pick(h, 0);
+  assert("{r.t ?? "-"} {r.n ?? -1}" == "a 1", "j1");
+  g = G { a: V { n: 1, v: [4, 5] }, b: V { n: 2, v: [6] } };
+  q = pickv(g, 0);
+  assert("{len(q.v ?? [])} {q.n ?? -1}" == "2 1", "j2");
+  r3 = pick(h, 1);
+  assert("{r3.t ?? "-"} {r3.n ?? -1}" == "b 2", "j3");
+  r4 = pickm(h, First);
+  assert("{r4.t ?? "-"} {r4.n ?? -1}" == "a 1", "j4");
+  r5 = pickn(h, 1);
+  assert("{r5.t ?? "-"} {r5.n ?? -1}" == "- -1", "j5");
+  e = H { a: null, b: R { n: 2, t: "b" } };
+  r6 = pick(e, 0);
+  assert("{r6.t ?? "-"} {r6.n ?? -1}" == "- -1", "j6");
+  r.t = "changed";
+  assert(h.a.t == "a" && r.t == "changed", "j7 the copy is the copy's");
+  s = 0;
+  for i in 0..50 { x = pickv(g, i % 2); s += len(x.v ?? []); }
+  assert(s == 75, "j8 {s}");
+  println("join ok");
+}

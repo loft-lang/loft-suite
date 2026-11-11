@@ -1,0 +1,110 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Rebind` crossed with `@FR-B-Disturb`, `@FR-B-Ref-Uniform`, `@FR-R-InPlaceLiteral` and
+// `@FR-R-MoveLast`.  `x = f(x, …)` hands the callee x's OWN record as its return buffer, so:
+// (B-Disturb) the CALL is where x's store changes — a struct view of x live across it reads
+// x as it was, and a vector field bound before it is a copy and
+// does not;  (B-Ref-Uniform) the by-value parameter IS that record, so the callee's writes
+// through it land in x before the exit literal reads them, and a `&` link to x rebound from
+// the same call writes x;  (R-InPlaceLiteral) the exit literal is STAGED — every field read
+// before the first write — so a field computed from the fields the literal replaces answers
+// what the copy would;  (R-MoveLast) exit fields taken from owned locals the callee built and
+// does not read again move in, one or two of them, straight and in a loop.  Each callee was
+// checked admitted (LOFT_TRACE_REBIND) except where a cell says the rebind declines.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct It { v: integer }
+struct A { n: integer, pieces: vector<text>, buf: vector<integer> }
+struct C { n: integer, pieces: vector<text>, items: vector<It> }
+
+fn mka() -> A { A { n: 1, pieces: ["a", "b"], buf: [1, 2, 3] } }
+fn mkc() -> C { C { n: 1, pieces: ["a"], items: [It { v: 1 }, It { v: 2 }] } }
+
+fn step(d: A, k: integer) -> A {
+  np: vector<text> = [];
+  for p in d.pieces { np += ["{p}{k}"]; }
+  np += ["n{k}"];
+  A { n: d.n + 1, pieces: np, buf: d.buf }
+}
+fn stepc(d: C, k: integer) -> C {
+  np: vector<text> = [];
+  for p in d.pieces { np += ["{p}{k}"]; }
+  C { n: d.n + 1, pieces: np, items: d.items }
+}
+fn stepi(d: C, k: integer) -> C {
+  ni: vector<It> = [];
+  for it in d.items { ni += [It { v: it.v * 10 + k }]; }
+  C { n: d.n + 1, pieces: d.pieces, items: ni }
+}
+fn bump(d: A, k: integer) -> A {
+  d.n += 5;
+  d.buf += [k];
+  np: vector<text> = ["x"];
+  A { n: d.n * 10 + len(d.buf), pieces: np, buf: d.buf }
+}
+fn reread(d: A, k: integer) -> A {
+  np: vector<text> = ["s{k}"];
+  A { pieces: np, n: len(d.pieces) * 100 + d.n * 10 + len(d.buf), buf: d.buf }
+}
+fn rebuild(d: A, k: integer) -> A {
+  np: vector<text> = [];
+  for p in d.pieces { np += [p + p]; }
+  nb: vector<integer> = [];
+  for b in d.buf { nb += [b * 10 + k]; }
+  A { n: len(d.buf) * 10 + len(d.pieces), pieces: np, buf: nb }
+}
+
+fn bsum(d: A) -> integer { s = 0; for b in d.buf { s = s * 100 + b; } s }
+
+fn test_a_view_live_across_the_rebind_and_a_field_copy() {
+  c = mkc();
+  e = c.items[1];
+  c = stepc(c, 3);
+  assert(e.v == 2 && c.n == 2 && c.pieces[0] == "a3" && len(c.items) == 2, "a struct view: {e.v} {c.n}");
+  g = mkc();
+  h = g.items[0];
+  g = stepi(g, 6);
+  assert(h.v == 1 && g.items[0].v == 16 && g.items[1].v == 26 && len(g.items) == 2,
+         "a struct view across a callee that replaces the viewed vector: {h.v} {g.items[0].v}");
+  d = mka();
+  p = d.pieces;
+  d = step(d, 4);
+  assert(len(p) == 2 && p[0] == "a" && len(d.pieces) == 3 && d.pieces[2] == "n4" && d.n == 2,
+         "a field copy: {len(p)} {len(d.pieces)}");
+}
+
+fn test_the_callees_writes_through_its_parameter_and_a_link() {
+  d = mka();
+  d = bump(d, 7);
+  assert(d.n == 64 && bsum(d) == 1020307 && len(d.pieces) == 1, "bump: {d.n} {bsum(d)}");
+  e = mka();
+  l = &e;
+  l = step(l, 5);
+  assert(e.n == 2 && len(e.pieces) == 3 && e.pieces[1] == "b5" && bsum(e) == 10203, "through a link: {e.n} {e.pieces[1]}");
+}
+
+fn test_a_staged_exit_literal_reads_the_fields_it_replaces() {
+  d = mka();
+  d = reread(d, 2);
+  assert(d.n == 213 && len(d.pieces) == 1 && d.pieces[0] == "s2", "reread: {d.n}");
+  d = rebuild(d, 4);
+  assert(d.n == 31 && d.pieces[0] == "s2s2" && bsum(d) == 142434 && len(d.buf) == 3, "rebuild: {d.n} {bsum(d)}");
+}
+
+fn test_moved_exit_fields_in_a_loop() {
+  d = mka();
+  for k in 1..4 { d = step(d, k); }
+  assert(d.n == 4 && len(d.pieces) == 5 && d.pieces[0] == "a123" && d.pieces[2] == "n123" && d.pieces[4] == "n3",
+         "three rounds: {d.n} {len(d.pieces)} {d.pieces[0]} {d.pieces[2]}");
+  for k in 0..2 { d = rebuild(d, k); }
+  assert(d.n == 35 && bsum(d) == 1030401 && len(d.pieces) == 5 && d.pieces[4] == "n3n3n3n3",
+         "two rebuilds: {d.n} {bsum(d)} {d.pieces[4]}");
+  d.buf += [7];
+  assert(len(d.buf) == 4 && d.buf[3] == 7, "the record kept is whole: {len(d.buf)}");
+}

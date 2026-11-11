@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-RefVal` crossed with `@FR-H-Ref`: a DbRef is a VALUE — a `reference<P>` field copies as a
+// value with its record, so two records holding it name ONE record, a write through either reaches
+// it, and assigning the field another record re-points only that copy — while an explicit `&` bind
+// is H-Ref's alias: no fresh store, the variable shares its source's backing, so element writes
+// and appends through it land in the source.  Crossed: a reference surviving a growth of the
+// vector it points into, a reference read into a local and written through, an `&` alias of a
+// vector local and of a vector field.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text }
+struct Link { to: reference<P>?, k: integer }
+struct Bag { ps: vector<P> }
+
+fn test_an_amp_bind_aliases() {
+  v = [1, 2, 3];
+  x = &v;
+  x[0] = 99;
+  x += [4];
+  assert(v[0] == 99 && len(v) == 4 && x[3] == 4, "{v}");
+  b = Bag { ps: [P { n: 1, t: "a" }] };
+  w = &b.ps;
+  w += [P { n: 3, t: "c" }];
+  w[0].n = 10;
+  assert(len(b.ps) == 2 && b.ps[0].n == 10 && b.ps[1].t == "c", "{len(b.ps)}");
+}
+
+fn test_a_reference_copies_as_a_value() {
+  b = Bag { ps: [P { n: 1, t: "a" }, P { n: 2, t: "b" }] };
+  l1 = Link { to: b.ps[0], k: 1 };
+  l2 = l1;
+  l2.k = 2;
+  assert(l1.k == 1 && l2.k == 2 && (l1.to.n ?? -1) == 1 && (l2.to.n ?? -1) == 1, "the copy");
+  b.ps[0].n = 50;
+  assert((l1.to.n ?? -1) == 50 && (l2.to.n ?? -1) == 50, "one record");
+  l2.to = b.ps[1];
+  assert((l1.to.n ?? -1) == 50 && (l2.to.n ?? -1) == 2, "re-pointed: {l2.to.n ?? -1}");
+  r = l1.to;
+  if r != null { r.n = 60; }
+  assert(b.ps[0].n == 60, "through a local: {b.ps[0].n}");
+  b.ps += [P { n: 3, t: "c" }, P { n: 4, t: "d" }];
+  assert((l2.to.t ?? "-") == "b" && (l1.to.n ?? -1) == 60 && len(b.ps) == 4, "after a growth");
+}

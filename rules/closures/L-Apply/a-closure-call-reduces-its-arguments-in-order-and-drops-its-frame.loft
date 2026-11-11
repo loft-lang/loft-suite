@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-Apply` crossed with `@FR-F-Args` and `@FR-F-Call`: applying a closure or a fn-ref binds
+// its parameters to the arguments exactly as a call does — each argument reduced fully, left to
+// right, BEFORE the body runs (F-Args), so the effects of the arguments come first and in
+// order, ahead of the body's own — and runs the body in a fresh frame that is DROPPED at the
+// return, its owned locals freed (F-Call), so a closure that builds a vector, a text and a
+// record per call, applied hundreds of times, leaves nothing behind and answers its return
+// each time.  Applied directly, through a fn-ref parameter, and from a struct field.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Box { n: integer, tags: vector<integer> }
+struct Holder { f: fn(integer, integer) -> integer, tag: integer }
+
+fn tick(log: vector<integer>, k: integer) -> integer { log += [k]; k * 10 }
+fn apply(f: fn(integer, integer) -> integer, a: integer, b: integer) -> integer { f(a, b) }
+fn digits(v: vector<integer>) -> integer { s = 0; for x in v { s = s * 10 + x; } s }
+
+fn test_arguments_before_the_body_in_order() {
+  log: vector<integer> = [];
+  f = fn(a: integer, b: integer, c: integer) -> integer { log += [9]; a + b * 2 + c * 3 };
+  r = f(tick(log, 1), tick(log, 2), tick(log, 3));
+  assert(r == 140 && digits(log) == 1239, "direct: {r} {digits(log)}");
+  g = fn(a: integer, b: integer) -> integer { log += [8]; a - b };
+  s = apply(g, tick(log, 4), tick(log, 5));
+  assert(s == -10 && digits(log) == 1239458, "through a fn-ref parameter: {s} {digits(log)}");
+  h = Holder { f: fn(a: integer, b: integer) -> integer { log += [8]; a - b }, tag: 1 };
+  t = h.f(tick(log, 6), tick(log, 7));
+  assert(t == -10 && len(log) == 10 && log[9] == 8 && log[7] == 6, "from a field: {t} {len(log)}");
+}
+
+fn test_each_application_drops_its_frame() {
+  mk = fn(k: integer, m: integer) -> integer {
+    v: vector<integer> = [];
+    for i in 0..k { v += [i * m]; }
+    b = Box { n: k, tags: v };
+    s = "{k}-{m}";
+    b.n + len(b.tags) + len(s)
+  };
+  t = 0;
+  for i in 0..300 { t += mk(i % 7, i); }
+  assert(t == 3184, "three hundred applications: {t}");
+}

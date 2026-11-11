@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-LoopRecord` crossed with `@FR-O-Borrow`: a no-heap record local minted by a literal inside
+// a loop may keep its store across passes — a complete literal writes every field, a partial one
+// re-establishes the omitted defaults first — and is observably a fresh record each pass.  A
+// hand-off to a callee is admitted only where the callee's return does not borrow THAT parameter
+// (O-Borrow: a callee keeps a caller's record only by copy or through its return's deps); a callee
+// that returns it, or wraps it into its result, makes every pass's result an independent copy, so
+// a vector of the results holds each pass's values and not the last one's.  Crossed with a nested
+// loop (the outermost loop keeps the record).
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Spec { a: integer, b: integer, c: integer = 7 }
+struct Hold { s: Spec }
+
+fn area(s: Spec) -> integer { s.a * s.b + s.c }
+fn keep(s: Spec) -> Spec { s }
+fn wrap(s: Spec) -> Hold { Hold { s: s } }
+
+fn test_complete_and_partial_literals() {
+  t = 0;
+  for i in 0..4 { sub = Spec { a: i, b: i + 1, c: 0 }; t += area(sub); }
+  assert(t == 0 + 2 + 6 + 12, "complete: {t}");
+  u = 0;
+  for i in 0..3 { sub = Spec { a: i, b: 2 }; sub.a += 1; sub.c += i; u += area(sub); }
+  // c is re-defaulted to 7 each pass before `+= i`
+  assert(u == (2 + 7) + (4 + 8) + (6 + 9), "partial: {u}");
+}
+
+fn test_a_borrowing_callee_copies_each_pass() {
+  ks: vector<Spec> = [];
+  for i in 0..3 { sub = Spec { a: i, b: i }; k = keep(sub); ks += [k]; }
+  assert(len(ks) == 3 && ks[0].a == 0 && ks[1].a == 1 && ks[2].a == 2 && ks[2].c == 7, "keep");
+  hs: vector<Hold> = [];
+  for i in 0..3 { sub = Spec { a: i * 10, b: 1 }; hs += [wrap(sub)]; }
+  assert(hs[0].s.a == 0 && hs[1].s.a == 10 && hs[2].s.a == 20, "wrap");
+  last = Spec { a: 0, b: 0 };
+  for i in 0..3 { sub = Spec { a: i, b: 5 }; last = keep(sub); }
+  assert(last.a == 2 && last.b == 5, "the last pass");
+}
+
+fn test_a_nest() {
+  t = 0;
+  for i in 0..2 { for j in 0..3 { sub = Spec { a: i, b: j, c: 1 }; t += area(sub); } }
+  assert(t == (1 + 1 + 1) + (1 + 2 + 3), "nest: {t}");
+}

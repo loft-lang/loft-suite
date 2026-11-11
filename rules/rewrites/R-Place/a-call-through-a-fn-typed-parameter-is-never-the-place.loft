@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Place` crossed with `@FR-O-Opaque`: R-Place hands a call the place its result is going to
+// only when the callee is known to build there; a call through a fn-typed PARAMETER has empty deps
+// whatever its target does (O-Opaque), so R-Place declines it and the caller assumes the return
+// BORROWS every heap argument.  So `o.p = f(p)` with `f` the identity copies `p` into the field
+// (a write to the field leaves `p`, and `p` stays alive and whole), and with `f` a builder the field
+// holds the fresh record.  The same assignment with a named callee is R-Place's own case and
+// answers the same.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+struct H { p: P }
+
+fn mk(n: integer) -> P { P { n: n, t: "m{n}", xs: [n] } }
+fn same(p: P) -> P { p }
+fn redo(p: P) -> P { P { n: p.n * 2, t: "r{p.t}", xs: [] } }
+fn apply(f: fn(P) -> P, o: H, p: P) { o.p = f(p); o.p.n += 1000; }
+
+fn test_an_identity_through_a_fn_parameter() {
+  o = H { p: mk(0) };
+  a = mk(5);
+  apply(same, o, a);
+  assert(a.n == 5 && len(a.xs) == 1 && o.p.n == 1005 && o.p.t == "m5", "{a.n} {o.p.n}");
+  a.xs += [6];
+  assert(len(o.p.xs) == 1, "independent: {len(o.p.xs)}");
+}
+
+fn test_a_builder_through_a_fn_parameter_in_a_loop() {
+  o = H { p: mk(0) };
+  a = mk(5);
+  for _ in 0..3 { apply(redo, o, a); }
+  assert(a.n == 5 && o.p.n == 1010 && o.p.t == "rm5" && len(o.p.xs) == 0, "{o.p.n} {o.p.t}");
+}
+
+fn test_a_named_callee_into_the_field() {
+  o = H { p: mk(0) };
+  for i in 1..4 { o.p = mk(i * 3); }
+  assert(o.p.n == 9 && o.p.t == "m9" && o.p.xs[0] == 9, "{o.p.n}");
+}

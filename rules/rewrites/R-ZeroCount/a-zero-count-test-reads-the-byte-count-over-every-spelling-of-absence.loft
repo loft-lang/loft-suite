@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-ZeroCount` crossed with `@FR-L-Null-Text`: a comparison of a text's CHARACTER count with
+// zero reads the BYTE count instead, which is sound because a text has no characters exactly
+// when it has no bytes — the absent text included, in both of its spellings (an unset handle and
+// the stored null), and an allocated `""` is present but empty.  Every folded spelling
+// (`== 0`, `!= 0`, `< 1`, `>= 1`, `0 < len`, `len > 0`) is checked over a null local, a
+// nullable field never set, a field set to null, a text parameter handed null, `""`, and a
+// one-character text whose one character is two bytes; the comparisons that count characters
+// (`== 1`, `> 1`) are not folded, and answer by characters.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct H { t: text?, u: text }
+
+fn code(t: text?) -> integer {
+  r = 0;
+  if len(t) == 0 { r += 1; }
+  if len(t) != 0 { r += 2; }
+  if len(t) < 1 { r += 4; }
+  if len(t) >= 1 { r += 8; }
+  if 0 < len(t) { r += 16; }
+  if len(t) > 0 { r += 32; }
+  if len(t) == 1 { r += 64; }
+  if len(t) > 1 { r += 128; }
+  r
+}
+
+fn test_every_spelling_of_absence_counts_zero() {
+  n: text? = null;
+  h = H { u: "" };
+  g = H { t: "x", u: "y" };
+  g.t = null;
+  assert(code(n) == 5 && code(h.t) == 5 && code(g.t) == 5 && code(null) == 5, "absent: {code(n)} {code(h.t)} {code(g.t)}");
+  assert(code(h.u) == 5 && code("") == 5 && len(h.u) == 0, "an empty text: {code(h.u)}");
+}
+
+fn test_a_present_text_counts_characters() {
+  assert(code("é") == 122 && "é".size() == 2, "one character of two bytes: {code("é")}");
+  assert(code("ab") == 186 && code("aé") == 186, "two characters: {code("ab")} {code("aé")}");
+}

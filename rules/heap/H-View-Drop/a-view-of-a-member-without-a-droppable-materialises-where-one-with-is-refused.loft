@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-View` crossed with `@FR-H-View-Drop` — the legal half of
+// `a-view-that-would-materialise-is-refused-where-its-member-owns-a-droppable-refused.loft`.
+// The four shapes refused there, over a member type that owns no droppable, compile: the
+// view MATERIALISES (B-View), so it reads the value it had at its bind, and a write through it
+// after the disturbance no longer reaches the container.  And the one shape that is no
+// disturbance of the view — the viewed slot itself overwritten (B-Disturb: a view OF the
+// place re-reads the new value) — stays a view for a droppable member too, so it compiles
+// and reads the new value.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Pi { k: integer, t: text }
+struct PO { inner: Pi, tag: integer }
+struct PW { v: vector<Pi> }
+fn grow(w: PW) { w.v += [Pi { k: 9, t: "z" }]; }
+fn drop_first(w: PW) { w.v.remove(0); }
+
+struct H { id: integer, n: integer }
+fn OpDrop(self: H) { print(""); }
+struct In { h: H, k: integer }
+struct O { inner: In, tag: integer }
+
+fn test_a_discharged_element_view_and_a_growth() {
+  v = [Pi { k: 1, t: "a" }];
+  e = v[0]?;
+  v += [Pi { k: 2, t: "bb" }];
+  assert(e.k == 1 && e.t == "a", "the bind-time value: {e.k} {e.t}");
+  e.k = 5;
+  assert(v[0].k == 1 && len(v) == 2 && e.k == 5, "the copy is its own: {v[0].k} {len(v)} {e.k}");
+}
+
+fn test_a_member_view_and_its_container_reassigned() {
+  o = PO { inner: Pi { k: 1, t: "a" }, tag: 0 };
+  x = o.inner;
+  o = PO { inner: Pi { k: 2, t: "bb" }, tag: 1 };
+  assert(x.k * 10 + len(x.t) == 11 && o.inner.k == 2, "the bind-time value: {x.k} {x.t} {o.inner.k}");
+}
+
+fn test_a_growth_one_call_down() {
+  w = PW { v: [Pi { k: 1, t: "a" }] };
+  e = w.v[0];
+  grow(w);
+  e.k = 9;
+  assert(w.v[0].k == 1 && len(w.v) == 2 && e.k == 9 && e.t == "a", "{w.v[0].k} {len(w.v)} {e.k} {e.t}");
+}
+
+fn test_a_removal_one_call_down() {
+  w = PW { v: [Pi { k: 1, t: "a" }, Pi { k: 2, t: "bb" }] };
+  e = w.v[1];
+  drop_first(w);
+  assert(e.k == 2 && e.t == "bb" && len(w.v) == 1 && w.v[0].k == 2, "{e.k} {e.t} {len(w.v)}");
+  e.k = 7;
+  assert(w.v[0].k == 2, "the copy is its own: {w.v[0].k}");
+}
+
+fn test_the_viewed_slot_overwritten_stays_a_view() {
+  o = O { inner: In { h: H { id: 1, n: 1 }, k: 1 }, tag: 0 };
+  x = o.inner;
+  o.inner = In { h: H { id: 2, n: 2 }, k: 2 };
+  assert(x.k * 10 + x.h.id == 22, "the new value through the view: {x.k} {x.h.id}");
+  x.k = 3;
+  assert(o.inner.k == 3, "a write through it reaches the slot: {o.inner.k}");
+}

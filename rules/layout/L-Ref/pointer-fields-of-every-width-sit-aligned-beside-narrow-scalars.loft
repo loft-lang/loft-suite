@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-Ref` crossed with `@FR-L-Align`: a collection field is a 4-byte record pointer, a
+// `reference<T>` field the full 12-byte DbRef with alignment 4, a fn-ref field a 4-byte function
+// id (8 bytes where a capturing lambda is assigned), and every scalar sits at an offset its
+// alignment divides, the record's size a multiple of its alignment so the next element in a
+// vector starts aligned too.  A record that mixes all of them with 1-, 2-, 4- and 8-byte
+// scalars, in a vector whose stride is that size, must keep every field's value: written, read
+// back per element, written again through a reference field, and called through its fn-ref.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+type Small = integer limit(-100, 100) size(1);
+type Mid = integer limit(-30000, 30000) size(2);
+
+struct P { k: integer, tag: text }
+struct Mix {
+  b: boolean,
+  link: reference<P>,
+  s: Small,
+  v: vector<integer>,
+  m: Mid,
+  f: fn(integer) -> integer,
+  x: single,
+  h: hash<P[k]>,
+  big: integer,
+  c: character
+}
+
+fn twice(n: integer) -> integer { n * 2 }
+
+fn test_every_field_of_every_element() {
+  pool = [P { k: 1, tag: "a" }, P { k: 2, tag: "b" }, P { k: 3, tag: "c" }];
+  ms: vector<Mix> = [];
+  for i in 0..3 {
+    ms += [Mix { b: i % 2 == 0, link: &pool[i], s: -50 + i ?? 0, v: [i, i * 10], m: -20000 + i ?? 0, f: twice,
+                 x: 1.5f, h: [P { k: i, tag: "h{i}" }], big: 9000000000 + i, c: 'q' }];
+  }
+  t = "";
+  for e in ms {
+    t += "{e.b}/{e.link.k}{e.link.tag}/{e.s}/{len(e.v)}:{e.v[1] ?? -1}/{e.m}/{e.f(e.s)}/{e.x}/{len(e.h)}/{e.big}/{e.c} ";
+  }
+  assert(t == "true/1a/-50/2:0/-20000/-100/1.5/1/9000000000/q false/2b/-49/2:10/-19999/-98/1.5/1/9000000001/q true/3c/-48/2:20/-19998/-96/1.5/1/9000000002/q ",
+         "every field: {t}");
+  ms[1].link.tag = "B";
+  ms[2].v += [7];
+  ms[0].h += [P { k: 9, tag: "n" }];
+  assert(pool[1].tag == "B" && len(ms[2].v) == 3 && len(ms[0].h) == 2 && ms[1].m == -19999 && ms[2].big == 9000000002 && ms[0].c == 'q',
+         "written again: {pool[1].tag} {ms[1].m}");
+}

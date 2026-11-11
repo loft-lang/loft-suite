@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-CopyView` crossed with `@FR-C-Ref`: a reference reads through to its referent, and a
+// plain record bind from it (`t = p` with `p: &C`, or `t = l` with `l = &b`) is B-Copy's copy
+// of the referent.  R-CopyView turns such a copy into a view only where no program can tell
+// the two apart, and declines a `&` source outright — so a write through the link after the
+// bind leaves the copy's value as it was, whether the link is a `&` parameter, a local link or
+// one arm of a value `if`.  A read-only bind from a record view (a field of a by-value
+// parameter) answers the record's value.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct C { x: integer, tag: text }
+struct H { c: C, k: integer }
+
+fn via_ref(p: &C) -> text {
+  t = p;
+  p = C { x: 99, tag: "new" };
+  "{t.x}{t.tag}"
+}
+
+fn via_ref_read(p: &C) -> integer {
+  t = p;
+  r = t.x * 2;
+  p.x += 1;
+  r + t.x
+}
+
+fn via_param(h: H) -> text {
+  t = h.c;
+  "{t.x}{t.tag}{len(t.tag)}"
+}
+
+fn test_a_ref_parameter_written_after_the_bind() {
+  a = C { x: 1, tag: "old" };
+  s = via_ref(a);
+  assert(s == "1old" && a.x == 99 && a.tag == "new", "{s} {a.x}{a.tag}");
+  b = C { x: 5, tag: "b" };
+  r = via_ref_read(b);
+  assert(r == 15 && b.x == 6, "{r} {b.x}");
+}
+
+fn test_a_local_link_written_after_the_bind() {
+  b = C { x: 6, tag: "lk" };
+  l = &b;
+  t = l;
+  b.x = 40;
+  l.tag += "!";
+  assert(t.x == 6 && t.tag == "lk" && l.x == 40 && b.tag == "lk!", "{t.x} {t.tag} {l.x} {b.tag}");
+}
+
+fn test_a_view_bind_read_only() {
+  hh = H { c: C { x: 7, tag: "hh" }, k: 1 };
+  assert(via_param(hh) == "7hh2", via_param(hh));
+}
+
+fn test_a_join_of_a_link_and_a_view() {
+  hh = H { c: C { x: 7, tag: "h" }, k: 1 };
+  m = H { c: C { x: 8, tag: "m" }, k: 2 };
+  lm = &m.c;
+  j = if hh.k > 0 { lm } else { hh.c };
+  m.c.x = 80;
+  assert(j.x == 8 && j.tag == "m" && m.c.x == 80, "{j.x} {m.c.x}");
+}

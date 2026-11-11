@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Materialise` crossed with `@FR-H-View` and `@FR-H-Copy`: a struct view (H-View)
+// aliases its place only while the place holds.  Where the container is disturbed — a removal,
+// a reassignment, a callee's removal — while the view is still LIVE, the bind takes the H-Copy
+// step instead: a fresh store holding a DEEP copy of the value at the bind, so a write through
+// the view before the disturbance does not reach the container either, and the copy's own text
+// and vector are independent of the element's.  A view whose last use precedes the disturbance
+// keeps aliasing.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { x: integer, t: text, xs: vector<integer> }
+struct O { ps: vector<P>, i: P }
+
+fn drop_first(v: vector<P>) { v.remove(0); }
+
+fn test_a_live_view_across_a_removal() {
+  v = [P { x: 1, t: "a", xs: [1] }, P { x: 2, t: "b", xs: [2, 2] }, P { x: 3, t: "c", xs: [] }];
+  e = v[1];
+  e.x = 20;
+  v.remove(0);
+  e.t += "!";
+  e.xs += [9];
+  assert(e.x == 20 && e.t == "b!" && len(e.xs) == 3, "the copy: {e.x} {e.t}");
+  assert(len(v) == 2 && v[0].x == 2 && v[0].t == "b" && len(v[0].xs) == 2, "the container: {v[0].x} {v[0].t}");
+}
+
+fn test_a_view_used_up_before_the_removal() {
+  w = [P { x: 1, t: "a", xs: [1] }, P { x: 2, t: "b", xs: [2, 2] }];
+  f = w[1];
+  f.x = 30;
+  f.t = "B";
+  w.remove(0);
+  assert(len(w) == 1 && w[0].x == 30 && w[0].t == "B", "aliased: {w[0].x} {w[0].t}");
+}
+
+fn test_a_field_view_across_a_reassignment() {
+  o = O { ps: [], i: P { x: 6, t: "i", xs: [6] } };
+  g = o.i;
+  g.x = 60;
+  o = O { ps: [], i: P { x: 7, t: "j", xs: [] } };
+  g.xs += [7];
+  assert(g.x == 60 && g.t == "i" && len(g.xs) == 2 && o.i.x == 7 && len(o.i.xs) == 0, "{g.x} {o.i.x}");
+}
+
+fn test_a_callee_removal() {
+  v = [P { x: 1, t: "a", xs: [] }, P { x: 2, t: "b", xs: [] }];
+  e = v[1];
+  drop_first(v);
+  e.x = 99;
+  assert(e.x == 99 && len(v) == 1 && v[0].x == 2, "a callee disturbs: {v[0].x}");
+}

@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-S-Digest` crossed with `@FR-L-Narrow-Decode`: a hash key's digest is fed an integer-class
+// field as the 8-byte value its declared type DECODES — the stored bytes are `value - start`,
+// and every decode adds `start` back — so a key held in a narrow slot with a non-zero start (a
+// one-byte slot over 1000..1250, a two-byte slot over -70000..-60000) is found by the plain
+// integer it means, whether the lookup's key is a literal, a computed value or an element of a
+// vector; a value inside the range that no record holds finds nothing (a value outside it is a
+// compile-time narrowing refusal, as for any store into the type); a removal and a re-add find
+// the new record; and the key order of a walk is the decoded order.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+type Lim = integer limit(1000, 1250) size(1);
+type Far = integer limit(-70000, -60000) size(2);
+struct A { k: Lim, v: integer }
+struct B { k: Far, v: text }
+
+fn test_a_biased_one_byte_key() {
+  h: hash<A[k]> = [A { k: 1250, v: 3 }, A { k: 1000, v: 1 }, A { k: 1100, v: 2 }];
+  base = 1000;
+  kk: Lim = base + 100 ?? 1000;
+  assert(h[1000].v == 1 && h[kk].v == 2 && h[1250].v == 3, "found by value: {h[1100].v ?? -1}");
+  assert(h[1001] == null && h[1249] == null && h[1101] == null, "absent inside the range");
+  h[1100] = null;
+  h += [A { k: 1100, v: 20 }];
+  ks: vector<Lim> = [1000, 1100, 1250];
+  t = 0;
+  for k in ks { t = t * 100 + (h[k].v ?? -1); }
+  walk = "";
+  for e in h { walk += "{e.k}:{e.v} "; }
+  assert(t == 12003 && walk == "1000:1 1100:20 1250:3 ", "re-added, walked: {t} {walk}");
+}
+
+fn test_a_biased_two_byte_negative_key() {
+  h: hash<B[k]> = [B { k: -60000, v: "top" }, B { k: -70000, v: "bottom" }, B { k: -65000, v: "mid" }];
+  assert(h[-70000].v == "bottom" && h[-65000].v == "mid" && h[-60000].v == "top", "found: {h[-65000].v ?? "-"}");
+  assert(h[-60001] == null && h[-61234] == null && h[-69999] == null, "absent inside the range");
+  walk = "";
+  for e in h { walk += "{e.v},"; }
+  assert(walk == "bottom,mid,top,", "decoded order: {walk}");
+}

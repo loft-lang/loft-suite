@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2453, `@FR-Col-Unordered` / `@FR-Col-Order` / `@FR-S-Hash` — A HASH HOLDING STORE RECORDS
+// WALKS `unordered` IN KEY ORDER.
+//
+// A linked type's entries are records of their own (Col-Inline's `linked` fact), whose numbers
+// follow the allocator, so `for e in unordered(h)` over such a table is in key order: keys
+// inserted out of order, after removals and re-inserts, a table built after others filled and
+// emptied the store, and a text key.  An inline table keeps its insertion order: the control
+// that no sort was added there.
+//
+// @falsified-at: loft main dbf8b05ae — u1 "0,7,3,10,6,2,9,5,1,8,4," on the interpreter,
+//   "1,8,4,0,7,3,10,6,2,9,5," on --native-c.
+// CHANNEL: the assertions and the leak gate.
+
+struct G { k: integer, v: text }
+struct T { name: text, n: integer }
+struct Holder { r: reference<G>?, s: reference<T>? }
+struct I { k: integer, v: text }
+fn walk_g(h: hash<G[k]>) -> text { s = ""; for e in unordered(h) { s += "{e.k},"; } s }
+fn main() {
+  h: hash<G[k]> = [];
+  for i in 0..11 { h += [G { k: (i * 7) % 11, v: "{i}" }]; }
+  assert(walk_g(h) == "0,1,2,3,4,5,6,7,8,9,10,", "u1 {walk_g(h)}");
+  h[3] = null;
+  h[8] = null;
+  h += [G { k: 20, v: "x" }];
+  h += [G { k: -1, v: "y" }];
+  assert(walk_g(h) == "-1,0,1,2,4,5,6,7,9,10,20,", "u2 {walk_g(h)}");
+  inl: hash<I[k]> = [];
+  for i in 0..6 { inl += [I { k: 50 - i * 10, v: "{i}" }]; }
+  si = "";
+  for e in unordered(inl) { si += "{e.k},"; }
+  assert(si == "50,40,30,20,10,0,", "u3 {si}");
+  warm: hash<G[k]> = [];
+  for i in 0..40 { warm += [G { k: i, v: "w" }]; }
+  for i in 0..40 { warm[i] = null; }
+  h2: hash<G[k]> = [];
+  for i in 0..11 { h2 += [G { k: (i * 7) % 11, v: "{i}" }]; }
+  assert(walk_g(h2) == "0,1,2,3,4,5,6,7,8,9,10,", "u4 {walk_g(h2)}");
+  t: hash<T[name]> = [];
+  t += [T { name: "pear", n: 1 }, T { name: "apple", n: 2 }, T { name: "fig", n: 3 }];
+  st = "";
+  for e in unordered(t) { st += "{e.name},"; }
+  assert(st == "apple,fig,pear,", "u5 {st}");
+  hold = Holder { };
+  assert(hold.r == null && hold.s == null, "holder");
+  println("unordered ok");
+}

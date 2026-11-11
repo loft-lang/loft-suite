@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-NoThreads` crossed with `@FR-R-Demote` and `@FR-R-CopyView` — the twin of
+// `a-unit-without-threads-runs-a-demote-and-a-view-walk-as-written.loft` in a C unit that DOES
+// run a `par` loop, so the runtime's statics stay thread-locals (R-NoThreads declines).  The
+// same demoted lists walked by the same view cursors answer the same values, and each par
+// worker builds and walks a list of its own.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct N { v: integer, name: text, next: N? }
+enum L { Nil, Cons { v: integer, next: L } }
+
+fn digits(n: N?) -> integer {
+  t = 0;
+  cur = n;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  t
+}
+
+fn ldigits(l: L) -> integer {
+  t = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      Cons { v, next } => { t = t * 10 + v; cur = next; }
+      Nil => { more = false; }
+    }
+  }
+  t
+}
+
+fn build(n: integer) -> N {
+  h = N { v: 0, name: "z" };
+  for i in 1..n { h = N { v: i % 10, name: "n{i}", next: h }; }
+  h
+}
+
+fn lbuild(n: integer) -> L {
+  l = Nil;
+  for i in 1..n { l = Cons { v: i % 10, next: l }; }
+  l
+}
+
+fn total(h: N) -> integer {
+  s = 0;
+  cur = h;
+  while cur != null { s += cur.v + len(cur.name); cur = cur.next; }
+  s
+}
+
+fn test_a_demoted_list_walked_by_a_view() {
+  h = build(5);
+  l = lbuild(5);
+  assert(digits(h) == 43210 && ldigits(l) == 4321, "five: {digits(h)} {ldigits(l)}");
+  big = build(300);
+  assert(total(big) == 2439, "three hundred: {total(big)}");
+}
+
+fn work(n: integer) -> integer { digits(build(n)) }
+
+fn test_par_workers_build_and_walk_their_own_lists() {
+  out = "";
+  for n in [2, 4, 6] par(r = work(n), 3) { out += "{r};"; }
+  assert(out == "10;3210;543210;", "par: {out}");
+}

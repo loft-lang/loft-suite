@@ -1,0 +1,115 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-HandOver` crossed with `@FR-R-Apart`: a record whose every field is a vector of a
+// scalar-field struct is held APART (one byte buffer per field, no store record) while it is
+// built, and crosses into the store at its BOUNDARY — the append into a history window —
+// where R-HandOver's rotate clause may write it into the OLDEST element's blocks and rotate
+// the slots left instead of appending and dropping.  The window must hold exactly the entries
+// the plain append-then-drop would leave: a window of four over nine pushes, a window of two,
+// and a window whose cursor is moved back mid-stream (the truncation before the append), with
+// entries whose three vector fields have different lengths, some empty.  Each expectation was
+// computed by hand from the append / drop / truncate semantics.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct P { q: integer, on: boolean }
+struct M { k: integer }
+struct N { v: integer }
+struct E { ps: vector<P>, ms: vector<M>, ns: vector<N> }
+struct T { es: vector<E>, cur: integer }
+
+fn show(t: const T) -> text {
+  s = "";
+  for e in t.es {
+    sq = 0;
+    on = 0;
+    for p in e.ps { sq += p.q; if p.on { on += 1; } }
+    sk = 0;
+    for m in e.ms { sk += m.k; }
+    sv = 0;
+    for n in e.ns { sv += n.v; }
+    if len(s) > 0 { s += " "; }
+    s += "{len(e.ps)}:{sq}:{on}|{len(e.ms)}:{sk}|{len(e.ns)}:{sv}";
+  }
+  "{len(t.es)} {t.cur} [{s}]"
+}
+
+fn noop(e: const E) -> boolean { len(e.ps) == 0 && len(e.ms) == 0 && len(e.ns) == 0 }
+
+fn trunc(h: &T, n: integer) {
+  if n >= len(h.es) { return; }
+  nv: vector<E> = [];
+  for i in 0..n { nv += [h.es[i]?]; }
+  h.es = nv;
+}
+
+fn drop_old(h: &T, n: integer) {
+  if n <= 0 || n > len(h.es) { return; }
+  nv: vector<E> = [];
+  for i in n..len(h.es) { nv += [h.es[i]?]; }
+  h.es = nv;
+  h.cur = h.cur - n;
+  if h.cur < 0 { h.cur = 0; }
+}
+
+fn push4(h: &T, e: E) {
+  if noop(e) { return; }
+  trunc(h, h.cur);
+  h.es += [e];
+  h.cur = h.cur + 1;
+  if len(h.es) > 4 { drop_old(h, len(h.es) - 4); }
+}
+
+fn push2(h: &T, e: E) {
+  if noop(e) { return; }
+  trunc(h, h.cur);
+  h.es += [e];
+  h.cur = h.cur + 1;
+  if len(h.es) > 2 { drop_old(h, len(h.es) - 2); }
+}
+
+fn entry(k: integer) -> E {
+  e = E { ps: [], ms: [], ns: [] };
+  for j in 0..(k * 3) % 4 + 1 { e.ps += [P { q: k * 10 + j, on: j % 2 == 0 }]; }
+  if k % 2 == 1 { e.ms += [M { k: k }]; }
+  for j in 0..k % 3 { e.ns += [N { v: k * 100 + j }]; }
+  e
+}
+
+fn test_a_window_of_four() {
+  t = T { es: [], cur: 0 };
+  for k in 1..10 {
+    e = E { ps: [], ms: [], ns: [] };
+    for j in 0..(k * 3) % 4 + 1 { e.ps += [P { q: k * 10 + j, on: j % 2 == 0 }]; }
+    if k % 2 == 1 { e.ms += [M { k: k }]; }
+    for j in 0..k % 3 { e.ns += [N { v: k * 100 + j }]; }
+    push4(t, e);
+  }
+  assert(show(t) == "4 4 [3:183:2|0:0|0:0 2:141:1|1:7|1:700 1:80:1|0:0|2:1601 4:366:2|1:9|0:0]", "four: {show(t)}");
+}
+
+fn test_a_window_of_two() {
+  t = T { es: [], cur: 0 };
+  for k in 1..7 {
+    e = E { ps: [], ms: [], ns: [] };
+    for j in 0..(k * 3) % 4 + 1 { e.ps += [P { q: k * 10 + j, on: j % 2 == 0 }]; }
+    if k % 2 == 1 { e.ms += [M { k: k }]; }
+    for j in 0..k % 3 { e.ns += [N { v: k * 100 + j }]; }
+    push2(t, e);
+  }
+  assert(show(t) == "2 2 [4:206:2|1:5|2:1001 3:183:2|0:0|0:0]", "two: {show(t)}");
+}
+
+fn test_a_cursor_moved_back() {
+  t = T { es: [], cur: 0 };
+  for k in 1..9 {
+    if k == 5 { t.cur = 1; }
+    push4(t, entry(k));
+  }
+  assert(show(t) == "4 4 [4:206:2|1:5|2:1001 3:183:2|0:0|0:0 2:141:1|1:7|1:700 1:80:1|0:0|2:1601]", "moved back: {show(t)}");
+}

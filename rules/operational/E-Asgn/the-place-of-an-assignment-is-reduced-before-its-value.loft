@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Asgn` crossed with `@FR-E-Left`: in `place = value` the left-hand PLACE reduces first,
+// left to right, and only then the right-hand value — so an index whose computation has an
+// effect runs before the value's, and a value that changes the index variable (through a `&`
+// parameter) writes the slot the index named BEFORE the change.  Crossed with a vector element,
+// a field of a record element, a whole record element, and a text element.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Log { s: text }
+struct It { n: integer, t: text }
+struct Box { items: vector<It> }
+
+fn at(l: Log, i: integer) -> integer { l.s += "L{i}"; i }
+fn val(l: Log, v: integer) -> integer { l.s += "R{v}"; v }
+fn bump(i: &integer) -> integer { i += 1; i * 100 }
+
+fn test_the_index_runs_before_the_value() {
+  l = Log { s: "" };
+  v = [0, 0, 0];
+  v[at(l, 2)] = val(l, 7);
+  assert(l.s == "L2R7" && v[2] == 7 && v[0] == 0 && len(v) == 3, "{l.s} {v}");
+}
+
+fn test_the_value_changes_the_index_after_the_place() {
+  i = 0;
+  w = [1, 2, 3];
+  w[i] = bump(i);
+  assert(i == 1 && w[0] == 100 && w[1] == 2, "{i} {w}");
+  ts = ["p", "q", "r"];
+  k = 1;
+  ts[k] = "t{bump(k)}";
+  assert(k == 2 && ts[1] == "t200" && ts[2] == "r", "{k} {ts}");
+}
+
+fn test_a_field_of_an_element_and_a_whole_element() {
+  b = Box { items: [It { n: 1, t: "a" }, It { n: 2, t: "b" }] };
+  l = Log { s: "" };
+  b.items[at(l, 1)].t = "x{val(l, 5)}";
+  assert(l.s == "L1R5" && b.items[1].t == "x5" && b.items[0].t == "a", "{l.s} {b.items[1].t}");
+  j = 1;
+  b.items[j] = It { n: bump(j), t: "z" };
+  assert(j == 2 && b.items[1].n == 200 && b.items[1].t == "z" && b.items[0].n == 1 && len(b.items) == 2, "{j}");
+}
+
+fn test_in_a_loop() {
+  l = Log { s: "" };
+  v = [0, 0, 0, 0];
+  for r in 0..3 { v[at(l, r)] = val(l, r * 11); }
+  assert(l.s == "L0R0L1R11L2R22" && v[2] == 22 && v[3] == 0, "{l.s} {v}");
+}

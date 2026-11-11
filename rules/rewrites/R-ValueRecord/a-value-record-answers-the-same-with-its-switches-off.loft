@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-ValueRecord` crossed with `@FR-R-Switch` — the A/B half of
+// `a-value-record-answers-the-buffer-form-inside-an-admitted-callee.loft`: the same cells armed
+// with the switch-off form of both halves of the rewrite (the IR pass, `LOFT_NO_IR_VALUE_RECORD`,
+// and the writers' own, `LOFT_NO_VALUE_RECORD`) answer the same hand-computed values, under
+// `--ship` (where the rewrite would apply) and in the checked build.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @ARMED: LOFT_NO_VALUE_RECORD=1 LOFT_NO_IR_VALUE_RECORD=1
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct P { x: integer, y: integer }
+struct V { f: integer, g: integer }
+
+fn mkp(k: integer) -> P { P { x: k, y: k * 2 } }
+fn fwd(k: integer) -> P { mkp(k + 1) }
+fn pick(v: vector<P>, i: integer) -> P { return v[i]?; }
+fn bump(w: V, k: integer) { p = mkp(k); w.f += p.x + p.y; }
+
+fn hoisted(a: V, b: V, n: integer) -> integer {
+  s = 0;
+  for i in 0..n { s += a.f * 10 + a.g; bump(b, i); }
+  s
+}
+
+fn picked(v: vector<P>, n: integer) -> integer {
+  s = 0;
+  for i in 0..n { p = pick(v, i); s += p.x * 10 + p.y; }
+  s
+}
+
+fn test_an_admitted_callee_that_takes_a_value_record() {
+  a = V { f: 1, g: 2 };
+  b = V { f: 0, g: 0 };
+  assert(hoisted(a, b, 3) == 36 && b.f == 9, "another record: {b.f}");
+  c = V { f: 1, g: 2 };
+  assert(hoisted(c, c, 3) == 66 && c.f == 10, "the same record: {c.f}");
+}
+
+fn test_a_forward_a_view_leaf_and_its_default() {
+  q = fwd(2);
+  assert(q.x == 3 && q.y == 6, "forward: {q.x} {q.y}");
+  v = [P { x: 1, y: 2 }, P { x: 3, y: 4 }];
+  assert(picked(v, 3) == 46 && v[1].x == 3, "a view leaf, then the default record: {picked(v, 3)}");
+}
+
+fn main() {
+  test_an_admitted_callee_that_takes_a_value_record();
+  test_a_forward_a_view_leaf_and_its_default();
+}

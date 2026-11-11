@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-ClearRelease` crossed with `@FR-H-KeepRoom`, `@FR-R-Compact` and
+// `@FR-R-InPlaceLiteral`: a vector or a place that outlives its reset releases what its old
+// elements owned.  A vector local MINTED again every round (`v = fill(8)`, H-KeepRoom: the
+// wrapper re-established at length zero in the block it held) and one CLEARED and refilled
+// (`w.clear()`), a vector COMPACTED into itself (`v = t`, t filled from v's own elements in index
+// order: the dropped elements released where they stand), and an element overwritten by a record
+// literal written in place (`v[i] = R { … }`, the old text and vector released field by field,
+// a field reading the old value first) — each repeated 20 000 times under a 1 MiB store ceiling,
+// which a stranded text per round would pass many times over.  Values are hand-computed.
+//
+// CHANNEL: the assertions and the leak gate (the store ceiling below).
+// @ARMED: LOFT_MEMORY_LIMIT=1M
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct E { k: integer, t: text, xs: vector<integer> }
+
+fn fill(n: integer) -> vector<text> {
+  v: vector<text> = [];
+  for i in 0..n { v += ["item-{i}-padding-padding-padding-padding-padding"]; }
+  v
+}
+
+fn test_a_minted_vector_in_a_loop() {
+  v: vector<text> = [];
+  total = 0;
+  for _ in 0..20000 {
+    v = fill(8);
+    total += len(v[7]);
+  }
+  assert(total == 46 * 20000 && len(v) == 8 && v[0] == "item-0-padding-padding-padding-padding-padding", "{total} {len(v)}");
+  v = [];
+  assert(len(v) == 0 && v != null, "empty and present");
+}
+
+fn test_a_cleared_vector_in_a_loop() {
+  w: vector<E> = [];
+  s = 0;
+  for r in 0..20000 {
+    w.clear();
+    for i in 0..4 { w += [E { k: i, t: "rec-{r}-{i}-padding-padding-padding", xs: [i, r] }]; }
+    s += len(w[3].t) + w[3].xs[1] % 2;
+  }
+  // len(t) = 30 + digits(r); digits over 0..19999 sum to 88890; r % 2 sums to 10000
+  assert(s == 600000 + 88890 + 10000 && len(w) == 4 && w[0].t == "rec-19999-0-padding-padding-padding", "{s}");
+}
+
+fn test_a_compaction_in_a_loop() {
+  kept = 0;
+  for r in 0..20000 {
+    v: vector<text> = [];
+    for i in 0..6 { v += ["r{r}-e{i}-padding-padding-padding"]; }
+    t: vector<text> = [];
+    for e in v { if len(e) % 2 == 0 || e#index == 0 { t += [e]; } }
+    v = t;
+    kept += len(v);
+  }
+  // "r{r}-e{i}-padding-padding-padding" has 1 + digits(r) + 3 + 24 = 28 + digits(r) characters:
+  // all six kept when digits(r) is even (10..99, 1000..9999: 90 + 9000 rounds), else only e0
+  assert(kept == (90 + 9000) * 6 + (20000 - 9090), "kept: {kept}");
+}
+
+fn test_an_in_place_literal_in_a_loop() {
+  v = [E { k: 0, t: "a", xs: [] }, E { k: 1, t: "b", xs: [1] }];
+  for r in 0..20000 {
+    v[1] = E { k: v[1].k + 1, t: "gen-{r % 10}-padding-padding-padding", xs: [r, r + 1, len(v[1].xs)] };
+  }
+  assert(v[1].k == 20001 && v[1].t == "gen-9-padding-padding-padding" && len(v[1].xs) == 3, "{v[1].k} {v[1].t}");
+  assert(v[1].xs[0] == 19999 && v[1].xs[2] == 3 && v[0].t == "a" && len(v) == 2, "{v[1].xs}");
+}

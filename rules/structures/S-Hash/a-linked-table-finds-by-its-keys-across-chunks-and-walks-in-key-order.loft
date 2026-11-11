@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-S-Hash` crossed with `@FR-S-Arena` and `@FR-S-Digest`.  S-Arena: an arena table's
+// entries live in chunks of 64, 128, 256, 512 … entries, and a freed entry is threaded through
+// its first 4 bytes onto the free list whose head the table holds — so 500 entries span four
+// chunks, every lookup answers its own record whatever chunk it sits in, a removed entry reads
+// null, and an entry inserted after 167 removals reads its own value, its first field (the one
+// a freed entry's thread overwrites) included.  G is linked, so its `unordered` walk is in key
+// order (Col-Unordered), a copy's too.  S-Digest: the digest is fed each
+// key field in key order — a text with a 0xFF after it, so ("ab", "c") and ("a", "bc") are two
+// keys — an integer-class field as its DECODED value (a biased `limit` key is found by the
+// literal), a float field adds nothing (every float key in one probe run, each still found by
+// comparison), and a table's seed lives in the table, so a copy finds every entry.  G is linked
+// (a `reference<G>` field), which keeps its table an arena one.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct G { k: integer, v: text }
+struct Holder { r: reference<G>? }
+struct P { a: text, b: text, n: integer }
+struct F { f: float, n: integer }
+type Yr = integer limit(1000, 1100) size(1);
+struct Y { k: Yr, n: integer }
+
+fn build() -> hash<G[k]> {
+  h: hash<G[k]> = [];
+  for i in 0..500 { h += [G { k: i * 7, v: "v{i}" }]; }
+  for i in 0..500 { if i % 3 == 0 { h[i * 7] = null; } }
+  for i in 0..100 { h += [G { k: 100000 + i, v: "n{i}" }]; }
+  h
+}
+
+fn test_lookups_across_four_chunks() {
+  h = build();
+  ok = 0;
+  for i in 0..500 {
+    e = h[i * 7];
+    if i % 3 == 0 { if e == null { ok += 1; } } else { if (e.v ?? "-") == "v{i}" && (e.k ?? 0) == i * 7 { ok += 1; } }
+  }
+  for i in 0..100 { if (h[100000 + i].v ?? "-") == "n{i}" && (h[100000 + i].k ?? 0) == 100000 + i { ok += 1; } }
+  assert(ok == 600 && len(h) == 333 + 100, "{ok} {len(h)}");
+  hold = Holder { };
+  assert(hold.r == null, "the reference field");
+}
+
+fn test_entries_after_removals_walk_in_key_order() {
+  h = build();
+  // the kept keys i * 7 (i not a multiple of 3) rise with i, and the new keys 100000 + m lie
+  // above them all
+  want = "";
+  for i in 0..500 { if i % 3 != 0 { want += "v{i},"; } }
+  for m in 0..100 { want += "n{m},"; }
+  got = "";
+  for e in unordered(h) { got += "{e.v},"; }
+  assert(got == want, "key order differs at {len(got)} of {len(want)}");
+  c = h;
+  got2 = "";
+  for e in unordered(c) { got2 += "{e.v},"; }
+  assert(got2 == want, "a copy walks as its source");
+}
+
+fn test_digests_of_each_key_shape() {
+  p: hash<P[a, b]> = [P { a: "ab", b: "c", n: 1 }, P { a: "a", b: "bc", n: 2 }];
+  assert(len(p) == 2 && (p["ab", "c"].n ?? -1) == 1 && (p["a", "bc"].n ?? -1) == 2 && p["abc", ""] == null, "text keys");
+  f: hash<F[f]> = [];
+  for i in 0..40 { f += [F { f: i as float * 0.5, n: i }]; }
+  fo = 0;
+  for i in 0..40 { if (f[i as float * 0.5].n ?? -1) == i { fo += 1; } }
+  assert(fo == 40 && len(f) == 40 && f[0.25] == null, "float keys: {fo}");
+  y: hash<Y[k]> = [Y { k: 1000, n: 1 }, Y { k: 1100, n: 2 }, Y { k: 1050, n: 3 }];
+  assert((y[1050].n ?? -1) == 3 && (y[1100].n ?? -1) == 2 && y[1001] == null, "a biased key");
+  h = build();
+  c = h;
+  co = 0;
+  for i in 0..100 { if (c[100000 + i].v ?? "-") == "n{i}" { co += 1; } }
+  assert(co == 100 && len(c) == 433, "a copy's seed: {co}");
+}

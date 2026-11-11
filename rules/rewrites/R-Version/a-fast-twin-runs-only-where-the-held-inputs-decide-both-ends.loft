@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Version` crossed with `@FR-R-Inputs`: a leaf called in an innermost counted loop through
+// its held-inputs twin (R-Inputs: the record's scalar field and its vector field's header are
+// handed in, read in place of the record) calls its FAST twin only when the leaf's decided
+// tests hold at the call's first and last counter values, with at least eight values in the
+// range; otherwise the plain twin runs.  The answers must not depend on which twin ran: the
+// tests decided at both ends (the whole vector, counting up and down), failing at the last
+// value (the range runs past the field's bound or below 0), a field bound below the vector's
+// length (the held scalar, not the header, decides), and a range of three values.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Buf { w: integer, cells: vector<integer> }
+
+fn at(self: const Buf, x: integer) -> integer {
+  if x >= 0 and x < self.w {
+    d = &self.cells;
+    if x < len(d) { d[x] ?? 0 } else { -2 }
+  } else {
+    -1
+  }
+}
+
+fn up(b: const Buf, x0: integer, n: integer) -> integer {
+  s = 0;
+  for i in 0..n { s += at(b, x0 + i); }
+  s
+}
+
+fn down(b: const Buf, x0: integer, n: integer) -> integer {
+  s = 0;
+  for i in 0..n { s += at(b, x0 - i); }
+  s
+}
+
+fn buf(w: integer) -> Buf {
+  b = Buf { w: w, cells: [] };
+  for k in 0..10 { b.cells += [10 + k]; }
+  b
+}
+
+fn test_decided_at_both_ends() {
+  b = buf(10);
+  assert(up(b, 0, 10) == 145 && down(b, 9, 10) == 145, "whole: {up(b, 0, 10)} {down(b, 9, 10)}");
+}
+
+fn test_failing_at_the_last_value() {
+  b = buf(10);
+  assert(up(b, 5, 10) == 80, "past the bound: {up(b, 5, 10)}");
+  assert(down(b, 3, 10) == 40, "below 0: {down(b, 3, 10)}");
+}
+
+fn test_a_field_bound_below_the_length_and_a_short_range() {
+  assert(up(buf(5), 0, 10) == 55, "the field decides: {up(buf(5), 0, 10)}");
+  assert(up(buf(12), 8, 4) == 18 + 19 - 2 - 2, "past the vector: {up(buf(12), 8, 4)}");
+  assert(up(buf(10), 2, 3) == 39, "three values: {up(buf(10), 2, 3)}");
+}

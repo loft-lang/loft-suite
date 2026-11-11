@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-RangedCall` crossed with `@FR-R-NonSentinelParam`.  One helper doing checked integer
+// arithmetic is called from two loops: one whose arguments are hoisted record fields — the
+// ranged-call copy guards `|x| <= 2^20` at the block's entry and calls the helper's RANGED
+// variant — and one whose arguments are a counter and a literal, which the program-wide
+// non-sentinel proof accepts at every call, so the C backend seeds the helper's parameters
+// (and calls its `__nn` twin, the helper taking a remainder by a literal).  The two rules
+// meet in that helper: each loop answers the checked helper's value, inside the guard, past
+// it (the plain copy), and past i64::MAX, where the helper's product is null and so is the sum.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Grid { q0: integer, r0: integer, w: integer }
+
+fn mix(q: integer, r: integer) -> integer { (q * 7 + r * 3) % 101 }
+
+fn over_fields(g: Grid) -> integer {
+  n = 0;
+  for iq in 0..g.w { n += mix(g.q0 + iq, g.r0); }
+  n
+}
+
+fn over_counters(k: integer) -> integer {
+  s = 0;
+  for i in 0..k { s += mix(i, 5); }
+  s
+}
+
+fn test_inside_the_guard() {
+  assert(over_fields(Grid { q0: 10, r0: 4, w: 5 }) == 278, "fields: {over_fields(Grid { q0: 10, r0: 4, w: 5 })}");
+  assert(over_counters(6) == 195 && over_counters(0) == 0, "counters: {over_counters(6)}");
+}
+
+fn test_past_the_guard_and_past_the_type() {
+  assert(over_fields(Grid { q0: 1048581, r0: 4, w: 3 }) == 36, "past 2^20: {over_fields(Grid { q0: 1048581, r0: 4, w: 3 })}");
+  assert(over_fields(Grid { q0: 2305843009213693952, r0: 4, w: 2 }) == null, "past i64::MAX: null");
+  assert(over_fields(Grid { q0: 2305843009213693952, r0: 4, w: 0 }) == 0, "no pass: 0");
+}

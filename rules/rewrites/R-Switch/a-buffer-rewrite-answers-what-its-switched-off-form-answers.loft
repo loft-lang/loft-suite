@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Switch` crossed with `@FR-O-Move`, `@FR-O-Buffer` and `@FR-O-LazyBuffer`: these three
+// are rewrites the parser or the scope pass applies, so the interpreter runs them too and has no
+// oracle; R-Switch's both-backend clause makes the SWITCH A/B the falsifier — the same program
+// with each switch off and on answers the same.  This cell and its twin hold ONE program and one
+// set of hand-computed values: a local first-bound from a callee returning its promoted local
+// (O-Move's adopt, `LOFT_NO_ADOPT_FIRST_BIND`), the same call rebound in a loop (O-Buffer's reuse,
+// `LOFT_NO_ADOPT_BUFFER_REUSE`), a buffer needed only on some paths (O-LazyBuffer's mint at first
+// use, `LOFT_NO_LAZY_BUFFER`), and a return that borrows its parameter (copied at the bind).
+// This file runs the rewrites ON (the default); `…-with-the-switches-off.loft` arms all three off.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+
+fn mk(n: integer) -> P {
+  o = P { n: n, t: "p{n}", xs: [] };
+  for i in 0..n { o.xs += [i * n]; }
+  o
+}
+fn lit(n: integer) -> P { P { n: n * 2, t: "l{n}", xs: [n] } }
+fn pass(p: P) -> P { p }
+fn either(c: boolean, n: integer) -> P {
+  if c { return mk(n); }
+  lit(n)
+}
+
+fn test_adopt_at_first_bind() {
+  p = mk(3);
+  assert(p.n == 3 && p.t == "p3" && len(p.xs) == 3 && p.xs[2] == 6, "{p.n} {p.t} {p.xs}");
+  p.xs += [99];
+  q = mk(3);
+  assert(len(q.xs) == 3 && len(p.xs) == 4, "two calls, two stores: {len(q.xs)} {len(p.xs)}");
+}
+
+fn test_a_rebind_in_a_loop_reuses_the_buffer() {
+  s = "";
+  r = mk(1);
+  for i in 2..6 {
+    r = mk(i);
+    s += "{r.t}:{len(r.xs)}:{r.xs[i - 1]},";
+  }
+  assert(s == "p2:2:2,p3:3:6,p4:4:12,p5:5:20," && r.n == 5, s);
+}
+
+fn test_a_buffer_minted_only_on_the_path_that_calls() {
+  total = 0;
+  names = "";
+  for i in 0..4 {
+    if i % 2 == 0 {
+      v = lit(i);
+      total += v.n;
+      names += v.t;
+    } else {
+      total += 1000;
+    }
+  }
+  assert(total == 0 + 1000 + 4 + 1000 && names == "l0l2", "{total} {names}");
+  e = either(true, 2);
+  f = either(false, 2);
+  assert(e.t == "p2" && len(e.xs) == 2 && f.t == "l2" && f.n == 4, "{e.t} {f.t}");
+}
+
+fn test_a_borrowing_return_is_copied() {
+  a = mk(2);
+  b = pass(a);
+  b.n = 77;
+  b.xs += [5];
+  assert(a.n == 2 && len(a.xs) == 2 && b.n == 77 && len(b.xs) == 3, "{a.n} {b.n}");
+}

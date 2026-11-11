@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapRef` crossed with `@FR-F-ParamRef`: a `&` parameter is the caller's place, and
+// capturing it captures its POINTEE — a `&S` is SHARED, so a field write, an append and a
+// whole replacement from inside the closure reach the caller (F-ParamRef's write-back), also
+// when the `&` parameter is forwarded from an outer `&` parameter; a `&integer` is COPIED when
+// the closure is built, so the closure answers the value at its build while the parameter's
+// own later write still reaches the caller.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, v: vector<integer> }
+
+fn writes(p: &S) { g = fn() { p.n += 1; p.v += [7]; }; g(); g(); }
+fn replaces(p: &S) { g = fn() { p = S { n: 42, v: [4, 2] }; }; g(); }
+fn forwards(p: &S) { writes(p); replaces(p); p.n += 1; }
+fn scalar(x: &integer) -> integer { g = fn() -> integer { x * 2 }; x = 10; g() + x }
+
+fn test_a_shared_record_pointee() {
+  t = S { n: 1, v: [] };
+  writes(t);
+  assert(t.n == 3 && len(t.v) == 2, "writes: {t.n} {len(t.v)}");
+  replaces(t);
+  assert(t.n == 42 && len(t.v) == 2 && t.v[0] == 4, "a whole replacement: {t.n}");
+  u = S { n: 0, v: [1] };
+  forwards(u);
+  assert(u.n == 43 && len(u.v) == 2 && u.v[1] == 2, "forwarded: {u.n} {len(u.v)}");
+  w = [S { n: 5, v: [] }];
+  writes(w[0]);
+  assert(w[0].n == 7 && len(w[0].v) == 2, "an element: {w[0].n}");
+}
+
+fn test_a_copied_scalar_pointee() {
+  x = 3;
+  assert(scalar(x) == 16 && x == 10, "a scalar: {x}");
+}

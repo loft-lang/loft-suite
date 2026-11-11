@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-TailSelf` crossed with `@FR-F-ParamHeap` and `@FR-F-Rec`.  A self-call in tail position
+// reuses the frame — a jump, bounded by nothing — and a heap parameter the jump rebinds to
+// itself or to a projection of a parameter is the caller's store all along (F-ParamHeap), so
+// every write the recursion makes through it reaches the caller; a self-call that is an
+// operand, or whose value is bound to a local before it is returned, is an ordinary call with a
+// frame of its own (F-Rec).  So: a void tail recursion appending to a vector parameter and one
+// writing a record parameter's fields; a tail recursion 200000 deep; a list walked by tail
+// calls on `p.next`; and the non-tail twins, which answer the same values at depths a stack
+// holds.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Acc { n: integer, total: integer, log: vector<integer> }
+struct L { v: integer, next: L? }
+
+fn fill(v: vector<integer>, n: integer) {
+  if n == 0 { return; }
+  v += [n];
+  fill(v, n - 1)
+}
+
+fn tally(a: Acc, k: integer) {
+  if k == 0 { return; }
+  a.n += 1;
+  a.total += k;
+  a.log += [k % 10];
+  tally(a, k - 1)
+}
+
+fn sumto(acc: integer, n: integer) -> integer {
+  if n == 0 { return acc; }
+  sumto(acc + n, n - 1)
+}
+
+fn sumto_bound(acc: integer, n: integer) -> integer {
+  if n == 0 { return acc; }
+  r = sumto_bound(acc + n, n - 1);
+  r
+}
+
+fn sumto_operand(n: integer) -> integer {
+  if n == 0 { return 0; }
+  n + sumto_operand(n - 1)
+}
+
+fn walk(p: L?, acc: integer) -> integer {
+  if p == null { return acc; }
+  walk(p.next, acc * 10 + p.v)
+}
+
+fn test_writes_through_a_heap_parameter_reach_the_caller() {
+  v: vector<integer> = [];
+  fill(v, 5);
+  assert(len(v) == 5 && v[0] == 5 && v[4] == 1, "fill: {len(v)}");
+  a = Acc { n: 0, total: 0, log: [] };
+  tally(a, 12);
+  assert(a.n == 12 && a.total == 78 && len(a.log) == 12 && a.log[0] == 2 && a.log[11] == 1, "tally: {a.n} {a.total}");
+}
+
+fn test_a_jump_and_its_ordinary_twins() {
+  assert(sumto(0, 200000) == 20000100000, "200000 deep: {sumto(0, 200000)}");
+  assert(sumto_bound(0, 1000) == 500500 && sumto_operand(1000) == 500500, "the calls: {sumto_bound(0, 1000)}");
+  l = L { v: 1, next: L { v: 2, next: L { v: 3 } } };
+  assert(walk(l, 0) == 123 && l.next.v == 2, "a walk on p.next: {walk(l, 0)}");
+}

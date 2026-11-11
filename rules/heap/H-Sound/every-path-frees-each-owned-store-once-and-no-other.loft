@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Sound` crossed with `@FR-O-Derived`, `@FR-O-Complete`, `@FR-H-FreeAll`,
+// `@FR-H-FreeTwice` and `@FR-H-FreeStack`: a program whose frees are derived (a local is freed iff
+// it owns its store and does not hand it out, once, at its scope's exit — never a view) and
+// complete (per binding, per path, every `if` / `match` arm its own fact) reaches no refused
+// free: no store freed twice, none of the stack's freed, no read of a freed store, and no store
+// left at exit.  The cell runs under strict stores, which turns each of those into a failure.
+// The shapes: a JOIN of a borrowed arm and an owned arm (the borrow path must free nothing), a
+// view hoisted out of a record literal, an early return on one path and a fresh value on the
+// other, a rebind in a loop, an arm-local binding, a record in a tuple, a `match` whose arms
+// own differently, and a value handed out through a return.
+//
+// CHANNEL: the assertions, strict stores (a store used after its free or never freed fails the
+// run) and the leak gate.
+// @ARMED: LOFT_STRICT_STORES=1
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct In { n: integer, t: text }
+struct Out { inner: In, xs: vector<integer> }
+
+fn mk(n: integer) -> In { In { n: n, t: "m{n}" } }
+fn pick(o: Out, c: boolean) -> integer {
+  x = if c { mk(o.inner.n * 2) } else { o.inner };
+  x.n + len(x.t)
+}
+fn early(o: Out, k: integer) -> In {
+  if k > 0 { return mk(k); }
+  o.inner
+}
+
+fn test_a_join_of_a_borrowed_and_an_owned_arm() {
+  o = Out { inner: In { n: 5, t: "five" }, xs: [1] };
+  a = pick(o, true);
+  b = pick(o, false);
+  assert(a == 10 + 3 && b == 5 + 4 && o.inner.t == "five", "{a} {b}");
+}
+
+fn test_a_view_out_of_a_literal_and_a_tuple() {
+  o = Out { inner: In { n: 1, t: "one" }, xs: [] };
+  w = Out { inner: o.inner, xs: [len(o.inner.t)] };
+  w.inner.n = 9;
+  tp = (mk(3), 4);
+  assert(w.inner.n == 9 && o.inner.n == 1 && w.xs[0] == 3 && tp.0.t == "m3" && tp.1 == 4, "{w.inner.n} {o.inner.n}");
+}
+
+fn test_paths_and_loops() {
+  o = Out { inner: In { n: 7, t: "seven" }, xs: [] };
+  s = "";
+  for k in 0..3 {
+    r = early(o, k);
+    s += "{r.n}{r.t},";
+  }
+  assert(s == "7seven,1m1,2m2,", "early: {s}");
+  cur = mk(0);
+  for i in 1..6 { cur = mk(cur.n + i); }
+  assert(cur.n == 15 && cur.t == "m15", "rebind: {cur.n}");
+  total = 0;
+  for i in 0..4 {
+    if i % 2 == 0 { arm = mk(i); total += arm.n; } else { arm = o.inner; total += arm.n; }
+  }
+  assert(total == 0 + 7 + 2 + 7, "arms: {total}");
+}
+
+fn test_a_match_whose_arms_own_differently() {
+  o = Out { inner: In { n: 4, t: "four" }, xs: [] };
+  s = 0;
+  for k in 0..3 {
+    v = match k { 0 => o.inner, 1 => mk(40), _ => In { n: 400, t: "lit" } };
+    s += v.n;
+  }
+  assert(s == 444 && o.inner.n == 4, "match: {s}");
+}

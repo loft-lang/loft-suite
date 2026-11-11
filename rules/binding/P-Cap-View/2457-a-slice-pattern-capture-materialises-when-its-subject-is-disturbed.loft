@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2457, `@FR-P-Cap-View` / `@FR-B-View` — A SLICE-PATTERN CAPTURE MATERIALISES WHEN ITS
+// SUBJECT IS DISTURBED IN THE ARM.
+//
+// A capture of a record element is a view, and a growth, a removal or a reassignment of the
+// subject while it is live copies it out at its bind: a growth, a removal, the subject
+// reassigned, a field subject, two captures, a tail capture across twenty growths and an integer
+// capture.  An undisturbed capture stays a view, so a write through it reaches the element.
+//
+// @falsified-at: loft main dbf8b05ae — c1 "0 a" for "1 a" (and c2 26 for 15); both backends.
+// CHANNEL: the assertions and the leak gate.
+
+struct Pt { x: integer, nm: text }
+struct Q { x: integer, y: integer }
+struct O { items: vector<Q> }
+fn main() {
+  v = [Pt { x: 1, nm: "a" }, Pt { x: 2, nm: "bb" }];
+  a = "";
+  match v { [first, ..] => { v += [Pt { x: 9, nm: "z" }]; a = "{first.x} {first.nm}"; }, _ => {} }
+  assert(a == "1 a" && len(v) == 3, "c1 {a}");
+  u = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  b = 0;
+  match u { [first, ..] => { u.remove(0); b = first.x * 10 + first.y; }, _ => {} }
+  assert(b == 15 && len(u) == 1 && u[0].x == 2, "c2 {b}");
+  w = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  match w { [first, ..] => { first.x = 99; }, _ => {} }
+  assert(w[0].x == 99, "c3 the capture is a view {w[0].x}");
+  r = [Q { x: 1, y: 5 }];
+  c = 0;
+  match r { [first, ..] => { r = [Q { x: 7, y: 7 }]; c = first.x * 10 + first.y; }, _ => {} }
+  assert(c == 15 && r[0].x == 7, "c4 {c}");
+  o = O { items: [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }] };
+  d = 0;
+  match o.items { [first, ..] => { o.items.remove(0); d = first.x * 10 + first.y; }, _ => {} }
+  assert(d == 15, "c5 {d}");
+  t = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }, Q { x: 3, y: 7 }];
+  e = "";
+  match t { [p, q, ..] => { t.remove(0); e = "{p.x * 10 + p.y} {q.x * 10 + q.y}"; }, _ => {} }
+  assert(e == "15 26", "c6 {e}");
+  g = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  f = 0;
+  match g { [.., last] => { for k in 0..20 { g += [Q { x: k, y: k }]; } f = last.x * 10 + last.y; }, _ => {} }
+  assert(f == 26 && len(g) == 22, "c7 {f}");
+  n = [1, 2, 3];
+  h = 0;
+  match n { [x, ..] => { n.remove(0); h = x; }, _ => {} }
+  assert(h == 1 && len(n) == 2, "c8 {h}");
+  println("capture ok");
+}

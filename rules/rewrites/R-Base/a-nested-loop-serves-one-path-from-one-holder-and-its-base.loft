@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Base` crossed with `@FR-R-State`: a loop's hoist state holds AT MOST ONE holder per
+// vector path per frame, a nested loop re-uses the enclosing frame's holder for the same path,
+// and the element base beside a header is valid exactly while no store's buffer is
+// reallocated — so an inner growth-free loop may serve its reads from a header an enclosing
+// GROWING loop holds, for the inner extent alone, where the growth is of a store apart from the
+// read one.  The answers: an outer loop that pushes into a fresh local while its inner loop
+// reads a parameter; an outer loop that grows the very vector its inner loop reads (the base
+// must be derived again each pass); a link to the held path read in the inner loop; and the
+// same path read in two sibling inner loops of one pass.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct H { cells: vector<integer> }
+
+fn digits(v: vector<integer>) -> integer { s = 0; for x in v { s = s * 100 + x; } s }
+
+fn apart(v: vector<integer>, n: integer) -> integer {
+  out: vector<integer> = [];
+  for r in 0..n {
+    s = 0;
+    for j in 0..len(v) { s += (v[j] ?? 0) * (r + 1); }
+    out += [s];
+  }
+  digits(out)
+}
+
+fn grows_itself(v: vector<integer>, n: integer) -> integer {
+  for r in 0..n {
+    s = 0;
+    for j in 0..len(v) { s += v[j] ?? 0; }
+    v += [s];
+  }
+  digits(v)
+}
+
+fn through_a_link(h: H, n: integer) -> integer {
+  out: vector<integer> = [];
+  for r in 0..n {
+    d = &h.cells;
+    s = 0;
+    for j in 0..len(d) { s += (d[j] ?? 0) + r; }
+    out += [s];
+  }
+  digits(out)
+}
+
+fn siblings(v: vector<integer>, n: integer) -> integer {
+  out: vector<integer> = [];
+  for r in 0..n {
+    a = 0;
+    for j in 0..len(v) { a += v[j] ?? 0; }
+    b = 0;
+    for j in 0..len(v) { b += (v[j] ?? 0) * r; }
+    out += [a + b];
+  }
+  digits(out)
+}
+
+fn test_an_inner_loop_under_a_growing_outer_one() {
+  assert(apart([1, 2, 3], 3) == 61218, "apart: {apart([1, 2, 3], 3)}");
+  v = [1, 2];
+  assert(grows_itself(v, 3) == 102030612 && len(v) == 5, "grows itself: {len(v)}");
+}
+
+fn test_a_link_and_sibling_loops_over_one_path() {
+  h = H { cells: [4, 5] };
+  assert(through_a_link(h, 3) == 91113, "a link: {through_a_link(H { cells: [4, 5] }, 3)}");
+  assert(siblings([1, 2, 3], 3) == 61218, "siblings: {siblings([1, 2, 3], 3)}");
+}

@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Package` crossed with `@FR-F-Surface`: a file beside a `#package` library reads every
+// item it declares — a function, a record type and its fields, a builder — as if it were
+// `pub`, by the glob import and by the qualifier alike; and a library beside it that
+// `pub use`s the package passes on its surface (`relay::outer`) while reading the rest for
+// itself.  The refusals across the directory boundary, and through the relay, are
+// `../F-Surface/a-package-share-reaches-no-sibling-directory-and-no-pub-use-refused.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+use f_package_core_lib::*;
+use f_package_relay_lib;
+
+fn test_the_directory_reads_the_package_as_pub() {
+  b = mkbox(3);
+  c = Box { k: 5 };
+  s = "{inner()} {outer()} {b.k} {c.k} {f_package_core_lib::inner()}";
+  assert(s == "41 42 6 5 41", "beside the package: {s}");
+  assert(f_package_relay_lib::outer() == 42 && f_package_relay_lib::relay() == 412, "through the relay");
+}
+
+fn main() { test_the_directory_reads_the_package_as_pub(); }

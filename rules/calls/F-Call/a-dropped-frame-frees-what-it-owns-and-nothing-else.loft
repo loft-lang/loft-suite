@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Call` crossed with `@FR-H-Free`: a call's frame is dropped at its return and its OWNED
+// locals are freed (H-Free) — and only those: a free of a pinned store (a file-scope constant
+// the body read or bound) is a no-op, the store a parameter names is the caller's, and the
+// value the body returns leaves the frame with the caller.  Each callee is called hundreds of
+// times; the caller reads its arguments and the constant after every call and the returned
+// values after the loop, and the leak gate counts what is left.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+TABLE = [3, 1, 4, 1, 5];
+
+struct Box { n: integer, tags: vector<integer>, name: text }
+
+fn locals_only(k: integer) -> integer {
+  v: vector<integer> = [];
+  for i in 0..k { v += [i]; }
+  b = Box { n: k, tags: v, name: "b{k}" };
+  t = TABLE;
+  len(b.tags) + len(b.name) + t[k % 5]
+}
+
+fn returns_one(k: integer) -> Box {
+  keep = Box { n: k, tags: [k, k + 1], name: "keep" };
+  drop = Box { n: -k, tags: [0], name: "drop" };
+  if drop.n > 0 { return drop; }
+  keep
+}
+
+fn reads_param(b: Box) -> integer {
+  w = b.tags;
+  w += [99];
+  len(w) + b.n
+}
+
+fn test_owned_locals_and_a_pinned_store() {
+  s = 0;
+  for i in 0..400 { s += locals_only(i % 9); }
+  assert(s == 3411 && TABLE[2] == 4 && len(TABLE) == 5, "locals: {s}");
+}
+
+fn test_a_returned_value_and_a_parameters_store() {
+  out: vector<Box> = [];
+  for i in 1..200 { out += [returns_one(i)]; }
+  assert(len(out) == 199 && out[0].n == 1 && out[198].tags[1] == 200 && out[5].name == "keep", "returned: {len(out)}");
+  b = Box { n: 7, tags: [1, 2], name: "p" };
+  t = 0;
+  for _ in 0..300 { t += reads_param(b); }
+  assert(t == 3000 && len(b.tags) == 2 && b.name == "p", "a parameter's store: {t} {len(b.tags)}");
+}

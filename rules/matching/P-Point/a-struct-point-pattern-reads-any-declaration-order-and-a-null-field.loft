@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2463 — `@FR-P-Point` × `@FR-M-Variant` × `@FR-M-Unit`: a struct / variant field may
+// itself be a point pattern "whether the field holds its record inline or points at it", and
+// nothing in the rule depends on where the field's type is declared or on the field being `S?`.
+// A null `S?` field holds no record, so `S { … }` over it FAILS (the arm is refutable).
+//
+// Values by hand: each assert names its answer.
+//
+// Axes this file MOVES: the declaration order (the field's type below its holder · below the
+// function · above both), the position (variant field · struct field · reference field · tuple
+// member · slice head · slice tail), the field's nullability (dense · inline `S?` · `reference<S>?`
+// · `vector<S?>` element, present and null), the sub-pattern (literal · binder · `_` · unit
+// variant · or-pattern · struct-enum variant).  HOLDS FIXED: integer leaves, one level of nesting.
+//
+// @falsified-at: main dbf8b05ae — interpret and native-c: "Expect token }" at `Pt { x: 0, y }`
+//   (and at every `S?` field / element struct pattern); without the binder forms, a refused
+//   free of the stack store (#306) and a C-backend refusal ("a reference expected, a Int found").
+// CHANNEL: exit (the parse error) on both backends, then the asserts.
+// HOLDS: every assert and the leak gate on both backends.
+
+enum Sh { Seg { a: Pt, b: Pt }, Empty }
+enum Ev { Hit { at: Pt?, n: integer }, Miss }
+struct Box2 { lo: Pt, hi: Pt, k: Kind, s: Shape, o: Pt? }
+struct Link { to: reference<Pt>, c: Kind }
+struct Opt { to: reference<Pt>?, n: integer }
+fn early(v: vector<Q>) -> text { match v { [Q { a: 1, k: Red }, ..rest] => "q {len(rest)}", [Q { a, k: Green }] => "g {a}", _ => "nq" } }
+fn early_null(v: vector<Q?>) -> text { match v { [Q { a, k: _ }, ..] => "n {a}", _ => "nn" } }
+struct Pt { x: integer, y: integer }
+enum Kind { Red, Green, Blue }
+enum Shape { Circle { r: integer }, Square { side: integer } }
+struct Q { a: integer, k: Kind }
+struct Holder { pts: vector<Pt> }
+
+fn seg(s: Sh) -> text {
+  match s {
+    Seg { a: Pt { x: ax, y: 0 }, b } => "lit-y x{ax} to {b.x}",
+    Seg { a: Pt { x: 0, y }, b: Pt { x: bx, y: by } } => "lit-x y{y} to {bx},{by}",
+    _ => "other"
+  }
+}
+fn bx(b: Box2) -> text {
+  match b {
+    Box2 { lo: Pt { x: 0, y: 0 }, k: Red | Green, s: Circle { r } } => "origin r{r}",
+    Box2 { hi: Pt { x, y: 9 }, k: Blue, s: Square { side } } => "hi x{x} side{side}",
+    Box2 { o: Pt { x: 7, y } } => "o y{y}",
+    _ => "none"
+  }
+}
+fn linked(l: Link) -> text {
+  match l { Link { to: Pt { x: 1, y }, c: Red } => "one {y}", Link { to: Pt { x, y: 2 } } => "y2 {x}", _ => "?" }
+}
+fn opt(l: Opt) -> text { match l { Opt { to: Pt { x, y } } => "pt {x} {y}", _ => "none" } }
+fn ev(e: Ev) -> text {
+  match e { Hit { at: Pt { x: 3, y } } => "hit3 {y}", Hit { at: Pt { x, y: _ } } => "hit {x}", Hit { n } => "bare {n}", Miss => "miss" }
+}
+fn tup(t: (Pt?, integer)) -> text { match t { (Pt { x, y: 1 }, k) => "t {x} {k}", (_, k) => "none {k}" } }
+fn sl(v: vector<Pt?>) -> text { match v { [Pt { x, y: 2 }, ..] => "s {x}", [_, Pt { x: 9, y }] => "t {y}", _ => "no" } }
+
+fn main() {
+  assert(seg(Seg { a: Pt { x: 2, y: 0 }, b: Pt { x: 3, y: 4 } }) == "lit-y x2 to 3", "a literal beside a binder");
+  assert(seg(Seg { a: Pt { x: 0, y: 6 }, b: Pt { x: 5, y: 8 } }) == "lit-x y6 to 5,8", "a bare binder");
+  assert(seg(Seg { a: Pt { x: 1, y: 1 }, b: Pt { x: 5, y: 8 } }) == "other", "no arm");
+  assert(seg(Empty) == "other", "the other variant");
+  assert(bx(Box2 { lo: Pt { x: 0, y: 0 }, hi: Pt { x: 1, y: 1 }, k: Green, s: Circle { r: 4 } }) == "origin r4", "or-pattern + variant");
+  assert(bx(Box2 { lo: Pt { x: 0, y: 1 }, hi: Pt { x: 3, y: 9 }, k: Blue, s: Square { side: 6 } }) == "hi x3 side6", "second arm");
+  assert(bx(Box2 { lo: Pt { x: 0, y: 1 }, hi: Pt { x: 3, y: 8 }, k: Blue, s: Square { side: 6 }, o: Pt { x: 7, y: 5 } }) == "o y5", "an S? field present");
+  assert(bx(Box2 { lo: Pt { x: 0, y: 0 }, hi: Pt { x: 3, y: 8 }, k: Blue, s: Circle { r: 2 } }) == "none", "an S? field null fails");
+  h = Holder { pts: [Pt { x: 1, y: 9 }, Pt { x: 5, y: 2 }, Pt { x: 4, y: 4 }] };
+  assert(linked(Link { to: h.pts[0], c: Red }) == "one 9", "reference + unit variant");
+  assert(linked(Link { to: h.pts[1], c: Blue }) == "y2 5", "reference, second arm");
+  assert(linked(Link { to: h.pts[2], c: Red }) == "?", "reference, no arm");
+  assert(opt(Opt { to: h.pts[0], n: 1 }) == "pt 1 9", "a reference<S>? present");
+  assert(opt(Opt { n: 2 }) == "none", "a reference<S>? null fails");
+  assert(ev(Hit { at: Pt { x: 3, y: 8 }, n: 1 }) == "hit3 8", "variant S? field, literal");
+  assert(ev(Hit { at: Pt { x: 4, y: 8 }, n: 1 }) == "hit 4", "variant S? field, binders");
+  assert(ev(Hit { n: 5 }) == "bare 5", "variant S? field null falls through");
+  assert(ev(Miss) == "miss", "unit variant");
+  a: Pt? = Pt { x: 6, y: 1 };
+  b: Pt? = null;
+  assert(tup((a, 2)) == "t 6 2", "tuple S? member present");
+  assert(tup((b, 3)) == "none 3", "tuple S? member null");
+  assert(sl([Pt { x: 7, y: 2 }]) == "s 7", "vector<S?> head");
+  assert(sl([null, Pt { x: 7, y: 2 }]) == "no", "a null head fails");
+  assert(sl([null, Pt { x: 9, y: 4 }]) == "t 4", "vector<S?> tail");
+  assert(sl([null]) == "no", "a lone null");
+  assert(early([Q { a: 1, k: Red }, Q { a: 3, k: Red }]) == "q 1", "a struct declared below the function");
+  assert(early([Q { a: 4, k: Green }]) == "g 4", "below the function, binder");
+  assert(early([]) == "nq", "empty");
+  assert(early_null([Q { a: 6, k: Red }]) == "n 6", "vector<S?> declared below the function");
+  assert(early_null([null]) == "nn", "its null fails");
+  println("struct point patterns ok");
+}

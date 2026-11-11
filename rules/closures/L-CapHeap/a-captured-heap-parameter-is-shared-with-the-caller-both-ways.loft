@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapHeap` crossed with `@FR-F-ParamHeap`: a heap PARAMETER shares its caller's store
+// (F-ParamHeap), and capturing a heap value SHARES it (L-CapHeap) — so a closure that captures
+// a struct or vector parameter shares the caller's record: a write through the parameter after
+// the capture is seen inside the closure, a write the closure makes is seen by the caller, and
+// both hold for a record parameter, a vector parameter and an element handed as the argument,
+// straight and per pass of a loop.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, v: vector<integer> }
+
+fn after_capture(p: S) -> integer { g = fn() -> integer { p.n * 10 + len(p.v) }; p.n = 5; p.v += [1]; g() }
+fn from_inside(p: S) { h = fn() { p.n += 100; p.v += [7]; }; h(); h(); }
+fn a_vector(v: vector<integer>) -> integer { g = fn() -> integer { len(v) * 100 + v[0] ?? -1 }; v[0] = 9; v += [3, 3]; g() }
+fn per_pass(p: S, k: integer) -> integer {
+  t = 0;
+  for i in 0..k { g = fn() -> integer { p.n + i }; p.n += 10; t = t * 100 + g(); }
+  t
+}
+
+fn test_a_record_parameter() {
+  s = S { n: 1, v: [] };
+  assert(after_capture(s) == 51 && s.n == 5 && len(s.v) == 1, "after the capture: {s.n}");
+  from_inside(s);
+  assert(s.n == 205 && len(s.v) == 3 && s.v[2] == 7, "from inside: {s.n} {len(s.v)}");
+}
+
+fn test_a_vector_parameter_and_an_element() {
+  v = [1, 2];
+  assert(a_vector(v) == 409 && len(v) == 4 && v[0] == 9, "a vector: {len(v)}");
+  w = [S { n: 0, v: [] }, S { n: 3, v: [2] }];
+  assert(after_capture(w[1]) == 52 && w[1].n == 5 && len(w[1].v) == 2 && w[0].n == 0, "an element: {w[1].n}");
+  assert(per_pass(w[0], 3) == 102132 && w[0].n == 30, "per pass: {w[0].n}");
+}

@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Reshape` crossed with `@FR-B-Ref-Alias` — the legal half of
+// `a-link-and-a-plain-parameter-refuse-a-disturbance-a-view-would-survive-refused.loft`.
+// LIVENESS is the condition, not existence: a `&` link whose last use precedes the
+// disturbance compiles, and its writes reached the container; and the PLAIN bind of the same place as the refused link materialises (B-View),
+// reading the value it had at the bind.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, t: text }
+struct W { tag: integer, a: vector<S> }
+
+
+fn test_a_link_dead_at_the_growth() {
+  w = W { tag: 0, a: [S { n: 1, t: "a" }, S { n: 2, t: "bb" }] };
+  c = &w.a[1];
+  c.n = 20;
+  c.t += "!";
+  w.a += [S { n: 3, t: "c" }];
+  assert(len(w.a) == 3 && w.a[1].n == 20 && w.a[1].t == "bb!" && w.a[2].n == 3,
+         "the link's writes, then the growth: {len(w.a)} {w.a[1].n} {w.a[1].t}");
+}
+
+
+fn test_the_plain_bind_materialises() {
+  w = W { tag: 0, a: [S { n: 1, t: "a" }, S { n: 2, t: "bb" }] };
+  c = w.a[1];
+  w.a += [S { n: 3, t: "c" }];
+  c.n += 5;
+  assert(c.n == 7 && c.t == "bb" && w.a[1].n == 2 && len(w.a) == 3,
+         "the copy taken at the bind: {c.n} {w.a[1].n} {len(w.a)}");
+  v = [S { n: 1, t: "a" }, S { n: 2, t: "b" }, S { n: 3, t: "c" }];
+  d = v[2];
+  s = 0;
+  for _ in 0..2 { v.remove(0); s += d.n; }
+  assert(s == 6 && len(v) == 1 && v[0].n == 3, "a materialised view across removals in a loop: {s}");
+}

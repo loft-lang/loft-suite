@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Reshape` crossed with `@FR-B-Ref-Alias` (and calls.md F-ParamHeap): a `&` projection is
+// a LINK that never materialises (B-Ref-Alias), so a disturbance of its container while it is
+// live is refused where the plain bind of the same place would materialise; and a plain
+// struct PARAMETER aliases its caller's element exactly as a `&` one does (F-ParamHeap), so a
+// call handed an element and the container it is in, whose body disturbs that container
+// while the element parameter is still live — directly or one call further down — is refused
+// the same way.  The legal half (the link dead at the disturbance, and the
+// plain bind materialising) is
+// `a-link-and-a-plain-parameter-dead-at-the-disturbance-compile.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code; each refusal was also checked alone
+//   (a later `@EXPECT_ERROR` can be credited without matching, loft#1261).
+
+struct S { n: integer, t: text }
+struct W { tag: integer, a: vector<S> }
+
+fn take_first(w: W) { w.a.remove(0); }
+fn read_after_remove(e: S, w: W) -> integer { w.a.remove(0); e.n }
+fn read_after_deep_remove(e: S, w: W) -> integer { take_first(w); e.n }
+fn read_after_local_grow(e: S, v: vector<S>) -> integer { v += [S { n: 9, t: "z" }]; e.n }
+
+// @EXPECT_ERROR: cannot grow `w` while `c` references a place inside it
+fn l1_a_record_link_across_a_field_append() -> integer {
+  w = W { tag: 0, a: [S { n: 1, t: "a" }, S { n: 2, t: "b" }] };
+  c = &w.a[1];
+  w.a += [S { n: 3, t: "c" }];
+  c.n
+}
+
+// @EXPECT_ERROR: cannot remove from `v` while `c` references a place inside it
+fn l2_a_record_link_across_a_removal_in_a_loop() -> integer {
+  v = [S { n: 1, t: "a" }, S { n: 2, t: "b" }, S { n: 3, t: "c" }];
+  c = &v[2];
+  s = 0;
+  for _ in 0..2 { v.remove(0); s += c.n; }
+  s
+}
+
+// @EXPECT_ERROR: cannot pass both `w` and a reference into it to `read_after_remove`
+fn p1_a_parameter_live_across_its_callers_removal() -> integer {
+  w = W { tag: 0, a: [S { n: 1, t: "a" }, S { n: 2, t: "b" }] };
+  read_after_remove(w.a[1], w)
+}
+
+// @EXPECT_ERROR: cannot pass both `w` and a reference into it to `read_after_deep_remove`
+fn p2_a_parameter_live_across_a_removal_two_calls_down() -> integer {
+  w = W { tag: 0, a: [S { n: 1, t: "a" }, S { n: 2, t: "b" }] };
+  read_after_deep_remove(w.a[1], w)
+}
+
+// @EXPECT_ERROR: cannot pass both `v` and a reference into it to `read_after_local_grow`
+fn p3_a_parameter_live_across_a_growth_of_a_local_vector() -> integer {
+  v = [S { n: 1, t: "a" }];
+  read_after_local_grow(v[0], v)
+}

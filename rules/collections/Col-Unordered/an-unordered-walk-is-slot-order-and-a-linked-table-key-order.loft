@@ -1,0 +1,96 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Unordered` crossed with `@FR-Col-Order`: `for x in unordered(h)` visits every entry
+// of a hash once, in SLOT order, where the ordered walk visits them in key order; a sorted and
+// a vector keep their Col-Order order under `unordered`.  Slot order is fixed by the inserts and
+// removes alone: an INLINE table (Col-Inline: E is named by no `reference<E>`) walks in
+// insertion sequence, a removal leaving its tombstone.  A LINKED type's table (G here, which a
+// `reference<G>` field makes linked) holds store records, whose numbers follow the allocator,
+// so it walks in KEY order.  Two tables built alike walk alike, and so does a copy.
+//
+// Hand-computed: inserts c(30) a(10) b(20) → ordered abc, inline slots cab.  Remove a, insert
+// z(5): ordered zbc; inline slots cbz (z takes sequence 4); the linked table walks zbc both ways.
+// Linked, then remove c and b, insert p(1) q(2) r(3): key order p q r z both ways.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct E { k: integer, v: text }
+struct G { k: integer, v: text }
+struct Holder { r: reference<G>? }
+
+fn walks(h: hash<E[k]>) -> text {
+  s = "";
+  for e in h { s += e.v; }
+  t = "";
+  for e in unordered(h) { t += e.v; }
+  "{s} {t}"
+}
+
+fn gwalks(h: hash<G[k]>) -> text {
+  s = "";
+  for e in h { s += e.v; }
+  t = "";
+  for e in unordered(h) { t += e.v; }
+  "{s} {t}"
+}
+
+fn test_an_inline_table() {
+  h: hash<E[k]> = [E { k: 30, v: "c" }, E { k: 10, v: "a" }, E { k: 20, v: "b" }];
+  assert(walks(h) == "abc cab", walks(h));
+  h[10] = null;
+  h += [E { k: 5, v: "z" }];
+  assert(walks(h) == "zbc cbz" && len(h) == 3, walks(h));
+  g: hash<E[k]> = [E { k: 30, v: "c" }, E { k: 10, v: "a" }, E { k: 20, v: "b" }];
+  g[10] = null;
+  g += [E { k: 5, v: "z" }];
+  assert(walks(g) == walks(h), "built alike: {walks(g)}");
+  c = h;
+  assert(walks(c) == "zbc cbz", "a copy: {walks(c)}");
+}
+
+fn test_a_linked_table_walks_in_key_order() {
+  h: hash<G[k]> = [G { k: 30, v: "c" }, G { k: 10, v: "a" }, G { k: 20, v: "b" }];
+  assert(gwalks(h) == "abc abc", gwalks(h));
+  h[10] = null;
+  h += [G { k: 5, v: "z" }];
+  assert(gwalks(h) == "zbc zbc", gwalks(h));
+  h[30] = null;
+  h[20] = null;
+  h += [G { k: 1, v: "p" }, G { k: 2, v: "q" }, G { k: 3, v: "r" }];
+  assert(gwalks(h) == "pqrz pqrz" && len(h) == 4, gwalks(h));
+  hold = Holder { };
+  assert(hold.r == null, "the reference field");
+}
+
+fn walk_n(n: integer) -> text {
+  h: hash<G[k]> = [];
+  for i in 0..n { h += [G { k: i * 7, v: "{i}," }]; }
+  t = "";
+  for e in unordered(h) { t += e.v; }
+  t
+}
+
+fn test_a_linked_table_past_eight_inserts() {
+  // the keys rise with the inserts, so key order is the insertion order
+  for n in [9, 10, 30] {
+    want = "";
+    for i in 0..n { want += "{i},"; }
+    assert(walk_n(n) == want, "{n} inserts: {walk_n(n)}");
+  }
+}
+
+fn test_other_kinds_keep_their_order() {
+  so: sorted<E[k]> = [E { k: 3, v: "x" }, E { k: 1, v: "y" }, E { k: 2, v: "w" }];
+  s = "";
+  for e in so { s += e.v; }
+  t = "";
+  for e in unordered(so) { t += e.v; }
+  assert(s == "ywx" && t == s, "sorted: {s} {t}");
+  v = [3, 1, 2];
+  u = "";
+  for e in unordered(v) { u += "{e}"; }
+  assert(u == "312", "vector: {u}");
+}

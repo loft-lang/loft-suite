@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE RELAY FIXTURE (`@FR-F-Package`, `@FR-F-Surface`): a library in the `#package` library's
+// own directory that `pub use`s it.  It reads the package's unpublished items as `pub` for its
+// own use, and its `pub use` passes on only what the package publishes.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions.
+pub use f_package_core_lib::*;
+
+pub fn relay() -> integer { inner() * 10 + mkbox(1).k }
+
+fn test_the_relay_reads_the_package() {
+  assert(relay() == 412 && outer() == 42, "relay: {relay()}");
+}

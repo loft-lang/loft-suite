@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-ParamText` crossed with `@FR-R-TextBorrow`: a `text` parameter is bound to the argument's
+// VALUE at the call, and reading the argument as a borrow of the store it lives in is admitted
+// only where nothing the call runs can write a store (R-TextBorrow's operand clause).  So a
+// field text handed to a callee that only reads it answers the field; one handed to a callee
+// that appends to that very field, grows the vector the text lives in, or removes its element —
+// directly, one call down, or through a closure — keeps the value it was handed; a `for` walk
+// over a `vector<text>`, and a walk of record text fields, that hand each text to a reading
+// callee borrow it and answer each element; and a walk whose callee writes the walked vector's
+// next element hands that callee the element's value as it stands when the call is made.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct R { name: text, k: integer }
+struct W { name: text, rs: vector<R>, names: vector<text> }
+
+fn reads(t: text) -> integer { len(t) * 10 + 1 }
+fn appends(t: text, w: W) -> text { w.name += "!"; "{t}|{w.name}" }
+fn grows(w: W, t: text) -> text { for i in 0..20 { w.rs += [R { name: "n{i}", k: i }]; } "{t}|{len(w.rs)}" }
+fn removes(w: W, t: text) -> text { w.rs.remove(0); w.rs[0].name = "zz"; "{t}|{w.rs[0].name}" }
+fn deep(t: text, w: W) -> text { r = removes(w, "x"); "{t}|{r}" }
+fn by_closure(t: text, w: W) -> text { f = fn() { w.name = "replaced"; }; f(); "{t}|{w.name}" }
+
+fn mk() -> W { W { name: "ab", rs: [R { name: "first", k: 1 }, R { name: "second", k: 2 }], names: ["a", "bcd", "ef"] } }
+
+fn walk(names: vector<text>) -> integer { t = 0; for p in names { t = t * 100 + reads(p); } t }
+fn field_walk(w: W) -> integer { t = 0; for i in 0..len(w.rs) { n = w.rs[i]?.name; t = t * 100 + reads(n); } t }
+fn rename(t: text, w: W) -> text { w.names[1] = "QQ"; w.rs[0].name = "q"; "{t}{len(w.names[1])}" }
+fn walk_writes(w: W) -> text { out = ""; for p in w.names { out += rename(p, w) + ","; } out }
+
+fn test_a_reading_callee() {
+  w = mk();
+  assert(reads(w.name) == 21 && reads(w.rs[1].name) == 61, "reads: {reads(w.name)}");
+  assert(walk(w.names) == 113121 && field_walk(w) == 5161, "walks: {walk(w.names)} {field_walk(w)}");
+}
+
+fn test_a_writing_callee_keeps_the_value_it_was_handed() {
+  w = mk();
+  assert(appends(w.name, w) == "ab|ab!", "the field appended: {appends(w.name, mk())}");
+  v = mk();
+  assert(grows(v, v.rs[0].name) == "first|22", "the vector grown: {len(v.rs)}");
+  u = mk();
+  assert(removes(u, u.rs[0].name) == "first|zz" && len(u.rs) == 1, "the element removed");
+  d = mk();
+  assert(deep(d.rs[0].name, d) == "first|x|zz", "one call down: {d.rs[0].name}");
+  e = mk();
+  assert(walk_writes(e) == "a2,QQ2,ef2," && e.rs[0].name == "q", "a walk whose callee writes: {walk_writes(mk())}");
+  c = mk();
+  assert(by_closure(c.name, c) == "ab|replaced" && c.name == "replaced", "through a closure");
+}

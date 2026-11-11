@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Apart` crossed with `@FR-H-Index` and `@FR-H-WriteOOB`: a value held apart from the store
+// — a `vector<float>` local, a record of fixed-length float vectors — answers every use as the
+// store path does, faults included.  A read: `v[i]` in range, a NEGATIVE index counting from the
+// end (`v[-1]` the last, `v[-len]` the first), and an index past either end reading null.  A
+// write: one in range lands, a negative one in [-len, -1] lands from the end, and one out of range
+// is a no-op that continues, the length unchanged.  Crossed with a loop of reads and writes, and a
+// field of a float-vector record.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct Pts { xs: vector<float>, ys: vector<float> }
+
+fn mkpts() -> Pts { Pts { xs: [1.0, 2.0, 3.0], ys: [4.0, 5.0, 6.0] } }
+
+fn test_reads() {
+  f: vector<float> = [];
+  for i in 0..5 { f += [i as float * 1.5]; }
+  assert(f[0] == 0.0 && f[4] == 6.0 && f[-1] == 6.0 && f[-5] == 0.0, "in range: {f}");
+  assert(f[5] == null && f[9] == null && f[-6] == null, "out of range reads null");
+}
+
+fn test_writes() {
+  f: vector<float> = [];
+  for i in 0..5 { f += [i as float]; }
+  f[1] = 10.0;
+  f[-1] = 20.0;
+  f[-5] = 30.0;
+  f[9] = 99.0;
+  f[-6] = 99.0;
+  assert(len(f) == 5 && f[0] == 30.0 && f[1] == 10.0 && f[4] == 20.0 && f[2] == 2.0, "{f}");
+}
+
+fn test_a_loop_and_a_record_field() {
+  f: vector<float> = [];
+  for i in 0..4 { f += [1.0]; }
+  s = 0.0;
+  for i in -4..6 { f[i] = i as float; s += f[i] ?? 100.0; }
+  // i = -4..-1 write f[0..3] = -4..-1 and read them back; i = 0..3 overwrite; i = 4, 5 miss
+  assert(s == (-4.0 - 3.0 - 2.0 - 1.0) + (0.0 + 1.0 + 2.0 + 3.0) + 200.0 && len(f) == 4, "{s} {f}");
+  p = mkpts();
+  p.xs[-1] = 9.0;
+  p.ys[3] = 9.0;
+  assert(p.xs[2] == 9.0 && p.ys[-1] == 6.0 && len(p.ys) == 3 && p.xs[-4] == null, "{p.xs} {p.ys}");
+}

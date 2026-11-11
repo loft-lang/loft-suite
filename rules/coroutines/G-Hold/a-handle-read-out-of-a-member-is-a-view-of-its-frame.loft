@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-G-Hold` crossed with `@FR-B-View`: a generator handle READ out of a member — a nested
+// struct field, a vector element, a `for` loop variable over a vector of handles — is a VIEW
+// (B-View): advancing it advances the member's generator, and the member keeps it.  Where the
+// container is disturbed while the view is live (a growth of the vector), B-View materialises
+// the binding — and for a handle the materialised value is another HOLDER of the same frame
+// (G-Hold: a frame may have several holders, each releasing its own hold once), so the local
+// and the element still advance one generator, and the frame is released once (leak gate).
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn patrol(id: integer, n: integer) -> iterator<integer> {
+  for s in 0..n { yield id * 100 + s; }
+}
+
+struct Task { g: iterator<integer>, id: integer }
+struct Outer { t: Task, k: integer }
+
+fn test_a_nested_field_view_advances_the_member() {
+  o = Outer { t: Task { g: patrol(1, 5), id: 7 }, k: 0 };
+  h = o.t.g;
+  a = next(h) ?? -1;
+  b = next(o.t.g) ?? -1;
+  c = next(h) ?? -1;
+  assert(a == 100 && b == 101 && c == 102 && (next(o.t.g) ?? -1) == 103, "one frame: {a} {b} {c}");
+}
+
+fn test_loop_variables_and_an_element_view() {
+  tasks = [patrol(2, 3), patrol(3, 3)];
+  s = "";
+  for g in tasks { s += "{next(g) ?? -1},"; }
+  for g in tasks { s += "{next(g) ?? -1},"; }
+  d = next(tasks[1]) ?? -1;
+  assert(s == "200,300,201,301," && d == 302 && (next(tasks[1]) ?? -1) == -1, "loop variables: {s} {d}");
+}
+
+fn test_an_element_view_across_a_growth() {
+  tasks = [patrol(2, 3), patrol(3, 3)];
+  e = tasks[0];
+  a = next(e) ?? -1;
+  tasks += [patrol(4, 2)];
+  b = next(e) ?? -1;
+  c = next(tasks[0]) ?? -1;
+  d = next(e) ?? -1;
+  assert(a == 200 && b == 201 && c == 202 && d == -1 && len(tasks) == 3 && (next(tasks[2]) ?? -1) == 400,
+         "a second holder of one frame: {a} {b} {c} {d}");
+}

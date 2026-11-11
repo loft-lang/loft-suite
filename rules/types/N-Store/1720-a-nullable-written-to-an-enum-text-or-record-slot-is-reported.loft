@@ -14,14 +14,16 @@
 //   * a FIELD or an ELEMENT written a nullable text, enum or record value was never asked: a
 //     scalar slot is asked at the typed store, and these three leave the assignment before it
 //     (text for `assign_text`, the others for `towards_set`'s copy).  A text or plain-enum
-//     slot then holds null; a dense record has no null to hold and keeps the value it had —
-//     the consequence loft#1404 wrote for a bare `null` there, now named in the warning.  A
+//     slot then holds null; a dense record or struct-enum slot has no null to hold and takes
+//     its type's default, as `?` gives it (@C163) — the warning names that.  A
 //     `reference<T>` POINTER field repoints and does hold null, so it says that instead.
 //   * `mc(i) ?? Shape::Square {…}` — the discharge the issue itself names as the cure — was
 //     refused: the result took the value's VARIANT type, and a sibling variant does not
 //     convert to it.  A sibling variant (or the enum) joins to the enum, as `if`/`else` joins.
 //
-// Every value is hand-computed.  `radius` answers a Circle's `r` and a Square's `-s`.
+// Every value is hand-computed.  `radius` answers a Circle's `r` and a Square's `-s`.  The
+// defaults: `P`'s is `P { a: 0 }`, `Shape`'s its first-declared variant `Circle { r: 0 }`, so
+// a null into `fresh()`'s `Square { s: 1 }` reads radius 0, where the kept value read -1.
 //
 // The ELEMENT cells are `1720b-…`: an expectation is matched file-wide, and theirs
 // would be met by the field cells' warnings here.
@@ -69,9 +71,9 @@ fn test_local_enum() { le: Shape = m(0); assert(le == null, "le null"); }
 
 // ── A FIELD written a nullable value ──────────────────────────────────────────
 
-// A dense record has no null to hold: the store does not happen.
-// @EXPECT_WARNING: a nullable `P?` is stored into the assignment target of the non-null type `P` — when it is null the store does not happen, so the slot keeps the value it had
-fn test_field_record() { h = fresh(); h.p = mp(0); assert(h.p.a == 1, "p {h.p.a}"); h.p = mp(4); assert(h.p.a == 4, "p4 {h.p.a}"); }
+// A dense record has no null to hold: the slot takes `P`'s default (@C163).
+// @EXPECT_WARNING: a nullable `P?` is stored into the assignment target of the non-null type `P` — when it is null the slot takes `P`'s default, as `?` gives it
+fn test_field_record() { h = fresh(); h.p = mp(0); assert(h.p.a == 0, "p {h.p.a}"); h.p = mp(4); assert(h.p.a == 4, "p4 {h.p.a}"); }
 
 // @EXPECT_WARNING: a nullable `text?` is stored into the assignment target of the non-null type `text` — it becomes null there
 fn test_field_text() { h = fresh(); h.t = mt(0); assert("{h.t}" == "null", "t {h.t}"); h.t = mt(2); assert(h.t == "x2", "t2 {h.t}"); }
@@ -79,11 +81,12 @@ fn test_field_text() { h = fresh(); h.t = mt(0); assert("{h.t}" == "null", "t {h
 // @EXPECT_WARNING: a nullable `Col?` is stored into the assignment target of the non-null type `Col` — it becomes null there
 fn test_field_plain_enum() { h = fresh(); h.c = mcol(0); assert("{h.c}" == "null", "c {h.c}"); h.c = mcol(1); assert(h.c == Col::Green, "c green"); }
 
-// @EXPECT_WARNING: a nullable `Shape?` is stored into the assignment target of the non-null type `Shape` — when it is null the store does not happen
-fn test_field_enum() { h = fresh(); h.s = m(0); assert(radius(h.s) == -1, "s {radius(h.s)}"); }
+// @EXPECT_WARNING: a nullable `Shape?` is stored into the assignment target of the non-null type `Shape` — when it is null the slot takes `Shape`'s default, as `?` gives it
+fn test_field_enum() { h = fresh(); h.s = m(0); assert(radius(h.s) == 0, "s {radius(h.s)}"); }
 
-// @EXPECT_WARNING: a nullable `Circle?` is stored into the assignment target of the non-null type `Shape` — when it is null the store does not happen
-fn test_field_variant() { h = fresh(); h.s = mc(0); assert(radius(h.s) == -1, "sv {radius(h.s)}"); h.s = mc(3); assert(radius(h.s) == 3, "sv3 {radius(h.s)}"); }
+// The default is the SLOT's: `Shape`'s first variant, whichever variant the value was typed as.
+// @EXPECT_WARNING: a nullable `Circle?` is stored into the assignment target of the non-null type `Shape` — when it is null the slot takes `Shape`'s default, as `?` gives it
+fn test_field_variant() { h = fresh(); h.s = mc(0); assert(radius(h.s) == 0, "sv {radius(h.s)}"); h.s = mc(3); assert(radius(h.s) == 3, "sv3 {radius(h.s)}"); }
 
 // A POINTER field repoints, so it does hold null.
 struct Nd { v: integer, next: reference<Nd> }

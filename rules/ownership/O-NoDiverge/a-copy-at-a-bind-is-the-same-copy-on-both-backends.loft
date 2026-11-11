@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-NoDiverge` crossed with `@FR-E-Op`: both backends read WHERE a bind copies from the
+// same `deps`, so a nullable record answered by a call or a fn-ref, reassigned, chosen by an
+// `if` of locals, or chosen by a `??` chain of locals is the same independent copy on both —
+// and every representable operation on the copy's fields (E-Op: `*`, `-`, `/`, `%`, `<<`,
+// text `+`) answers the same value while the source keeps its own.  The callee whose tail joins
+// two nullable FIELD views of its parameter is the case that fails (held back).
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct R { n: integer, t: text, v: vector<integer> }
+struct H { a: R?, b: R? }
+
+fn early(h: H, k: integer) -> R? { if k == 0 { return h.a; } h.b }
+fn tail_join(h: H, k: integer) -> R? { if k == 0 { h.a } else { h.b } }
+
+fn mk() -> H { H { a: R { n: 1, t: "a", v: [1, 2] }, b: R { n: 2, t: "b", v: [3] } } }
+
+fn test_a_call_and_a_reassignment() {
+  h = mk();
+  r = early(h, 0);
+  if r != null { r.n = 10 + r.n * 3; r.t += "!"; r.v += [9]; }
+  assert((h.a.n ?? -1) == 1 && (h.a.t ?? "-") == "a" && len(h.a.v ?? []) == 2, "the source");
+  assert((r.n ?? -1) == 13 && (r.t ?? "-") == "a!" && len(r.v ?? []) == 3, "the copy: {r.t ?? "-"}");
+  r = early(h, 1);
+  if r != null { r.n = r.n * 7 - 1; }
+  assert((h.b.n ?? -1) == 2 && (r.n ?? -1) == 13, "reassigned: {h.b.n ?? -1} {r.n ?? -1}");
+}
+
+fn test_a_fn_ref() {
+  h = mk();
+  f = early;
+  q = f(h, 1);
+  if q != null { q.n = q.n / 2 - 9; q.t = q.t + "q"; }
+  assert((h.b.n ?? -1) == 2 && (h.b.t ?? "-") == "b" && (q.n ?? 0) == -8 && (q.t ?? "-") == "bq", "fn-ref");
+}
+
+fn test_an_if_and_a_chain_of_locals() {
+  x: R? = R { n: 4, t: "x", v: [] };
+  y: R? = R { n: 5, t: "y", v: [5] };
+  c = true;
+  s = if c { x } else { y };
+  if s != null { s.n = (s.n + 4) % 3; }
+  assert((x.n ?? -1) == 4 && (s.n ?? -1) == 2, "if: {x.n ?? -1} {s.n ?? -1}");
+  nn: R? = null;
+  u = nn ?? y ?? x;
+  if u != null { u.n = u.n << 4; }
+  y = R { n: 6, t: "z", v: [] };
+  assert((u.n ?? -1) == 80 && (u.t ?? "-") == "y" && (y.n ?? -1) == 6, "chain: {u.n ?? -1}");
+}
+
+fn test_a_tail_join_of_two_field_views() {
+  h = mk();
+  r = tail_join(h, 0);
+  assert((r.t ?? "-") == "a" && len(r.v ?? []) == 2 && (r.n ?? -1) == 1, "the copy: {r.t ?? "-"} {len(r.v ?? [])}");
+  if r != null { r.t += "!"; }
+  assert((h.a.t ?? "-") == "a" && (r.t ?? "-") == "a!", "the source and the copy");
+}

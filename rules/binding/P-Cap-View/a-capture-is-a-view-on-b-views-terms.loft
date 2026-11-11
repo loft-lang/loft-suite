@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Cap-View` crossed with `@FR-B-View`: a structural capture of an interior place, and a
+// capture of the WHOLE subject at the arm root, is a view on B-View's terms — a write through
+// it reaches the subject, and where the subject is disturbed (a growth, a removal) while the
+// capture is live, the capture materialises: it reads the element as it was at the bind and
+// a write through it no longer reaches the subject.
+//
+// CHANNEL: the assertions and the leak gate.
+
+struct Pt { x: integer, nm: text }
+struct Q { x: integer, y: integer }
+struct Rect { w: integer, h: integer }
+enum Sh { Sq { side: integer }, Bx { r: Rect } }
+
+fn test_a_whole_subject_capture_writes_through() {
+  r = Rect { w: 3, h: 4 };
+  match r { whole: Rect { w, h } => { whole.w = w * 10 + h; } }
+  assert(r.w == 34, "whole: {r.w}");
+  s = Bx { r: Rect { w: 1, h: 2 } };
+  match s { other: _ => { if other is Bx { r } { r.h = 9; } } }
+  assert(match s { Bx { r } => r.h, _ => -1 } == 9, "other: _");
+}
+
+fn test_a_capture_across_a_growth_materialises() {
+  v = [Pt { x: 1, nm: "a" }, Pt { x: 2, nm: "bb" }];
+  a = "";
+  match v { [first, ..] => { v += [Pt { x: 9, nm: "z" }]; first.x += 100; a = "{first.x} {first.nm}"; }, _ => {} }
+  assert(a == "101 a" && v[0].x == 1 && len(v) == 3, "grow: {a} {v[0].x} {len(v)}");
+}
+
+fn test_a_capture_across_a_removal_materialises() {
+  u = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  b = 0;
+  match u { [first, ..] => { u.remove(0); b = first.x * 10 + first.y; }, _ => {} }
+  assert(b == 15 && len(u) == 1 && u[0].x == 2, "remove: {b}");
+}

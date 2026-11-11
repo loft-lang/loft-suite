@@ -1,0 +1,32 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-W-Lit` crossed with `@FR-I-Lit`: in a regime file an unsuffixed integer literal is i32 and
+// a float literal `single` — but W-Lit refines I-Lit, so a literal still checks at the width it
+// is EXPECTED at: a `u8` field, an `i64` binding, an `i64` field, a `vector<i64>` element and an
+// `i64` parameter each take a literal of their own range, and `123l` / `2.5d` are 64-bit
+// literals anywhere.  (The i64-expected literals are refused today — held back.)
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct R { b: u8, w: i64, n: integer }
+
+fn wide(x: i64) -> i64 { x + 1 }
+
+fn test_a_literal_at_its_expected_width() {
+  y: i64 = 3000000000;
+  r = R { b: 250, w: 5000000000, n: 2147483647 };
+  v: vector<i64> = [4000000000, 1];
+  assert(y == 3000000000l && r.w == 5000000000l && v[0] == 4000000000l && r.b == 250 && r.n == 2147483647, "{y} {r.w}");
+  assert(wide(3000000000) == 3000000001l, "a parameter");
+}
+
+fn test_the_regime_defaults() {
+  f = 0.1;
+  g: f64 = 0.1d;
+  z = 3000000000l;
+  assert(f == 0.1f && sizeof(f) == 4 && sizeof(g) == 8 && z - 1 == 2999999999l, "single and suffixed");
+}

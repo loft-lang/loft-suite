@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2458 — `@FR-B-OutOfLine` × `@FR-B-Disturb` for an `S?` field stored INLINE, the tagged
+// `__nullable<S>` of `@FR-L-Null-Tag`.  A view reads the slot's payload, so it is a place inside
+// the slot's holder.  OVERWRITING the slot ends the places inside it (`d = p.g.next`), and the
+// view of the slot re-reads the new value.  A write that MAY BE NULL releases the payload, so
+// every view of it, the view of the slot included, is copied out at its bind: what the
+// out-of-line `S?` field answers, whatever the layout.
+//
+// Values by hand: every host starts as g = N{1,"a", next: N{0,"z"}}.
+//   d = o.g.next; o.g = N{5,"e", next: o.g}       -> d keeps 0z
+//   d = p.g.next; p.g = N{5,"e", next: N{8,"y"}}  -> d keeps 0z
+//   d = q.g.next; q.g = null                       -> d keeps 0z
+//   c = r.g; r.g = null                            -> c keeps 1a, r.g absent
+//   c = s.g; s.g = N{9,"w"}                        -> c re-reads 9w
+//   c = r.g; r.g = maybe(0) / maybe(3)            -> c keeps 1a either way
+//   c = q.g; q.g = null; c.v = 5                   -> c is 5a, q.g stays absent
+//   e = vs[0]; vs[0] = null (vector<N?>)           -> e keeps 1n1, vs[1] untouched
+//   d = h.g.next; h.g = null in a callee frame     -> d keeps 0z
+//
+// @falsified-at: main dbf8b05ae — interpret and native-c: d reads 8y after the overwrite, and
+//   every view across a null write reads the released record (0null, 1null).
+// CHANNEL: the asserts.
+// HOLDS: every assert on both backends.
+
+struct N { v: integer, name: text, next: N? }
+struct Host { tag: integer, g: N? }
+
+fn mk() -> Host { Host { tag: 7, g: N { v: 1, name: "a", next: N { v: 0, name: "z" } } } }
+fn nn(k: integer) -> N { N { v: k, name: "n{k}", next: N { v: k * 10, name: "d{k}" } } }
+fn show(n: N?) -> text { if n == null { "absent" } else { "{n.v}{n.name}" } }
+fn maybe(k: integer) -> N? { if k > 0 { N { v: k, name: "m" } } else { null } }
+fn in_callee(h: Host) -> text { d = h.g.next; h.g = null; show(d) }
+
+fn test_a_view_inside_the_slot_survives_an_overwrite() {
+  o = mk(); d = o.g.next; o.g = N { v: 5, name: "e", next: o.g };
+  assert(show(d) == "0z", "push: {show(d)}");
+  p = mk(); d2 = p.g.next; p.g = N { v: 5, name: "e", next: N { v: 8, name: "y" } };
+  assert(show(d2) == "0z", "overwrite: {show(d2)}");
+}
+
+fn test_a_view_across_a_null_write_is_copied_out() {
+  q = mk(); d = q.g.next; q.g = null;
+  assert(show(d) == "0z", "deep: {show(d)}");
+  r = mk(); c = r.g; r.g = null;
+  assert(show(c) == "1a" && show(r.g) == "absent", "slot: {show(c)} {show(r.g)}");
+}
+
+fn test_the_view_of_the_slot_re_reads_an_overwrite() {
+  s = mk(); c = s.g; s.g = N { v: 9, name: "w" };
+  assert(show(c) == "9w", "re-read: {show(c)}");
+}
+
+fn test_a_write_that_may_be_null_copies_out_either_way() {
+  r = mk(); c = r.g; r.g = maybe(0);
+  assert(show(c) == "1a" && show(r.g) == "absent", "absent: {show(c)} {show(r.g)}");
+  r2 = mk(); c2 = r2.g; r2.g = maybe(3);
+  assert(show(c2) == "1a" && show(r2.g) == "3m", "present: {show(c2)} {show(r2.g)}");
+}
+
+fn test_a_write_through_the_copy_stays_in_the_copy() {
+  q = mk(); c = q.g; q.g = null; c.v = 5;
+  assert(show(c) == "5a" && show(q.g) == "absent", "{show(c)} {show(q.g)}");
+}
+
+fn test_an_element_slot_and_a_callee_frame() {
+  vs: vector<N?> = [nn(1), nn(2)];
+  e = vs[0]; vs[0] = null;
+  assert(show(e) == "1n1" && show(vs[0]) == "absent" && show(vs[1]) == "2n2",
+    "element: {show(e)} {show(vs[0])} {show(vs[1])}");
+  h = mk();
+  assert(in_callee(h) == "0z" && show(h.g) == "absent", "callee: {show(h.g)}");
+}

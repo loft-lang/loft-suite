@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-AppendTwin` crossed with `@FR-R-InlineLeaf`: `out += row(…)` calls the builder's APPEND
+// TWIN with `out` as its buffer — the builder's body with none of the buffer's clears — and the
+// builder's body calls SCALAR LEAVES (`sq`, `clampi`) that are replaced by their bodies over
+// fresh locals, an argument read in place where nothing can write it.  Both rewrite the same
+// body; the vector the caller accumulates must be the concatenation of the rows the plain
+// builder would answer: per pass of a loop, with a leaf's lower and upper branch taken, and a
+// builder called on its own beside the twin.  InlineLeaf applies in a build that ships no
+// live tier, so the rewritten form runs under `--ship`; `main` runs every cell so a `--ship`
+// run reads the file.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn sq(x: integer) -> integer { x * x + 1 }
+fn clampi(x: integer, lo: integer, hi: integer) -> integer { if x < lo { lo } else if x > hi { hi } else { x } }
+
+fn row(n: integer, k: integer) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..n { r += [clampi(sq(i) - k, 0, 20)]; }
+  r
+}
+
+fn rows(m: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for j in 0..m { out += row(3, j); }
+  out += row(3, -18);
+  out
+}
+
+fn main() {
+  x = rows(3);
+  assert(len(x) == 12, "twelve: {len(x)}");
+  assert(x[0] == 1 && x[2] == 5 && x[3] == 0 && x[5] == 4 && x[6] == 0 && x[7] == 0 && x[8] == 3, "the rows: {x[8]}");
+  assert(x[9] == 19 && x[10] == 20 && x[11] == 20, "the upper branch: {x[9]} {x[10]} {x[11]}");
+  alone = row(3, 1);
+  assert(len(alone) == 3 && alone[0] == 0 && alone[1] == 1 && alone[2] == 4, "a builder on its own: {alone[2]}");
+  empty: vector<integer> = [];
+  empty += row(0, 5);
+  assert(len(empty) == 0, "an empty row");
+}

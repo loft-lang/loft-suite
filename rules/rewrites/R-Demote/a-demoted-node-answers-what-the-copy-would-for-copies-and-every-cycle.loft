@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Demote` crossed with `@FR-B-Copy` and `@FR-L-OutOfLine`.  A literal
+// whose one out-of-line field is the whole old value of its own destination MOVES that old
+// record into the field instead of copying it, and the program must see exactly the value the
+// copy builds.  (B-Copy) a copy of the list taken before or after the push is the copy's own:
+// a later push or write on one never reaches the other;  (L-OutOfLine) every field on a cycle is out of line, whether
+// the cycle runs through a nullable field, through an enum variant, or through two struct
+// types, and record 0 is absence for each — so a push onto an absent destination builds a
+// one-node list.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct N { v: integer, name: text, next: N? }
+enum L { Nil, Cons { v: integer, rest: L } }
+struct A { k: integer, b: B? }
+struct B { j: integer, a: A? }
+
+fn walk(n: N?) -> text {
+  out = "";
+  cur = &n;
+  while cur != null { out += "{cur.v}{cur.name} "; cur = &cur.next; }
+  out
+}
+
+fn lsum(l: L) -> integer {
+  match l { Cons { v, rest } => v + 10 * lsum(rest), Nil => 0 }
+}
+
+fn test_a_copy_before_and_after_the_push() {
+  h = N { v: 1, name: "a" };
+  h = N { v: 2, name: "b", next: h };
+  before = h;
+  h = N { v: 3, name: "c", next: h };
+  after = h;
+  after.next.v = 20;
+  h = N { v: 4, name: "d", next: h };
+  before.name = "B";
+  assert(walk(before) == "2B 1a ", "the copy before: {walk(before)}");
+  assert(walk(after) == "3c 20b 1a ", "the copy after: {walk(after)}");
+  assert(walk(h) == "4d 3c 2b 1a ", "the list: {walk(h)}");
+}
+
+
+fn test_every_cycle_shape_is_out_of_line() {
+  l = Nil;
+  for i in 1..5 { l = Cons { v: i, rest: l }; }
+  assert(lsum(l) == 1234, "through an enum variant: {lsum(l)}");
+  a = A { k: 1 };
+  a = A { k: 2, b: B { j: 20, a: a } };
+  a = A { k: 3, b: B { j: 30, a: a } };
+  assert(a.k == 3 && a.b.j == 30 && a.b.a.k == 2 && a.b.a.b.j == 20 && a.b.a.b.a.k == 1 && a.b.a.b.a.b == null,
+         "through two struct types: {a.k} {a.b.j} {a.b.a.k}");
+  n: N? = null;
+  for i in 0..3 { n = N { v: i, name: "{i}", next: n }; }
+  assert(walk(n) == "22 11 00 ", "onto an absent destination, in a loop: {walk(n)}");
+}

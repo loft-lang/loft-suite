@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Copy-Refuse` crossed with `@FR-B-Copy`: every shape B-Copy calls a copy is the copy
+// H-Copy-Refuse refuses when the type owns a droppable without `OpCopy`.  B-Copy says the
+// SHAPE decides, never the nullability — so a nullable whole-value bind of a parameter is
+// refused as its dense twin is; a struct-enum value is a heap record like a struct, so its
+// whole bind is refused too; and a record UPDATE `S { f: e, ..b }` is the bind `d = b`
+// followed by writes, so a base the function does not own (a parameter, a member of one) is
+// refused.  Each refusal names the copy; the legal positions are
+// `a-link-a-view-and-an-argument-make-no-second-structure.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code.
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+struct S { h: H, tag: integer }
+struct O { s: S }
+enum E { A { h: H }, Z }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r1_a_nullable_whole_value_bind(p: H?) -> integer { x = p; (x?).id }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r2_a_record_update_over_a_parameter(p: S) -> integer { t = S { tag: 1, ..p }; t.tag }
+
+// @EXPECT_ERROR: cannot copy `e` here
+fn r3_a_struct_enum_bound_whole(e: E) -> integer { x = e; if x is A { 1 } else { 0 } }
+
+// @EXPECT_ERROR: cannot copy `o` here
+fn r4_a_record_update_over_a_member(o: O) -> integer { t = S { tag: 2, ..o.s }; t.tag }

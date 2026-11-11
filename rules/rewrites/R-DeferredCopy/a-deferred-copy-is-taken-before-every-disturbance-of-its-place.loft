@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-DeferredCopy` crossed with `@FR-B-Disturb`: a record local bound by B-Copy's copy of
+// an element view, and only read after, is bound by a MOVE and copied where its place could
+// first change.  Every one of B-Disturb's events on that place must take the copy first:
+// a REMOVAL that renumbers the place, a write made THROUGH a view or a `&` link of the place
+// (the event on the place that view names), a write at a NEGATIVE index that resolves to the
+// place, a `sort` that overwrites every slot, and a write to a place INSIDE the source (an
+// element of its vector field) through a view.  The local reads, after the event, the value
+// it was bound to; the container shows the event.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Op { a: integer, b: integer }
+struct P { ops: vector<Op>, k: integer }
+
+fn mk(i: integer) -> P { P { ops: [Op { a: i, b: 1 }, Op { a: i, b: 2 }, Op { a: i, b: 3 }], k: 10 * i } }
+fn mks() -> vector<P> { [mk(0), mk(1), mk(2)] }
+
+fn removed(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps.remove(0);
+  ps.remove(0);
+  op = prog.ops[2] ?? panic("in range");
+  prog.k * 1000 + len(prog.ops) * 10 + op.b
+}
+
+fn through_a_view(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  o = ps[1];
+  o.k = 77;
+  prog.k
+}
+
+fn through_a_link(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  l = &ps[1];
+  l.ops += [Op { a: 5, b: 5 }];
+  len(prog.ops) * 100 + prog.k
+}
+
+fn from_the_end(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps[-2].k = 88;
+  prog.k
+}
+
+fn sorted_over(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  ps.sort_by(|p| { -p.k });
+  prog.k
+}
+
+fn inside_the_source(ps: vector<P>) -> integer {
+  prog = ps[0] ?? panic("in range");
+  callee = ps[1] ?? panic("in range");
+  prog = callee;
+  n = ps[1].ops[0];
+  n.a = 99;
+  n.b = 9;
+  prog.ops[0].a * 10 + prog.ops[0].b
+}
+
+fn test_a_removal_renumbers_the_place() {
+  ps = mks();
+  assert(removed(ps) == 10033 && len(ps) == 1 && ps[0].k == 20, "removal: {removed(mks())}");
+}
+
+fn test_a_write_through_a_view_and_a_link() {
+  ps = mks();
+  a = through_a_view(ps);
+  assert(a == 10 && ps[1].k == 77, "view: {a} {ps[1].k}");
+  qs = mks();
+  b = through_a_link(qs);
+  assert(b == 310 && len(qs[1].ops) == 4, "link: {b} {len(qs[1].ops)}");
+}
+
+fn test_a_negative_index_and_a_sort() {
+  ps = mks();
+  a = from_the_end(ps);
+  assert(a == 10 && ps[1].k == 88, "from the end: {a} {ps[1].k}");
+  qs = mks();
+  b = sorted_over(qs);
+  assert(b == 10 && qs[0].k == 20 && qs[1].k == 10 && qs[2].k == 0, "sort: {b} {qs[0].k}");
+}
+
+fn test_a_write_inside_the_source() {
+  ps = mks();
+  a = inside_the_source(ps);
+  assert(a == 11 && ps[1].ops[0].a == 99, "inside: {a} {ps[1].ops[0].a}");
+}

@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-ElemFirst` crossed with `@FR-B-Copy` and `@FR-R-WorkBuffer`.  A local vector consumed
+// exactly once as a record-literal field of an append is BUILT INSIDE the appended element,
+// and the element must hold what B-Copy's copy into it would: per pass of a loop, from a
+// literal-built local and from a call-filled one; a local read again after the append
+// declines and keeps the copy, so its later growth does not reach the element.  In the same
+// callee a second local used only in place (a push, a length, a walk) becomes a WORK BUFFER the
+// caller supplies (R-WorkBuffer) — a local copied whole into a record field is exactly what
+// that rule declines, so the two rewrites split the callee's locals between them — and the
+// buffer is cleared on entry, so two calls in one frame each start from empty.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Row { k: integer, pts: vector<integer> }
+
+fn mkpts(i: integer) -> vector<integer> { r: vector<integer> = []; for j in 0..i { r += [j + i]; } r }
+
+fn built(out: vector<Row>, n: integer) {
+  for i in 0..n {
+    v: vector<integer> = [];
+    for j in 0..i { v += [j * i]; }
+    out += [Row { k: i, pts: v }];
+  }
+}
+
+fn filled(out: vector<Row>, n: integer) {
+  for i in 0..n {
+    v = mkpts(i);
+    out += [Row { k: i, pts: v }];
+  }
+}
+
+fn read_after(out: vector<Row>, n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    v: vector<integer> = [i, i];
+    out += [Row { k: i, pts: v }];
+    v += [9];
+    t += len(v);
+  }
+  t
+}
+
+fn beside_a_work_buffer(out: vector<Row>, n: integer) -> integer {
+  scratch: vector<integer> = [];
+  t = 0;
+  for i in 0..n {
+    scratch += [i];
+    v: vector<integer> = [];
+    for j in 0..i { v += [j]; }
+    out += [Row { k: len(scratch), pts: v }];
+  }
+  for x in scratch { t += x; }
+  t
+}
+
+fn test_an_element_holds_the_copy() {
+  a: vector<Row> = [];
+  built(a, 4);
+  assert(len(a) == 4 && len(a[0].pts) == 0 && len(a[3].pts) == 3 && a[3].pts[2] == 6, "built: {len(a[3].pts)}");
+  b: vector<Row> = [];
+  filled(b, 3);
+  assert(len(b) == 3 && len(b[2].pts) == 2 && b[2].pts[1] == 3, "filled: {b[2].pts[1]}");
+  d: vector<Row> = [];
+  assert(read_after(d, 3) == 9 && len(d[2].pts) == 2 && d[2].pts[1] == 2, "read after: {len(d[2].pts)}");
+}
+
+fn test_a_work_buffer_beside_it() {
+  c: vector<Row> = [];
+  t1 = beside_a_work_buffer(c, 4);
+  t2 = beside_a_work_buffer(c, 2);
+  assert(t1 == 6 && t2 == 1 && len(c) == 6 && c[3].k == 4 && len(c[3].pts) == 3 && c[5].k == 2 && len(c[5].pts) == 1,
+         "two calls: {t1} {t2} {c[5].k}");
+}

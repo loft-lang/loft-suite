@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Const` crossed with `@FR-R-CopyView` and `@FR-R-Callee`.  A literal-bodied function is
+// a constant and every call answers a VIEW of it; a bind of that view stays a view while only
+// READ — and "read" is the callee's own fact, one call deep, as R-Callee reads it.  So
+// (R-Callee) a bind handed to a callee that only reads stays the constant, and one handed to
+// a callee that writes it in place — R-Callee's in-place writer — is a copy: the write lands
+// in the copy and the next call still answers the constant, and a callee R-Callee admits
+// into a caller's loop reads a constant record on every pass;  (R-CopyView) a record local
+// bound by a copy of a constant record view, or of a join of two, is read as the record it
+// chose, and a local that is written is B-Copy's copy, so the constant never changes.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct P { x: integer, y: integer }
+struct V { f: integer, g: integer }
+
+fn origin() -> P { P { x: 1, y: 2 } }
+fn far() -> P { P { x: 7, y: 8 } }
+fn table() -> vector<P> { [P { x: 1, y: 2 }, P { x: 3, y: 4 }] }
+fn codes() -> vector<integer> { [3, 1, 4] }
+
+fn psum(v: vector<integer>) -> integer { s = 0; for x in v { s = s * 10 + x; } s }
+fn bump_all(v: vector<integer>) { for i in 0..len(v) { v[i] += 10; } }
+fn shift(p: P, k: integer) { p.x += k; p.y += k; }
+fn second(tab: vector<P>) -> integer { e = tab[1] ?? panic("in range"); t = e; t.x * 10 + t.y }
+fn either(tab: vector<P>, c: boolean) -> integer {
+  a = tab[0] ?? panic("in range");
+  b = tab[1] ?? panic("in range");
+  t = if c { a } else { b };
+  t.x * 10 + t.y
+}
+fn addc(w: V, k: integer) { w.f += origin().x * k + origin().y; }
+fn loop_with_a_constant_reader(a: V, b: V, n: integer) -> integer {
+  s = 0;
+  for i in 0..n {
+    s += a.f * 10 + a.g;
+    addc(b, i);
+  }
+  s * 1000 + b.f
+}
+fn pick(c: boolean, a: P, b: P) -> integer { t = if c { a } else { b }; t.x * 10 + t.y }
+
+fn test_a_constant_handed_to_a_reader_and_to_an_in_place_writer() {
+  c = codes();
+  assert(psum(c) == 314, "a reader: {psum(c)}");
+  d = codes();
+  bump_all(d);
+  assert(psum(d) == 1424 && psum(codes()) == 314, "a writer takes a copy: {psum(d)} {psum(codes())}");
+  for k in 0..3 { e = codes(); bump_all(e); assert(e[k] == codes()[k] + 10, "pass {k}"); }
+  assert(psum(codes()) == 314, "the constant after the loop: {psum(codes())}");
+}
+
+fn test_an_admitted_callee_reading_a_constant_in_a_loop() {
+  a = V { f: 1, g: 2 };
+  b = V { f: 0, g: 0 };
+  r = loop_with_a_constant_reader(a, b, 5);
+  assert(r == 60020 && b.f == 20 && origin().x == 1, "five passes: {r} {b.f}");
+  w = V { f: 5, g: 0 };
+  q = loop_with_a_constant_reader(w, w, 4);
+  assert(q == 360019 && w.f == 19, "the callee writes the record the loop reads: {q} {w.f}");
+}
+
+fn test_a_constant_record_bound_read_and_written() {
+  r = origin();
+  assert(r.x * 10 + r.y == 12, "read: {r.x}{r.y}");
+  t = origin();
+  t.x = 5;
+  shift(t, 100);
+  assert(t.x == 105 && t.y == 102 && origin().x == 1 && origin().y == 2, "written: {t.x} {t.y} {origin().x}");
+  q = origin();
+  shift(q, 3);
+  assert(q.x == 4 && origin().x == 1, "an in-place writer: {q.x}");
+}
+
+fn test_a_copy_of_a_constant_view_and_of_a_join() {
+  assert(pick(true, origin(), far()) == 12 && pick(false, origin(), far()) == 78, "a join of constants");
+  assert(second(table()) == 34 && either(table(), true) == 12 && either(table(), false) == 34,
+         "copies of views into a constant handed as a parameter: {second(table())}");
+  e = table()[1] ?? panic("in range");
+  t = e;
+  assert(t.x == 3 && t.y == 4, "a copy of a constant element view: {t.x}");
+  u = table()[0] ?? panic("in range");
+  w = u;
+  w.x = 9;
+  assert(w.x == 9 && (table()[0] ?? panic("in range")).x == 1 && len(table()) == 2, "written copy: {w.x}");
+}

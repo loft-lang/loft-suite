@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-Tuple` crossed with `@FR-L-Struct`: a stored tuple is a synthetic struct packed by
+// L-Struct — largest alignment first — so the ORDER of its members in the bytes is not the
+// written one, and that order has no effect on a member's name: `t.0 … t.n` stay the written
+// positions.  So a tuple whose members have every alignment (a boolean, a float, a single, a
+// character, a text, an integer), written in an order L-Struct reorders, reads back by
+// position after every boundary between the stack form and the stored form: kept in a vector,
+// in a struct field next to fields of other widths, written member by member in place, and
+// handed out of the store by a function.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Host { flag: boolean, t: (boolean, float, character, text, integer, single), tail: integer }
+
+fn mk(k: integer) -> (boolean, float, character, text, integer, single) {
+  (k % 2 == 1, k as float + 0.5, 'a', "s{k}", k * 1000, 1.25f)
+}
+
+fn first_of(v: vector<(boolean, float, character, text, integer, single)>, i: integer) -> (boolean, float, character, text, integer, single) {
+  v[i]
+}
+
+fn test_positions_survive_every_boundary() {
+  v: vector<(boolean, float, character, text, integer, single)> = [];
+  for k in 0..4 { v += [mk(k)]; }
+  e = v[3];
+  assert(e.0 && e.1 == 3.5 && e.2 == 'a' && e.3 == "s3" && e.4 == 3000 && e.5 == 1.25f, "a stored element: {e.3} {e.4}");
+  h = Host { flag: true, t: mk(5), tail: 77 };
+  assert(h.t.0 && h.t.1 == 5.5 && h.t.3 == "s5" && h.t.4 == 5000 && h.flag && h.tail == 77, "a struct field: {h.t.4} {h.tail}");
+  h.t.4 = -1;
+  h.t.3 = "w";
+  h.t.0 = false;
+  assert(!h.t.0 && h.t.1 == 5.5 && h.t.2 == 'a' && h.t.3 == "w" && h.t.4 == -1 && h.t.5 == 1.25f && h.tail == 77,
+         "written member by member: {h.t.3} {h.t.4}");
+  r = first_of(v, 2);
+  assert(!r.0 && r.1 == 2.5 && r.3 == "s2" && r.4 == 2000 && len(v) == 4, "handed out of the store: {r.4}");
+}

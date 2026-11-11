@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-SpecChain` crossed with `@FR-R-Counter`, `@FR-R-Range`, `@FR-R-GuardedChain` and
+// `@FR-R-Invariant`.  A chain of silent checked operators assigned to an integer local in a
+// loop is written with the processor's operators and one flag, recomputed checked on the flag;
+// the operators beside it that other rewrites already settled take part as those rules say —
+// the counters R-Counter seeds as never the sentinel (two nested), the operands R-Range proves
+// plain (`acc & 1023`, `x % 16`), the chain R-GuardedChain runs plain under its entry guard,
+// and the invariant subchain R-Invariant memoises (`a * 7 + b`).  Each loop answers the checked
+// value, and the same loop driven past the edge answers null: a carried value that overflows,
+// and an invariant whose memo is null from the first pass.  Every value was computed by hand
+// over the checked semantics (an overflow or the sentinel is null, null propagates).
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+fn counters(n: integer, salt: integer) -> integer {
+  acc = salt;
+  for i in 0..n { for j in 0..n { acc = (acc * 3 + i * j - j) & 65535; } }
+  acc
+}
+
+fn carried(n: integer, salt: integer) -> integer {
+  acc = salt;
+  for i in 0..n { acc = acc * 3 + i - 1; }
+  acc
+}
+
+fn ranged(v: vector<integer>) -> integer {
+  acc = 0;
+  for x in v { acc = ((acc & 1023) * 3 + (x % 16)) - 5; }
+  acc
+}
+
+fn memo(n: integer, a: integer, b: integer) -> integer {
+  acc = 0;
+  for i in 0..n { acc = (acc ^ (a * 7 + b)) + i * (a - b); }
+  acc
+}
+
+fn test_counters_inside_the_chain() {
+  assert(counters(6, 5) == 7624 && counters(4, 70000) == 35924, "counters: {counters(6, 5)} {counters(4, 70000)}");
+  assert(carried(5, 2) == 423, "carried: {carried(5, 2)}");
+  assert(carried(3, 4611686018427387904) == null, "a carried overflow: {carried(3, 4611686018427387904)}");
+}
+
+fn test_ranged_operands_inside_the_chain() {
+  assert(ranged([20, 35, 7]) == 3059, "ranged: {ranged([20, 35, 7])}");
+  assert(ranged([9223372036854775807, 17, 1000]) == 81, "the largest element: {ranged([9223372036854775807, 17, 1000])}");
+}
+
+fn test_a_guarded_and_memoised_subchain() {
+  assert(memo(5, 3, 2) == 9 && memo(4, -5, 9) == -12, "memo: {memo(5, 3, 2)} {memo(4, -5, 9)}");
+  assert(memo(3, 2305843009213693952, 1) == null, "a null memo: {memo(3, 2305843009213693952, 1)}");
+  assert(memo(0, 2305843009213693952, 1) == 0, "a zero-trip loop evaluates nothing: {memo(0, 2305843009213693952, 1)}");
+}

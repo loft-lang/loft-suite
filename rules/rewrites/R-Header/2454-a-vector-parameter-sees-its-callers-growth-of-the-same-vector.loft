@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// loft#2454, `@FR-R-Header` / `@FR-F-ParamHeap` — A VECTOR PARAMETER SEES ITS CALLER'S GROWTH OF
+// THE SAME VECTOR.
+//
+// A heap parameter shares its caller's store, so `grow_through(s.v, s)` hands one vector twice:
+// a growth through `s.v` is a growth of `v`, and every later read of `v` sees the new length.
+// The same holds for one vector passed as two parameters.  An element write through the other
+// parameter, a scalar field write and an owned local grown beside the reads change no length.
+//
+// @falsified-at: loft main dbf8b05ae — rustc-native answered 252 for 359 (the header held from
+//   entry); the interpreter and --native-c were right.
+// CHANNEL: the assertions and the leak gate.
+
+struct S { n: integer, v: vector<integer> }
+fn grow_through(v: vector<integer>, s: S) -> integer {
+  s.v += [9];
+  s.v[0] = 5;
+  len(v) * 100 + v[0] * 10 + v[len(v) - 1]
+}
+fn twice(a: vector<integer>, b: vector<integer>) -> integer {
+  a += [9];
+  len(b) * 100 + b[0] * 10 + b[len(b) - 1]
+}
+fn own_beside(v: vector<integer>) -> integer {
+  w: vector<integer> = [];
+  w += [1];
+  v[0] + v[1] + len(w)
+}
+fn elem_through(v: vector<integer>, s: S) -> integer {
+  s.v[0] = 5;
+  v[0] * 1 + v[1] * 0
+}
+fn field_through(v: vector<integer>, s: S) -> integer {
+  s.n = 3;
+  v[0] + v[1] + s.n - 3
+}
+fn main() {
+  s = S { n: 0, v: [1, 2] };
+  assert(grow_through(s.v, s) == 359 && len(s.v) == 3, "r1");
+  x = [1, 2];
+  assert(twice(x, x) == 319 && len(x) == 3, "r2 {len(x)}");
+  assert(own_beside([1, 2]) == 4, "r3");
+  s4 = S { n: 0, v: [1, 2] };
+  assert(elem_through(s4.v, s4) == 5, "r4");
+  s5 = S { n: 0, v: [1, 2] };
+  assert(field_through(s5.v, s5) == 3 && s5.n == 3, "r5");
+  println("header ok");
+}

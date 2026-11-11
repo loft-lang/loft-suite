@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Copy-Refuse` crossed with `@FR-B-Ref-Alias`, `@FR-B-View` and `@FR-F-ParamHeap`: the
+// three positions H-Copy-Refuse names as LEGAL for a type that owns a droppable without
+// `OpCopy`, because none of them makes a second structure.  A `&` bind of a parameter, a
+// member or an element is a link; a struct projection (`x = s.h`, `e = v[1]`, a `for` loop
+// variable) is a view; an argument is bound without a copy.  Each compiles, each write lands
+// in the one record its owner holds, and the hook runs ONCE per record, at the owner's end.
+// The hook counts through a stored `reference<Ctr>`, so the count is read after the owners
+// have gone.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+
+struct Ctr { n: integer, log: text }
+struct H { id: integer, c: reference<Ctr> }
+fn OpDrop(self: H) { self.c.n += 1; self.c.log += "{self.id}."; }
+struct S { h: H, tag: integer }
+struct B { hs: vector<H> }
+
+fn link_param(p: H) -> integer { x = &p; x.id += 10; x.id }
+fn bump(p: H) { p.id += 100; }
+fn bump_twice(p: H) { bump(p); bump(p); }
+
+fn test_a_link_is_no_copy() {
+  c = Ctr { n: 0, log: "" };
+  {
+    s = S { h: H { id: 1, c: &c }, tag: 5 };
+    k = link_param(s.h);
+    x = &s.h;
+    x.id += 1;
+    b = B { hs: [H { id: 2, c: &c }, H { id: 3, c: &c }] };
+    y = &b.hs[1];
+    y.id = 30;
+    assert(k == 11 && s.h.id == 12 && b.hs[1].id == 30 && b.hs[0].id == 2,
+           "links: {k} {s.h.id} {b.hs[1].id} {b.hs[0].id}");
+    assert(c.n == 0, "nothing released inside the block: {c.n}");
+  }
+  assert(c.n == 3, "three records, three releases: {c.n} {c.log}");
+}
+
+fn test_a_view_is_no_copy() {
+  c = Ctr { n: 0, log: "" };
+  {
+    s = S { h: H { id: 4, c: &c }, tag: 0 };
+    x = s.h;
+    x.id = 40;
+    b = B { hs: [H { id: 5, c: &c }, H { id: 6, c: &c }, H { id: 7, c: &c }] };
+    e = b.hs[1];
+    e.id += 50;
+    for h in b.hs { h.id += 1; }
+    assert(s.h.id == 40 && b.hs[0].id == 6 && b.hs[1].id == 57 && b.hs[2].id == 8 && len(b.hs) == 3,
+           "views: {s.h.id} {b.hs[0].id} {b.hs[1].id} {b.hs[2].id}");
+  }
+  assert(c.n == 4, "four records, four releases: {c.n} {c.log}");
+}
+
+fn test_an_argument_is_no_copy() {
+  c = Ctr { n: 0, log: "" };
+  {
+    s = S { h: H { id: 8, c: &c }, tag: 0 };
+    bump_twice(s.h);
+    v = [H { id: 9, c: &c }, H { id: 10, c: &c }];
+    for i in 0..len(v) { bump(v[i]); }
+    o = H { id: 11, c: &c };
+    bump(o);
+    assert(s.h.id == 208 && v[0].id == 109 && v[1].id == 110 && o.id == 111,
+           "arguments: {s.h.id} {v[0].id} {v[1].id} {o.id}");
+  }
+  assert(c.n == 4, "four records, four releases: {c.n} {c.log}");
+}

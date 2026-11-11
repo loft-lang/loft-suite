@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Place` × `@FR-R-Callee` — disjoint.  `R-Callee` is asked only while the header hoist
+// walks a loop body, and inside a loop `R-Place` admits only its loop clause, whose result field
+// is appended to a host: a growth.  The hoist declines the whole loop at that growth (or at the
+// placement's own claim, `OpPlaceRecord(host)`) before it asks what any callee writes, so a
+// placed call and an admitted callee never meet on one loop.  This cell is the program where
+// they would: a loop reading a local record's fields, calling a callee that writes only scalars
+// into its return buffer, with that result's vector placed into a host.  It reads every value
+// either way; it is the place a change to that decline shows first.
+//
+// Values by hand: cv.width = 4, cv.data = [0..5], mkp(k) = P { a: 10k }.
+//   per pass i: 4 + data[i] + 10(i+1)  ->  14 + 25 + 36 = 75; host gets 3 entries.
+//
+// @falsified-at: not falsifiable as a value — every placement and every hoist answers the same
+//   values; LOFT_TRACE_PLACE names the loop admission (`ADMITTED (loop) host=host`) and
+//   LOFT_TRACE_HOIST_DECLINE the decline at `OpPlaceRecord`, which is what the row reads.
+// CHANNEL: the value, and the leak gate.
+// HOLDS: both backends.
+
+struct P { a: integer, items: vector<integer> }
+struct Cv { width: integer, data: vector<integer> }
+
+fn mkp(k: integer) -> P { P { a: k * 10 } }
+
+fn grid() -> Cv {
+  c = Cv { width: 4, data: [] };
+  for i in 0..6 { c.data += [i] }
+  c
+}
+
+fn run(host: vector<vector<integer>>) -> integer {
+  cv = grid();
+  s = 0;
+  for i in 0..3 {
+    s += cv.width + (cv.data[i] ?? 0);
+    pp = mkp(i + 1);
+    host += [pp.items];
+    s += pp.a;
+  }
+  s
+}
+
+fn test_a_placed_loop_bind_beside_a_hoisted_reader() {
+  host: vector<vector<integer>> = [];
+  s = run(host);
+  assert(s == 75 && len(host) == 3, "{s} {len(host)}");
+}

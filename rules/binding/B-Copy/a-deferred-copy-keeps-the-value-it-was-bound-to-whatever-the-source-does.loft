@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — a deferred copy views its source until a disturbance makes it copy, so it owns on some paths and views on others; the pre-witness form releases the wrong store (wrong values, out-of-range reads and a leaked vector across nine of the tests).
 //
 // A DEFERRED COPY KEEPS THE VALUE IT WAS BOUND TO, WHATEVER THE SOURCE DOES (`@FR-B-Copy`,
 // `@FR-B-DeferredCopy`).  `prog = callee` copies the record: a later write to the source must

@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Cursor` crossed with `@FR-P-Whole` and `@FR-P-Atomic`: a match on a CURSOR reads each
+// slice pattern from ⟨pos, source⟩ as a PREFIX — P-Whole's whole-input demand does not apply —
+// so `[LP]` wins on a cursor where the same pattern loses on the plain vector; the arm that
+// commits writes pos where its pattern ended, and an arm that fails — on a fixed element after a
+// rule moved the cursor, or on a rule answering null — leaves pos where the match started, so
+// the next arm reads from there and nothing it captured is seen.  (A guard on a cursor arm is
+// refused at compile time, LOFT_CONTROL.md § Match, so it is not crossed here.)
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+enum Tok { Num { v: integer }, LP, RP, Plus, End }
+struct Cur { src: vector<Tok>, pos: integer }
+struct N { v: integer }
+
+fn num(c: Cur) -> N? { match c { [Num { v }] => N { v: v }, _ => null } }
+
+fn test_a_prefix_on_a_cursor_and_the_whole_on_a_vector() {
+  v = [LP, RP];
+  w = match v { [LP] => 1, [LP, RP] => 2, _ => 3 };
+  q = Cur { src: [LP, RP], pos: 0 };
+  z = match q { [LP] => 1, [LP, RP] => 2, _ => 3 };
+  assert(w == 2 && z == 1 && q.pos == 1, "{w} {z} {q.pos}");
+  r = match v { [LP, ..rest] => len(rest), _ => -1 };
+  assert(r == 1, "a rest absorbs the remainder: {r}");
+}
+
+fn test_a_failed_arm_leaves_pos() {
+  c = Cur { src: [Num { v: 7 }, Num { v: 8 }, End], pos: 0 };
+  r = match c {
+    [a: num, Plus] => a.v,
+    [Plus, a: num] => -a.v,
+    [a: num, b: num] => a.v * 10 + b.v,
+    _ => -1
+  };
+  assert(r == 78 && c.pos == 2, "{r} {c.pos}");
+  d = Cur { src: [Num { v: 7 }, End], pos: 0 };
+  s = match d { [a: num, Num { v }] => a.v + v, [End] => 0, _ => 9 };
+  assert(s == 9 && d.pos == 0, "every arm fails: {s} {d.pos}");
+}
+
+fn test_successive_matches_walk_the_source() {
+  c = Cur { src: [Num { v: 1 }, Plus, Num { v: 2 }, Plus, Num { v: 3 }, End], pos: 0 };
+  total = 0;
+  steps = 0;
+  while steps < 10 {
+    steps += 1;
+    k = match c { [a: num, Plus] => a.v, [a: num, End] => a.v + 1000, _ => -1 };
+    if k < 0 { break; }
+    total += k;
+    if k >= 1000 { break; }
+  }
+  assert(total == 1 + 2 + 1003 && c.pos == 6 && steps == 3, "{total} {c.pos} {steps}");
+}

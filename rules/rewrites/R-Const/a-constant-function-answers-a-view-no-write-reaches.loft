@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Const` crossed with `@FR-O-Borrow` and `@FR-H-WriteLocked`: a function whose body is one
+// literal over literals is a CONSTANT — built once in the read-only const store, every call
+// answering a VIEW of it (O-Borrow: its deps name the constant, so nothing frees it) — and a plain
+// bind of that view stays a view only while it is read; the first write, append or hand-off to a
+// writing parameter makes it B-Copy's copy, placed at the bind.  So no write ever reaches the
+// locked store (H-WriteLocked would refuse or discard it): a later call answers the literal, a
+// second bind taken before the write is unchanged, and no lock report is raised.  Crossed with a
+// `vector<integer>`, a record with a vector field, a `const` parameter, a writing callee, a loop.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+
+fn codes() -> vector<integer> { [3, 1, 4, 1, 5] }
+fn origin() -> P { P { n: 0, t: "o", xs: [7, 8] } }
+fn tot(v: const vector<integer>) -> integer { s = 0; for x in v { s += x; } s }
+fn scribble(v: vector<integer>) { v[0] = -1; v += [6]; }
+
+fn test_read_only_binds() {
+  c = codes();
+  d = codes();
+  assert(tot(c) == 14 && c[2] == 4 && len(d) == 5 && tot(codes()) == 14, "{tot(c)}");
+}
+
+fn test_a_write_copies_at_the_bind() {
+  c = codes();
+  d = codes();
+  c[0] = 100;
+  c += [9];
+  assert(c[0] == 100 && len(c) == 6 && codes()[0] == 3 && len(codes()) == 5 && d[0] == 3, "{c} {d}");
+  e = codes();
+  scribble(e);
+  assert(e[0] == -1 && len(e) == 6 && codes()[0] == 3, "a writing callee: {e}");
+}
+
+fn test_a_record_constant_in_a_loop() {
+  s = 0;
+  for i in 0..3 {
+    o = origin();
+    o.xs += [i];
+    o.n = i;
+    s += len(o.xs) * 10 + o.n;
+  }
+  assert(s == 30 + 31 + 32 && len(origin().xs) == 2 && origin().n == 0 && origin().t == "o", "{s}");
+}

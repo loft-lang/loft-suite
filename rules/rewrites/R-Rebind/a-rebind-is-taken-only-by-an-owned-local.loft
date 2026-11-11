@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-Rebind` crossed with `@FR-O-Owner`: `x = f(x, …)` hands x's own record to f as its
+// buffer only where x is a plain OWNED local — never a parameter, a view, a `&` link or a
+// nullable that may be absent — and each declined shape answers what B-Copy and B-Ref-Write say:
+// an owned local rebound in a loop holds the latest result; a by-value parameter rebound is the
+// callee's own (the caller's value unchanged); a `&` link to a local or to a field written whole
+// replaces its source; a nullable local starting absent takes each result.  (Held back: the
+// field-link case keeps the old field.)
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct P { n: integer, t: text, xs: vector<integer> }
+struct H { p: P }
+
+fn mk(n: integer) -> P { P { n: n, t: "m{n}", xs: [n] } }
+fn step(d: P, w: integer) -> P { P { n: d.n + w, t: "{d.t}.", xs: d.xs } }
+fn rebind_param(p: P) -> integer { p = step(p, 5); p.n }
+fn mk_maybe(d: P?, n: integer) -> P? { if d == null { return mk(n); } step(d!, n) }
+
+fn test_an_owned_local() {
+  d = mk(1);
+  for i in 0..3 { d = step(d, i); }
+  assert(d.n == 4 && d.t == "m1..." && len(d.xs) == 1, "{d.n} {d.t}");
+}
+
+fn test_a_parameter_and_a_nullable() {
+  q = mk(7);
+  assert(rebind_param(q) == 12 && q.n == 7 && q.t == "m7", "a parameter: {q.n}");
+  x: P? = null;
+  for i in 1..4 { x = mk_maybe(x, i); }
+  assert((x.n ?? -1) == 1 + 2 + 3 && (x.t ?? "-") == "m1..", "a nullable: {x.n ?? -1} {x.t ?? "-"}");
+}
+
+fn test_links() {
+  a = mk(4);
+  l = &a;
+  l = step(l, 3);
+  assert(a.n == 7 && a.t == "m4." && l.n == 7, "a link to a local: {a.n}");
+  h = H { p: mk(4) };
+  k = &h.p;
+  k = step(k, 3);
+  assert(h.p.n == 7 && h.p.t == "m4." && k.n == 7, "a link to a field: {h.p.n} {h.p.t}");
+}
