@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Ret` — A CONTAINER TEMPORARY OF ANOTHER TYPE IS NOT THE RETURN BUFFER.  `fn elm(n) -> In
+// { if n > 0 { decode(n).items[0] } else { In { … } } }`: the arm reads an element out of a `Dec`
+// temporary, and the return promotion renamed that temporary onto the caller's `In` buffer — a
+// `Dec` was built in it, and the store it displaced (the caller's) was freed.  In a loop the next
+// call read a corrupt reference on the interpreter.  A record of another type now stays an inner
+// work-ref; the element is copied into the buffer.
+//
+// Axes it MOVES: the caller (one call, a loop), the arm taken (the projection, the literal, both
+// in turn) and the projection (an element, a field).  Values are hand-computed: `elm(i)` answers
+// `i * 100` on the projection arm and 9 on the literal arm.  `main` runs every cell so the leak
+// gate reads the file.
+//
+// Found by the store records (loft2-83): `store-wrong-end __retbuf … its store is the caller's`.
+// Falsified by its switch: `LOFT_NO_RET_TYPE_MATCH=1` panics with a corrupt reference in the two
+// loop cells on the interpreter.
+
+struct In { a: integer, t: text }
+struct Dec { next: integer, inn: In, items: vector<In> }
+
+fn decode(n: integer) -> Dec {
+  Dec { next: 1, inn: In { a: n * 10, t: "t{n}" }, items: [In { a: n * 100, t: "e{n}" }] }
+}
+fn elm(n: integer) -> In { if n > 0 { decode(n).items[0] } else { In { a: 9, t: "z" } } }
+fn fld(n: integer) -> In { if n > 0 { decode(n).inn } else { In { a: 9, t: "z" } } }
+
+fn test_one_call() {
+  e = elm(2);
+  assert(e.a == 200 && e.t == "e2", "one: {e.a} {e.t}");
+}
+
+fn test_a_loop_over_the_projection_arm() {
+  t = 0;
+  for i in 1..4 { e = elm(i); t += e.a; }
+  assert(t == 600, "projection arm: {t}");
+}
+
+fn test_a_loop_over_both_arms() {
+  t = 0;
+  for i in 0..4 { e = elm(i); t += e.a; }
+  assert(t == 609, "both arms: {t}");
+}
+
+fn test_a_field_projection() {
+  t = 0;
+  for i in 0..4 { e = fld(i); t += e.a; }
+  assert(t == 69, "field: {t}");
+}
+
+fn main() {
+  test_one_call();
+  test_a_loop_over_the_projection_arm();
+  test_a_loop_over_both_arms();
+  test_a_field_projection();
+  println("ok");
+}
