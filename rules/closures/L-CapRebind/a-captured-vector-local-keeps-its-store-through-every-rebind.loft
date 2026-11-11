@@ -16,9 +16,16 @@
 //   s = ["x"]; s = s + ["y"]        -> closure "x", s has 2
 //   called before and after         -> 2 2, a has 3
 //   no closure / built after        -> in place: 3; the closure sees 3
+//   a = a[0..1] (scalar), t = t[1..] (text)       -> closure 3 / "x3", the local has 1 / 2
+//   a closure rebuilt each pass over a frame local, then a = a + [i] / a = [i, i, i] /
+//   a = a[1..]: each pass's closure reads the value of its own build ("19 20 31", "19 30 31",
+//   "61 52 43"); one kept past the loop reads its last build again (31)
 //
 // @falsified-at: main dbf8b05ae — interpret and native-c: the concat reads 31 (the append
-//   reached the record), the literal rebind reads 4 (the freed store reused by `x`).
+//   reached the record), the literal rebind reads 4 (the freed store reused by `x`), the
+//   self-slice 1, and every loop pass after the first reads its local's later rebind.
+//   On the fix: LOFT_NO_CAPREBIND_MINT=1 brings back the concat, slice and loop values, and
+//   LOFT_NO_CAPREBIND_KEEP=1 the literal rebind's reuse.
 // CHANNEL: the asserts, then the leak gate.
 // HOLDS: every assert and the leak gate on both backends.
 
@@ -84,4 +91,42 @@ fn test_without_a_record_the_concat_is_in_place() {
   assert(len(a) == 3 && a[2] == 3, "control: {len(a)}");
   g = fn() -> integer { len(a) };
   assert(g() == 3, "built after: {g()}");
+}
+
+fn test_a_self_slice_takes_a_fresh_store() {
+  a = [1, 2, 3];
+  g = fn() -> integer { len(a) };
+  a = a[0..1];
+  assert(g() == 3 && len(a) == 1 && a[0] == 1, "scalar: {g()} {len(a)}");
+  t = ["x", "y", "z"];
+  h = fn() -> text { "{t[0]}{len(t)}" };
+  t = t[1..];
+  assert(h() == "x3" && len(t) == 2 && t[0] == "y", "text: {h()} {len(t)}");
+}
+
+fn test_a_closure_rebuilt_each_pass_reads_its_own_build() {
+  a = [9]; t = "";
+  for i in 0..3 { g = fn() -> text { "{len(a)}{a[len(a) - 1]}" }; a = a + [i]; t += g() + " "; }
+  assert(t == "19 20 31 " && len(a) == 4, "concat: {t}");
+  b = [9]; u = "";
+  for i in 0..3 { g = fn() -> text { "{len(b)}{b[0]}" }; b = [i, i, i]; u += g() + " "; }
+  assert(u == "19 30 31 " && len(b) == 3, "literal: {u}");
+  c = [1, 2, 3, 4, 5, 6]; w = "";
+  for _i in 0..3 { g = fn() -> text { "{len(c)}{c[0]}" }; c = c[1..]; w += g() + " "; }
+  assert(w == "61 52 43 " && len(c) == 3, "slice: {w}");
+}
+
+fn test_a_closure_kept_past_the_loop() {
+  a = [9];
+  g = fn() -> integer { 0 };
+  t = 0;
+  for i in 0..3 { g = fn() -> integer { len(a) * 10 + a[len(a) - 1] }; a = a + [i]; t = t * 100 + g(); }
+  t = t * 100 + g();
+  assert(t == 19203131 && len(a) == 4, "concat: {t}");
+  b = [9];
+  h = fn() -> integer { 0 };
+  u = 0;
+  for i in 0..3 { h = fn() -> integer { len(b) * 10 + b[0] }; b = [i, i, i]; u = u * 100 + h(); }
+  u = u * 100 + h();
+  assert(u == 19303131 && len(b) == 3, "literal: {u}");
 }
