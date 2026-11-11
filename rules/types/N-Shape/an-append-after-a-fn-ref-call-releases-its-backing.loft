@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Complete` — AN APPEND AFTER A FN-REF CALL RELEASES ITS BACKING.  `v = h(k); v += [1000]`
+// with `h` answering a nullable vector: an append onto an absent `v` mints a backing, which is
+// marked never-free because the local frees what it names (loft#1486).  The fn-ref call's
+// result is delivered through a `__lift_N` the local then VIEWS, so the local frees nothing and
+// the backing was released by nobody — on the C backend; the interpreter's frame exit hid it.
+// The lift now hands the release back to the backing (`LOFT_NO_LIFT_BACKING_FREE`).
+//
+// Axes it MOVES: the call (a fn-ref, the direct call as control) and the answer (present on
+// passes 0-2, absent after).  Values are hand-computed: present passes sum `k + 1000`, absent ones
+// `1000`, so nine passes give 0+1+2 + 9*1000 = 9003.  `main` runs both so the leak gate reads it.
+//
+// Found by the store records (loft2-83).  Falsified by its switch: `LOFT_NO_LIFT_BACKING_FREE=1`
+// leaks one vector store on `--native-c` under the leak gate.
+
+fn g(k: integer) -> vector<integer>? { if k > 2 { return null; } [k] }
+fn tot(v: vector<integer>?) -> integer { t = 0; for x in v ?? [] { t += x; } t }
+
+fn test_through_a_fn_ref() {
+  h = fn(k: integer) -> vector<integer>? { g(k) };
+  r = 0;
+  for k in 0..9 { v = h(k); v += [1000]; r += tot(v); }
+  assert(r == 9003, "fn-ref: {r}");
+}
+
+fn test_a_direct_call() {
+  r = 0;
+  for k in 0..9 { v = g(k); v += [1000]; r += tot(v); }
+  assert(r == 9003, "direct: {r}");
+}
+
+fn main() {
+  test_through_a_fn_ref();
+  test_a_direct_call();
+  println("ok");
+}
