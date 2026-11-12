@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Move` — A SUB-RULE RUN RELEASES ITS ANSWERS AND NEVER THE SUBJECT'S.  `(xs: rule)*`
+// calls the rule from the cursor, copies each answer that consumed something into `xs`, and
+// stops on a null answer or one that consumed nothing.  The run used to free every record answer
+// inside its copy.  For a rule answering a record of its subject (`p.nodes[0]`) that released the
+// caller's whole store: the read-after-free filled the strict run, while the plain interpreter
+// still printed the right count.  And an answer that consumed nothing stopped the run before the
+// copy, so a rule answering a fresh record without consuming leaked it.  Now an answer the rule
+// always makes itself is freed by the copy and at the stop, and an answer that may be borrowed is
+// freed after the copy and at the stop only where it names no argument's store.  The C backend
+// copies a borrowed answer bound to the run's temporary and the interpreter binds the record
+// itself, and that one guarded free is right for both.
+//
+// Expected values by hand: `rec` answers v for each Num, 4 + 5 = 9; `zero` answers a record and
+// consumes nothing, so the run stops at once, 0 records; `view` answers the subject's node 7
+// twice, 14, and the subject keeps its one node 7; the `+` run sums 4 + 5 = 9; `mixed` answers a
+// fresh record for 6 and the subject's node 7 for 4, 13, the node intact.
+//
+// @falsified-at: `LOFT_NO_SUBRULE_OWNED_ANSWER=1` — interpret read and wrote after free in
+//   `borrowed` (strict; native-c copies the borrowed answer and stays clean);
+//   `LOFT_NO_SUBRULE_STOP_FREE=1` — interpret and native-c leaked `zero`'s record (`N×1`).
+// CHANNEL: the strict-store and leak gates, both backends; the values by assertion.
+// HOLDS: `fresh` and `plus` under both switches.
+
+enum Tok { Num { v: integer }, LP, RP, Semi, End }
+struct N { v: integer }
+struct P { src: vector<Tok>, pos: integer, nodes: vector<N> }
+fn rec(p: P) -> N? { match p { [Num { v }] => N { v: v }, _ => null } }
+fn zero(p: P) -> N? { if p.pos < 0 { null } else { N { v: 0 } } }
+fn view(p: P) -> N? { match p { [Num { v }] => p.nodes[0], _ => null } }
+fn mixed(p: P) -> N? { match p { [Num { v }] => if v > 4 { N { v: v } } else { p.nodes[0] }, _ => null } }
+fn tot(xs: vector<N>) -> integer { t = 0; for x in xs { t += x.v; } t }
+
+fn fresh() -> integer {
+  d = P { src: [Num { v: 4 }, Num { v: 5 }, Semi], pos: 0, nodes: [N { v: 7 }] };
+  match d { [(xs: rec)*, Semi] => tot(xs), _ => -1 }
+}
+fn none_consumed() -> integer {
+  d = P { src: [Semi], pos: 0, nodes: [N { v: 7 }] };
+  match d { [(xs: zero)*, Semi] => len(xs), _ => -1 }
+}
+fn borrowed() -> text {
+  d = P { src: [Num { v: 4 }, Num { v: 5 }, Semi], pos: 0, nodes: [N { v: 7 }] };
+  r = match d { [(xs: view)*, Semi] => tot(xs), _ => -1 };
+  "{r} {d.nodes[0].v} {len(d.nodes)}"
+}
+fn plus() -> integer {
+  d = P { src: [LP, Num { v: 4 }, Num { v: 5 }, RP], pos: 0, nodes: [] };
+  match d { [LP, (xs: rec)+, RP] => tot(xs), _ => -1 }
+}
+fn mixed_run() -> text {
+  d = P { src: [Num { v: 4 }, Num { v: 6 }, Semi], pos: 0, nodes: [N { v: 7 }] };
+  r = match d { [(xs: mixed)*, Semi] => tot(xs), _ => -1 };
+  "{r} {d.nodes[0].v}"
+}
+
+fn main() {
+  assert(fresh() == 9, "fresh {fresh()}");
+  assert(none_consumed() == 0, "none consumed {none_consumed()}");
+  assert(borrowed() == "14 7 1", "borrowed {borrowed()}");
+  assert(plus() == 9, "plus {plus()}");
+  assert(mixed_run() == "13 7", "mixed {mixed_run()}");
+}
