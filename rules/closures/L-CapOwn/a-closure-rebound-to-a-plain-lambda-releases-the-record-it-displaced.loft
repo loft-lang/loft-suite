@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapOwn` — A CLOSURE RE-BOUND TO A PLAIN LAMBDA RELEASES THE RECORD IT DISPLACED.  A
+// fn-ref holds a closure record the frame built, and a branch re-binds it to a lambda that
+// captures nothing (or to a named function); the fn-ref is returned.  Its dep list names the
+// record, so the frame took the record as leaving with the fn-ref on every run: on the run that
+// re-bound it, the record and every store it captured were released by nobody — a leak on both
+// backends, and a captured value's drop hook that never ran.  The frame now decides it by store
+// identity: the record stands down where the returned fn-ref holds it, and is released on the
+// runs that displaced it.
+//
+// The cases vary one axis each: a captured record with a drop hook, a vector capture, a named
+// function as the new value, the record built on one branch only, the re-bind inside a loop,
+// two re-binds in a row, and a fn-ref that never leaves.  Values by hand:
+//   hooked(false) 1, hooked(true) 5, and `H` 1 dropped once per call (D1 twice in all).
+//   named(false) 10, named(true) 9.   one_arm(false) 6, one_arm(true) 20.
+//   looped(0) 10, looped(1) 10, looped(2) 7, looped(3) 7.   twice(false) 10, twice(true) 6.
+//   stays(false) 10, stays(true) 5.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_PLAIN_REBIND_KEEP=1` — "not freed at exit" in `hooked`, `named`,
+//   `looped` and `twice` on both backends, and the hook trace misses the second D1.
+// CHANNEL: the leak check (every cell runs with LOFT_LEAK_CHECK=1), the hook trace, the values.
+// HOLDS: `one_arm` and `stays` under the switch.
+
+struct H { id: integer }
+
+fn trace_path() -> text { return "loft_plain_rebind_trace.tmp"; }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mkh(id: integer) -> H { H { id: id } }
+fn plain() -> integer { 9 }
+
+fn hooked(q: boolean) -> fn() -> integer {
+  e = mkh(1);
+  h = fn() -> integer { e.id };
+  if q { h = fn() -> integer { 5 }; }
+  h
+}
+fn named(q: boolean) -> fn() -> integer {
+  w = [10, 20];
+  h = fn() -> integer { w[0] };
+  if q { h = plain; }
+  h
+}
+fn one_arm(q: boolean) -> fn() -> integer {
+  w = [10, 20];
+  h = fn() -> integer { 5 };
+  if q { h = fn() -> integer { w[1] }; } else { h = fn() -> integer { 6 }; }
+  h
+}
+fn looped(n: integer) -> fn() -> integer {
+  w = [10, 20];
+  h = fn() -> integer { w[0] };
+  for i in 0..n { if i == 1 { h = fn() -> integer { 7 }; } }
+  h
+}
+fn twice(q: boolean) -> fn() -> integer {
+  w = [10, 20];
+  h = fn() -> integer { w[0] };
+  if q { h = fn() -> integer { 5 }; h = fn() -> integer { 6 }; }
+  h
+}
+fn stays(q: boolean) -> integer {
+  w = [10, 20];
+  h = fn() -> integer { w[0] };
+  if q { h = fn() -> integer { 5 }; }
+  h()
+}
+fn run(f: fn() -> integer) -> integer { f() }
+fn hooked_run(q: boolean) -> integer { run(hooked(q)) }
+
+fn test_a_hooked_capture() {
+  drain();
+  a = hooked_run(false);
+  b = hooked_run(true);
+  t = drain();
+  assert(a == 1 && b == 5, "hooked: {a} {b}");
+  assert(t == "D1,D1", "hooked drops: {t}");
+}
+fn test_a_named_function() { assert(run(named(false)) == 10 && run(named(true)) == 9, "named"); }
+fn test_two_rebinds() { assert(run(twice(false)) == 10 && run(twice(true)) == 6, "twice"); }
+fn test_in_a_loop() {
+  r = "{run(looped(0))} {run(looped(1))} {run(looped(2))} {run(looped(3))}";
+  assert(r == "10 10 7 7", "looped: {r}");
+}
+fn test_one_arm() { assert(run(one_arm(false)) == 6 && run(one_arm(true)) == 20, "one_arm"); }
+fn test_a_fn_ref_that_stays() { assert(stays(false) == 10 && stays(true) == 5, "stays"); }
