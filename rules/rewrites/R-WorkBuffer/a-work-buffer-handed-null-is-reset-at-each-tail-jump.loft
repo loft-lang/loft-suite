@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-WorkBuffer` with `@FR-R-TailSelf` and `@FR-O-NoDiverge` — A WORK BUFFER HANDED NULL IS
+// RESET AT EACH TAIL JUMP.  A vector local that never leaves its frame becomes a hidden parameter
+// its callers fill, and a callee handed the null sentinel takes the rebound-parameter road: it
+// mints a store of its own and releases it against its entry witness
+// (`OpFreeRefIfDistinct(v, __ref_1)`).  `(R-TailSelf)` turns a self-tail-call into a loop, so that
+// release runs at each tail jump and the next pass reads `v` again.  The C backend resets a
+// variable its guarded free released; the interpreter left `v` naming the freed store, and the
+// next pass cleared it in place: a write after free under strict stores.  Armed with
+// `LOFT_WORK_BUFFER_NULL=1`, the road's own control, which hands every callee null.
+//
+// Expected values by hand: `walk(5, 0)` sums 5 + 4 + 3 + 2 + 1 = 15; `walk(0, 3)` answers its
+// accumulator, 3; `pairs(3, 0)` adds `len(v) + v[1]` = 2 + k for k = 3, 2, 1: 5 + 4 + 3 = 12.
+//
+// @ARMED: LOFT_WORK_BUFFER_NULL=1 LOFT_STRICT_STORES=1
+// @falsified-at: `LOFT_NO_GUARDED_FREE_RESET=1` — the interpreter reports "USE AFTER FREE (write)"
+//   in `tail_jumps` and `two_elements`; native-c stays clean (it resets already).
+// CHANNEL: the strict-store gate, the interpreter; the values by assertion.
+// HOLDS: `no_jump` under the switch.
+
+fn walk(n: integer, acc: integer) -> integer { v = [n]; if n == 0 { acc } else { walk(n - 1, acc + v[0]) } }
+fn pairs(n: integer, acc: integer) -> integer {
+  v = [n, n];
+  if n == 0 { acc } else { pairs(n - 1, acc + len(v) + v[1]) }
+}
+
+fn test_tail_jumps() { assert(walk(5, 0) == 15, "walk(5, 0): {walk(5, 0)}"); }
+fn test_two_elements() { assert(pairs(3, 0) == 12, "pairs(3, 0): {pairs(3, 0)}"); }
+fn test_no_jump() { assert(walk(0, 3) == 3, "walk(0, 3): {walk(0, 3)}"); }
