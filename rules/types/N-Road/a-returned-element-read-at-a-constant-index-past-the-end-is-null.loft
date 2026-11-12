@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Road` with `@FR-N-Index` — A RETURNED ELEMENT READ AT A CONSTANT INDEX PAST THE END IS
+// NULL.  `(N-Index)` types `v[0]` non-null by contract, and an overrun is still null at run time
+// (`@C80`): the null is the value.  A `-> S?` answering a record local bound from such a read
+// copies it into its return buffer, and the copy tests every local that may hold nothing.  A local
+// viewing a collection's element was read as always present, so `r = v[0]; r` on an empty `v`
+// answered a default record (`ms` 0) where the read gave null, in silence on both backends.  A
+// variable index (typed `S?`), a field path, a keyed lookup and `return v[0]` itself answered
+// null already.
+//
+// Expected values by hand: every read below is past the end, so each answers null (`true`); the
+// present twins answer the element they read: 7, 4 and 7.
+//
+// @falsified-at: `LOFT_NO_ELEMENT_VIEW_ABSENT=1` — `param`, `past_one`, `local` and `explicit`
+//   answer a record (`false`), interpreter and native-c.
+// CHANNEL: the assertions, both backends.
+// HOLDS: `variable_index`, `field`, `keyed` and `direct` under the switch.
+
+struct D { ms: integer }
+struct K { k: integer, ms: integer }
+struct Box { items: vector<D> }
+
+fn at0(v: vector<D>) -> D? { r = v[0]; r }
+fn at3(v: vector<D>) -> D? { r = v[3]; r }
+fn local_at(i: integer) -> D? { w = [D { ms: 4 }]; if i == 0 { r = w[0]; return r; } r = w[3]; r }
+fn at0_return(v: vector<D>) -> D? { r = v[0]; return r; }
+fn at_i(v: vector<D>, i: integer) -> D? { r = v[i]; r }
+fn field2(b: Box) -> D? { r = b.items[2]; r }
+fn key5(h: hash<K[k]>) -> K? { r = h[5]; r }
+fn direct0(v: vector<D>) -> D? { v[0] }
+
+fn test_param() {
+  e: vector<D> = [];
+  f = [D { ms: 7 }];
+  assert(at0(e) == null, "v[0] of an empty vector: {at0(e) == null}");
+  assert((at0(f) ?? D { ms: -1 }).ms == 7, "v[0] present");
+}
+
+fn test_past_one() {
+  f = [D { ms: 7 }];
+  assert(at3(f) == null, "v[3] of one element: {at3(f) == null}");
+}
+
+fn test_local() {
+  assert(local_at(3) == null, "a local vector's w[3]: {local_at(3) == null}");
+  assert((local_at(0) ?? D { ms: -1 }).ms == 4, "a local vector's w[0]");
+}
+
+fn test_explicit() {
+  e: vector<D> = [];
+  f = [D { ms: 7 }];
+  assert(at0_return(e) == null, "return r: {at0_return(e) == null}");
+  assert((at0_return(f) ?? D { ms: -1 }).ms == 7, "return r present");
+}
+
+fn test_variable_index() {
+  e: vector<D> = [];
+  assert(at_i(e, 0) == null, "v[i]");
+}
+
+fn test_field() {
+  b = Box { items: [D { ms: 9 }] };
+  assert(field2(b) == null, "b.items[2]");
+}
+
+fn test_keyed() {
+  h: hash<K[k]> = [K { k: 1, ms: 11 }];
+  assert(key5(h) == null, "h[5]");
+}
+
+fn test_direct() {
+  e: vector<D> = [];
+  assert(direct0(e) == null, "return v[0]");
+}
