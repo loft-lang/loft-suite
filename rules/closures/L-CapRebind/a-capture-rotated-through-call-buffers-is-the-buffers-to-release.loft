@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapRebind` with `@FR-H-FreeTwice` — A CAPTURE ROTATED THROUGH CALL BUFFERS IS THE
+// BUFFERS' TO RELEASE.  `v = bump(v)` in a loop reads `v` while the call fills its hidden
+// buffer, so the frame ROTATES two buffers (`OpPutRef(__ref_1, __ref_2); OpPutRef(__ref_2, v)`)
+// and a closure rebuilt over `v` each pass only BORROWS what it captured.  The rebound-capture
+// let-go points still released the previous record's capture at a rebuild as if the record
+// owned it: on the third pass that freed a store a buffer still held, and the next call read it
+// — a use after free on the C backend (the interpreter's store identities happened to differ).
+//
+// Expected values by hand (`g` reads `v[0]` of its own build; `bump` answers `[v[0] + 1]`):
+//   rot(3): built over [9] -> "9", v = [10]; "10", v = [11]; "11", v = [12]; g() after -> "11".
+//     So "9 10 11 11".   rot(2): "9 10 10".   rot(1): "9 9".   rot(0): "".
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_ROTATED_CAPTURE_LEFT_TO_BUFFERS=1` — the C backend reports
+//   "USE AFTER FREE (access)" in `bump`, the store freed in `rot` (`test_three_passes`).
+// CHANNEL: the strict-store gate on the C backend, and the values by assertion.
+// HOLDS: `test_fewer_passes` under the switch, and the interpreter throughout.
+
+fn bump(w: vector<integer>) -> vector<integer> { [w[0]! + 1] }
+
+fn rot(n: integer) -> text {
+  v = [9]; g = fn() -> text { "" }; t = "";
+  for _i in 0..n { g = fn() -> text { "{v[0]}" }; v = bump(v); t += g() + " "; }
+  t + g()
+}
+
+fn test_three_passes() { r = rot(3); assert(r == "9 10 11 11", "rot(3): {r}"); }
+fn test_fewer_passes() {
+  r2 = rot(2);
+  assert(r2 == "9 10 10", "rot(2): {r2}");
+  r1 = rot(1);
+  assert(r1 == "9 9", "rot(1): {r1}");
+  r0 = rot(0);
+  assert(r0 == "", "rot(0): {r0}");
+}
