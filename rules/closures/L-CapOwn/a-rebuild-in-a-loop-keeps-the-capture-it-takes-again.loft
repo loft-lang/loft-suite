@@ -1,0 +1,90 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapOwn` — A REBUILD IN A LOOP KEEPS THE CAPTURE IT TAKES AGAIN.  A closure record whose
+// capture type has a drop hook is rebuilt through a snapshot: the displaced record is copied, its
+// cascade runs the hooks and releases every slot, then the record is filled again.  A slot that
+// names the store the rebuild captures AGAIN is not displaced, so it must not be released — the
+// route without a hook says so with `OpFreeRefIfDistinct(old slot, fill)`.  A leaving closure
+// rebuilt twice in one loop over the frame's `e` released `e` at the second rebuild and again at
+// the end: a use after free, then a double free, on both backends.
+//
+// The cases vary one axis each: the same capture rebuilt three times; a fresh capture every pass
+// (each old one is displaced, so each is dropped at the rebuild); one shared and one fresh capture
+// in the same record; a vector of droppables.  Values and drop orders by hand:
+//   same3(4): the last pass is i = 3, 10 * 3 + 2 = 32; `e` dropped once, at the end: D2.
+//   fresh(3): 102; D100 and D101 at the rebuilds, D102 with the closure.
+//   mixed(3): 7 * 1000 + 202 = 7202; D200, D201 at the rebuilds, then D202 and D7.
+//   vec3(3): len 2 * 100 + 32 + 2 = 234; D31, D32 once, with the closure.
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: `LOFT_NO_SNAPSHOT_KEEPS_REFILL=1` — both backends report "USE AFTER FREE" in
+//   `t_1H_OpDrop` reading a capture the snapshot's cascade freed (`same3`, `mixed`, `vec3`); the
+//   C backend then "a store was freed twice".
+// CHANNEL: the strict-store gate, and the hook order through the trace file.
+// HOLDS: `fresh` under the switch: every capture it displaces is a different store.
+
+struct H { id: integer }
+
+fn trace_path() -> text { return "loft_rebuild_refill_trace.tmp"; }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mkh(id: integer) -> H { H { id: id } }
+
+fn same3(n: integer) -> fn() -> integer {
+  e = mkh(2);
+  h = fn() -> integer { e.id };
+  for i in 0..n { if i >= 1 { h = fn() -> integer { 10 * i + e.id }; } }
+  h
+}
+fn fresh(n: integer) -> fn() -> integer {
+  h = fn() -> integer { 0 };
+  for i in 0..n { t = mkh(100 + i); h = fn() -> integer { t.id }; }
+  h
+}
+fn mixed(n: integer) -> fn() -> integer {
+  e = mkh(7);
+  h = fn() -> integer { 0 };
+  for i in 0..n { t = mkh(200 + i); h = fn() -> integer { e.id * 1000 + t.id }; }
+  h
+}
+fn vec3(n: integer) -> fn() -> integer {
+  w = [mkh(31), mkh(32)];
+  h = fn() -> integer { 0 };
+  for i in 0..n { h = fn() -> integer { len(w) * 100 + w[1].id + i }; }
+  h
+}
+
+fn run_same3() -> integer { a = same3(4); a() }
+fn run_fresh() -> integer { b = fresh(3); b() }
+fn run_mixed() -> integer { c = mixed(3); c() }
+fn run_vec3() -> integer { d = vec3(3); d() }
+
+fn check(nm: text, got: integer, want: integer, trace: text) {
+  assert(got == want, "{nm}: got {got}, want {want}");
+  t = drain();
+  assert(t == trace, "{nm} drops: {t}, want {trace}");
+}
+
+fn test_the_same_capture_rebuilt_three_times() { drain(); check("same3", run_same3(), 32, "D2"); }
+fn test_a_fresh_capture_every_pass() { drain(); check("fresh", run_fresh(), 102, "D100,D101,D102"); }
+fn test_a_shared_and_a_fresh_capture() { drain(); check("mixed", run_mixed(), 7202, "D200,D201,D202,D7"); }
+fn test_a_vector_of_droppables() { drain(); check("vec3", run_vec3(), 234, "D31,D32"); }
