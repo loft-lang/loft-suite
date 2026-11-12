@@ -1,0 +1,90 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD BUILT FOR AN ELEMENT OF A FIELD LITERAL IS RELEASED ONCE (`@FR-H-Drop`, `@FR-H-Move`).
+// `S2 { hs: [H { id: 4 }], … }` builds each element record in a work-ref and copies it into the
+// element with a source-free: the element holds the record from then on, and the outer record's
+// cascade releases it.  The work-ref is reset to null right after the copy.  That reset is part of
+// the same statement as the copy, and the scope pass armed the copy's hand-off only after the whole
+// statement, so it read the reset as a rebind displacing an owned record: it copied the freed store
+// into a snapshot (onto the slot the allocator had just handed back) and ran the hook on it — `dh0`
+// once per element, before the real releases, on both backends.  A struct-enum element ran the hook
+// on a zeroed record that matched no variant, which is why `1597`'s `c10` printed nothing wrong.
+//
+// Expected traces by hand: each record's hook runs once, where its owner dies.  `one`: the two
+// elements at `s`'s end (dh4 dh5).  `pass`: `s` is scoped to the pass, so each pass releases its
+// own element (p0 dh0 p1 dh1 p2 dh2).  `rebind`: each rebind releases the element it displaces
+// (dh0 dh1), the last one at the end (dh2).  `two`: `t` then `s` at the end (dh2 dh1).  `nested`:
+// the element of a field of a field (dh7 dh8).  `variant`: a struct-enum element beside a unit one
+// (r2 eb ea4).
+//
+// @falsified-at: the scope pass without the hand-off armed at the copy (`src/scopes/scan.rs`,
+//   the `OpCopyRecord` source-free arm) — interpret and native-c failed the first assert,
+//   `one dh0,dh0,r2,dh4,dh5`.
+// CHANNEL: the asserts, both backends — the extra hook runs show up in the trace.
+// HOLDS: `pass`, `rebind`, `two`, `nested` — no element is released twice or left unreleased by
+//   the hand-off armed at the copy.
+
+struct H { id: integer }
+fn OpDrop(self: H) { note("dh{self.id}"); }
+enum E { A { id: integer }, B }
+fn OpDrop(self: E) { match self { A { id } => note("ea{id}"), B => note("eb") } }
+struct S2 { hs: vector<H>, n: integer }
+struct W { s: S2, k: integer }
+struct SE { es: vector<E>, n: integer }
+
+fn trace_path() -> text { return "a_record_built_for_an_element_trace.tmp"; }
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn one() { s = S2 { hs: [H { id: 4 }, H { id: 5 }], n: 1 }; note("r{len(s.hs)}"); }
+fn pass() { for i in 0..3 { s = S2 { hs: [H { id: i }], n: i }; note("p{s.n}"); } }
+fn rebind() {
+  s = S2 { hs: [H { id: 0 }], n: 0 };
+  for i in 1..3 { s = S2 { hs: [H { id: i }], n: i }; }
+  note("p{s.n}");
+}
+fn two() {
+  s = S2 { hs: [H { id: 1 }], n: 1 };
+  t = S2 { hs: [H { id: 2 }], n: 2 };
+  note("p{s.n + t.n}");
+}
+fn nested() { w = W { s: S2 { hs: [H { id: 7 }, H { id: 8 }], n: 1 }, k: 2 }; note("p{len(w.s.hs)}"); }
+fn variant() { s = SE { es: [B, A { id: 4 }], n: 1 }; note("r{len(s.es)}"); }
+
+fn main() {
+  drain();
+  one();
+  got = drain();
+  assert(got == "r2,dh4,dh5", "one {got}");
+  pass();
+  got = drain();
+  assert(got == "p0,dh0,p1,dh1,p2,dh2", "pass {got}");
+  rebind();
+  got = drain();
+  assert(got == "dh0,dh1,p2,dh2", "rebind {got}");
+  two();
+  got = drain();
+  assert(got == "p3,dh2,dh1", "two {got}");
+  nested();
+  got = drain();
+  assert(got == "p2,dh7,dh8", "nested {got}");
+  variant();
+  got = drain();
+  assert(got == "r2,eb,ea4", "variant {got}");
+  delete(trace_path());
+}
