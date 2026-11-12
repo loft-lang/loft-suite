@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// `@FR-N-Shape`: an append onto a nullable vector local, under the rule it exercises.
 // `@FR-O-Complete` — AN APPEND AFTER A FN-REF CALL RELEASES ITS BACKING.  `v = h(k); v += [1000]`
 // with `h` answering a nullable vector: an append onto an absent `v` mints a backing, which is
 // marked never-free because the local frees what it names (loft#1486).  The fn-ref call's

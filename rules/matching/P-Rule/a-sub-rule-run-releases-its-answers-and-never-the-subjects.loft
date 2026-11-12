@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// `@FR-P-Rule`: a sub-rule run `(xs: rule)*`, under the rule it exercises.
 // `@FR-O-Move` — A SUB-RULE RUN RELEASES ITS ANSWERS AND NEVER THE SUBJECT'S.  `(xs: rule)*`
 // calls the rule from the cursor, copies each answer that consumed something into `xs`, and
 // stops on a null answer or one that consumed nothing.  The run used to free every record answer
