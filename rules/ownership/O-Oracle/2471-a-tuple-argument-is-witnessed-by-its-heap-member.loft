@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2471, `@FR-O-Oracle` — a call that may hand back a heap member of a TUPLE argument, or
+// build a record of its own, is bound by a per-run join: the answer is copied where it is the
+// argument's store and adopted where the callee minted it.  The join's witness is the store it
+// compares against, and a tuple has none of its own: the witness is its one heap member.
+//
+// Compared against the tuple itself, the C and rustc writers did not compile (`loft_tup0` has
+// no `store_nr`), and the interpreter read the tuple slot's first bytes as the record — right
+// only where the heap member is first; where it is second the binding adopted the member,
+// writes through it reached the tuple, and the member was freed twice.
+//
+// A branch over a tuple member (`b = if f { t.0 } else { … }`) is no call: by `(B-View)` it is
+// a VIEW of the arm that ran, so a write through it reaches the tuple — the control beside the
+// call, whose answer is a copy.  A plain record argument is the second control.
+//
+// Every value is hand-computed.
+//
+// @falsified-at: bea9a94fa (loft, before the member witness) — interpret: a store freed twice;
+//   native-c and rustc: the generated code does not compile.
+//   CHANNEL: the run's exit, then the values; WITNESS: c3 `b.w = 8` read back as `t.1.w == 8`.
+//   HOLDS: c6 and c7 answer the same on both trees.
+
+struct R { w: integer }
+fn pick(p: (R, integer)) -> R { if p.1 > 0 { p.0 } else { R { w: 0 } } }
+fn pick_b(p: (integer, R)) -> R { if p.0 > 0 { p.1 } else { R { w: 0 } } }
+fn pk(r: R, k: integer) -> R { if k > 0 { r } else { R { w: 0 } } }
+
+// c1: the heap member first, the minted arm
+fn c1() -> text { t = (R { w: 5 }, 0); b = pick(t); "{b.w}" }
+// c2: the heap member first, the borrow arm — b is a copy, a write to it leaves t.0
+fn c2() -> text { t = (R { w: 5 }, 1); b = pick(t); b.w = 7; "{b.w} {t.0.w}" }
+// c3: the heap member second, the borrow arm
+fn c3() -> text { t = (1, R { w: 5 }); b = pick_b(t); b.w = 8; "{b.w} {t.1.w}" }
+// c4: the heap member second, the minted arm
+fn c4() -> text { t = (0, R { w: 5 }); b = pick_b(t); "{b.w} {t.1.w}" }
+// c5: in a loop, both arms per pass
+fn c5() -> text {
+  out = "";
+  for i in 0..4 { t = (i % 2, R { w: i }); b = pick_b(t); b.w += 100; out += "{b.w}/{t.1.w} "; }
+  out
+}
+// c6 (control): a branch over the member is a view of the arm that ran
+fn c6(f: boolean) -> text { t = (R { w: 5 }, 0); b = if f { t.0 } else { R { w: 3 } }; b.w += 10; "{b.w} {t.0.w}" }
+// c7 (control): a plain record argument
+fn c7() -> text { r = R { w: 5 }; b = pk(r, 1); b.w = 6; c = pk(r, 0); "{b.w} {c.w} {r.w}" }
+
+fn main() {
+  assert(c1() == "0", "c1 {c1()}");
+  assert(c2() == "7 5", "c2 {c2()}");
+  assert(c3() == "8 5", "c3 {c3()}");
+  assert(c4() == "0 5", "c4 {c4()}");
+  assert(c5() == "100/0 101/1 100/2 103/3 ", "c5 {c5()}");
+  assert(c6(true) == "15 15", "c6t {c6(true)}");
+  assert(c6(false) == "13 5", "c6f {c6(false)}");
+  assert(c7() == "6 0 5", "c7 {c7()}");
+}
