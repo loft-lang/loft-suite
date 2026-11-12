@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-ParamRebind`, `@FR-O-Complete` — A WRITE THROUGH A LINK TO A PLAIN PARAMETER IS
+// RELEASED.  `cur = &n; cur = N { … }` rebinds the by-value parameter `n` as `n = N { … }` does:
+// the caller's record stays the caller's (freeing it was a use-after-free), and the record the
+// callee wrote is the callee's to release.  It was released by nobody: one record per call.  The
+// write now takes the direct rebind's entry witness (`Parser::rebind_param_through_link`).
+//
+// Axes it MOVES: how often the link writes (once, twice — the first written record displaced),
+// the caller's value (a record, null), and a re-point (`cur = &cur.next`, which writes nothing).
+// Each cell checks the callee's answer AND that the caller's record is unchanged; `main` runs
+// every cell so the leak gate reads the file.  Values are hand-computed.
+//
+// Found by the store records (loft2-83).  Falsified by its switch: `LOFT_NO_LINK_PARAM_REBIND=1`
+// leaks one `N` per call under the leak gate, on the interpreter and the C backend.
+
+struct N { v: integer, name: text, next: N? }
+
+fn once(n: N?) -> integer { cur = &n; cur = N { v: 77, name: "zz" }; n.v ?? -1 }
+fn twice(n: N?) -> integer {
+  cur = &n;
+  cur = N { v: 5, name: "a" };
+  cur = N { v: 6, name: "b" };
+  n.v ?? -1
+}
+fn repoint(n: N?) -> integer {
+  cur = &n;
+  k = 0;
+  while cur != null { k += cur.v; cur = &cur.next; }
+  k
+}
+
+fn test_written_once() {
+  h = N { v: 4, name: "n4", next: N { v: 3, name: "n3" } };
+  r = 0;
+  for i in 0..3 { r += once(h); }
+  assert(r == 231 && h.v == 4 && h.next.v == 3, "once: {r} {h.v}");
+}
+
+fn test_written_twice() {
+  h = N { v: 4, name: "n4" };
+  r = 0;
+  for i in 0..3 { r += twice(h); }
+  assert(r == 18 && h.v == 4 && h.name == "n4", "twice: {r} {h.v} {h.name}");
+}
+
+fn test_a_null_argument() {
+  r = once(null);
+  assert(r == 77, "null: {r}");
+}
+
+fn test_a_repoint_writes_nothing() {
+  h = N { v: 4, name: "n4", next: N { v: 3, name: "n3" } };
+  r = repoint(h) + repoint(h);
+  assert(r == 14 && h.v == 4 && h.next.v == 3, "repoint: {r}");
+}
+
+fn main() {
+  test_written_once();
+  test_written_twice();
+  test_a_null_argument();
+  test_a_repoint_writes_nothing();
+  println("ok");
+}
