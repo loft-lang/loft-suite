@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Move` — A MEMBER OF A TUPLE ARGUMENT HANDED BACK IS THE CALLER'S.  `fn first(p: (R,
+// integer)) -> R { p.0 }` answers a store the caller holds, exactly as `fn id(r: R) -> R { r }`
+// does: the caller copies it and keeps releasing its own.  Three sites read a tuple as borrowing
+// nothing.  The @P290 bracket's witness set skipped a tuple argument and read COMPLETE, so the
+// copy's source-free released the member's store and its holder freed it again.  The def→frame
+// dep converter gave a vector result no dep, so the bind adopted the member's store.  And a
+// member built inside the literal had no name for the bracket to protect, so a callee that
+// answers the member OR mints (`pick`) leaked its mint.  Every cell freed a store twice on both
+// backends before, except `mint`, whose callee never borrows.
+//
+// Expected values by hand: `first` answers r's copy, 5, and r is 9 after its own write; through
+// a bound tuple, 5; `mint` builds w + 1 = 6; `pick` answers 5 on its member arm and 0 on its
+// minting arm; the vector member is the two
+// elements [1, 2] while v grows to 3; three passes of `first` sum 5 * 3 = 15.
+//
+// @falsified-at: each cure switched off — `LOFT_NO_TUPLE_ARG_COVER=1` freed a store twice in
+//   `literal`, `bound`, `either` and `passes`; `LOFT_NO_TUPLE_ARG_DEPS=1` in `vec_member`;
+//   `LOFT_NO_TUPLE_ARG_NAME=1` leaked `either`'s mint (interpret and native-c alike).
+// CHANNEL: the re-free and the leak gate, both backends; the values by assertion.
+// HOLDS: `mint` under every switch — a callee that only mints never borrows.
+// NOT HERE: a bound tuple handed to `pick` (it may answer the member or mint) — the C backend
+//   cannot compile that join yet (loft#2471).
+
+struct R { w: integer }
+fn first(p: (R, integer)) -> R { p.0 }
+fn mint(p: (R, integer)) -> R { R { w: p.0.w + 1 } }
+fn pick(p: (R, integer)) -> R { if p.1 > 0 { p.0 } else { R { w: 0 } } }
+fn fv(p: (vector<integer>, integer)) -> vector<integer> { p.0 }
+fn pickv(p: (vector<integer>, integer)) -> vector<integer> { if p.1 > 0 { p.0 } else { [9, 9, 9] } }
+
+fn literal() -> text {
+  r = R { w: 5 };
+  y = first((r, 1));
+  r.w = 9;
+  "{y.w} {r.w}"
+}
+fn bound() -> integer {
+  r = R { w: 5 };
+  t = (r, 1);
+  y = first(t);
+  y.w
+}
+fn minted() -> integer {
+  r = R { w: 5 };
+  y = mint((r, 1));
+  y.w
+}
+fn either() -> text {
+  r = R { w: 5 };
+  a = pick((r, 1));
+  b = pick((r, 0));
+  "{a.w} {b.w}"
+}
+fn vec_member() -> text {
+  v = [1, 2];
+  u = fv((v, 1));
+  v += [3];
+  "{len(u)} {len(v)}"
+}
+fn vec_either() -> text {
+  v = [1, 2];
+  a = pickv((v, 1));
+  b = pickv((v, 0));
+  "{len(a)} {len(b)}"
+}
+fn passes() -> integer {
+  r = R { w: 5 };
+  t = 0;
+  for i in 0..3 { y = first((r, i)); t += y.w; }
+  t
+}
+
+fn main() {
+  assert(literal() == "5 9", "literal {literal()}");
+  assert(bound() == 5, "bound {bound()}");
+  assert(minted() == 6, "mint {minted()}");
+  assert(either() == "5 0", "either {either()}");
+  assert(vec_member() == "2 3", "vector {vec_member()}");
+  assert(vec_either() == "2 3", "vector either {vec_either()}");
+  assert(passes() == 15, "passes {passes()}");
+}
