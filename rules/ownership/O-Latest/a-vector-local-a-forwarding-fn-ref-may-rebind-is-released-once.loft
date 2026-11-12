@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Latest` with `@FR-H-FreeTwice` — A VECTOR LOCAL A FORWARDING FN-REF MAY REBIND IS
+// RELEASED ONCE.  `x: vector<integer> = [5, 6]` fills a literal backing; `x = fwd(q)`, with `fwd`
+// a lambda that forwards to another, has a declared return that borrows `q`, so `x`'s scope-end
+// free is `OpFreeRefIfDistinct(x, q)`.  The rebind's displaced free already declined while `x`
+// still named the backing; the scope-end free did not, so where no rebind ran (a loop of zero
+// passes, an `if` not taken) `x` and the backing both freed the literal's store: "a store was
+// freed twice", both backends.  A plain lambda, a named forwarder, a record, text and a hash
+// local never took that free.
+//
+// Expected values by hand: `x * 100`-style sums, with `[5, 6]` kept: 0 passes → 0·100 + 2·10 + 5
+// = 25; one pass of `fwd(none)` → [7, 8]: 8·100 + 20 + 7 = 827; of `fwd(some)` with some = [3, 4]
+// → 400 + 20 + 3 = 423.
+//
+// @falsified-at: `LOFT_NO_VIEW_TEMP_SCOPE_END_GUARD=1` — interpret and native-c abort with "a
+//   store was freed twice" in `zero_passes_null`, `zero_passes_some` and `branch_not_taken`.
+// CHANNEL: the strict-store gate (the abort), both backends; the values by assertion.
+// HOLDS: `one_pass`, `plain_lambda` and `record_twin` under the switch.
+
+struct P { n: integer }
+
+fn run(n: integer) -> integer {
+  inner = fn(q: vector<integer>?) -> vector<integer> { q ?? [7, 8] };
+  fwd = fn(q: vector<integer>?) -> vector<integer> { inner(q) };
+  none: vector<integer>? = null;
+  x: vector<integer> = [5, 6];
+  y = 0;
+  for _ in 0..n { x = fwd(none); y += x[1]; }
+  y * 100 + len(x) * 10 + x[0]
+}
+
+fn run_some(n: integer) -> integer {
+  inner = fn(q: vector<integer>?) -> vector<integer> { q ?? [7, 8] };
+  fwd = fn(q: vector<integer>?) -> vector<integer> { inner(q) };
+  some: vector<integer>? = [3, 4];
+  x: vector<integer> = [5, 6];
+  y = 0;
+  for _ in 0..n { x = fwd(some); y += x[1]; }
+  y * 100 + len(x) * 10 + x[0]
+}
+
+fn branch(c: boolean) -> integer {
+  inner = fn(q: vector<integer>?) -> vector<integer> { q ?? [7, 8] };
+  fwd = fn(q: vector<integer>?) -> vector<integer> { inner(q) };
+  none: vector<integer>? = null;
+  x: vector<integer> = [5, 6];
+  y = 0;
+  if c { x = fwd(none); y += x[1]; }
+  y * 100 + len(x) * 10 + x[0]
+}
+
+fn test_zero_passes_null() { assert(run(0) == 25, "zero passes, null: {run(0)}"); }
+fn test_zero_passes_some() { assert(run_some(0) == 25, "zero passes, some: {run_some(0)}"); }
+fn test_branch_not_taken() { assert(branch(false) == 25, "branch not taken: {branch(false)}"); }
+
+fn test_one_pass() {
+  assert(run(1) == 827, "one pass, null: {run(1)}");
+  assert(run_some(1) == 423, "one pass, some: {run_some(1)}");
+  assert(branch(true) == 827, "branch taken: {branch(true)}");
+}
+
+fn test_plain_lambda() {
+  lam = fn(q: vector<integer>?) -> vector<integer> { q ?? [7, 8] };
+  none: vector<integer>? = null;
+  x: vector<integer> = [5, 6];
+  for _ in 0..0 { x = lam(none); }
+  assert(len(x) == 2 && x[0] == 5, "a plain lambda keeps the literal: {len(x)}");
+}
+
+fn test_record_twin() {
+  mkr = fn(q: P?) -> P { q ?? P { n: 7 } };
+  fwdr = fn(q: P?) -> P { mkr(q) };
+  none: P? = null;
+  x: P = P { n: 5 };
+  for _ in 0..0 { x = fwdr(none); }
+  assert(x.n == 5, "a record local keeps its literal: {x.n}");
+}
