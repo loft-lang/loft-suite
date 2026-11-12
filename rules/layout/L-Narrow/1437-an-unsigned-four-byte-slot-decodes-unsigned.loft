@@ -3,9 +3,9 @@
 //
 // @FR-L-Narrow — the storage WIDTH is decided by the range, and @FR-L-Null — absence is a
 // sentinel in the slot's own bytes.  Four bytes do not say which encoding they are: `u32`
-// runs past `i32::MAX`, so it is written unsigned with `u32::MAX` reserved for absence
-// (which is why `u32` is declared `limit(0, 4294967294)`), while `i32` is written signed
-// with `i32::MIN` reserved.  The two have the same width and different meanings for the
+// runs past `i32::MAX`, so it is written unsigned — a `u32` uses all 2^32 codes and a
+// `u32?` keeps `u32::MAX` back for absence — while `i32` is written signed with
+// `i32::MIN` reserved.  The two have the same width and different meanings for the
 // same bytes.
 //
 // The codegen has carried that split since `NarrowIntKind` gained `Int4Raw`/`Int4Full`;
@@ -53,8 +53,8 @@ fn a_u32_field_renders_its_own_value_past_the_signed_boundary() {
   assert_eq("{hi[0]}", "{{a:2147483648,c:9}}", "the first value it does not");
   big: vector<R> = [R { a: 3000000000, c: 9 }];
   assert_eq("{big[0]}", "{{a:3000000000,c:9}}", "a value well past the boundary");
-  top: vector<R> = [R { a: 4294967294, c: 9 }];
-  assert_eq("{top[0]}", "{{a:4294967294,c:9}}", "the type's declared maximum");
+  top: vector<R> = [R { a: 4294967295, c: 9 }];
+  assert_eq("{top[0]}", "{{a:4294967295,c:9}}", "the type's declared maximum");
 }
 
 fn the_field_read_agrees_with_the_render() {
@@ -68,8 +68,8 @@ fn the_field_read_agrees_with_the_render() {
 }
 
 fn a_u32_vector_element_renders_its_own_value() {
-  v: vector<u32> = [7, 2147483648, 3000000000, 4294967294];
-  assert_eq("{v}", "[7,2147483648,3000000000,4294967294]", "an element is a slot too");
+  v: vector<u32> = [7, 2147483648, 3000000000, 4294967295];
+  assert_eq("{v}", "[7,2147483648,3000000000,4294967295]", "an element is a slot too");
   assert_eq("{len(v)}", "4", "and the length is untouched by the encoding");
 }
 
@@ -130,10 +130,10 @@ fn a_large_key_iterates_as_itself() {
 fn a_sorted_collection_orders_large_keys_above_small_ones() {
   // Compared as `i32`, every key at or above 2147483648 sorts BELOW every key under it,
   // so this order inverts under the defect while every single lookup still succeeds.
-  t: sorted<K[k]> = [K { k: 4294967294, v: 9 }, K { k: 2147483648, v: 8 }, K { k: 3, v: 7 }];
+  t: sorted<K[k]> = [K { k: 4294967295, v: 9 }, K { k: 2147483648, v: 8 }, K { k: 3, v: 7 }];
   out = "";
   for e in t { out = out + "{e.k},"; }
-  assert_eq(out, "3,2147483648,4294967294,", "unsigned order, smallest first");
+  assert_eq(out, "3,2147483648,4294967295,", "unsigned order, smallest first");
 }
 
 struct P { x: u32, y: u32, n: text }
@@ -184,9 +184,9 @@ fn a_signed_key_still_orders_negatives_first() {
 fn a_nested_vector_of_u32_keeps_the_encoding_at_both_levels() {
   // The element Part is derived recursively for a nested container, so the inner
   // vector's element resolves through the same home a second time.
-  n: vector<vector<u32>> = [[7, 3000000000], [4294967294]];
+  n: vector<vector<u32>> = [[7, 3000000000], [4294967295]];
   assert_eq("{n[0]}", "[7,3000000000]", "the inner vector renders unsigned");
-  assert_eq("{n[1]}", "[4294967294]", "and so does the second one");
+  assert_eq("{n[1]}", "[4294967295]", "and so does the second one");
   assert_eq("{len(n)}", "2", "outer length");
   assert_eq("{len(n[0])}", "2", "inner length");
 }
@@ -194,12 +194,12 @@ fn a_nested_vector_of_u32_keeps_the_encoding_at_both_levels() {
 fn a_u32_survives_a_parameter_and_a_return() {
   v: vector<R> = [R { a: 3000000000, c: 9 }];
   assert_eq(render(v[0]), "{{a:3000000000,c:9}}", "through a parameter");
-  assert_eq("{minted()[0]}", "{{a:4294967294,c:1}}", "and out of a callee's return");
+  assert_eq("{minted()[0]}", "{{a:4294967295,c:1}}", "and out of a callee's return");
 }
 
 fn render(r: R) -> text { "{r}" }
 
-fn minted() -> vector<R> { [R { a: 4294967294, c: 1 }] }
+fn minted() -> vector<R> { [R { a: 4294967295, c: 1 }] }
 
 // ── The binary-I/O route: a file is a decode too ───────────────────────────────────────
 
