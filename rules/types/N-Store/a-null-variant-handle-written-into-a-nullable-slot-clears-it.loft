@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Store`, @C163 — a null written into a DENSE record or struct-enum slot is the slot
+// type's default, and a null written into a NULLABLE slot (`e: Entity?`) is a null: the slot
+// holds it.  The two are told apart by the slot's own type, never by its base: the `?` of an
+// `Entity?` field is what says it can hold the null.
+//
+// A null handle typed as a VARIANT (`absent: Fireball? = null`) written into an `Entity?` field
+// was read through the slot's base as a dense struct-enum slot, and the field took the enum's
+// default record: `h.e == null` answered false on both backends.  The enum-typed handle, a bare
+// `null` and a present variant are the controls.
+//
+// Every value is hand-computed.
+//
+// @falsified-at: 7fc423232 (loft) — interpret and native-c: c1 answers `false`.
+//   CHANNEL: an assertion; WITNESS: c1 `h.e == null` is false.
+//   HOLDS: c2, c3 and c4 answer the same on both trees.
+
+enum Entity { Fireball { n: integer }, IceWall { n: integer } }
+struct Holder { e: Entity? }
+struct Dense { e: Entity }
+
+// c1: a null variant-typed handle into a nullable slot clears it
+fn c1() -> text { absent: Fireball? = null; h = Holder { e: Fireball { n: 4 } }; h.e = absent; "{h.e == null}" }
+// c2 (control): an enum-typed null handle
+fn c2() -> text { absent: Entity? = null; h = Holder { e: Fireball { n: 4 } }; h.e = absent; "{h.e == null}" }
+// c3 (control): a present variant handle is written
+fn c3() -> text { some: Fireball? = Fireball { n: 9 }; h = Holder { e: IceWall { n: 1 } }; h.e = some; m = match h.e { Fireball { n } => n, _ => 0 }; "{m}" }
+// c4 (control): the DENSE slot takes the default, as @C163 says
+fn c4() -> text { absent: Fireball? = null; d = Dense { e: IceWall { n: 6 } }; d.e = absent; m = match d.e { Fireball { n } => n + 100, IceWall { n } => n }; "{m}" }
+
+fn main() {
+  assert(c1() == "true", "c1 {c1()}");
+  assert(c2() == "true", "c2 {c2()}");
+  assert(c3() == "9", "c3 {c3()}");
+  assert(c4() == "100", "c4 {c4()}");
+}
