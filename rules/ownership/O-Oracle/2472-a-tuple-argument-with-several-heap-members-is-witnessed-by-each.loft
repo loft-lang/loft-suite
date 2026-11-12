@@ -16,6 +16,7 @@
 // @falsified-at: 7fc423232 (loft) — every backend: values right, `1 stores not freed … R×1` per
 //   minted call under LOFT_LEAK_CHECK / LOFT_NATIVE_LEAK_CHECK.
 //   CHANNEL: the leak check; WITNESS: c1's minted arm.
+//   ARMED: LOFT_LEAK_CHECK=1 on the interpreter, LOFT_NATIVE_LEAK_CHECK=1 on the compiled program.
 //   HOLDS: the values of every cell answer the same on both trees.
 
 struct R { w: integer }
