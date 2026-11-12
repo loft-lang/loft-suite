@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapKeep` with `@FR-L-CapOwn` — A STAYING RECORD REBUILT IN ONE PASS FREES ITS CAPTURE
+// ONCE.  A loop rebuilds a closure over a vector local and rebinds the local after each build;
+// the closure stays in the frame and is read after the loop.  After exactly ONE pass the record
+// holds the store the declaration's backing (`__vdb_1`) minted, and the frame's end freed that
+// backing while the record's cascade freed the same store: a double free on both backends.
+// With 0 passes nothing was built and with 2 or more the stores have rotated apart, so a cell
+// that runs three passes never sees it.  Each case here runs ONE pass, beside the 0- and 2-pass
+// controls; the rebinds vary one axis each: a literal, a variable, `[]`, a comprehension, and
+// the closure held by a fn-ref local or by a fn field of a struct in the frame.
+//
+// Expected values by hand (`g` reads the `a` of its own build, `{len}{first}`):
+//   literal(1): built over [9] -> "19", then a = [0]; g() after the loop -> "19".
+//   literal(0): g is the `{ "" }` lambda -> "".   literal(2): "19", "10", then "10".
+//   variable(1): built over [9], a = b ([7]) -> "19"; empty(1): a = [] -> "19".
+//   comprehension(1): built over [1, 2, 3] -> 3 + 0 = 3.   field(1): the same through h.f -> 3.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_STAYING_RECORD_TAKES_BACKING=1` — "a store was freed twice" in every
+//   one-pass test, both backends.
+// CHANNEL: the re-free gate (LOFT_REFREE_FAILS), and the values by assertion.
+// HOLDS: `test_zero_and_two_passes` under the switch.
+
+struct H { tag: integer, f: fn() -> integer }
+
+fn literal(n: integer) -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for i in 0..n { g = fn() -> text { "{len(a)}{a[0]}" }; a = [i]; t += g() + " "; }
+  t + g()
+}
+fn variable(n: integer) -> text {
+  a = [9]; b = [7]; g = fn() -> text { "" }; t = "";
+  for _i in 0..n { g = fn() -> text { "{len(a)}{a[0]}" }; a = b; t += g() + " "; }
+  t + g()
+}
+fn empty(n: integer) -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for _i in 0..n { g = fn() -> text { "{len(a)}{a[0]}" }; a = []; t += g() + " "; }
+  t + g()
+}
+fn comprehension(n: integer) -> integer {
+  v = [1, 2, 3];
+  g = fn() -> integer { 0 };
+  for i in 0..n { g = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  g()
+}
+fn field(n: integer) -> integer {
+  v = [1, 2, 3];
+  h = H { tag: 0, f: fn() -> integer { 0 } };
+  for i in 0..n { h.f = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  h.f()
+}
+
+fn test_a_literal_rebind() { r = literal(1); assert(r == "19 19", "literal(1): {r}"); }
+fn test_a_variable_rebind() { r = variable(1); assert(r == "19 19", "variable(1): {r}"); }
+fn test_an_empty_rebind() { r = empty(1); assert(r == "19 19", "empty(1): {r}"); }
+fn test_a_comprehension_rebind() { r = comprehension(1); assert(r == 3, "comprehension(1): {r}"); }
+fn test_a_fn_field() { r = field(1); assert(r == 3, "field(1): {r}"); }
+fn test_zero_and_two_passes() {
+  r0 = literal(0);
+  assert(r0 == "", "literal(0): {r0}");
+  r2 = literal(2);
+  assert(r2 == "19 10 10", "literal(2): {r2}");
+}
