@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapKeep` with `@FR-H-FreeTwice` — A PASS-SCOPED FN-REF BESIDE A KEPT ONE FREES ITS
+// RECORD ONCE.  A fn-ref declared inside a loop holds a record confined to the pass, and the
+// frame frees that record's local at its end.  A second loop that keeps a fn-ref past it makes
+// the frame release its fn-refs by store identity, and the pass-scoped fn-ref then released its
+// confined record at each pass end as well, standing down only against the frame's OTHER
+// records: the record was freed twice, both backends, at any pass count.  A frame with only the
+// pass-scoped loop never had the second release.
+//
+// Expected values by hand: `two_loops(n)` builds `g` over `a`, concatenates `[i]`, and appends
+// `{len}{last}`; the kept `g4` does the same over `a2` and is read once more after its loop.
+//   n = 1: "19 " and 19, then 19 * 100 + 19 = 1919.
+//   n = 3: "19 20 31 " and 19, 20, 31 -> 192031, then * 100 + 31 = 19203131.
+//   n = 0: "" and the `{ 0 }` lambda -> 0.   `one_loop(3)`: "19 20 31 ".
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_CONFINED_RECORD_STAND_DOWN=1` — "a store was freed twice" in
+//   `test_one_pass` and `test_three_passes`, both backends.
+// CHANNEL: the re-free gate (LOFT_REFREE_FAILS), and the values by assertion.
+// HOLDS: `test_zero_passes` and `test_the_pass_scoped_loop_alone` under the switch.
+
+fn two_loops(n: integer) -> text {
+  a = [9]; t = "";
+  for i in 0..n { g = fn() -> text { "{len(a)}{a[len(a) - 1]}" }; a = a + [i]; t += g() + " "; }
+  a2 = [9]; g4 = fn() -> integer { 0 }; t4 = 0;
+  for i in 0..n { g4 = fn() -> integer { len(a2) * 10 + a2[len(a2) - 1]! }; a2 = a2 + [i]; t4 = t4 * 100 + g4(); }
+  t4 = t4 * 100 + g4();
+  "{t}{t4}"
+}
+fn one_loop(n: integer) -> text {
+  a = [9]; t = "";
+  for i in 0..n { g = fn() -> text { "{len(a)}{a[len(a) - 1]}" }; a = a + [i]; t += g() + " "; }
+  t
+}
+
+fn test_one_pass() { r = two_loops(1); assert(r == "19 1919", "two_loops(1): {r}"); }
+fn test_three_passes() { r = two_loops(3); assert(r == "19 20 31 19203131", "two_loops(3): {r}"); }
+fn test_zero_passes() { r = two_loops(0); assert(r == "0", "two_loops(0): {r}"); }
+fn test_the_pass_scoped_loop_alone() { r = one_loop(3); assert(r == "19 20 31 ", "one_loop(3): {r}"); }
