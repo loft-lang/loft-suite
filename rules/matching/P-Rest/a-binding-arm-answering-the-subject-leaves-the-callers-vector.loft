@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-P-Rest` with `@FR-H-FreeTwice` — A BINDING ARM ANSWERING THE SUBJECT LEAVES THE CALLER'S
+// VECTOR.  `fn f(v: vector<T>) -> vector<T> { match v { [h, ..t] => t, whole => whole } }`
+// delivers each arm into the caller's return buffer.  The `whole` arm copied `whole` into the
+// buffer and then freed what `whole` depends on: the parameter `v`, the CALLER's vector.  Taken
+// (the subject too short for the first arm), the caller's vector was freed twice, on both
+// backends (a caller still reading it read a freed store).  A `_ => v` arm and a match of one arm
+// never took that free; a parameter rebound to a fresh store inside the callee is the frame's own
+// and is not this arm's to keep.
+//
+// Expected values by hand: `e` is empty, so every `f(e)` takes the `whole` arm and answers 0, and
+// `e` keeps length 0; `full` has three elements, so `[h, ..t]` answers 2 and `[h, i, j]` answers
+// `[h]`, 1; the rebound callee replaces `v` with three elements first: 3, and its `[h, ..t]` 2.
+//
+// @falsified-at: `LOFT_ARM_FREES_PARAM_DEPS=1` — "a store was freed twice" on the interpreter and
+//   native-c, in `rest_text`, `rest_int`, `rest_struct` and `no_rest`.
+// CHANNEL: the strict-store gate (the abort), both backends; the values by assertion.
+// HOLDS: `catch_all_v`, `one_arm` and `rebound` under the switch.
+
+struct P { x: integer }
+
+fn tail_t(v: vector<text>) -> vector<text> { match v { [_h, ..t] => t, whole => whole } }
+fn tail_i(v: vector<integer>) -> vector<integer> { match v { [_h, ..t] => t, whole => whole } }
+fn tail_p(v: vector<P>) -> vector<P> { match v { [_h, ..t] => t, whole => whole } }
+fn head3(v: vector<integer>) -> vector<integer> { match v { [h, _i, _j] => [h], whole => whole } }
+fn tail_v(v: vector<integer>) -> vector<integer> { match v { [_h, ..t] => t, _ => v } }
+fn only(v: vector<integer>) -> vector<integer> { match v { whole => whole } }
+fn rebound(v: vector<integer>, c: boolean) -> vector<integer> {
+  if c { v = [1, 2, 3]; }
+  match v { [_h, ..t] => t, whole => whole }
+}
+
+fn test_rest_text() {
+  e: vector<text> = [];
+  r = tail_t(e);
+  full = ["a", "b", "c"];
+  assert(len(r) == 0 && len(e) == 0 && len(tail_t(full)) == 2, "text: {len(r)} {len(e)}");
+}
+
+fn test_rest_int() {
+  e: vector<integer> = [];
+  r = tail_i(e);
+  assert(len(r) == 0 && len(e) == 0 && len(tail_i([1, 2, 3])) == 2, "integer: {len(r)} {len(e)}");
+}
+
+fn test_rest_struct() {
+  e: vector<P> = [];
+  r = tail_p(e);
+  full = [P { x: 1 }, P { x: 2 }, P { x: 3 }];
+  assert(len(r) == 0 && len(e) == 0 && len(tail_p(full)) == 2, "struct: {len(r)} {len(e)}");
+}
+
+fn test_no_rest() {
+  e: vector<integer> = [];
+  r = head3(e);
+  assert(len(r) == 0 && len(e) == 0 && len(head3([4, 5, 6])) == 1, "no rest: {len(r)} {len(e)}");
+}
+
+fn test_catch_all_v() {
+  e: vector<integer> = [];
+  r = tail_v(e);
+  assert(len(r) == 0 && len(e) == 0, "`_ => v`: {len(r)} {len(e)}");
+}
+
+fn test_one_arm() {
+  e: vector<integer> = [];
+  r = only(e);
+  assert(len(r) == 0 && len(e) == 0, "one arm: {len(r)} {len(e)}");
+}
+
+fn test_rebound() {
+  e: vector<integer> = [];
+  a = rebound(e, true);
+  b = rebound(e, false);
+  assert(len(a) == 2 && len(b) == 0 && len(e) == 0, "rebound: {len(a)} {len(b)} {len(e)}");
+}
