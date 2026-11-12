@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2472, `@FR-O-Oracle` — the twin of loft#2471 with SEVERAL heap members.  A call that may
+// hand back any heap member of a tuple argument, or mint a record of its own, is bound by the
+// per-run join: the answer is copied where its store is ANY member's, and adopted where the callee
+// minted it.  Every heap member is a witness.
+//
+// With one witness for a two-member tuple there was none at all: the join took the copy path on
+// every run, so the values were right and the record the callee minted was copied and leaked, one
+// per call (`LOFT_LEAK_CHECK=1`: `R×1`).  Before loft#2471 the C and rustc writers did not compile
+// it and the interpreter re-freed.
+//
+// Every value is hand-computed; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 7fc423232 (loft) — every backend: values right, `1 stores not freed … R×1` per
+//   minted call under LOFT_LEAK_CHECK / LOFT_NATIVE_LEAK_CHECK.
+//   CHANNEL: the leak check; WITNESS: c1's minted arm.
+//   HOLDS: the values of every cell answer the same on both trees.
+
+struct R { w: integer }
+fn pick2(p: (R, R), k: integer) -> R { if k == 0 { p.0 } else if k == 1 { p.1 } else { R { w: 9 } } }
+fn pick3(p: (integer, R, R), k: integer) -> R { if k == 1 { p.1 } else if k == 2 { p.2 } else { R { w: 7 } } }
+
+// c1: two heap members — each borrow arm copies, the minted arm is adopted
+fn c1() -> text {
+  t = (R { w: 1 }, R { w: 2 });
+  a = pick2(t, 0); b = pick2(t, 1); c = pick2(t, 2);
+  a.w = 11; b.w = 12;
+  "{a.w} {b.w} {c.w} {t.0.w} {t.1.w}"
+}
+// c2: the heap members behind a scalar
+fn c2() -> text {
+  u = (0, R { w: 3 }, R { w: 4 });
+  d = pick3(u, 1); d.w = 30; e = pick3(u, 2); e.w = 40; f = pick3(u, 0);
+  "{d.w} {e.w} {f.w} {u.1.w} {u.2.w}"
+}
+// c3: in a loop, every arm per pass
+fn c3() -> text {
+  out = "";
+  for i in 0..3 { t = (R { w: i }, R { w: i + 10 }); x = pick2(t, i); x.w += 100; out += "{x.w}/{t.0.w}/{t.1.w} "; }
+  out
+}
+
+fn main() {
+  assert(c1() == "11 12 9 1 2", "c1 {c1()}");
+  assert(c2() == "30 40 7 3 4", "c2 {c2()}");
+  assert(c3() == "100/0/10 111/1/11 109/2/12 ", "c3 {c3()}");
+}
