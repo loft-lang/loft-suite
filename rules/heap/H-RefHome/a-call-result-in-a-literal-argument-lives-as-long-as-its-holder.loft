@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-RefHome` — A CALL RESULT IN A LITERAL ARGUMENT LIVES AS LONG AS ITS HOLDER.
+// `readk(Linked { link: mk(9), n: 1 })` builds the `Linked` record in a work-ref inside the
+// argument, and `mk(9)`'s record — the one the stored reference `link` names — is a call result
+// the scope pass gives a temporary home.  That home was scoped to the literal's block, so its
+// free ran at the block's end, before the call: `readk` read a released store.  On the
+// interpreter that read answered whatever the slot held next (`readk_alloc` mints first, and
+// read 70 where 90 is right), on the C backend strict stores failed.  The home now lasts as
+// long as the holder.  The other spellings were right before and are the controls: a literal
+// bound to a local, one built each pass, a vector of holders, and a field write.
+//
+// Expected values by hand: mk(i) has k = 10 * i, so link.k + n is 90 + 1 = 91; three passes of
+// i = 0, 1, 2 with n = 1 sum (0 + 1) + (10 + 1) + (20 + 1) = 33; `readk_alloc` subtracts the
+// 70 of the record it mints itself (7 * 10) and answers the same 91 and 33; the field write
+// re-points `link` from q (k 1) to mk(9), so 90 + 0 = 90.
+//
+// @falsified-at: `LOFT_NO_REF_HOME_LIFT=1` — interpret answered 71 in `argument_alloc` (the
+//   first assert: `link.k` read 70, the record `readk_alloc` minted into the freed slot), and
+//   native-c failed strict stores with 2 use-after-free reads.
+// CHANNEL: the values by assertion and the strict-store use-after-free, both backends.
+// HOLDS: `bound`, `passes`, `holders`, `field`, `passes_alloc` under the switch.
+
+struct P { k: integer }
+struct Linked { link: reference<P>, n: integer }
+fn mk(i: integer) -> P { P { k: 10 * i } }
+fn readk(h: Linked) -> integer { h.link.k + h.n }
+fn readk_alloc(h: Linked) -> integer { z = mk(7); h.link.k + h.n + z.k - 70 }
+
+fn argument() -> integer { readk(Linked { link: mk(9), n: 1 }) }
+fn argument_alloc() -> integer { readk_alloc(Linked { link: mk(9), n: 1 }) }
+fn bound() -> integer {
+  h = Linked { link: mk(9), n: 1 };
+  readk(h)
+}
+fn passes() -> integer {
+  t = 0;
+  for i in 0..3 { t += readk(Linked { link: mk(i), n: 1 }); }
+  t
+}
+fn passes_alloc() -> integer {
+  t = 0;
+  for i in 0..3 { t += readk_alloc(Linked { link: mk(i), n: 1 }); }
+  t
+}
+fn holders() -> integer {
+  hs: vector<Linked> = [];
+  for i in 0..3 { hs += [Linked { link: mk(i), n: 1 }]; }
+  t = 0;
+  for h in hs { t += readk(h); }
+  t
+}
+fn field() -> integer {
+  q = P { k: 1 };
+  h = Linked { link: q, n: 0 };
+  h.link = mk(9);
+  readk(h)
+}
+
+fn main() {
+  assert(argument_alloc() == 91, "argument alloc {argument_alloc()}");
+  assert(argument() == 91, "argument {argument()}");
+  assert(bound() == 91, "bound {bound()}");
+  assert(passes() == 33, "passes {passes()}");
+  assert(passes_alloc() == 33, "passes alloc {passes_alloc()}");
+  assert(holders() == 33, "holders {holders()}");
+  assert(field() == 90, "field {field()}");
+}
