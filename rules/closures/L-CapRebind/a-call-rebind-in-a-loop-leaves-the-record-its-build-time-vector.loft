@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapRebind` — A CALL REBIND IN A LOOP LEAVES THE RECORD ITS BUILD-TIME VECTOR.  A closure
+// is rebuilt each pass over a vector local, and the local is then rebound from a CALL
+// (`a = mkv(i)`), which delivers into the hidden buffer `__ref_N` the frame reuses every pass.
+// From the second pass on, the record captured the buffer's store, and the next call refilled
+// that store in place: the closure answered the value assigned AFTER its build, a silent wrong
+// answer on both backends.  A literal, a concat and a slice rebind already moved the local to a
+// fresh store first; the call spelling now does too.
+//
+// Expected values by hand (`g` reads `a[0]` of its own build):
+//   loop(3): built over [9] -> "9", a = [0, 0]; over [0, 0] -> "0", a = [1, 1]; over [1, 1] -> "1";
+//     then g() after the loop -> "1".  So "9 0 1 1".
+//   straight(): two builds in a line, rebound by mkv(5) and mkv(6) -> "9 5" (the control: no
+//     loop, no reused buffer).
+//   loop(1): "9 9";  loop(0): "" (g is the `{ "" }` lambda).
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_CALL_BUFFER_REBIND_DETACH=1` — `loop(3)` answers "9 1 2 2" on both
+//   backends, no diagnostic.
+// CHANNEL: the values, by assertion.
+// HOLDS: `test_a_straight_line_rebind` and `test_one_pass_and_none` under the switch.
+
+fn mkv(i: integer) -> vector<integer> { [i, i] }
+
+fn looped(n: integer) -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for i in 0..n { g = fn() -> text { "{a[0]}" }; a = mkv(i); t += g() + " "; }
+  t + g()
+}
+fn straight() -> text {
+  a = [9]; t = "";
+  g = fn() -> text { "{a[0]}" }; a = mkv(5); t += g() + " ";
+  g = fn() -> text { "{a[0]}" }; a = mkv(6); t += g();
+  t
+}
+
+fn test_a_call_rebind_in_a_loop() { r = looped(3); assert(r == "9 0 1 1", "looped(3): {r}"); }
+fn test_a_straight_line_rebind() { r = straight(); assert(r == "9 5", "straight(): {r}"); }
+fn test_one_pass_and_none() {
+  r1 = looped(1);
+  assert(r1 == "9 9", "looped(1): {r1}");
+  r0 = looped(0);
+  assert(r0 == "", "looped(0): {r0}");
+}
