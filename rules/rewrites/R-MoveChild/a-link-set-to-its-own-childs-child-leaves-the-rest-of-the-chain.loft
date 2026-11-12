@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK SET TO ITS OWN CHILD'S CHILD LEAVES THE REST OF THE CHAIN INTACT (`@FR-R-MoveChild`).
+// A whole write into an out-of-line field whose value is a chain of child reads rooted at the
+// field's own child (`h.next = h.next.next`, `cur = cur.next` through a slot) installs that
+// child's record by its number and releases only the record it replaces, where the template
+// copied the surviving subtree.  The answer must be the copy's: the chain without the
+// unlinked node(s), every later node still present and in order, the null child moved as null,
+// a view bound to the replaced record before the write still reading the old value, and the
+// write to one link leaving the other link untouched.
+//
+// Axes this file MOVES:  the chain read (one link down, two links down, the end of the chain
+//                        which moves null), the written place (a field link, a second field
+//                        link, a slot reference through a parameter), a view live across
+//                        the write, the chain length (1, 2, 3, 4, 100).
+// Axes it HOLDS FIXED:   a self-typed record with two optional links.
+//
+// Expected values by hand (chain(a, b) = a > a+1 > ... > b):
+//   chain(1, 4), `next = next.next`: 1>3>4>, size 3, total 1 + 3 + 4 = 8.
+//   chain(1, 4), `next = next.next.next`: 1>4>, size 2.
+//   chain(5, 6), `next = next.next`: the second node's own link is null, so 5>, size 1 and
+//     the link null.
+//   chain(1, 4) with a view `keep` of the second node taken first: the view still reads 2;
+//     the chain reads 1>3>4>.
+//   chain(1, 3) with `side` = chain(7, 9), `side = side.next`: next chain 1>2>3> untouched,
+//     side chain 8>9>.
+//   drop_first through a slot on chain(1, 4): k=3 -> 1>2>4>; k=4 (last, moves null) -> 1>2>;
+//     k=9 (absent) -> unchanged; k=1 (the root itself, not on a link) -> unchanged.
+//   chain(1, 100) with 4, 8, ..., 100 dropped (25 removals): size 100 - 25 = 75, total
+//     5050 - 4 * (1 + ... + 25) = 5050 - 4 * 325 = 3750.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_MOVE_CHILD=1: the six whole writes (five in
+//   main, the slot write in drop_first) are `OpMoveChildRec` under the rule and
+//   `OpSetChildRec` without it.
+
+struct Node { v: integer, next: Node?, side: Node? }
+
+fn size(n: Node?) -> integer { if n == null { return 0; } 1 + size(n.next) }
+fn total(n: Node?) -> integer { if n == null { return 0; } n.v + total(n.next) }
+fn walk(n: Node?) -> text {
+  if n == null { return ""; }
+  "{n.v}>{walk(n.next)}"
+}
+fn chain(a: integer, b: integer) -> Node {
+  if a == b { return Node { v: a }; }
+  Node { v: a, next: chain(a + 1, b) }
+}
+fn drop_first(root: Node, k: integer) {
+  cur = &root.next;
+  while cur != null && cur.v != k { cur = &cur.next; }
+  if cur == null { return; }
+  cur = cur.next;
+}
+
+fn main() {
+  l1 = chain(1, 4);
+  assert(walk(l1) == "1>2>3>4>" && size(l1) == 4, "built {walk(l1)}");
+  l1.next = l1.next.next;
+  assert(walk(l1) == "1>3>4>" && size(l1) == 3 && total(l1) == 8, "one removed {walk(l1)}");
+  l2 = chain(1, 4);
+  l2.next = l2.next.next.next;
+  assert(walk(l2) == "1>4>" && size(l2) == 2, "two removed {walk(l2)}");
+  l3 = chain(5, 6);
+  l3.next = l3.next.next;
+  assert(walk(l3) == "5>" && size(l3) == 1 && l3.next == null, "null moved {walk(l3)}");
+  l4 = chain(1, 4);
+  keep = l4.next;
+  l4.next = l4.next.next;
+  assert(keep.v == 2 && walk(l4) == "1>3>4>", "view across the move {keep.v} {walk(l4)}");
+  l5 = chain(1, 3);
+  l5.side = chain(7, 9);
+  l5.side = l5.side.next;
+  assert(walk(l5) == "1>2>3>" && walk(l5.side) == "8>9>", "side link {walk(l5)} / {walk(l5.side)}");
+  l6 = chain(1, 4);
+  drop_first(l6, 3);
+  assert(walk(l6) == "1>2>4>", "slot, middle {walk(l6)}");
+  drop_first(l6, 4);
+  assert(walk(l6) == "1>2>", "slot, last (null moved) {walk(l6)}");
+  drop_first(l6, 9);
+  assert(walk(l6) == "1>2>" && size(l6) == 2, "slot, absent {walk(l6)}");
+  drop_first(l6, 1);
+  assert(walk(l6) == "1>2>", "the root is not on the link {walk(l6)}");
+  big = chain(1, 100);
+  for j in 1..26 { drop_first(big, j * 4); }
+  assert(size(big) == 75 && total(big) == 3750, "multiples of 4 dropped {size(big)} {total(big)}");
+}

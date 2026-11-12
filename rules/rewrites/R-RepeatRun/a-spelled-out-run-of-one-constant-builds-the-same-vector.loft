@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SPELLED-OUT RUN OF ONE CONSTANT BUILDS THE SAME VECTOR AS ITS PUSHES (`@FR-R-RepeatRun`).
+// Four or more consecutive pushes of the same literal into the same target, the element at
+// least four bytes wide, become a reservation, one push of the template and one
+// `OpAppendCopy` that copies the LAST element `n - 1` more times.  The answer must be the
+// pushes': the full length, every element the constant, elements appended before the run
+// untouched, a run broken by another constant two runs, and a shorter run, a narrower
+// element or a computed literal (a negative one is a call) the pushes as written.
+//
+// Axes this file MOVES:  the run length (3, 4, 5, 6, 4 + 5), the element kind (integer,
+//                        float, i32, a 64-bit value past 2^53, u8, a negated literal), the
+//                        target (a local, a record field in a constructor), what precedes
+//                        the run (nothing, one earlier element), a write after the build.
+// Axes it HOLDS FIXED:   every constant is a plain literal in one literal or `+=`.
+//
+// Expected values by hand:
+//   a = [9] ++ six 4s: length 1 + 6 = 7, sum 9 + 6*4 = 33, a[0] = 9, a[6] = 4.
+//   f = five 2.25: length 5, sum 5*2.25 = 11.25.
+//   w = four 77 (i32): length 4, sum 4*77 = 308.
+//   s = three 6 (too short, kept as pushes): length 3, sum 18.
+//   m = four 5, five 8: length 9, sum 4*5 + 5*8 = 20 + 40 = 60, m[3] = 5, m[4] = 8.
+//   n = four -7 (computed, kept): length 4, sum -28.
+//   big = four 9007199254740993 (2^53 + 1): length 4, sum 4*9007199254740993
+//     = 36028797018963972, big[3] = 9007199254740993.
+//   b = five 200 as u8 (narrow, kept): length 5, sum 1000.
+//   record cells = six 0.5: length 6, sum 3.0, tag 31 untouched; after cells[5] = 7.25 the
+//     sum is 5*0.5 + 7.25 = 9.75 and cells[4] stays 0.5.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_REPEAT_RUN=1: a, f, w, m (twice), big and the
+//   record's field gain an OpAppendCopy under the rule, and s, n, b keep their pushes.
+
+struct Buf { cells: vector<float>, tag: integer }
+
+fn isum(v: vector<integer>) -> integer {
+  s = 0;
+  for x in v { s += x; }
+  s
+}
+
+fn fsum(v: vector<float>) -> float {
+  s = 0.0;
+  for x in v { s += x; }
+  s
+}
+
+fn make() -> Buf {
+  Buf { cells: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5], tag: 31 }
+}
+
+fn main() {
+  a: vector<integer> = [9];
+  a += [4, 4, 4, 4, 4, 4];
+  assert(len(a) == 7 && isum(a) == 33 && a[0] == 9 && a[6] == 4, "a {a} len {len(a)}");
+  f: vector<float> = [2.25, 2.25, 2.25, 2.25, 2.25];
+  assert(len(f) == 5 && fsum(f) == 11.25, "f {f} len {len(f)}");
+  w: vector<i32> = [77, 77, 77, 77];
+  ws = 0;
+  for x in w { ws += x; }
+  assert(len(w) == 4 && ws == 308, "w {w} len {len(w)} sum {ws}");
+  s: vector<integer> = [6, 6, 6];
+  assert(len(s) == 3 && isum(s) == 18, "s {s} len {len(s)}");
+  m: vector<integer> = [5, 5, 5, 5, 8, 8, 8, 8, 8];
+  assert(len(m) == 9 && isum(m) == 60 && m[3] == 5 && m[4] == 8, "m {m} len {len(m)}");
+  n: vector<integer> = [-7, -7, -7, -7];
+  assert(len(n) == 4 && isum(n) == -28, "n {n} len {len(n)}");
+  big: vector<integer> = [9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993];
+  assert(len(big) == 4 && isum(big) == 36028797018963972 && big[3] == 9007199254740993, "big {big}");
+  b: vector<u8> = [200, 200, 200, 200, 200];
+  bs = 0;
+  for x in b { bs += x; }
+  assert(len(b) == 5 && bs == 1000, "b len {len(b)} sum {bs}");
+  r = make();
+  assert(len(r.cells) == 6 && fsum(r.cells) == 3.0 && r.tag == 31, "r {r.cells} tag {r.tag}");
+  r.cells[5] = 7.25;
+  assert(fsum(r.cells) == 9.75 && r.cells[4] == 0.5, "r after write {r.cells}");
+}

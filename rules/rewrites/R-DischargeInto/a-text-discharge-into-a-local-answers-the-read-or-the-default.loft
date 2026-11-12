@@ -1,0 +1,104 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT DISCHARGE THAT ASSIGNS A LOCAL ANSWERS THE READ WHEN IT IS PRESENT AND THE DEFAULT
+// WHEN IT IS NOT (`@FR-R-DischargeInto`).  `w = r ?? d` over a text read is
+// `{t = r; if t is not null then w = t else w = d}`; when `w` is named in neither `r` nor `d`
+// it is read straight into `w` (`{w = r; if w is null then w = d}`) with no temporary.  The
+// answer must be the temporary form's: the element when it exists — INCLUDING an empty
+// element, which is present and not null — the default when the read answers null (past the
+// end, before the start, a null text), the old value of `w` replaced whichever arm runs, and,
+// where the read or the default names `w` itself, the value the original statement computes.
+//
+// Axes this file MOVES:  the read (in range, an empty element, the last element by a negative
+//                        index, past the end on both sides, a null `text?` variable, a present
+//                        one), the text's width (ASCII, 'γδ€' multi-byte), the default (a
+//                        literal, one naming the target), the read (one indexing by len of
+//                        the target), `w`'s previous value, a loop of binds.
+// Axes it HOLDS FIXED:   the vector `["alpha", "", "γδ€", "zz"]`.
+//
+// Expected values by hand, over v = ["alpha", "", "γδ€", "zz"] (len 4):
+//   pick(v, i) = "[" + (v[i] ?? "none") + "]":
+//     0 → [alpha]   1 → []  (the empty element is present, so NOT "none")   2 → [γδ€] (5 chars)
+//     3 → [zz]      4 → [none]   -1 → [zz]   -4 → [alpha]   -5 → [none] (before the start)
+//   gathered(v): i in 0..6 appends v[i] ?? "-": "alpha" + "" + "γδ€" + "zz" + "-" + "-"
+//     = "alphaγδ€zz--", 5 + 0 + 3 + 2 + 1 + 1 = 12 characters
+//   maybe(null) = "zz"; maybe("q") = "q"; maybe("") = "" (a present empty text is kept)
+//   replaced: w = "old" then v[7] ?? "new" → "new"; w = "old" then v[0] ?? "new" → "alpha"
+//   names_the_read: w = "ab", v2 = ["x", "yy", "zzz"]: v2[len("ab")] = v2[2] = "zzz"
+//   names_the_default: w = "old", v2[9] is null, the default "{w}!" reads the old w: "old!"
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_DISCHARGE_INTO=1`, which names `pick`, `gathered` and `replaced` as read
+//   straight into their local (and the stdlib's `File.lines`), and by the rewrite census under
+//   `--native-c --native-emit` (4 admissions, none with `LOFT_NO_DISCHARGE_INTO=1`).  The two
+//   cells that name `w` are shapes the parser already routes elsewhere; guarded for values.
+
+fn pick(v: const vector<text>, i: integer) -> text {
+  w = v[i] ?? "none";
+  "[{w}]"
+}
+
+fn gathered(v: const vector<text>) -> text {
+  out = "";
+  for i in 0..6 {
+    w = v[i] ?? "-";
+    out += w;
+  }
+  out
+}
+
+fn maybe(s: text?) -> text {
+  w = s ?? "zz";
+  w
+}
+
+fn replaced(v: const vector<text>, i: integer) -> text {
+  w = "old";
+  w = v[i] ?? "new";
+  w
+}
+
+fn names_the_read(v: const vector<text>) -> text {
+  w = "ab";
+  w = v[len(w)] ?? "";
+  w
+}
+
+fn names_the_default(v: const vector<text>) -> text {
+  w = "old";
+  w = v[9] ?? "{w}!";
+  w
+}
+
+fn main() {
+  v = ["alpha", "", "γδ€", "zz"];
+  a = pick(v, 0);
+  assert(a == "[alpha]" && len(a) == 7, "0: {a}");
+  b = pick(v, 1);
+  assert(b == "[]" && len(b) == 2, "empty element: {b}");
+  c = pick(v, 2);
+  assert(c == "[γδ€]" && len(c) == 5, "multi-byte: {c}");
+  d = pick(v, 3);
+  assert(d == "[zz]", "3: {d}");
+  e = pick(v, 4);
+  assert(e == "[none]" && len(e) == 6, "past the end: {e}");
+  f = pick(v, -1);
+  g = pick(v, -4);
+  h = pick(v, -5);
+  assert(f == "[zz]" && g == "[alpha]" && h == "[none]", "from the end: {f} {g} {h}");
+  t = gathered(v);
+  assert(t == "alphaγδ€zz--" && len(t) == 12, "gathered: {t}");
+  n: text? = null;
+  m1 = maybe(n);
+  m2 = maybe("q");
+  m3 = maybe("");
+  assert(m1 == "zz" && m2 == "q" && m3 == "" && len(m3) == 0, "maybe: {m1} {m2} {m3}");
+  r1 = replaced(v, 7);
+  r2 = replaced(v, 0);
+  assert(r1 == "new" && r2 == "alpha", "replaced: {r1} {r2}");
+  v2 = ["x", "yy", "zzz"];
+  x = names_the_read(v2);
+  y = names_the_default(v2);
+  assert(x == "zzz" && y == "old!", "names w: {x} {y}");
+}

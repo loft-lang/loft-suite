@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VALUE READ ONCE AFTER ITS STORE IS READ IN PLACE (`@FR-R-SingleUse`).  In an inlined body,
+// the last assignment `t = e` to a fresh local followed by a result that reads `t` once and
+// first has the result read `e` and the store and load go.  Outside an inlined body, a
+// comprehension's element temporary read once by the push after it, with a pure value,
+// goes straight into the push.  The answer must be the store's: the same value for a
+// result that reads `t` first, one that reads a variable before `t`, a result that reads
+// `t` twice or only after another operator completed (kept), a computation that overflows
+// to null, and a comprehension whose element calls a function with an effect (the effect
+// happens once per element, in order, and the value is the call's).
+//
+// Axes this file MOVES:  the result's read (`t + a`, `a + t`, `t + t`, `(a * 3) + t`), the
+//                        argument (9, 0, -3, 2^62 whose product overflows), the element's
+//                        value (pure `i * i + 1`, a call that logs), the comprehension's
+//                        length (4, 3).
+// Axes it HOLDS FIXED:   the local is assigned once, the last statement before the result.
+//
+// Expected values by hand:
+//   su1(a) = (a * 7 + 2) + a: a=9 -> 65 + 9 = 74; a=0 -> 2; a=-3 -> -19 + -3 = -22.
+//   su2(9) = 9 + 65 = 74.  su3(9) = 65 + 65 = 130.  su4(9) = 27 + 65 = 92.
+//   su1(2^62): 2^62 * 7 exceeds the integer range, the product is null and so is the sum: -1
+//     after `?? -1`.
+//   squares() = [for i in 1..4] of i*i+1: 2, 5, 10, 17 (length 4).
+//   logged(log): i = 0, 1, 2: values 0+1, 1+1, 4+1 = 1, 2, 5; log gains i*10 = 0, 10, 20 in
+//     that order (length 3).
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_SINGLE_USE=1: the inlined su1 and su2 bodies
+//   lose their `_il_t_N` store, and squares() pushes `i * i + 1` without its `_comp_1`
+//   temporary; su3, su4 and logged are the same in both.
+
+fn su1(a: integer) -> integer { t = a * 7 + 2; t + a }
+
+fn su2(a: integer) -> integer { t = a * 7 + 2; a + t }
+
+fn su3(a: integer) -> integer { t = a * 7 + 2; t + t }
+
+fn su4(a: integer) -> integer { t = a * 7 + 2; (a * 3) + t }
+
+fn bump(log: &vector<integer>, i: integer) -> integer {
+  log += [i * 10];
+  i * i + 1
+}
+
+fn squares() -> vector<integer> {
+  [for i in 1..5 { i * i + 1 }]
+}
+
+fn logged(log: &vector<integer>) -> vector<integer> {
+  [for i in 0..3 { bump(log, i) }]
+}
+
+fn main() {
+  u = 9;
+  zero = 0;
+  neg = -3;
+  huge = 4611686018427387904;
+  assert(su1(u) == 74 && su1(zero) == 2 && su1(neg) == -22, "su1");
+  assert(su2(u) == 74, "su2");
+  assert(su3(u) == 130, "su3");
+  assert(su4(u) == 92, "su4");
+  assert((su1(huge) ?? -1) == -1, "su1 overflow");
+  s = squares();
+  assert(len(s) == 4 && s[0] == 2 && s[1] == 5 && s[2] == 10 && s[3] == 17, "squares {s}");
+  log: vector<integer> = [];
+  l = logged(log);
+  assert(len(l) == 3 && l[0] == 1 && l[1] == 2 && l[2] == 5 && len(log) == 3 && log[0] == 0 && log[1] == 10 && log[2] == 20, "logged {l} {log}");
+}

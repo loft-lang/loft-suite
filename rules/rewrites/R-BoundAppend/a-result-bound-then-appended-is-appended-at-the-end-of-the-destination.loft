@@ -1,0 +1,153 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL RESULT BOUND FIRST AND APPENDED LATER LANDS AT THE END OF THE DESTINATION AS IT WAS
+// WHEN THE APPEND IS WRITTEN (`@FR-R-BoundAppend`).  In one block, `k = f(args); S; dst += k`
+// with `f` answering a vector is made as `b0 = len(dst); dst += f(args); kl = len(dst) - b0;
+// S'`: the append moves BEFORE `S`, and `S'` reads `len(dst)` as b0 and `len(k)` as kl.  The
+// answer must be the original's: a statement of S that reads dst sees it NOT yet grown, a
+// statement of S that writes dst lands BEFORE k's elements, a `return` in S skips the append,
+// k read after the append still holds its elements, and an empty k appends nothing.
+//
+// Axes this file MOVES:  what S does with dst (reads a length, reads an element, writes,
+//                        leaves early), what S does with k (reads its length, nothing), k read
+//                        after the append, k's length (0, 1, 2, 3), dst (a local; a `&`
+//                        parameter and a plain parameter, each holding an element already).
+// Axes it HOLDS FIXED:   `chunk(n)` is `[n*100, n*100 + 3, …]` of length n.
+//
+// Expected values by hand (chunk(1) = [100], chunk(2) = [200, 203], chunk(3) = [300, 303, 306]):
+//   offsets  n = 0..4, k = chunk(n): offs records len(buf) before the append and lens len(k):
+//            n = 0: offs 0, lens 0, buf []; n = 1: offs 0, lens 1, buf [100]; n = 2: offs 1,
+//            lens 2, buf [100, 200, 203]; n = 3: offs 3, lens 3, buf 6 long:
+//            offs [0, 0, 1, 3], lens [0, 1, 2, 3], buf [100, 200, 203, 300, 303, 306]
+//   marks    n = 1..4, len(buf) * 1000 + len(k): 0*1000 + 1 = 1, 1*1000 + 2 = 1002,
+//            3*1000 + 3 = 3003
+//   firsts   buf[0] read before each append, n = 1..3: empty → -5, then 100, then 100; buf ends
+//            1 + 2 + 3 = 6 long
+//   writes   `buf += [-1]` before the append, n = 1..3: [-1, 100, -1, 200, 203], 5 long
+//   early    n = 1..5, `return buf` at n = 3 before its append: [100] then [200, 203]:
+//            [100, 200, 203], 3 long
+//   after    k[1] read after the append, n = 2..4: 203 + 303 = 506, buf 2 + 3 = 5 long
+//   params   v = [9]; fill_ref (n = 1, 2): t = len(v)*10 + len(k) = 1*10 + 1 = 11, then
+//            2*10 + 2 = 22: 33, v = [9, 100, 200, 203] (4 long); then fill_plain on that v
+//            (the vector parameter aliases the caller's): 4*10 + 1 = 41, then 5*10 + 2 = 52:
+//            93, v = [9, 100, 200, 203, 100, 200, 203] (7 long)
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   the rewrite census (`--native-c --native-emit` with `LOFT_REWRITE_CENSUS`): `R-BoundAppend`
+//   admits `offsets`, `marks` and `fill_plain` (3) and none with `LOFT_NO_BOUND_APPEND=1`;
+//   `LOFT_TRACE_BOUND_APPEND=1` names them.  The other functions are shapes the rule declines.
+
+fn chunk(n: integer) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..n { r += [n * 100 + i * 3]; }
+  r
+}
+
+fn offsets() -> text {
+  buf: vector<integer> = [];
+  offs: vector<integer> = [];
+  lens: vector<integer> = [];
+  for n in 0..4 {
+    k = chunk(n);
+    offs += [len(buf)];
+    lens += [len(k)];
+    buf += k;
+  }
+  "{offs} {lens} {buf}"
+}
+
+fn marks() -> text {
+  buf: vector<integer> = [];
+  out: vector<integer> = [];
+  for n in 1..4 {
+    k = chunk(n);
+    out += [len(buf) * 1000 + len(k)];
+    buf += k;
+  }
+  "{out}"
+}
+
+fn firsts() -> text {
+  buf: vector<integer> = [];
+  out: vector<integer> = [];
+  for n in 1..4 {
+    k = chunk(n);
+    out += [buf[0] ?? -5];
+    buf += k;
+  }
+  "{out} {len(buf)}"
+}
+
+fn writes() -> vector<integer> {
+  buf: vector<integer> = [];
+  for n in 1..3 {
+    k = chunk(n);
+    buf += [-1];
+    buf += k;
+  }
+  buf
+}
+
+fn early() -> vector<integer> {
+  buf: vector<integer> = [];
+  for n in 1..5 {
+    k = chunk(n);
+    if n == 3 { return buf; }
+    buf += k;
+  }
+  buf
+}
+
+fn after() -> text {
+  buf: vector<integer> = [];
+  t = 0;
+  for n in 2..4 {
+    k = chunk(n);
+    buf += k;
+    t += k[1] ?? 0;
+  }
+  "{t} {len(buf)}"
+}
+
+// The same body over a `&` parameter (declined: the append is not on the bare parameter) and
+// over a plain parameter (admitted); the plain vector parameter aliases the caller's.
+fn fill_ref(dst: &vector<integer>) -> integer {
+  t = 0;
+  for n in 1..3 {
+    k = chunk(n);
+    t += len(dst) * 10 + len(k);
+    dst += k;
+  }
+  t
+}
+
+fn fill_plain(dst: vector<integer>) -> integer {
+  t = 0;
+  for n in 1..3 {
+    k = chunk(n);
+    t += len(dst) * 10 + len(k);
+    dst += k;
+  }
+  t
+}
+
+fn main() {
+  o = offsets();
+  assert(o == "[0,0,1,3] [0,1,2,3] [100,200,203,300,303,306]", "offsets: {o}");
+  m = marks();
+  assert(m == "[1,1002,3003]", "marks: {m}");
+  f = firsts();
+  assert(f == "[-5,100,100] 6", "firsts: {f}");
+  w = writes();
+  assert(len(w) == 5 && w[0] == -1 && w[1] == 100 && w[2] == -1 && w[3] == 200 && w[4] == 203, "writes: {w}");
+  e = early();
+  assert(len(e) == 3 && e[0] == 100 && e[1] == 200 && e[2] == 203, "early: {e}");
+  a = after();
+  assert(a == "506 5", "after: {a}");
+  v: vector<integer> = [9];
+  r = fill_ref(v);
+  assert(r == 33 && len(v) == 4 && v[0] == 9 && v[1] == 100 && v[3] == 203, "ref param: {r} {v}");
+  p = fill_plain(v);
+  assert(p == 93 && len(v) == 7 && v[4] == 100 && v[6] == 203, "plain param: {p} {v}");
+}

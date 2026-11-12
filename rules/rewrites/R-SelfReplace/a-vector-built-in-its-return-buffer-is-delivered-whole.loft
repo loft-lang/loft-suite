@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR BUILT IN ITS RETURN BUFFER IS DELIVERED WHOLE (`@FR-R-SelfReplace`).  A function that
+// builds its result in its buffer names it as a view of that buffer and delivers the view at
+// every exit; when nothing after the binding rebinds either, the delivery of a vector into
+// itself is dropped.  The answer must be the template's: the elements in order, at the early
+// returns and at the tail, none for an empty range, one for the smallest, and the result a
+// caller can keep growing.  A function whose result local is rebound to another vector, or
+// that returns one of two locals, keeps its delivery and must answer the vector it returns.
+//
+// Axes this file MOVES:  the exit (an early return before the loop, an early return inside it,
+//                        the tail), the count built (0, 1, 2, 3), what the caller does after
+//                        (reads, appends one record), the returned local (the buffer's view,
+//                        a rebound view, one of two locals).
+// Axes it HOLDS FIXED:   a vector<Seg> of records holding a text; integers for the kept shapes.
+//
+// Expected values by hand, with w = 3 * i + 1:
+//   lay(2, 5): i = 2, 3, 4 -> s2:7; s3:10; s4:13; -> text of length 5 + 6 + 6 = 17.
+//   lay(5, 5): empty.  lay(7, 8): one record, s7, w = 22.
+//   lay(39, 45): i = 39 (w = 118), then i = 40 (w = 121), which returns early: two records.
+//   lay(0, 2) with one more appended: s0:1; s1:4; z:5;.
+//   evens(7) = 0, 2, 4, 6 (length 4); evens(0) is empty.
+//   swap_in(1) = [77, 88, 99] (the view rebound to another vector), swap_in(0) = [10, 20].
+//   pick(8) = [4, 8], pick(0) = [5, 6].
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_SELF_REPLACE=1: the three `OpReplaceVector` of
+//   `lay` (two early returns and the tail) go under the rule (LOFT_TRACE_SELF_REPLACE=1 names
+//   "n_lay drops 3"); swap_in and pick keep theirs.
+
+struct Seg { label: text, w: integer }
+
+fn lay(a: integer, b: integer) -> vector<Seg> {
+  segs: vector<Seg> = [];
+  if b <= a { return segs; }
+  for i in a..b {
+    segs += [Seg { label: "s{i}", w: i * 3 + 1 }];
+    if i == 40 { return segs; }
+  }
+  return segs;
+}
+
+fn evens(n: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..n {
+    if i % 2 == 0 { out += [i]; }
+  }
+  out
+}
+
+fn swap_in(a: integer) -> vector<integer> {
+  out: vector<integer> = [10, 20];
+  if a > 0 {
+    other: vector<integer> = [77, 88, 99];
+    out = other;
+  }
+  return out;
+}
+
+fn pick(n: integer) -> vector<integer> {
+  a: vector<integer> = [4];
+  b: vector<integer> = [5, 6];
+  a += [n];
+  if n > 0 { return a; }
+  b
+}
+
+fn show(rs: vector<Seg>) -> text {
+  t = "";
+  for r in rs { t += "{r.label}:{r.w};"; }
+  t
+}
+
+fn main() {
+  a = show(lay(2, 5));
+  assert(a == "s2:7;s3:10;s4:13;" && len(a) == 17, "a {a}");
+  e = lay(5, 5);
+  assert(len(e) == 0, "empty {len(e)}");
+  one = lay(7, 8);
+  assert(len(one) == 1 && one[0].label == "s7" && one[0].w == 22, "one {show(one)}");
+  early = lay(39, 45);
+  assert(len(early) == 2 && early[1].label == "s40" && early[1].w == 121, "early {show(early)}");
+  grown = lay(0, 2);
+  grown += [Seg { label: "z", w: 5 }];
+  assert(len(grown) == 3 && show(grown) == "s0:1;s1:4;z:5;", "grown {show(grown)}");
+  ev = evens(7);
+  assert(len(ev) == 4 && ev[3] == 6, "evens {ev}");
+  assert(len(evens(0)) == 0, "evens 0");
+  s2 = "{swap_in(1)}|{swap_in(0)}";
+  assert(s2 == "[77,88,99]|[10,20]", "swap {s2}");
+  s3 = "{pick(8)}|{pick(0)}";
+  assert(s3 == "[4,8]|[5,6]", "pick {s3}");
+}

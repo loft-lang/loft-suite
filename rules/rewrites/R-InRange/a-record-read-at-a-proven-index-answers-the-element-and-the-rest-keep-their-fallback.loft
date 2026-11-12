@@ -1,0 +1,168 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD READ AT AN INDEX THE LOOP PROVES IN RANGE ANSWERS THE ELEMENT, AND EVERY READ IT
+// DOES NOT PROVE KEEPS ITS FALLBACK (`@FR-R-InRange`).  Inside `for i in 0..len(v)` whose body
+// can neither resize `v` nor assign `i`, `v[i]?` over a RECORD element is the element read
+// alone (the fallback is never minted); the same holds for a field walk `0..len(d.f)`, a
+// range end held in a length local, and the wrapped index `(i + c) % n ?? 0` with `c` a literal
+// from 0 up.  The answer must be the discharged read's everywhere: the element where the
+// index is proved, the default record (id 0) where it is not — another, shorter vector at the
+// same index; a vector the body empties part-way; a vector emptied before a length local's
+// walk; a field whose record is handed to a call that clears it — and a negative offset
+// `(i - 1) % n`, which is NOT the form, reads -1 from the end for i = 0.
+//
+// Axes this file MOVES:  the proof (own vector, another vector, a body that clears, a length
+//                        local, a length local of a vector emptied before the loop, the field
+//                        clause, a field clause defeated by a call, the wrapped form with
+//                        offsets 1, 7 and -1), and the vector's length (0, 1, 5).
+// Axes it HOLDS FIXED:   a record `P { id }`; `pts(n, first)` holds ids first, first+1, ….
+//
+// Expected values by hand, with a = pts(5, 20) (ids 20, 21, 22, 23, 24):
+//   own(a)                 20 + 21 + 22 + 23 + 24 = 110
+//   other(a, pts(3, 70))   the second has ids 70, 71, 72; at i = 3, 4 its read is the default,
+//                          id 0: 70 + 71 + 72 + 0 + 0 = 213
+//   cleared(a)             i = 0, 1 read 20, 21; the clear at i = 2 runs before the read, so
+//                          i = 2, 3, 4 read defaults: 41
+//   held(a)                the length local n = 5: 110;  emptied(a) clears a after n is taken:
+//                          5 trips, every read the default: sum 0, trips 5 → "0/5"
+//   field(Doc{a})          the field walk: 110;  field_cleared: a call clears d.pts at i = 2:
+//                          20 + 21 = 41
+//   wrap +1 (weight 1 << i, n = 5):   index (i + 1) % 5 = 1, 2, 3, 4, 0 → ids 21, 22, 23, 24, 20:
+//                          21*1 + 22*2 + 23*4 + 24*8 + 20*16 = 21 + 44 + 92 + 192 + 320 = 669
+//   wrap +7:               (i + 7) % 5 = 2, 3, 4, 0, 1 → 22, 23, 24, 20, 21:
+//                          22 + 46 + 96 + 160 + 336 = 660
+//   wrap -1 (not the form): (i - 1) % 5 = -1, 0, 1, 2, 3 and -1 reads the last element
+//                          → 24, 20, 21, 22, 23: 24*1 + 20*2 + 21*4 + 22*8 + 23*16
+//                          = 24 + 40 + 84 + 176 + 368 = 692
+//   empty / one            own(pts(0, 9)) = 0;  own(pts(1, 9)) = 9;  wrap +1 over pts(1, 9):
+//                          n = 1, (0 + 1) % 1 = 0 → id 9, weight 1: 9
+//   scalars([4, 5, 6])     the scalar discharge keeps its own rule: (4 + 5 + 6) * 3 = 45
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   the rewrite census under `--native-c --native-emit` (`R-InRange` 7, `R-InRange/length-local`
+//   5, `R-InRange/wrapped` 2; none with `LOFT_NO_IN_RANGE=1`) and `LOFT_TRACE_IN_RANGE=1`, which
+//   names `own`, `held`, `field`, `wrap_one` and `wrap_seven`.  `other`, `cleared`, `emptied`,
+//   `field_cleared`, `wrap_minus` and `scalars` are the shapes it declines or leaves alone.
+
+struct P { id: integer }
+struct Doc { pts: vector<P> }
+
+fn pts(n: integer, first: integer) -> vector<P> {
+  out: vector<P> = [];
+  for i in 0..n { out += [P { id: first + i }]; }
+  out
+}
+
+fn own(v: vector<P>) -> integer {
+  t = 0;
+  for i in 0..len(v) { t += v[i]?.id; }
+  t
+}
+
+fn other(a: const vector<P>, b: const vector<P>) -> integer {
+  t = 0;
+  for i in 0..len(a) { t += b[i]?.id; }
+  t
+}
+
+fn cleared(v: vector<P>) -> integer {
+  t = 0;
+  for i in 0..len(v) {
+    if i == 2 { v.clear(); }
+    t += v[i]?.id;
+  }
+  t
+}
+
+fn held(cnt: integer, first: integer) -> integer {
+  v = pts(cnt, first);
+  n = len(v);
+  t = 0;
+  for i in 0..n { t += v[i]?.id; }
+  t
+}
+
+fn emptied(v: vector<P>) -> text {
+  n = len(v);
+  v.clear();
+  t = 0;
+  trips = 0;
+  for i in 0..n { t += v[i]?.id; trips += 1; }
+  "{t}/{trips}"
+}
+
+fn field(d: const Doc) -> integer {
+  t = 0;
+  for i in 0..len(d.pts) { t += d.pts[i]?.id; }
+  t
+}
+
+fn wipe(d: Doc) { d.pts.clear(); }
+
+fn field_cleared(d: Doc) -> integer {
+  t = 0;
+  for i in 0..len(d.pts) {
+    if i == 2 { wipe(d); }
+    t += d.pts[i]?.id;
+  }
+  t
+}
+
+fn wrap_one(cnt: integer, first: integer) -> integer {
+  v = pts(cnt, first);
+  n = len(v);
+  t = 0;
+  for i in 0..n { t += v[(i + 1) % n ?? 0]?.id * (1 << i); }
+  t
+}
+
+fn wrap_seven(cnt: integer, first: integer) -> integer {
+  v = pts(cnt, first);
+  n = len(v);
+  t = 0;
+  for i in 0..n { t += v[(i + 7) % n ?? 0]?.id * (1 << i); }
+  t
+}
+
+fn wrap_minus(cnt: integer, first: integer) -> integer {
+  v = pts(cnt, first);
+  n = len(v);
+  t = 0;
+  for i in 0..n { t += v[(i - 1) % n ?? 0]?.id * (1 << i); }
+  t
+}
+
+fn scalars(v: const vector<integer>) -> integer {
+  t = 0;
+  for i in 0..len(v) { t += v[i]? * 3; }
+  t
+}
+
+fn main() {
+  a = pts(5, 20);
+  o = own(pts(5, 20));
+  assert(o == 110, "own: {o}");
+  x = other(a, pts(3, 70));
+  assert(x == 213, "another vector: {x}");
+  c = cleared(pts(5, 20));
+  assert(c == 41, "cleared part-way: {c}");
+  h = held(5, 20);
+  assert(h == 110, "length local: {h}");
+  e = emptied(pts(5, 20));
+  assert(e == "0/5" && len(e) == 3, "emptied before the walk: {e}");
+  f = field(Doc { pts: pts(5, 20) });
+  assert(f == 110, "field: {f}");
+  fc = field_cleared(Doc { pts: pts(5, 20) });
+  assert(fc == 41, "field cleared by a call: {fc}");
+  w1 = wrap_one(5, 20);
+  w7 = wrap_seven(5, 20);
+  wm = wrap_minus(5, 20);
+  assert(w1 == 669 && w7 == 660 && wm == 692, "wrapped: {w1} {w7} {wm}");
+  z = own(pts(0, 9));
+  one = own(pts(1, 9));
+  w_one = wrap_one(1, 9);
+  assert(z == 0 && one == 9 && w_one == 9, "empty / one / wrapped one: {z} {one} {w_one}");
+  s = scalars([4, 5, 6]);
+  assert(s == 45, "scalars: {s}");
+}

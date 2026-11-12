@@ -1,0 +1,188 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WALK OF A SCALAR LITERAL TAKES EACH ITEM ONCE, IN SOURCE ORDER, AT ITS OWN POSITION
+// (`@FR-R-LiteralWalk`).  `for x in [e0, …, en-1]` over 1..=16 scalar items evaluates each
+// item once into its own temp before the first round and walks the temps by a counted
+// select: step i is item i, `x#index` is i, the walk ends after step n-1, and no vector is
+// built.  Both backends take the lowering at parse time, so their agreement is no evidence;
+// the values below are derived by hand.  An order fault (the select shifted by one) and a
+// count fault (a step too many or too few) both show in the order-sensitive folds; a plain
+// sum would not.
+//
+// Axes this file MOVES:  the item count (1, 3, 4, 5, 16, and 17 which keeps the vector walk),
+//                        the item kind (integer fields, a widening integer/float mix,
+//                        boolean, character), the body (a positional fold, `x#index`,
+//                        `continue`/`break`, an early `return`, a write to the loop variable,
+//                        a write to the items' sources), the item sources (field reads, calls
+//                        with a side effect), a nesting, and `rev(…)` around the literal
+//                        (the decline).
+// Axes it HOLDS FIXED:   the iterable is always a literal; the loop variable is a fresh name.
+//
+// Expected values by hand:
+//   fields    T{4, 7, 2}: s = 0 → 0*10+4 = 4 → 4*10+7 = 47 → 47*10+2 = 472.
+//   once      note(log, 31), note(log, 17), note(log, 55) each push their value when evaluated
+//             (before the first round), then each round pushes -x: [31, 17, 55, -31, -17, -55],
+//             length 6.  A lazily evaluated item would interleave the pushes.
+//   index     [40, 30, 20, 10]: sum x#index * x = 0*40 + 1*30 + 2*20 + 3*10 = 100.
+//   widening  [3, 0.5, 8] are floats: s = 0.0 → 0*2+3 = 3.0 → 3*2+0.5 = 6.5 → 6.5*2+8 = 21.0.
+//   one       [9]: s = 9, one round, so 9*10 + 1 = 91.
+//   sixteen   2, 4, …, 32 (item k is 2(k+1)): sum x * (x#index + 1) = 2 * sum_{j=1..16} j^2
+//             = 2 * (16*17*33/6) = 2 * 1496 = 2992; rounds counted: 16.
+//   seventeen 1..17 keeps the vector walk: the last item seen is 17, rounds 17: 17*100 + 17 = 1717.
+//   skip      [8, 3, 5, 9, 2], `continue` at 3, `break` at 9: 8 + 5 = 13.
+//   bits      [true, false, false, true]: s = s*2 + bit: 0 → 1 → 2 → 4 → 9.
+//   chars     ['x', 'é', '😀']: text "xé😀" (3 characters); code points 120 + 233 + 128512 = 128865.
+//   sources   a = 5, b = 6; the walk holds the values at entry, so the body's `a = 100;
+//             b = 100` does not change what x sees: 5 + 6 = 11; a ends at 100: 11*1000 + 100 = 11100.
+//   own copy  [1, 2], the body writes x = x + 100 before reading it: 101 + 102 = 203.
+//   early     first_over(20) over [10, 25, 40] answers 25; first_over(50) answers -1.
+//   nested    x in [2, 3], y in [5, 7]: products in order 10, 14, 15, 21: "10,14,15,21," (12 chars).
+//   rev       rev([1, 2, 3]) walks 3, 2, 1: digits "321" (the decline keeps the vector walk).
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   the rewrite census (`LOFT_REWRITE_CENSUS`, `--native-c --native-emit`): `R-LiteralWalk`
+//   fires for this cell and not with `LOFT_NO_LITERAL_WALK=1`.
+
+struct T { a: integer, b: integer, c: integer }
+
+fn fields(t: T) -> integer {
+  s = 0;
+  for i in [t.a, t.b, t.c] { s = s * 10 + i; }
+  s
+}
+
+fn note(log: &vector<integer>, v: integer) -> integer {
+  log += [v];
+  v
+}
+
+fn once() -> vector<integer> {
+  log: vector<integer> = [];
+  for x in [note(log, 31), note(log, 17), note(log, 55)] { log += [-x]; }
+  log
+}
+
+fn by_index() -> integer {
+  s = 0;
+  for x in [40, 30, 20, 10] { s += x#index * x; }
+  s
+}
+
+fn widening() -> float {
+  s = 0.0;
+  for f in [3, 0.5, 8] { s = s * 2.0 + f; }
+  s
+}
+
+fn one() -> integer {
+  s = 0;
+  n = 0;
+  for x in [9] { s += x; n += 1; }
+  s * 10 + n
+}
+
+fn sixteen() -> text {
+  s = 0;
+  n = 0;
+  for x in [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32] {
+    s += x * (x#index + 1);
+    n += 1;
+  }
+  "{s}/{n}"
+}
+
+fn seventeen() -> integer {
+  last = 0;
+  n = 0;
+  for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] { last = x; n += 1; }
+  last * 100 + n
+}
+
+fn skip() -> integer {
+  s = 0;
+  for x in [8, 3, 5, 9, 2] {
+    if x == 3 { continue; }
+    if x == 9 { break; }
+    s += x;
+  }
+  s
+}
+
+fn bits() -> integer {
+  s = 0;
+  for b in [true, false, false, true] { s = s * 2; if b { s += 1; } }
+  s
+}
+
+fn chars() -> text {
+  out = "";
+  cp = 0;
+  for c in ['x', 'é', '😀'] { out += "{c}"; cp += c as integer; }
+  "{out}/{cp}"
+}
+
+fn sources() -> integer {
+  a = 5;
+  b = 6;
+  s = 0;
+  for x in [a, b] { a = 100; b = 100; s += x; }
+  s * 1000 + a
+}
+
+fn own_copy() -> integer {
+  s = 0;
+  for x in [1, 2] { x = x + 100; s += x; }
+  s
+}
+
+fn first_over(limit: integer) -> integer {
+  for x in [10, 25, 40] { if x > limit { return x; } }
+  -1
+}
+
+fn nested() -> text {
+  out = "";
+  for x in [2, 3] { for y in [5, 7] { out += "{x * y},"; } }
+  out
+}
+
+fn reversed() -> text {
+  out = "";
+  for x in rev([1, 2, 3]) { out += "{x}"; }
+  out
+}
+
+fn main() {
+  a = fields(T { a: 4, b: 7, c: 2 });
+  assert(a == 472, "fields: {a}");
+  l = once();
+  assert(len(l) == 6 && l[0] == 31 && l[1] == 17 && l[2] == 55 && l[3] == -31 && l[5] == -55, "once: {l}");
+  i = by_index();
+  assert(i == 100, "index: {i}");
+  w = widening();
+  assert(w == 21.0, "widening: {w}");
+  o = one();
+  assert(o == 91, "one: {o}");
+  s16 = sixteen();
+  assert(s16 == "2992/16" && len(s16) == 7, "sixteen: {s16}");
+  s17 = seventeen();
+  assert(s17 == 1717, "seventeen: {s17}");
+  k = skip();
+  assert(k == 13, "skip: {k}");
+  b = bits();
+  assert(b == 9, "bits: {b}");
+  c = chars();
+  assert(c == "xé😀/128865" && len(c) == 10, "chars: {c}");
+  so = sources();
+  assert(so == 11100, "sources: {so}");
+  oc = own_copy();
+  assert(oc == 203, "own copy: {oc}");
+  e1 = first_over(20);
+  e2 = first_over(50);
+  assert(e1 == 25 && e2 == -1, "early: {e1} {e2}");
+  n = nested();
+  assert(n == "10,14,15,21," && len(n) == 12, "nested: {n}");
+  r = reversed();
+  assert(r == "321" && len(r) == 3, "rev: {r}");
+}

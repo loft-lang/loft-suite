@@ -1,0 +1,113 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FRAME FROM WHICH NO FN-REF BUFFER REGISTRANT IS REACHABLE CARRIES NO GUARD, AND EVERY
+// ANSWER AND EVERY STORE STAYS WHERE THE GUARDED FRAME PUT IT (`@FR-R-GuardFree`).  A function
+// whose call-graph closure (cycles included) holds no fn-ref call, no `parallel`, no `yield`,
+// no capturing-lambda hand-up and no user native, is entered without the fn-ref buffer guard:
+// its drop would release nothing, every time.  Where a registrant IS reachable — a fn-ref
+// dispatch in the function, in a callee, in a callee's callee, or a generator — the guard
+// stays and releases the buffers the dispatch registered.  The rewrite changes no value, so
+// the cells hand-compute the values AND are scored on the leak channel (`LOFT_STRICT_STORES=1`
+// and the exit leak report): a guard that was wrongly dropped leaks the buffers it should have
+// released; a guard wrongly kept changes nothing visible, which is why the switch run
+// (`LOFT_NO_GUARD_FREE=1`) is the A/B for the answers.
+//
+// Axes this file MOVES:  the recursion shape (direct, mutual, through a stdlib native, 200
+//                        frames deep), what the frame returns (a scalar, a record with a
+//                        vector and a text), and the registrant that must keep the guard
+//                        (a fn-ref call in the frame, in a callee, a result consumed
+//                        unbound, a generator).
+// Axes it HOLDS FIXED:   every function is a plain top-level function.
+//
+// Expected values by hand:
+//   hanoi(10)        h(n) = 2*h(n-1) + 1, h(0) = 0: 2^10 - 1 = 1023
+//   chain(5)         even(5) → odd(4) → even(3) → odd(2) → even(1) → odd(0), whose base is
+//                    Big { [100], "o" }; each frame on the way up appends n*n:
+//                    n = 1, 2, 3, 4, 5 → [100, 1, 4, 9, 16, 25]: length 6, sum 155, tag "o"
+//   ladder(200)      [1, 4, 9, …, 40000]: 200 elements, sum n^2 = 200*201*401/6 = 2686700
+//   digits(12)       "12".."10" are 2 characters each (3 × 2 = 6), "9".."1" one each (9): 15
+//   through(5, mk)   mk(k) has k elements: 5 + 4 + 3 + 2 + 1 = 15
+//   top(4)           mid(n, mk) = len(mk(n).xs) + 1 = n + 1, summed over n = 4, 3, 2, 1:
+//                    5 + 4 + 3 + 2 = 14
+//   total(3)         firsts(n) yields 0, 2, …, 2(n-1): n = 3 → 6, n = 2 → 2, n = 1 → 0, n = 0
+//                    → 0: 8
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   the rewrite census (`R-GuardFree` counts the guard-free frames of this cell under
+//   `--native-c --native-emit` and not with `LOFT_NO_GUARD_FREE=1`) and the emitted C: `hanoi`
+//   and `digits` take no `loft_nfnrefs` mark with the rule on and take one with it off (the
+//   heap-returning frames and the registrants keep theirs either way).
+
+struct Big { xs: vector<integer>, tag: text }
+
+fn hanoi(n: integer) -> integer {
+  if n == 0 { 0 } else { 2 * hanoi(n - 1) + 1 }
+}
+
+fn even_chain(n: integer) -> Big {
+  if n == 0 { return Big { xs: [100], tag: "e" }; }
+  b = odd_chain(n - 1);
+  b.xs += [n * n];
+  b
+}
+
+fn odd_chain(n: integer) -> Big {
+  if n == 0 { return Big { xs: [100], tag: "o" }; }
+  b = even_chain(n - 1);
+  b.xs += [n * n];
+  b
+}
+
+fn ladder(n: integer) -> vector<integer> {
+  if n == 0 { return []; }
+  below = ladder(n - 1);
+  below += [n * n];
+  below
+}
+
+fn digits(n: integer) -> integer {
+  if n == 0 { 0 } else { len("{n}") + digits(n - 1) }
+}
+
+fn mk(n: integer) -> Big { Big { xs: [for i in 0..n { i * 3 }], tag: "m{n}" } }
+
+fn through(n: integer, f: fn(integer) -> Big) -> integer {
+  if n == 0 { return 0; }
+  b = f(n);
+  len(b.xs) + through(n - 1, f)
+}
+
+fn leaf(n: integer, f: fn(integer) -> Big) -> integer { len(f(n).xs) }
+fn mid(n: integer, f: fn(integer) -> Big) -> integer { leaf(n, f) + 1 }
+fn top(n: integer) -> integer {
+  if n == 0 { return 0; }
+  mid(n, mk) + top(n - 1)
+}
+
+fn firsts(n: integer) -> iterator<integer> { for i in 0..n { yield i * 2; } }
+
+fn total(n: integer) -> integer {
+  if n == 0 { return 0; }
+  s = 0;
+  for x in firsts(n) { s += x; }
+  s + total(n - 1)
+}
+
+fn main() {
+  h = hanoi(10);
+  assert(h == 1023, "hanoi: {h}");
+  c = even_chain(5);
+  r = "{c.tag} {len(c.xs)} {sum(c.xs)} {c.xs[0]?} {c.xs[5]?}";
+  assert(r == "o 6 155 100 25", "chain: {r}");
+  l = ladder(200);
+  assert(len(l) == 200 && sum(l) == 2686700 && l[199]? == 40000, "ladder: {len(l)} {sum(l)}");
+  d = digits(12);
+  assert(d == 15, "digits: {d}");
+  t = through(5, mk);
+  assert(t == 15, "through: {t}");
+  u = top(4);
+  assert(u == 14, "top: {u}");
+  s = total(3);
+  assert(s == 8, "total: {s}");
+}

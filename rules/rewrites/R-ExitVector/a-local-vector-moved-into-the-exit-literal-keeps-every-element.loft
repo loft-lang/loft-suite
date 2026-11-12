@@ -1,0 +1,148 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LOCAL VECTOR MOVED INTO THE EXIT LITERAL ARRIVES WITH EVERY ELEMENT AND LEAVES NOTHING
+// BEHIND (`@FR-R-ExitVector`).  A local vector that reaches the function's exit only inside
+// the literal built into the return buffer (`return Doc { n: n, items: xs }`) has its wrapper
+// claimed in the return buffer's store and the literal takes it by a handle move: the slot's
+// record number moves, the source slot is zeroed.  The answer must be the copy's: the whole
+// vector in the field (empty, short, built through a callee, recursive), a function with
+// another exit (that answers an empty field) unchanged, a literal that names the local
+// AGAIN after the field that took it (the later mention must see the elements, not an emptied
+// slot), and the caller reading, growing and dropping the result without disturbing a later
+// call's result.
+//
+// Axes this file MOVES:  the vector's length (0, 3, 4), the exits (one, two with different
+//                        fields), the literal's mention order (a read of the local before the
+//                        field, after it, and a second field taking it too), the record kind
+//                        (struct, enum variant), a callee that grows the local, a recursive
+//                        builder.
+// Axes it HOLDS FIXED:   `xs` is a `vector<integer>` filled with `i*i + 1`.
+//
+// Expected values by hand (`i*i + 1` for i = 0.. is 1, 2, 5, 10):
+//   build(4)        items [1, 2, 5, 10]: length 4, sum 18, n (named first) 4
+//   after(4)        the literal reads len(xs) AFTER the field that took it: still 4, items sum 18
+//   build(0)        no element: length 0, n 0
+//   early(true)     the other exit answers items [] and n -1: length 0, -1
+//   early(false)    xs = [1, 2, 5]: length 3, sum 8, n 3
+//   twice(3)        a and b both name xs; each must hold [1, 2, 5]: lengths 3 and 3, sums 8 and 8
+//   shape(3)        Poly { sides: 3, pts: [1, 2, 5] } → 3 and sum 8;  shape(0) is Dot { x: 7 }
+//   grown(2)        xs = [1, 2] then the callee appends [100, 200, 300]: 5 long, sum 603
+//   tree(d)         ids d, children d of tree(d-1): nodes(d) = 1 + d*nodes(d-1): 1, 2, 5, 16, 65
+//                   for d = 0..4; id sum(d) = d + d*sum(d-1): 0, 1, 4, 15, 64
+//   independent     build(4) kept while build(2) is built and grown: the first is still
+//                   [1, 2, 5, 10] (sum 18), the second [1, 2, 7] after `+= [7]` (sum 10)
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   the per-function rewrite census (`LOFT_REWRITE_CENSUS_FN`, `--native-c --native-emit`):
+//   `R-ExitVector` (phase `ir`, so both backends run it) admits `build`, `early`, `grown`,
+//   `shape` and `tree`, and none with `LOFT_NO_EXIT_VECTOR=1`.  `after` and `twice` mention
+//   the local after the field that took it and are declined by design; they guard the values.
+
+struct Doc { n: integer, items: vector<integer> }
+struct Both { a: vector<integer>, b: vector<integer> }
+struct Tree { id: integer, kids: vector<Tree> }
+enum Shape { Poly { sides: integer, pts: vector<integer> }, Dot { x: integer } }
+
+fn squares(n: integer) -> vector<integer> {
+  xs: vector<integer> = [];
+  for i in 0..n { xs += [i * i + 1]; }
+  xs
+}
+
+fn build(n: integer) -> Doc {
+  xs: vector<integer> = [];
+  for i in 0..n { xs += [i * i + 1]; }
+  return Doc { n: len(xs), items: xs };
+}
+
+fn after(n: integer) -> Doc {
+  xs: vector<integer> = [];
+  for i in 0..n { xs += [i * i + 1]; }
+  return Doc { items: xs, n: len(xs) };
+}
+
+fn early(flag: boolean) -> Doc {
+  xs: vector<integer> = [];
+  for i in 0..3 { xs += [i * i + 1]; }
+  if flag { return Doc { n: -1, items: [] }; }
+  return Doc { n: len(xs), items: xs };
+}
+
+fn twice(n: integer) -> Both {
+  xs: vector<integer> = [];
+  for i in 0..n { xs += [i * i + 1]; }
+  return Both { a: xs, b: xs };
+}
+
+fn shape(n: integer) -> Shape {
+  if n == 0 { return Dot { x: 7 }; }
+  xs: vector<integer> = [];
+  for i in 0..n { xs += [i * i + 1]; }
+  return Poly { sides: n, pts: xs };
+}
+
+fn push_all(v: vector<integer>, base: integer) {
+  for i in 1..4 { v += [base * i]; }
+}
+
+fn grown(n: integer) -> Doc {
+  xs: vector<integer> = [];
+  for i in 0..n { xs += [i * i + 1]; }
+  push_all(xs, 100);
+  return Doc { n: 0, items: xs };
+}
+
+fn tree(d: integer) -> Tree {
+  kids: vector<Tree> = [];
+  for _ in 0..d { kids += [tree(d - 1)]; }
+  return Tree { id: d, kids: kids };
+}
+
+fn nodes(t: Tree) -> integer {
+  c = 1;
+  for k in t.kids { c += nodes(k); }
+  c
+}
+
+fn ids(t: Tree) -> integer {
+  c = t.id;
+  for k in t.kids { c += ids(k); }
+  c
+}
+
+fn main() {
+  d = build(4);
+  assert(len(d.items) == 4 && sum(d.items) == 18 && d.n == 4, "build(4): {d.items} {d.n}");
+  a = after(4);
+  assert(len(a.items) == 4 && sum(a.items) == 18 && a.n == 4, "after(4): {a.items} {a.n}");
+  z = build(0);
+  assert(len(z.items) == 0 && z.n == 0, "build(0): {z.items} {z.n}");
+  e1 = early(true);
+  e2 = early(false);
+  assert(len(e1.items) == 0 && e1.n == -1, "early(true): {e1.items} {e1.n}");
+  assert(len(e2.items) == 3 && sum(e2.items) == 8 && e2.n == 3, "early(false): {e2.items} {e2.n}");
+  t = twice(3);
+  assert(len(t.a) == 3 && len(t.b) == 3 && sum(t.a) == 8 && sum(t.b) == 8, "twice(3): {t.a} {t.b}");
+  s = shape(3);
+  sd = match s { Poly { sides, pts } => "{sides}/{len(pts)}/{sum(pts)}", Dot { x } => "dot {x}" };
+  assert(sd == "3/3/8", "shape(3): {sd}");
+  o = shape(0);
+  od = match o { Poly { sides, pts } => "{sides}/{len(pts)}", Dot { x } => "dot {x}" };
+  assert(od == "dot 7", "shape(0): {od}");
+  g = grown(2);
+  assert(len(g.items) == 5 && sum(g.items) == 603, "grown(2): {g.items}");
+  want_nodes = [1, 2, 5, 16, 65];
+  want_ids = [0, 1, 4, 15, 64];
+  for k in 0..5 {
+    tr = tree(k);
+    nn = nodes(tr);
+    ss = ids(tr);
+    assert(nn == want_nodes[k]? && ss == want_ids[k]?, "tree({k}): {nn} nodes, id sum {ss}");
+  }
+  first = build(4);
+  second = build(2);
+  second.items += [7];
+  assert(len(first.items) == 4 && sum(first.items) == 18, "independent first: {first.items}");
+  assert(len(second.items) == 3 && sum(second.items) == 10, "independent second: {second.items}");
+}

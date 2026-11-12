@@ -1,0 +1,121 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RETURNED LOCAL BOUND FROM A CALL HOLDS THE CALL'S ELEMENTS FOLLOWED BY EXACTLY THE
+// ELEMENTS APPENDED AFTER IT (`@FR-R-ForwardResult`).  `buf = head(…); buf += payload; buf`
+// as the tail of a block hands `head` this function's own return buffer: the call builds
+// there, the appends land there, and the delivery's clear-and-copy goes.  The answer must be
+// the copy's: the header then the payload in order, the header alone when nothing is
+// appended, a long header (two elements) and a short one (one) in the same buffer, a result
+// that does not carry elements over from an earlier, longer one in a reused variable, nested
+// results built from inner calls into their own buffers, and the shapes the rule leaves alone
+// (a callee answering a borrowed view, a local also appended on only one branch).
+//
+// Axes this file MOVES:  the header's length (1 or 2 elements), the payload's length (0, 3,
+//                        12), the nesting (flat, a list of lists), the caller's result
+//                        variable (fresh, reused after a longer result), the callee kind
+//                        (building, borrowing), the branch structure after the bind.
+// Axes it HOLDS FIXED:   `head2(tag, n)` is `[tag*10 + n]` below 10 and `[tag*10 + 9, n]` from 10.
+//
+// Expected values by hand:
+//   head2(1, 4) = [14];  head2(1, 12) = [19, 12];  head2(2, 3) = [23];  head2(2, 12) = [29, 12];
+//   head2(2, 0) = [20];  head2(3, 3) = [33].
+//   Num 4           [14]                                     (1 long)
+//   Num 12          [19, 12]                                 (2 long)
+//   Blob [5, 6, 7]  [23] + [5, 6, 7] = [23, 5, 6, 7]         (4 long, sum 41)
+//   Blob (1, 3, …, 23)  twelve odd numbers sum 12*12 = 144; [29, 12] + them: 14 long, sum 185
+//   Blob []         [20]                                     (1 long: the header alone)
+//   List [Num 4, Blob [5, 6, 7], Num 12]  [33] + [14] + [23, 5, 6, 7] + [19, 12]
+//                   = [33, 14, 23, 5, 6, 7, 19, 12]          (8 long, sum 33 + 14 + 41 + 31 = 119)
+//   reuse           e = the 14-long result, then e = Blob [5, 6, 7]: 4 long, not 14, and
+//                   e[3] = 7; this repeated three times
+//   borrowed(v)     a callee returning its argument's own view: v = [1, 2, 3] → [1, 2, 3, 9]
+//                   (4 long) and v is still 3 long
+//   branchy(true)   [12] + [5] = [12, 5];  branchy(false) = [12]
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_FORWARD_RESULT=1` (`n_encode builds buf in the return buffer __ref_1 (2
+//   site(s))`: the Blob and List arms) and by the rewrite census (phase `ir`, `n_encode`,
+//   `R-ForwardResult` 2; none with `LOFT_NO_FORWARD_RESULT=1`).  `borrowed` and `branchy` are
+//   the shapes the rule declines.
+
+enum Item {
+  Num { v: integer },
+  Blob { bytes: vector<integer> },
+  List { items: vector<Item> },
+}
+
+fn head2(tag: integer, n: integer) -> vector<integer> {
+  buf: vector<integer> = [];
+  if n < 10 {
+    buf += [tag * 10 + n];
+  } else {
+    buf += [tag * 10 + 9];
+    buf += [n];
+  }
+  buf
+}
+
+fn encode(it: Item) -> vector<integer> {
+  match it {
+    Num { v } => head2(1, v),
+    Blob { bytes } => {
+      buf = head2(2, len(bytes));
+      buf += bytes;
+      buf
+    },
+    List { items } => {
+      buf = head2(3, len(items));
+      for i in 0..len(items) { buf += encode(items[i]); }
+      buf
+    },
+  }
+}
+
+fn keep(x: vector<integer>) -> vector<integer> { x }
+
+fn borrowed(v: vector<integer>) -> vector<integer> {
+  buf = keep(v);
+  buf += [9];
+  buf
+}
+
+fn branchy(c: boolean) -> vector<integer> {
+  buf = head2(1, 2);
+  if c { buf += [5]; }
+  buf
+}
+
+fn odd(n: integer) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 0..n { r += [i * 2 + 1]; }
+  r
+}
+
+fn main() {
+  a = encode(Num { v: 4 });
+  assert(len(a) == 1 && a[0] == 14, "Num 4: {a}");
+  b = encode(Num { v: 12 });
+  assert(len(b) == 2 && b[0] == 19 && b[1] == 12, "Num 12: {b}");
+  c = encode(Blob { bytes: [5, 6, 7] });
+  assert(len(c) == 4 && c[0] == 23 && c[1] == 5 && c[3] == 7 && sum(c) == 41, "Blob 3: {c}");
+  d = encode(Blob { bytes: odd(12) });
+  assert(len(d) == 14 && d[0] == 29 && d[1] == 12 && d[13] == 23 && sum(d) == 185, "Blob 12: {d}");
+  z = encode(Blob { bytes: [] });
+  assert(len(z) == 1 && z[0] == 20, "Blob empty: {z}");
+  l = encode(List { items: [Num { v: 4 }, Blob { bytes: [5, 6, 7] }, Num { v: 12 }] });
+  assert(len(l) == 8 && l[0] == 33 && l[1] == 14 && l[2] == 23 && l[6] == 19 && l[7] == 12 && sum(l) == 119, "List: {l}");
+  e = encode(Num { v: 4 });
+  for _ in 0..3 {
+    e = encode(Blob { bytes: odd(12) });
+    assert(len(e) == 14, "the long result again: {len(e)}");
+    e = encode(Blob { bytes: [5, 6, 7] });
+    assert(len(e) == 4 && e[3] == 7, "a shorter result carries nothing over: {e}");
+  }
+  src = [1, 2, 3];
+  bw = borrowed(src);
+  assert(len(bw) == 4 && bw[3] == 9 && len(src) == 3, "borrowed: {bw} {src}");
+  t = branchy(true);
+  f = branchy(false);
+  assert(len(t) == 2 && t[0] == 12 && t[1] == 5 && len(f) == 1 && f[0] == 12, "branchy: {t} {f}");
+}

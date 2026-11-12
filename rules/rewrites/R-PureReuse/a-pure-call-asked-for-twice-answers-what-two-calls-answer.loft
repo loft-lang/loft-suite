@@ -1,0 +1,128 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PURE CALL ASKED FOR TWICE ANSWERS WHAT TWO CALLS ANSWER (`@FR-R-PureReuse`).  Two calls of
+// projection wrappers of one effect-free function on the same argument variables, in one
+// block with nothing between that writes a store or rebinds an argument, are one call into
+// a fresh local read twice.  The answer must be the two calls': the projections of one
+// summary for one vector (including the empty and the one-element vector), and where the
+// reuse must not happen the second call's own answer: an argument rebound between, its
+// store written between, a function that itself writes (each call counted), a first call
+// in only one arm, a different argument, and a call in a loop body.
+//
+// Axes this file MOVES:  the projections taken (hi and lo; sum, hi and lo; sum and hi), the
+//                        argument between the calls (kept, rebound, grown), the callee's
+//                        effect (none, appends to its argument), the first call's place (the
+//                        block, one `if` arm, a loop body), the vector (0, 1, 2, 3, 4).
+// Axes it HOLDS FIXED:   one effect-free `stats(v)`; wrappers in both spellings.
+//
+// Expected values by hand, with stats([9, -4, 7, 12]) = lo -4, hi 12, sum 24, n 4 and the
+// summary of an empty vector all zeros:
+//   spread = hi - lo: 12 - (-4) = 16; empty: 0 - 0 = 0; [5]: 5 - 5 = 0.
+//   st_hi([3, 8]) = 8 and, after v = [100, 50, -1], 100.
+//   st_hi([2, 6]) = 6 and, after v += [40], 40.
+//   bump_hi([1, 2]) appends 1000 and answers 1000 twice: the vector has 4 entries, the last
+//     1000.
+//   arm([4, 6], true) = hi 6 + lo 4 = 10; arm([4, 6], false) = 0 + 4 = 4.
+//   pair([1, 2, 3], [4, 5]) = 6 + 9 * 10 = 96.   proj([1, 2, 3]) = sum 6 * 100 + hi 3 = 603.
+//   trio([9, -4, 7, 12]) = 24 * 10000 + 12 * 100 + (-4) = 240000 + 1200 - 4 = 241196;
+//     trio([]) = 0.
+//   looped([9, -4, 7, 12]): three rounds of 12 + (-4) + k, k = 0, 1, 2: 24 + 3 = 27.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_PURE_REUSE=1: spread, trio and proj bind
+//   one `stats` call (LOFT_TRACE_PURE_REUSE=1 names "n_spread / n_trio / n_proj: n_stats
+//   computed once"); the other functions keep their calls.
+
+struct Stats { lo: integer, hi: integer, sum: integer, n: integer }
+
+fn stats(v: vector<integer>) -> Stats {
+  lo = v[0] ?? 0;
+  hi = lo;
+  t = 0;
+  for x in v {
+    t += x;
+    if x < lo { lo = x; }
+    if x > hi { hi = x; }
+  }
+  Stats { lo: lo, hi: hi, sum: t, n: len(v) }
+}
+
+fn st_hi(v: vector<integer>) -> integer { s = stats(v); return s.hi; }
+fn st_lo(v: vector<integer>) -> integer { stats(v).lo }
+fn st_sum(v: vector<integer>) -> integer { return stats(v).sum; }
+
+fn spread(v: vector<integer>) -> integer {
+  h = st_hi(v);
+  l = st_lo(v);
+  h - l
+}
+
+fn spread_one(v: vector<integer>) -> integer { st_hi(v) - st_lo(v) }
+
+fn bump_hi(v: vector<integer>) -> integer {
+  v += [1000];
+  stats(v).hi
+}
+
+fn arm(v: vector<integer>, c: boolean) -> integer {
+  t = 0;
+  if c { t = st_hi(v); }
+  l = st_lo(v);
+  t + l
+}
+
+fn trio(v: vector<integer>) -> integer {
+  s = st_sum(v);
+  h = st_hi(v);
+  l = st_lo(v);
+  s * 10000 + h * 100 + l
+}
+
+fn proj(p: vector<integer>) -> integer {
+  sp = st_sum(p);
+  hp = st_hi(p);
+  sp * 100 + hp
+}
+
+fn pair(p: vector<integer>, q: vector<integer>) -> integer {
+  sp = st_sum(p);
+  sq = st_sum(q);
+  sp + sq * 10
+}
+
+fn looped(v: vector<integer>) -> integer {
+  acc = 0;
+  for k in 0..3 { h = st_hi(v);
+    l = st_lo(v);
+    acc += h + l + k;
+  }
+  acc
+}
+
+fn main() {
+  assert(spread([9, -4, 7, 12]) == 16, "spread {spread([9, -4, 7, 12])}");
+  assert(spread([]) == 0 && spread([5]) == 0, "spread edges");
+  assert(spread_one([9, -4, 7, 12]) == 16 && spread_one([]) == 0, "spread_one");
+  v = [3, 8];
+  a = st_hi(v);
+  v = [100, 50, -1];
+  b = st_hi(v);
+  assert(a == 8 && b == 100, "rebound {a} {b}");
+  w = [2, 6];
+  c = st_hi(w);
+  w += [40];
+  d = st_hi(w);
+  assert(c == 6 && d == 40, "written {c} {d}");
+  x = [1, 2];
+  e = bump_hi(x);
+  f = bump_hi(x);
+  assert(e == 1000 && f == 1000 && len(x) == 4 && x[3] == 1000, "effect {e} {f} {len(x)}");
+  assert(arm([4, 6], true) == 10 && arm([4, 6], false) == 4, "arm");
+  p = [1, 2, 3];
+  q = [4, 5];
+  assert(pair(p, q) == 96, "different args");
+  assert(proj(p) == 603, "two projections");
+  assert(trio([9, -4, 7, 12]) == 241196 && trio([]) == 0, "trio {trio([9, -4, 7, 12])}");
+  assert(looped([9, -4, 7, 12]) == 27, "looped {looped([9, -4, 7, 12])}");
+}

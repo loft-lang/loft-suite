@@ -1,0 +1,78 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A POWER-OF-TWO SCALE ANSWERS WHAT THE QUOTIENT ROUNDED ONCE ANSWERS (`@FR-R-ScaleFold`).
+// Inside an inlined body, `x / c * m`, `x * m / c` and `m * (x / c)` with `x` an integer
+// converted to float, `c` a float literal and `m` a power of two of at least 2 are
+// `x / (c / m)`.  Scaling by a power of two is exact and commutes with rounding, so the folded
+// quotient is the one the unfolded form rounds: the same double for every integer, the
+// extremes of the integer range included.  A scale by 3, by 1, a negative divisor (a
+// negation call, not a literal) and a divisor whose half would be subnormal keep both
+// operations, and their answers are the two-step ones.
+//
+// Axes this file MOVES:  the form (`x / c * m`, `x * m / c`, `m * (x / c)`), the integer
+//                        (0, 1, 5, 7, 9, -9, the largest integer), the call's argument (a
+//                        variable, a literal), the scale (4, 8, 3, 1, 2 over a minimum
+//                        normal divisor), the divisor (6, 10, 3, 7, -6, 2^-1022).
+// Axes it HOLDS FIXED:   a one-expression float function over one integer parameter.
+//
+// Expected values by hand (each quotient is one exactly-rounded division; scaling by 2^k
+// commutes with that rounding, so `x / c * m` = `x * m / c` = fl(x·m / c)):
+//   sc1 = x / 6 * 4 = fl(2x / 3): x=9 -> 6.0; x=1 -> fl(2/3) = 0.6666666666666666; x=0 ->
+//     0.0; x=-9 -> -6.0; x = 2^63 - 1 (converted: 2^63) -> 2^64 / 3 = 6.148914691236517e18.
+//   sc2 = x * 4 / 10 = fl(2x / 5): x=9 -> 3.6; x=1 -> 0.4; x=7 -> 2.8; x=5 -> 2.0;
+//     x = 2^63 -> 2^64 / 5 = 3.6893488147419105e18.
+//   sc3 = 8 * (x / 3) = fl(8x / 3): x=9 -> 24.0; x=1 -> fl(8/3) = 2.6666666666666665.
+//   third = x / 7 * 3, NOT a power-of-two scale: x=9 -> fl(fl(9/7) * 3) = 3.8571428571428577
+//     (the folded 9 / fl(7/3) would read ...568).
+//   unit = x / 6 * 1, x=1 -> fl(1/6) = 0.16666666666666666.
+//   negc = x / -6 * 4, x=9 -> -1.5 * 4 = -6.0.
+//   tiny = x / 2^-1022 * 2: x=1 -> 2^1022 * 2 = 2^1023 = 8.98846567431158e307; x=9 -> 9 * 2^1023
+//     exceeds the largest double: infinity.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_SCALE_FOLD=1: the inlined sc1/sc2/sc3 bodies
+//   in `main` read `OpDivFloat(x, 1.5)`, `(x, 2.5)`, `(x, 0.375)` under the rule and the
+//   two-operation form without it; third, unit, negc and tiny read the same in both.
+
+fn sc1(x: integer) -> float { (x as float) / 6.0 * 4.0 }
+
+fn sc2(x: integer) -> float { (x as float) * 4.0 / 10.0 }
+
+fn sc3(x: integer) -> float { 8.0 * ((x as float) / 3.0) }
+
+fn third(x: integer) -> float { (x as float) / 7.0 * 3.0 }
+
+fn unit(x: integer) -> float { (x as float) / 6.0 * 1.0 }
+
+fn negc(x: integer) -> float { (x as float) / -6.0 * 4.0 }
+
+fn tiny(x: integer) -> float { (x as float) / 2.2250738585072014e-308 * 2.0 }
+
+fn main() {
+  u = 9;
+  one = 1;
+  zero = 0;
+  neg = -9;
+  big = 9223372036854775807;
+  assert(sc1(u) == 6.0, "sc1(9) {sc1(u)}");
+  assert(sc1(one) == 0.6666666666666666, "sc1(1) {sc1(one)}");
+  assert(sc1(zero) == 0.0, "sc1(0) {sc1(zero)}");
+  assert(sc1(neg) == -6.0, "sc1(-9) {sc1(neg)}");
+  assert(sc1(big) == 6148914691236517000.0, "sc1(max) {sc1(big)}");
+  assert(sc1(9) == 6.0, "sc1 literal argument {sc1(9)}");
+  assert(sc2(u) == 3.6, "sc2(9) {sc2(u)}");
+  assert(sc2(one) == 0.4, "sc2(1) {sc2(one)}");
+  assert(sc2(7) == 2.8, "sc2(7) {sc2(7)}");
+  assert(sc2(5) == 2.0, "sc2(5) {sc2(5)}");
+  assert(sc2(big) == 3689348814741910500.0, "sc2(max) {sc2(big)}");
+  assert(sc3(u) == 24.0, "sc3(9) {sc3(u)}");
+  assert(sc3(one) == 2.6666666666666665, "sc3(1) {sc3(one)}");
+  assert(third(u) == 3.8571428571428577, "third(9) {third(u)}");
+  assert(unit(one) == 0.16666666666666666, "unit(1) {unit(one)}");
+  assert(negc(u) == -6.0, "negc(9) {negc(u)}");
+  t1 = tiny(one);
+  assert(t1 > 8.98e307 && t1 < 8.99e307, "tiny(1) {t1}");
+  t9 = tiny(u);
+  assert(t9 > 1.0e308, "tiny(9) overflows {t9}");
+}

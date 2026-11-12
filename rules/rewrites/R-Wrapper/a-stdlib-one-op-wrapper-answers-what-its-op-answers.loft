@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STDLIB ONE-OP WRAPPER ANSWERS WHAT ITS OP ANSWERS (`@FR-R-Wrapper`).  A call to a stdlib
+// function whose whole body is one native op over its parameters (`len` of a vector, a
+// vector's `clear`, `sqrt`) with leaf or pure-vector-path arguments IS that op; one whose
+// argument is neither stays a call.  The answer must be the call's: the length of a vector
+// local, parameter and record-field path, of an emptied vector and of one grown in a loop
+// (a length re-read after every push), the square root of a float and a single with an
+// uncomputable one answering the default the program wrote, and an argument that is a call
+// evaluated exactly once with its effect.
+//
+// Axes this file MOVES:  the wrapper (len, clear, float sqrt, single sqrt), the argument
+//                        (a local, a parameter, a field path, an indexed element's field,
+//                        a call), the vector's size (0, 1, 2, 3, 5), the sqrt's operand
+//                        (a perfect square, a fraction, a negative).
+// Axes it HOLDS FIXED:   no user function is a wrapper candidate; no text operand.
+//
+// Expected values by hand:
+//   count([4, 5, 6]) = 4 + 5 + 6 + len 3 = 18; count([]) = 0 + 0 = 0.
+//   b.items has 2 items; items[0].tags = [5, 6] has 2, items[1].tags = [] has 0, then 1
+//   after `+= [9]`.
+//   v = [3, 1, 2]: 3; after clear: 0; after `+= [7]`: 1 and v[0] = 7.
+//   grow_total(): lengths read after each of five pushes 1+2+3+4+5 = 15, final length 5;
+//     15 * 100 + 5 = 1505.
+//   len(mk(log)): mk pushes one entry into log and answers three elements: 3 and len(log) = 1.
+//   roots(16.0, -4.0, 2.25f): sqrt 16 = 4 -> 400; sqrt of -4 is null -> -1.0 -> -10;
+//     sqrt 2.25 = 1.5 (exact in single) -> 1.5; total 400 - 10 + 1.5 = 391.5.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_WRAPPER_INLINE=1: `t_6vector_len(v)`,
+//   `t_6vector_clear(v)` and `t_5float_sqrt(x)` become OpLengthVector, OpClearVector and
+//   OpMathFuncFloat under the rule; the call-valued and indexed-element arguments stay calls
+//   (LOFT_TRACE_WRAPPER=1 names each decision).
+
+struct Item { id: integer, tags: vector<integer> }
+struct Bag { items: vector<Item>, name: text }
+
+fn count(v: vector<integer>) -> integer {
+  n = 0;
+  for i in 0..len(v) { n += v[i]; }
+  n + len(v)
+}
+
+fn grow_total() -> integer {
+  v: vector<integer> = [];
+  total = 0;
+  for i in 0..5 { v += [i * 10]; total += len(v); }
+  total * 100 + len(v)
+}
+
+fn mk(log: &vector<integer>) -> vector<integer> {
+  log += [1];
+  [10, 20, 30]
+}
+
+fn roots(x: float, y: float, z: single) -> float {
+  a = sqrt(x) ?? -1.0;
+  b = sqrt(y) ?? -1.0;
+  c = (sqrt(z) ?? -1.0f) as float;
+  a * 100.0 + b * 10.0 + c
+}
+
+fn main() {
+  b = Bag { items: [Item { id: 1, tags: [5, 6] }, Item { id: 2, tags: [] }], name: "x" };
+  c = count([4, 5, 6]);
+  assert(c == 18, "count {c}");
+  assert(count([]) == 0, "count empty");
+  assert(len(b.items) == 2 && len(b.items[0].tags) == 2 && len(b.items[1].tags) == 0, "paths");
+  b.items[1].tags += [9];
+  assert(len(b.items[1].tags) == 1 && len(b.items) == 2, "after push");
+  v = [3, 1, 2];
+  assert(len(v) == 3, "v");
+  v.clear();
+  assert(len(v) == 0, "cleared");
+  v += [7];
+  assert(len(v) == 1 && v[0] == 7, "after clear {v}");
+  g = grow_total();
+  assert(g == 1505, "grow {g}");
+  log: vector<integer> = [];
+  n = len(mk(log));
+  assert(n == 3 && len(log) == 1, "arg once n {n} log {len(log)}");
+  r = roots(16.0, -4.0, 2.25f);
+  assert(r == 391.5, "roots {r}");
+}

@@ -1,0 +1,132 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BOUND RECORD LITERAL APPENDED ONCE LANDS AS WRITTEN, IN APPEND ORDER, WITH THE FIELD
+// VALUES THE LITERAL WAS BUILT FROM (`@FR-R-LiteralAppend`).  `t = T { … }; box.segs += [t]`
+// with `t` named nowhere else is built in the appended element: the element is minted first
+// and the literal's field writes go to it, with no store for `t`, no copy and no free.  The
+// answer must be the copy's: every field of every element, in append order across several
+// locals of one body, with the values of scalar variables and scalar operators; and where the
+// rule must DECLINE — a field value that reads the vector being appended to, one that calls a
+// function appending to the same vector, a local read after its append, a text field — the
+// values are the original's, the old elements unmoved when the vector grows.
+//
+// Axes this file MOVES:  the field values (a variable, an operator over variables, a cast to
+//                        float, a read of the vector's first element, a call that appends to
+//                        the vector), the use of the local (appended only, read afterwards),
+//                        the destination (a vector field of a struct), the number of locals
+//                        appended per round (1, 2 interleaved), the field kinds (integers, a
+//                        float, a text), and the round count (0, 1, 4).
+// Axes it HOLDS FIXED:   a record `Seg { a, b, w }`.
+//
+// Expected values by hand:
+//   plain(base = 30, rounds = 4)  round k: a = base*2 + k = 60 + k, b = k*k, w = k as float * 0.5:
+//                          a = 60, 61, 62, 63 (sum 246); b = 0, 1, 4, 9 (sum 14);
+//                          w = 0.0, 0.5, 1.0, 1.5 (sum 3.0); 4 elements
+//   plain(30, 0)           no round: 0 elements;  plain(30, 1): a = 60, b = 0, w = 0.0: 1 element
+//   reads_the_vector       seed [a = 5]; round k appends a = segs[0].a + k = 5 + k (the first
+//                          element stays 5): 5, 6, 7, 8; total length 5, sum 5 + 26 = 31
+//   call_appends           segs = []; the value `tag(box)` appends a Seg { a: 77 } first and
+//                          answers the new length 1: the literal's element follows it with
+//                          a = 1: [77, 1], length 2
+//   read_after             each round reads `s.b` after its append: b = 1, 2, 3 → 6 (length 3)
+//   two_locals             round k appends s1 (a = k) then s2 (a = 100 + k), k = 0..3:
+//                          [0, 100, 1, 101, 2, 102], length 6
+//   text_field             Named { n: "t{k}", k: k } appended for k = 0..3: "t0", "t1", "t2"
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_LITERAL_APPEND=1` (`n_plain builds s in its element`, `n_two_locals builds s2
+//   in its element`) and the rewrite census (`R-LiteralAppend` 2, phase `ir`, under
+//   `--native-c --native-emit`; none with `LOFT_NO_LITERAL_APPEND=1`).  `reads_the_vector`,
+//   `call_appends`, `read_after` and `text_field` are the shapes it declines.
+
+struct Seg { a: integer, b: integer, w: float }
+struct Box { segs: vector<Seg> }
+struct Named { n: text, k: integer }
+
+fn plain(bx: Box, base: integer, rounds: integer) {
+  for k in 0..rounds {
+    s = Seg { a: base * 2 + k, b: k * k, w: k as float * 0.5 };
+    bx.segs += [s];
+  }
+}
+
+fn reads_the_vector(bx: Box) {
+  for k in 0..4 {
+    s = Seg { a: bx.segs[0].a + k, b: 0, w: 0.0 };
+    bx.segs += [s];
+  }
+}
+
+fn tag(bx: Box) -> integer {
+  bx.segs += [Seg { a: 77, b: 0, w: 0.0 }];
+  len(bx.segs)
+}
+
+fn call_appends(bx: Box) {
+  s = Seg { a: tag(bx), b: 0, w: 0.0 };
+  bx.segs += [s];
+}
+
+fn read_after(bx: Box) -> integer {
+  t = 0;
+  for k in 1..4 {
+    s = Seg { a: 0, b: k, w: 0.0 };
+    bx.segs += [s];
+    t += s.b;
+  }
+  t
+}
+
+fn two_locals(bx: Box) {
+  for k in 0..3 {
+    s1 = Seg { a: k, b: 0, w: 0.0 };
+    bx.segs += [s1];
+    s2 = Seg { a: 100 + k, b: 0, w: 0.0 };
+    bx.segs += [s2];
+  }
+}
+
+fn text_field(v: vector<Named>) {
+  for k in 0..3 {
+    x = Named { n: "t{k}", k: k };
+    v += [x];
+  }
+}
+
+fn totals(bx: Box) -> text {
+  a = 0;
+  b = 0;
+  w = 0.0;
+  for s in bx.segs { a += s.a; b += s.b; w += s.w; }
+  "{len(bx.segs)}/{a}/{b}/{w}"
+}
+
+fn main() {
+  p = Box { segs: [] };
+  plain(p, 30, 4);
+  r = totals(p);
+  assert(r == "4/246/14/3" && p.segs[0].a == 60 && p.segs[3].a == 63 && p.segs[3].w == 1.5, "plain: {r}");
+  z = Box { segs: [] };
+  plain(z, 30, 0);
+  assert(len(z.segs) == 0, "no round: {len(z.segs)}");
+  o = Box { segs: [] };
+  plain(o, 30, 1);
+  assert(totals(o) == "1/60/0/0", "one round: {totals(o)}");
+  rv = Box { segs: [Seg { a: 5, b: 0, w: 0.0 }] };
+  reads_the_vector(rv);
+  assert(totals(rv) == "5/31/0/0" && rv.segs[4].a == 8 && rv.segs[1].a == 5, "reads the vector: {totals(rv)}");
+  ca = Box { segs: [] };
+  call_appends(ca);
+  assert(len(ca.segs) == 2 && ca.segs[0].a == 77 && ca.segs[1].a == 1, "call appends: {totals(ca)}");
+  ra = Box { segs: [] };
+  t = read_after(ra);
+  assert(t == 6 && len(ra.segs) == 3 && ra.segs[2].b == 3, "read after: {t}");
+  tl = Box { segs: [] };
+  two_locals(tl);
+  ok = len(tl.segs) == 6 && tl.segs[0].a == 0 && tl.segs[1].a == 100 && tl.segs[2].a == 1 && tl.segs[3].a == 101 && tl.segs[4].a == 2 && tl.segs[5].a == 102;
+  assert(ok, "two locals: {totals(tl)}");
+  nv: vector<Named> = [];
+  text_field(nv);
+  assert(len(nv) == 3 && nv[0].n == "t0" && nv[2].n == "t2" && nv[1].k == 1, "text field: {len(nv)}");
+}

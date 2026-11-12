@@ -1,0 +1,122 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LOOP READS THE LENGTH OF A TEXT AS THE TEXT STANDS AT THAT READ (`@FR-R-TextLen`).  In a
+// loop, `len(t)` of a text local or by-value parameter is counted at its first use and
+// answered from a memo until a statement that may write t has run.  The answer must be the
+// count of CHARACTERS (not bytes) of t as it stands at each read: unchanged text reads the same
+// count; after an append, a rebind, a format into it, a clear, or a write in an `if` arm, the
+// next read counts again; a write between two entries of an outer loop is seen by the
+// inner loop's first read; a self-tail call (a loop) over a by-value text counts it
+// the same.
+//
+// Axes this file MOVES:  the write kind (none, append, rebind through a format, clear then
+//                        reassign, an append in a conditional arm), the loop shape (while,
+//                        counted for, nested for, self-tail call), the text's UTF-8 widths
+//                        (1, 2, 3 and 4 bytes per character), the length (0, 1, 2, 7).
+// Axes it HOLDS FIXED:   the text is a local or a by-value parameter that borrows from nothing.
+//
+// Expected values by hand:
+//   walk("héllo€😀"): 7 characters; i runs 1..7 and adds 7 - i + 1: 7+6+5+4+3+2+1 = 28.
+//   walk("") = 0 (the loop does not run); walk("😀") = 1 (one character, four bytes).
+//   grow_to("ab", 6): k = 0..4 appends "é" while the length is below 6, then adds length + k:
+//     lengths after the append 3, 4, 5, 6, 6 -> 24, plus k 0+1+2+3+4 = 10 -> 34; final length
+//     6; the answer 34 * 100 + 6 = 3406.
+//   rebind(): lengths read before each rebind 0, 2, 4, 6 -> 12, plus k 0..3 = 6 -> 18; final
+//     length 8 ("€" twice per round, four rounds); 18 * 100 + 8 = 1808.
+//   nested(): "ab", j = 0..2, inner m = 0,1 adds length + m: j=0 length 2 -> 2+0 + 2+1 = 5;
+//     j=1 length 3 -> 7; j=2 length 4 -> 9; sum 21; final length 5; 21 * 100 + 5 = 2105.
+//   arm_write(): "日本" is 2 characters; k=0: +2; k=1: +2 then the arm appends "語x" (length 4);
+//     k=2: +4; k=3: +4; total 12.
+//   tail("日本語x", 0): recurses while i < 4 and answers i = 4.
+//   cleared(): k=0 reads 4 ("abcd") + 0 for the empty text; k=1, k=2 read 5 ("wxyz😀") each;
+//     14, plus k 0+1+2 = 3 -> 17.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_TEXT_LEN=1: walk, grow_to, rebind, nested,
+//   arm_write, tail and cleared each gain a `_len_N` memo local (and `t_4text_len` calls go).
+
+fn walk(t: text) -> integer {
+  i = 0;
+  hits = 0;
+  while i < len(t) {
+    i += 1;
+    hits += len(t) - i + 1;
+  }
+  hits
+}
+
+fn grow_to(t: text, cap: integer) -> integer {
+  acc = 0;
+  for k in 0..5 {
+    if len(t) < cap { t += "é"; }
+    acc += len(t) + k;
+  }
+  acc * 100 + len(t)
+}
+
+fn rebind() -> integer {
+  t = "";
+  acc = 0;
+  for k in 0..4 {
+    acc += len(t) + k;
+    t = "{t}€€";
+  }
+  acc * 100 + len(t)
+}
+
+fn nested() -> integer {
+  t = "ab";
+  acc = 0;
+  for j in 0..3 {
+    for m in 0..2 { acc += len(t) + m; }
+    if j < 9 { t += "ü"; }
+  }
+  acc * 100 + len(t)
+}
+
+fn arm_write() -> integer {
+  t = "日本";
+  acc = 0;
+  for k in 0..4 {
+    acc += len(t);
+    if k == 1 { t += "語x"; }
+  }
+  acc
+}
+
+fn tail(t: text, i: integer) -> integer {
+  if i >= len(t) { return i; }
+  tail(t, i + 1)
+}
+
+fn cleared() -> integer {
+  t = "abcd";
+  acc = 0;
+  for k in 0..3 {
+    acc += len(t) + k;
+    t = "";
+    acc += len(t) * 10;
+    t = "wxyz😀";
+  }
+  acc
+}
+
+fn main() {
+  w = walk("héllo€😀");
+  assert(w == 28, "walk {w}");
+  assert(walk("") == 0, "walk empty");
+  assert(walk("😀") == 1, "walk one");
+  g = grow_to("ab", 6);
+  assert(g == 3406, "grow {g}");
+  r = rebind();
+  assert(r == 1808, "rebind {r}");
+  n = nested();
+  assert(n == 2105, "nested {n}");
+  a = arm_write();
+  assert(a == 12, "arm {a}");
+  tl = tail("日本語x", 0);
+  assert(tl == 4, "tail {tl}");
+  c = cleared();
+  assert(c == 17, "cleared {c}");
+}

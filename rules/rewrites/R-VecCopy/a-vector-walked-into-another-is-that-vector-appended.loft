@@ -1,0 +1,135 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR WALKED INTO ANOTHER ELEMENT BY ELEMENT IS THAT VECTOR APPENDED (`@FR-R-VecCopy`).
+// `for e in V { t += [e] }` over a local or parameter V, into an exclusive destination (a
+// local, or the frame's hidden return buffer), is `t += V`.  The answer must be the walk's:
+// every element in index order after whatever t already held, for each element kind whose
+// read and push are exact inverses (integer, float, boolean, character, an enum, i32); an
+// empty V changes nothing.  A transformed value, a text element (owns heap), a source that
+// is a call or a slice and a destination that is a `&` parameter keep the walk and must
+// answer the same.
+//
+// Axes this file MOVES:  the element kind (integer, float, boolean, character of UTF-8 widths
+//                        1, 2 and 4, an enum, i32 past 2^16, text), the destination (a local
+//                        holding one element first, a return buffer, a `&` parameter), the
+//                        source (a parameter, a call, a slice), the body (the bare element,
+//                        element + 1), the length (0, 2, 3, 4, 5).
+// Axes it HOLDS FIXED:   a single-statement loop body, a forward walk.
+//
+// Expected values by hand, with pre() = [3, 1, 4, 1, 5]:
+//   a = [100] ++ pre: length 6, 100 first, 5 last, sum 100 + 14 = 114.
+//   f = [0.5, -2.25, 8.0]: length 3, sum 0.5 - 2.25 + 8.0 = 6.25.
+//   bo = [true, false, true, true]: length 4, three true.
+//   c = ['a', 'é', '😀']: length 3, middle 'é', last '😀'.
+//   h = [Blue, Red, Green]: length 3 in that order.
+//   i = [70000, -3]: length 2, sum 70000 - 3 = 69997.
+//   p = each of pre plus 1 = [4, 2, 5, 2, 6]: length 5, sum 19.
+//   t = ["x", "yy"]: length 2, t[1] "yy".
+//   k = pre via a call: length 5, sum 14.
+//   sl = pre[1..4] = [1, 4, 1]: length 3, sum 6.
+//   e = copy of the empty float vector: length 0.
+//   d = [7, 8, 9] with [20, 30] pushed through the `&` parameter: length 5, sum 74.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` with and without LOFT_NO_VEC_COPY=1: copy_int, copy_float, copy_bool,
+//   copy_char, copy_hue and copy_i32 hold one OpAppendVector in place of the element loop;
+//   plus_one, text, call, slice and append_into keep the loop in both.
+
+enum Hue { Red, Green, Blue }
+
+fn pre() -> vector<integer> { [3, 1, 4, 1, 5] }
+
+fn copy_int(src: vector<integer>, first: integer) -> vector<integer> {
+  t: vector<integer> = [first];
+  for e in src { t += [e]; }
+  t
+}
+
+fn copy_float(src: vector<float>) -> vector<float> {
+  r: vector<float> = [];
+  for e in src { r += [e]; }
+  r
+}
+
+fn copy_bool(src: vector<boolean>) -> vector<boolean> {
+  r: vector<boolean> = [];
+  for e in src { r += [e]; }
+  r
+}
+
+fn copy_char(src: vector<character>) -> vector<character> {
+  r: vector<character> = [];
+  for e in src { r += [e]; }
+  r
+}
+
+fn copy_hue(src: vector<Hue>) -> vector<Hue> {
+  r: vector<Hue> = [];
+  for e in src { r += [e]; }
+  r
+}
+
+fn copy_i32(src: vector<i32>) -> vector<i32> {
+  r: vector<i32> = [];
+  for e in src { r += [e]; }
+  r
+}
+
+fn copy_plus_one(src: vector<integer>) -> vector<integer> {
+  r: vector<integer> = [];
+  for e in src { r += [e + 1]; }
+  r
+}
+
+fn copy_text(src: vector<text>) -> vector<text> {
+  r: vector<text> = [];
+  for e in src { r += [e]; }
+  r
+}
+
+fn copy_call() -> vector<integer> {
+  r: vector<integer> = [];
+  for e in pre() { r += [e]; }
+  r
+}
+
+fn copy_slice(src: vector<integer>) -> vector<integer> {
+  r: vector<integer> = [];
+  for e in src[1..4] { r += [e]; }
+  r
+}
+
+fn append_into(t: &vector<integer>, src: vector<integer>) {
+  for e in src { t += [e]; }
+}
+
+fn main() {
+  a = copy_int(pre(), 100);
+  asum = 0;
+  for x in a { asum += x; }
+  assert(len(a) == 6 && a[0] == 100 && a[5] == 5 && asum == 114, "a {a}");
+  f = copy_float([0.5, -2.25, 8.0]);
+  assert(len(f) == 3 && f[0] == 0.5 && f[1] == -2.25 && f[2] == 8.0 && f[0] + f[1] + f[2] == 6.25, "f {f}");
+  bo = copy_bool([true, false, true, true]);
+  assert(len(bo) == 4 && bo[0] && !bo[1] && bo[3] && bo[2], "bo {bo}");
+  c = copy_char(['a', 'é', '😀']);
+  assert(len(c) == 3 && c[1] == 'é' && c[2] == '😀', "c {c}");
+  h = copy_hue([Blue, Red, Green]);
+  assert(len(h) == 3 && h[0] == Blue && h[1] == Red && h[2] == Green, "h {h}");
+  i = copy_i32([70000, -3]);
+  assert(len(i) == 2 && i[0] == 70000 && i[1] == -3 && i[0] + i[1] == 69997, "i {i}");
+  p = copy_plus_one(pre());
+  assert(len(p) == 5 && p[0] == 4 && p[4] == 6 && p[1] == 2, "p {p}");
+  t = copy_text(["x", "yy"]);
+  assert(len(t) == 2 && t[1] == "yy", "t {t}");
+  k = copy_call();
+  assert(len(k) == 5 && k[0] + k[1] + k[2] + k[3] + k[4] == 14, "k {k}");
+  sl = copy_slice(pre());
+  assert(len(sl) == 3 && sl[0] == 1 && sl[1] == 4 && sl[2] == 1, "sl {sl}");
+  e = copy_float([]);
+  assert(len(e) == 0, "e {e}");
+  d = [7, 8, 9];
+  append_into(d, [20, 30]);
+  assert(len(d) == 5 && d[2] == 9 && d[3] == 20 && d[4] == 30 && d[0] + d[1] + d[2] + d[3] + d[4] == 74, "d {d}");
+}
