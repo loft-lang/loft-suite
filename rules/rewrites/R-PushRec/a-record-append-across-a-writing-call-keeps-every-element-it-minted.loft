@@ -1,0 +1,165 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD APPEND ACROSS A WRITING CALL KEEPS EVERY ELEMENT IT MINTED (`@FR-R-PushRec`'s
+// apart-call clause).  A loop that calls a function which WRITES a store is declined by the
+// in-place gate; the apart clause still holds a push header for the one vector the loop mints
+// into, when nothing the body names can reach that vector but fresh values — and "a claim
+// anywhere in P's store moves no record number, length or capacity".  The header's length is
+// written back at every finish, so a writing call that appended to the SAME vector would be
+// overwritten by the stale length, and a claim in the same store that moved the vector's record
+// would leave the header pointing at the old one.  The neighbouring cell appends records in
+// loops that call nothing; this one puts a writing call between every pair of appends: an
+// unrelated vector local, a sibling vector field of the very record the mint targets (one
+// store), a text-owning element, struct-enum elements, a `continue` and a `break` that skip or
+// end the mints, a second call after the first has used the buffer, and — the decline — the
+// vector itself handed to the writing call.
+//
+// Axes this file MOVES (over the existing cell):  a writing call between the appends (it writes
+// an unrelated vector, a sibling field in the same store, the minted vector itself), the
+// element (plain, text-owning, struct-enum), control flow around the mint (`continue`, `break`,
+// a conditional mint), the trip count (a parameter, 100 growths past the first capacity), a
+// second call reusing the pooled buffer.
+// Axes it HOLDS FIXED:  the mint is `v += [E { … }]` in a counted loop.
+//
+// Expected values by hand.  note(log, i) appends i·7 to log and answers the new length (i + 1).
+//   plain(100): a = i, b = i + 1 → Σa = 4950, Σb = 5050, v[99] = (99, 100), log 100 long;
+//       plain(3) afterwards: 3 elements, Σa = 3, Σb = 6.
+//   field(70): the record's v gets (2i, i + 1), its log gets 7i: Σa = 2·2415 = 4830,
+//       Σb = 2485, log length 70, Σlog = 7·2415 = 16905.
+//   texts(40): s = "t{i}": 2 bytes for i < 10, 3 after → 20 + 90 = 110; Σn = 780; last "t39".
+//   shapes(24): i % 3 == 0 → Box3 (i + 210), else Dot (i): Σ = 276 + 8·210 = 1956.
+//   skips(60): i in 0..50 (break at 50, after the note) except i % 4 == 1 (13 values: 1 + 4k,
+//       k = 0..12, Σ = 13 + 4·78 = 325): 37 elements, Σa = 1225 − 325 = 900, Σb = 900 + 37 =
+//       937; the log holds 51 notes (the break follows the note).
+//   alias: i = 0..5, mint (i, 0), and on even i the callee appends (−i, −1) to the SAME vector:
+//       a = 0,0,1,2,−2,3,4,−4,5 → 9 elements, Σa = 9, Σb = −3.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_REWRITE_CENSUS_FN=` counting `R-PushRec/apart` (4 each in `plain`, `texts`, `shapes`
+//   and `skips`; none in `field` — a field path — and `alias`, which keep the runtime append)
+//   and the emitted C differing under `LOFT_NO_APART_MINT=1`.
+
+struct P { a: integer, b: integer }
+struct T { n: integer, s: text }
+struct Bag { v: vector<P>, log: vector<integer> }
+enum Sh { Dot { x: integer }, Box3 { x: integer, y: integer, z: integer } }
+
+fn note(log: vector<integer>, i: integer) -> integer { log += [i * 7]; len(log) }
+fn twice(v: vector<P>, i: integer) { v += [P { a: -i, b: -1 }]; }
+
+fn sh_sum(v: const vector<Sh>) -> integer {
+  t = 0;
+  for e in v { match e { Dot { x } => { t += x; }, Box3 { x, y, z } => { t += x + y * 10 + z * 100; } } }
+  t
+}
+
+fn plain(n: integer) -> vector<P> {
+  v: vector<P> = [];
+  log: vector<integer> = [];
+  for i in 0..n { c = note(log, i); v += [P { a: i, b: c }]; }
+  v
+}
+
+fn field(n: integer) -> Bag {
+  bx = Bag { v: [], log: [] };
+  for i in 0..n { c = note(bx.log, i); bx.v += [P { a: i * 2, b: c }]; }
+  bx
+}
+
+fn texts(n: integer) -> vector<T> {
+  v: vector<T> = [];
+  log: vector<integer> = [];
+  for i in 0..n { note(log, i); v += [T { n: i, s: "t{i}" }]; }
+  v
+}
+
+fn shapes(n: integer) -> vector<Sh> {
+  v: vector<Sh> = [];
+  log: vector<integer> = [];
+  for i in 0..n {
+    note(log, i);
+    if i % 3 == 0 { v += [Box3 { x: i, y: 1, z: 2 }]; } else { v += [Dot { x: i }]; }
+  }
+  v
+}
+
+fn skips(n: integer, log: vector<integer>) -> vector<P> {
+  v: vector<P> = [];
+  for i in 0..n {
+    c = note(log, i);
+    if i % 4 == 1 { continue; }
+    if i == 50 { break; }
+    v += [P { a: i, b: c }];
+  }
+  v
+}
+
+fn alias() -> vector<P> {
+  v: vector<P> = [];
+  for i in 0..6 {
+    v += [P { a: i, b: 0 }];
+    if i % 2 == 0 { twice(v, i); }
+  }
+  v
+}
+
+fn test_an_unrelated_vector_written_between_the_appends() {
+  v = plain(100);
+  sa = 0;
+  sb = 0;
+  for e in v { sa += e.a; sb += e.b; }
+  assert(len(v) == 100 && sa == 4950 && sb == 5050 && v[99].a == 99 && v[99].b == 100, "plain: {len(v)} {sa} {sb}");
+  w = plain(3);
+  ta = 0;
+  tb = 0;
+  for e in w { ta += e.a; tb += e.b; }
+  assert(len(w) == 3 && ta == 3 && tb == 6, "a second call: {len(w)} {ta} {tb}");
+  assert(len(v) == 100 && v[0].b == 1, "the first result stands: {len(v)} {v[0].b}");
+}
+
+fn test_a_sibling_field_in_the_same_store() {
+  bx = field(70);
+  sa = 0;
+  sb = 0;
+  sl = 0;
+  for e in bx.v { sa += e.a; sb += e.b; }
+  for x in bx.log { sl += x; }
+  assert(len(bx.v) == 70 && sa == 4830 && sb == 2485, "records: {len(bx.v)} {sa} {sb}");
+  assert(len(bx.log) == 70 && sl == 16905, "the log: {len(bx.log)} {sl}");
+}
+
+fn test_text_owning_and_enum_elements() {
+  v = texts(40);
+  bytes = 0;
+  sn = 0;
+  for e in v { bytes += size(e.s); sn += e.n; }
+  assert(len(v) == 40 && bytes == 110 && sn == 780 && v[39].s == "t39", "texts: {len(v)} {bytes} {sn}");
+  s = shapes(24);
+  assert(len(s) == 24 && sh_sum(s) == 1956, "enums: {len(s)} {sh_sum(s)}");
+}
+
+fn test_skipped_and_ended_mints() {
+  log: vector<integer> = [];
+  v = skips(60, log);
+  sa = 0;
+  sb = 0;
+  for e in v { sa += e.a; sb += e.b; }
+  assert(len(v) == 37 && sa == 900 && sb == 937 && len(log) == 51, "skips: {len(v)} {sa} {sb} {len(log)}");
+}
+
+fn test_the_vector_itself_handed_to_the_writing_call() {
+  v = alias();
+  sa = 0;
+  sb = 0;
+  for e in v { sa += e.a; sb += e.b; }
+  assert(len(v) == 9 && sa == 9 && sb == -3 && v[4].a == -2 && v[8].a == 5, "alias: {len(v)} {sa} {sb}");
+}
+
+fn main() {
+  test_an_unrelated_vector_written_between_the_appends();
+  test_a_sibling_field_in_the_same_store();
+  test_text_owning_and_enum_elements();
+  test_skipped_and_ended_mints();
+  test_the_vector_itself_handed_to_the_writing_call();
+}

@@ -1,0 +1,138 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE APPENDED TO ANY SCALAR VECTOR IN ANY PLACE READS ITS BOUNDS FIRST
+// (`@FR-R-SliceInto`, with `@FR-Slice-Value`).  `P += v[a..b]` becomes the bounds' statements
+// and ONE `OpSliceVector(P, v, lo, hi, row)`: the span clamped, appended to P as a block.  P is
+// now evaluated AFTER the bounds, so the rewrite is only sound where nothing the bounds do can
+// change what P names; and the block copy has to move the element's own width.  The
+// neighbouring cell appends slices of a `vector<integer>` to a local and to a literal's field.
+// This one moves the element type (an unsigned byte, a 32-bit integer, a float, a character, a
+// boolean), the place (a field of a record held in a vector, a field of a nested struct, a
+// field of the very record the slice is cut from, a parameter's slice built into a result
+// record), and the order of evaluation (a bound with a side effect, the subject called once).
+// A wrong width copies the wrong bytes; a P read before the bounds appends to the old place.
+//
+// Axes this file MOVES (over the existing cell):  the element type (u8, i32, float, character,
+// boolean), the place (an element's field `rs[i].items`, a nested field `o.inner.items`, the
+// source's own field `r.items += r.items[..]`), the source (a `const` parameter, an empty
+// vector, a call result), the bounds' effects (two ticks, a call subject).
+// Axes it HOLDS FIXED:  the slice's bounds are literals or loop counters otherwise.
+// The decline boundary: `rs[i].items += ...` names its place through an index, which the rule
+// leaves to the parser's block copy (`LOFT_TRACE_SLICE_INTO=1`: "the place is not variables and
+// field offsets"); the answer is the same, and the cell holds both arms.
+//
+// Expected values by hand.
+//   u8  [10,20,30,40,250]: [3..9] clamps to 3..5 → [40,250]; [-3..-1] is 2..4 → [30,40];
+//       [..=0] → [10]; together [40,250,30,40,10]: sum 370, length 5.
+//   i32 [100000,-200000,300000]: [1..] → [-200000,300000]; [..1] → [100000]; together length 3,
+//       sum 200000, first -200000, last 100000.
+//   float [1.5,2.5,3.5,4.5]: [1..3] → 2.5, 3.5; [3..] → 4.5; sum 10.5, length 3.
+//   character ['a','é','€','😀']: [1..3] → é, €; [-1..] → 😀: "é€😀" in 3 characters.
+//   boolean [true,false,true,true]: [1..3] → false, true: one true of two.
+//   rs = [R{[1]}, R{[2]}], i = 1: rs[1].items += v[2..4] with v = [1,2,3,4,5] → [2,3,4]; then
+//       rs[1].items += rs[1].items[1..] → [2,3,4,3,4]; rs[0].items stays [1].
+//   o.inner.items = [9] += v[-2..] → [9,4,5]; the source's own field: r.items = [7,8,9];
+//       += r.items[1..] → [7,8,9,8,9]; += r.items[0..99] (clamped to the 5) → length 10, sum
+//       41 + 41 = 82; the last five are the first five.
+//   Order: v[tick..tick + 2] with tick counting 1, 2 → lo 1, hi 2 + 2 = 4 → [2,3,4] (a hi read
+//       first would be 1 + 2 = 3, lo 2: [3]); the log holds two ticks.  A call subject
+//       src(log)[1..4] is evaluated once: [2,3,4], log length 1.
+//   grab([5,6,7,8]) → items [6,7], k 4;  grab([]) → items [], k 0.
+//   An empty source slices to nothing: [] += e[0..3] stays empty.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_REWRITE_CENSUS=` counting 5 admissions (0 under `LOFT_NO_SLICE_INTO=1`) and the
+//   emitted C differing under the switch.  The transient clause (a decoder's tree built outside
+//   the store) is not reached: no admitted site reads such a field.
+
+struct R { items: vector<integer>, k: integer }
+struct O { inner: R }
+
+fn tick(log: vector<integer>) -> integer { log += [len(log)]; len(log) }
+fn src(log: vector<integer>) -> vector<integer> { log += [1]; [1, 2, 3, 4, 5] }
+fn grab(v: const vector<integer>) -> R { R { items: v[1..3], k: len(v) } }
+
+fn total_of(v: vector<integer>) -> integer { s = 0; for x in v { s += x; } s }
+
+fn test_element_widths() {
+  b: vector<u8> = [10, 20, 30, 40, 250];
+  ub: vector<u8> = [];
+  ub += b[3..9];
+  ub += b[-3..-1];
+  ub += b[..=0];
+  su = 0;
+  for x in ub { su += x; }
+  assert(len(ub) == 5 && su == 370 && ub[0] == 40 && ub[1] == 250 && ub[4] == 10, "u8: {len(ub)} {su}");
+  w: vector<i32> = [100000, -200000, 300000];
+  wx: vector<i32> = [];
+  wx += w[1..];
+  wx += w[..1];
+  sw = 0;
+  for x in wx { sw += x; }
+  assert(len(wx) == 3 && sw == 200000 && wx[0] == -200000 && wx[2] == 100000, "i32: {len(wx)} {sw}");
+  f: vector<float> = [1.5, 2.5, 3.5, 4.5];
+  fx: vector<float> = [];
+  fx += f[1..3];
+  fx += f[3..];
+  sf = 0.0;
+  for x in fx { sf += x; }
+  assert(len(fx) == 3 && sf == 10.5 && fx[0] == 2.5, "float: {len(fx)} {sf}");
+  cs: vector<character> = ['a', 'é', '€', '😀'];
+  cx: vector<character> = [];
+  cx += cs[1..3];
+  cx += cs[-1..];
+  txt = "";
+  for c in cx { txt += "{c}"; }
+  assert(len(cx) == 3 && txt == "é€😀" && len(txt) == 3, "character: {len(cx)} {txt}");
+  bs = [true, false, true, true];
+  bx: vector<boolean> = [];
+  bx += bs[1..3];
+  trues = 0;
+  for x in bx { if x { trues += 1; } }
+  assert(len(bx) == 2 && trues == 1 && !bx[0] && bx[1], "boolean: {len(bx)} {trues}");
+}
+
+fn test_places() {
+  v = [1, 2, 3, 4, 5];
+  rs = [R { items: [1], k: 0 }, R { items: [2], k: 1 }];
+  i = 1;
+  rs[i].items += v[2..4];
+  assert("{rs[1].items}" == "[2,3,4]" && "{rs[0].items}" == "[1]", "an element's field: {rs[1].items} {rs[0].items}");
+  rs[i].items += rs[i].items[1..];
+  assert("{rs[1].items}" == "[2,3,4,3,4]" && len(rs[0].items) == 1, "its own tail: {rs[1].items}");
+  o = O { inner: R { items: [9], k: 0 } };
+  o.inner.items += v[-2..];
+  assert("{o.inner.items}" == "[9,4,5]", "a nested field: {o.inner.items}");
+  r = R { items: [7, 8, 9], k: 0 };
+  r.items += r.items[1..];
+  assert("{r.items}" == "[7,8,9,8,9]", "the source's own field: {r.items}");
+  r.items += r.items[0..99];
+  assert(len(r.items) == 10 && total_of(r.items) == 82 && r.items[5] == 7 && r.items[9] == 9, "clamped to its own length: {len(r.items)} {total_of(r.items)}");
+  g = grab([5, 6, 7, 8]);
+  assert("{g.items}" == "[6,7]" && g.k == 4, "a parameter's slice: {g.items} {g.k}");
+  z = grab([]);
+  assert(len(z.items) == 0 && z.k == 0, "an empty parameter: {len(z.items)} {z.k}");
+  e: vector<integer> = [];
+  x: vector<integer> = [];
+  x += e[0..3];
+  assert(len(x) == 0, "an empty source: {len(x)}");
+}
+
+fn test_bounds_are_read_before_the_place_and_once() {
+  v = [1, 2, 3, 4, 5];
+  log: vector<integer> = [];
+  r = R { items: [], k: 0 };
+  r.items += v[tick(log)..tick(log) + 2];
+  assert("{r.items}" == "[2,3,4]" && len(log) == 2, "two ticks, in order: {r.items} {len(log)}");
+  log2: vector<integer> = [];
+  y: vector<integer> = [0];
+  y += src(log2)[1..4];
+  assert("{y}" == "[0,2,3,4]" && len(log2) == 1, "a call subject once: {y} {len(log2)}");
+}
+
+fn main() {
+  test_element_widths();
+  test_places();
+  test_bounds_are_read_before_the_place_and_once();
+}

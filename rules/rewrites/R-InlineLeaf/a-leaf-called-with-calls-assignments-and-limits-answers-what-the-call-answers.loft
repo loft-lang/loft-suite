@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LEAF CALLED WITH CALLS, ASSIGNMENTS AND LIMITS ANSWERS WHAT THE CALL ANSWERS
+// (`@FR-R-InlineLeaf`).  A call of a scalar leaf is replaced by its body over fresh caller
+// locals: an argument is read in place only when it is a literal, or a plain variable when no
+// argument holds a call; any other argument is bound first, in argument order; a parameter the
+// body assigns is never the caller's variable; literal operations that become adjacent fold only
+// when the fold neither overflows nor lands on the null sentinel.  The tuple-result, appender and
+// reader clauses replace a call by its body the same way.  Whether or not the call survives, the
+// value, the order its arguments ran in, and the caller's variables must be what the call gave.
+//
+// Axes this file MOVES:  the leaf's types (integer, float, boolean, character, an integer
+//                        tuple, a void appender, a `File` reader), the arguments (a literal, a
+//                        plain variable, a call that rewrites that variable, two calls in
+//                        order), whether the body assigns a parameter, the limits (an overflow
+//                        on the fold, a result equal to the null sentinel), a call on a record
+//                        held in a field (stays a call), the call in a loop.
+// Axes it HOLDS FIXED:   leaves are free functions that call no other function.
+// Over the existing cell it ADDS: the argument and assignment hazards, the fold limits, the
+//                        float / boolean / character / tuple / appender / reader leaves (the
+//                        existing cell inlines integer leaves inside an append twin only).
+//
+// Expected values by hand.
+//   fold limits  addmax(x) = x + 9223372036854775807:  addmax(-1) = 9223372036854775806;
+//     addmax(1) overflows -> null;  sub1(x) = x - 1:  sub1(-9223372036854775807) lands on
+//     -9223372036854775808, the sentinel -> null;  sub1(5) = 4.
+//   float  lerp(a, b, t) = a + (b - a) * t:  lerp(2.0, 10.0, 0.25) = 2 + 8 * 0.25 = 4;
+//     lerp(1.0, 1.0, 0.5) = 1.
+//   boolean  between(x, lo, hi) = lo <= x <= hi:  (5, 1, 5) true;  (6, 1, 5) false;  (0, 1, 5)
+//     false.
+//   character  up('q') = 'Q' (113 - 32 = 81);  up('Q') = 'Q';  up('é') = 'é' (233 > 'z').
+//   assigned parameter  step(n) assigns n = n / 2 or 3n + 1: step(7) = 22, step(10) = 5; the
+//     caller's v = 7 is still 7 after `step(v)`.
+//   order  pair(a, b) = a * 10 + b;  c = 0: pair(next(c), next(c)) reads 1 then 2 -> 12, c = 2;
+//     c2 = 5: pair(c2, next(c2)) — c2 read first (5), then next makes it 6 -> 5*10 + 6 = 56,
+//     c2 = 6.
+//   tuple  dir(i) = (0,1) (1,0) (0,-1) for i = 0, 1, 2: over i in 0..6, dir(i % 3) weighted
+//     by i + 1: y += 1; x += 2; y -= 3; y += 4; x += 5; y -= 6 -> x = 7, y = 1 - 3 + 4 - 6 = -4.
+//     divmod5(17) = (3, 2); divmod5(-17) = (-3, -2) (truncating, as loft's / and %).
+//   appender  put(a, v) pushes v * 2 + 1: for i in 0..4 put(acc, i * 3) -> [1, 7, 13, 19];
+//     put(acc, next(c)) with c = 0 twice -> [3, 5] (c = 1: 3, c = 2: 5); put(box.acc, 5)
+//     through a field pushes 11 -> box.acc.xs = [11].
+//   reader  the file holds the i16 values 3 * i - 50 (-50, -47, -44, -41, ...): four reads
+//     through `rd` sum -50 - 47 - 44 - 41 = -182, the cursor after them 8.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_INLINE_LEAF=1` naming the inlined calls and the declines; LOFT_NO_INLINE_LEAF=1,
+//   LOFT_NO_INLINE_APPENDER=1 and LOFT_NO_INLINE_READER=1 must answer the same.
+
+struct Acc { xs: vector<integer> }
+struct Box { acc: Acc }
+
+fn addmax(x: integer) -> integer { x + 9223372036854775807 }
+fn sub1(x: integer) -> integer { x - 1 }
+fn lerp(a: float, b: float, t: float) -> float { a + (b - a) * t }
+fn between(x: integer, lo: integer, hi: integer) -> boolean { x >= lo && x <= hi }
+fn up(c: character) -> character { if c >= 'a' && c <= 'z' { (c as integer - 32) as character } else { c } }
+fn step(n: integer) -> integer { n = if n % 2 == 0 { n / 2 } else { 3 * n + 1 }; n }
+fn pair(a: integer, b: integer) -> integer { a * 10 + b }
+fn next(c: &integer) -> integer { c += 1; c }
+fn dir(i: integer) -> (integer, integer) {
+  if i == 0 { (0, 1) } else if i == 1 { (1, 0) } else { (0, -1) }
+}
+fn divmod5(a: integer) -> (integer, integer) { (a / 5, a % 5) }
+fn put(a: Acc, v: integer) { w = v * 2 + 1; a.xs += [w]; }
+fn rd(bf: File) -> integer { bf#read(2) as i16 as integer }
+
+fn main() {
+  assert(addmax(-1) == 9223372036854775806, "addmax(-1) {addmax(-1)}");
+  ov = addmax(1);
+  assert(ov == null, "addmax(1) overflows to null: {ov}");
+  assert(sub1(5) == 4, "sub1(5) {sub1(5)}");
+  low = sub1(-9223372036854775807);
+  assert(low == null, "sub1 onto the sentinel is null: {low}");
+  assert(lerp(2.0, 10.0, 0.25) == 4.0 && lerp(1.0, 1.0, 0.5) == 1.0, "lerp {lerp(2.0, 10.0, 0.25)}");
+  assert(between(5, 1, 5) && !between(6, 1, 5) && !between(0, 1, 5), "between");
+  assert(up('q') == 'Q' && up('Q') == 'Q' && up('é') == 'é', "up {up('q')} {up('Q')} {up('é')}");
+  v = 7;
+  s1 = step(v);
+  assert(s1 == 22 && v == 7 && step(10) == 5, "step {s1} {v}");
+  c = 0;
+  p1 = pair(next(c), next(c));
+  assert(p1 == 12 && c == 2, "pair of two calls {p1} {c}");
+  c2 = 5;
+  p2 = pair(c2, next(c2));
+  assert(p2 == 56 && c2 == 6, "pair of a variable and a call {p2} {c2}");
+  x = 0;
+  y = 0;
+  for i in 0..6 {
+    (dx, dy) = dir(i % 3);
+    x += dx * (i + 1);
+    y += dy * (i + 1);
+  }
+  assert(x == 7 && y == -4, "dir walk {x} {y}");
+  (q, r) = divmod5(17);
+  (nq, nr) = divmod5(-17);
+  assert(q == 3 && r == 2 && nq == -3 && nr == -2, "divmod {q} {r} {nq} {nr}");
+  acc = Acc { xs: [] };
+  for i in 0..4 { put(acc, i * 3); }
+  assert(len(acc.xs) == 4 && acc.xs[0] == 1 && acc.xs[1] == 7 && acc.xs[2] == 13 && acc.xs[3] == 19, "put in a loop {acc.xs}");
+  a2 = Acc { xs: [] };
+  c3 = 0;
+  put(a2, next(c3));
+  put(a2, next(c3));
+  assert(len(a2.xs) == 2 && a2.xs[0] == 3 && a2.xs[1] == 5 && c3 == 2, "put of calls {a2.xs} {c3}");
+  bx = Box { acc: Acc { xs: [] } };
+  put(bx.acc, 5);
+  assert(len(bx.acc.xs) == 1 && bx.acc.xs[0] == 11, "put through a field {bx.acc.xs}");
+  p = "{temp_dir() ?? "/tmp"}/loft_inline_leaf_cell.bin";
+  w = file(p);
+  w.set_file_size(0);
+  w#format = LittleEndian;
+  for i in 0..16 { w += ((3 * i - 50) as i16?) ?? (0 as i16); }
+  f = file(p);
+  f#format = LittleEndian;
+  total = 0;
+  for _k in 0..4 { total += rd(f); }
+  assert(total == -182 && f#next == 8, "rd {total} {f#next}");
+}

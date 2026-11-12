@@ -1,0 +1,173 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LAZY SPLIT WALKS THE PIECES `split` ANSWERS, WHATEVER THE SEPARATOR AND THE SOURCE
+// (`@FR-R-LazySplit`, with (R-TextBorrow) for the piece).  `for p in T.split(c)` with a
+// character constant `c` iterates the pieces of T as slices instead of building the vector:
+// none for an empty text, otherwise one per separator plus the trailing piece (empty when T ends
+// in a separator).  T is evaluated ONCE where the call stood; a text parameter never written is
+// borrowed, any other T is iterated as the copy taken there.  The loop declines — and must answer
+// the same — for a `rev`, a vector bound to a name first, a third mention of the hidden vector,
+// a separator that is a variable.
+//
+// Axes this file MOVES:  the separator (newline, the 2-byte `é`, the 3-byte `€`, the 4-byte
+//                        `😀`, a variable holding a comma), the source (a parameter, a call's
+//                        result evaluated once, a slice of a text, a `&text` parameter the
+//                        body appends to, a parameter the body ASSIGNS), the loop (nested
+//                        splits, `break`, `continue`, `return` from inside, `p#index`), the
+//                        decline shapes (`rev`, a named vector, a variable separator).
+// Axes it HOLDS FIXED:   a `text` piece bound as the loop variable, forward direction (but
+//                        for the `rev` decline).
+// Over the existing cell it ADDS: separators other than the comma (the existing cell splits on
+//                        ',' only), nested splits, a call-result source evaluated once, a
+//                        slice source, a `&text` source, an assigned parameter, early exits,
+//                        and the decline shapes beside the admitted ones.
+//
+// Expected values by hand.  Pieces of "a,b" are "a", "b"; of "" none; of "," two empty ones.
+//   lines  src = "a=1\nbb=22\n\nccc=333\n" splits on '\n' into "a=1", "bb=22", "", "ccc=333",
+//     "" (5 pieces, the last empty by the trailing newline); each splits on '=': "a=1" ->
+//     a, 1;  "bb=22" -> bb, 22;  "" -> none;  "ccc=333" -> ccc, 333;  "" -> none:
+//     "0:<a><1>;1:<bb><22>;2:;3:<ccc><333>;4:;".  Edges: "" -> no line -> ""; "," has no newline:
+//     one line "," with no '=' -> "0:<,>;"; "\n" -> two empty lines -> "0:;1:;".
+//   sizes  "x€yy€€z€" on '€': x, yy, "", z, "" -> byte sizes 1, 2, 0, 1, 0 -> digits "12010".
+//     "éaé" on 'é': "", a, "" -> "0" "1" "0" -> "010".  "p😀😀q" on '😀': p, "", q -> "101".
+//   once   mk() counts its calls through a `&integer`: `for p in mk(n).split(',')` walks
+//     "p,q,r" -> "pqr" with ONE call, n = 1.
+//   slice  t = "xx,ab,cd,yy": t[3..8] is "ab,cd" (bytes 3 to 7) -> pieces ab, cd -> "ab|cd|".
+//   grown  g = "m,n": the body appends ",z" each round -> the walk is of "m,n": 2 pieces
+//     "mn", g ends "m,n,z,z".
+//   assigned  the parameter "a,b,c" is overwritten with "zz" in the body: pieces a, b, c -> "abc".
+//   early  "k1,k2,stop,k4": break at "stop" -> "k1k2" and 3 rounds counted; continue past the
+//     pieces starting with "k" in "k1,x,k2,y" -> "xy"; first piece longer than 2 bytes in
+//     "ab,c,def,ghij" -> "def" at index 2.
+//   decline  "a,b,c": rev(vector) -> "cba"; named vector with len read in the body: sum of
+//     len(parts) over 3 rounds = 9, joined "abc"; variable separator c = ',' gives the same
+//     pieces "abc".
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_LAZY_SPLIT=1` (each loop admitted or declined) with `LOFT_NO_LAZY_SPLIT=1`
+//   silencing it; a lazy split that borrowed `g` in `grown` would walk 4 pieces for 2.
+
+fn mk(calls: &integer) -> text { calls += 1; "p,q,r" }
+
+fn lines(src: text) -> text {
+  out = "";
+  for line in src.split('\n') {
+    out += "{line#index}:";
+    for f in line.split('=') { out += "<{f}>"; }
+    out += ";";
+  }
+  out
+}
+
+fn sizes_euro(t: text) -> text {
+  out = "";
+  for p in t.split('€') { out += "{size(p)}"; }
+  out
+}
+
+fn sizes_acute(t: text) -> text {
+  out = "";
+  for p in t.split('é') { out += "{size(p)}"; }
+  out
+}
+
+fn sizes_grin(t: text) -> text {
+  out = "";
+  for p in t.split('😀') { out += "{size(p)}"; }
+  out
+}
+
+fn grown(g: &text) -> integer {
+  n = 0;
+  for _p in g.split(',') { n += 1; g += ",z"; }
+  n
+}
+
+fn assigned(t: text) -> text {
+  out = "";
+  for p in t.split(',') { t = "zz"; out += p; }
+  out
+}
+
+fn until_stop(t: text) -> text {
+  out = "";
+  rounds = 0;
+  for p in t.split(',') {
+    rounds += 1;
+    if p == "stop" { break; }
+    out += p;
+  }
+  "{out}/{rounds}"
+}
+
+fn skip_k(t: text) -> text {
+  out = "";
+  for p in t.split(',') {
+    if p.starts_with("k") { continue; }
+    out += p;
+  }
+  out
+}
+
+fn first_long(t: text) -> text {
+  for p in t.split(',') { if size(p) > 2 { return "{p}@{p#index}"; } }
+  "none"
+}
+
+fn reversed(t: text) -> text {
+  out = "";
+  for p in rev(t.split(',')) { out += p; }
+  out
+}
+
+fn named(t: text) -> text {
+  parts = t.split(',');
+  total = 0;
+  out = "";
+  for p in parts { total += len(parts); out += p; }
+  "{out}{total}"
+}
+
+fn variable_sep(t: text, c: character) -> text {
+  out = "";
+  for p in t.split(c) { out += p; }
+  out
+}
+
+fn main() {
+  l = lines("a=1\nbb=22\n\nccc=333\n");
+  assert(l == "0:<a><1>;1:<bb><22>;2:;3:<ccc><333>;4:;", "lines: {l}");
+  se = sizes_euro("x€yy€€z€");
+  assert(se == "12010", "euro: {se}");
+  sa = sizes_acute("éaé");
+  assert(sa == "010", "acute: {sa}");
+  sg = sizes_grin("p😀😀q");
+  assert(sg == "101", "grin: {sg}");
+  calls = 0;
+  once = "";
+  for p in mk(calls).split(',') { once += p; }
+  assert(once == "pqr" && calls == 1, "once: {once} {calls}");
+  t = "xx,ab,cd,yy";
+  sl = "";
+  for p in t[3..8].split(',') { sl += "{p}|"; }
+  assert(sl == "ab|cd|", "slice: {sl}");
+  g = "m,n";
+  gn = grown(g);
+  assert(gn == 2 && g == "m,n,z,z", "grown: {gn} {g}");
+  as1 = assigned("a,b,c");
+  assert(as1 == "abc", "assigned: {as1}");
+  u = until_stop("k1,k2,stop,k4");
+  assert(u == "k1k2/3", "break: {u}");
+  sk = skip_k("k1,x,k2,y");
+  assert(sk == "xy", "continue: {sk}");
+  fl = first_long("ab,c,def,ghij");
+  assert(fl == "def@2" && first_long("a,b") == "none", "return: {fl}");
+  rv = reversed("a,b,c");
+  assert(rv == "cba", "rev: {rv}");
+  nm = named("a,b,c");
+  assert(nm == "abc9", "named: {nm}");
+  vs = variable_sep("a,b,c", ',');
+  assert(vs == "abc", "variable separator: {vs}");
+  assert(lines("") == "" && lines(",") == "0:<,>;" && lines("\n") == "0:;1:;", "edges: {lines("")}|{lines(",")}|{lines("\n")}");
+}

@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A ZERO-COUNT TEST READS THE BYTE COUNT IN A LOOP OVER A COMPUTED TEXT (`@FR-R-ZeroCount`'s
+// element, call-result, coalesce and loop contexts, with the vector length as its decline).
+// The rewrite turns `len(t) ⋈ 0` (⋈ in ==, !=, <, <=, either side) and `len(t) >= 1` /
+// `len(t) < 1` into the same test over `size(t)`; the answer must be the character count's:
+// zero exactly when the text has no characters.  The neighbouring cell feeds the test a
+// parameter and a field; this one feeds it a text that is COMPUTED where it is tested — a
+// vector's element, a field of a walked record, the result of a call, the value of a `??`, a
+// loop's shrinking remainder — and the tests that must NOT change: `len` of a vector, whose
+// "count" is not a byte count, and the always-true / always-false boundaries (`0 <= len`,
+// `len < 0`).  A fold that reached a vector's length would read `size`, which a vector has
+// not — or its record's byte width — and answer a non-empty vector as empty.
+//
+// Axes this file MOVES (over the existing cell):  where the text comes from (a vector
+// element, a field of a walked record, a call result, a `??` value, a `trim`), the statement
+// context (loop body, while condition, `??` subject), the evaluation count (many per run),
+// non-null texts, the operand's type (text vs vector), the boundary's other spellings
+// (`<= 0`, `0 >= len`, `0 <= len`, `len < 0`, `len >= 0`).
+// Axes it HOLDS FIXED:  every compared constant is 0 or 1 (the rule's whole reach).
+//
+// Expected values by hand.
+//   ws = ["", "a", "é", "", "bcd", ""]: three empty (indices 0, 3, 5), three present.
+//   peel("abcde") strips one byte a pass: 5 passes; peel("") 0.
+//   fields: [W "", W "xy", W "é"] → present 2.
+//   trim: "  \t ".trim() is "" (empty); "  x ".trim() is "x" (present).
+//   `n ?? ""` for a null n is "" (empty); `n ?? "zz"` is "zz" (2 characters, present).
+//   bounds(t) adds 1 for `len(t) <= 0`, 2 for `0 >= len(t)`, 4 for `0 <= len(t)` (always),
+//   8 for `len(t) < 0` (never), 16 for `len(t) >= 0` (always):
+//     "" → 1+2+4+16 = 23;  "é" → 4+16 = 20.
+//   vcode(v) adds 1 `len(v) == 0`, 2 `len(v) != 0`, 4 `len(v) >= 1`, 8 `len(v) < 1`,
+//   16 `len(v) > 0`:  [] → 1+8 = 9;  [7] → 2+4+16 = 22;  [5,6,7] → 22.
+//   vector<text> ["", ""] has two elements: len != 0 → 2+4+16 = 22.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   the census (`LOFT_REWRITE_CENSUS=` fires count) differing with `LOFT_NO_ZERO_COUNT=1`.
+
+struct W { s: text }
+
+fn count_empty(ws: vector<text>) -> integer {
+  n = 0;
+  for w in ws { if len(w) == 0 { n += 1; } }
+  n
+}
+
+fn count_present(ws: vector<text>) -> integer {
+  n = 0;
+  for w in ws { if len(w) > 0 && len(w) >= 1 && 0 < len(w) { n += 1; } }
+  n
+}
+
+fn present_fields(ws: vector<W>) -> integer {
+  n = 0;
+  for w in ws { if len(w.s) != 0 { n += 1; } }
+  n
+}
+
+fn peel(t: text) -> integer {
+  n = 0;
+  rest = t;
+  while len(rest) > 0 { rest = rest[1..]; n += 1; }
+  n
+}
+
+fn bounds(t: text) -> integer {
+  r = 0;
+  if len(t) <= 0 { r += 1; }
+  if 0 >= len(t) { r += 2; }
+  if 0 <= len(t) { r += 4; }
+  if len(t) < 0 { r += 8; }
+  if len(t) >= 0 { r += 16; }
+  r
+}
+
+fn vcode(v: vector<integer>) -> integer {
+  r = 0;
+  if len(v) == 0 { r += 1; }
+  if len(v) != 0 { r += 2; }
+  if len(v) >= 1 { r += 4; }
+  if len(v) < 1 { r += 8; }
+  if len(v) > 0 { r += 16; }
+  r
+}
+
+fn tcode(v: vector<text>) -> integer {
+  r = 0;
+  if len(v) == 0 { r += 1; }
+  if len(v) != 0 { r += 2; }
+  if len(v) >= 1 { r += 4; }
+  if len(v) < 1 { r += 8; }
+  if len(v) > 0 { r += 16; }
+  r
+}
+
+fn blank(t: text) -> boolean { len(t.trim()) == 0 }
+fn orelse(n: text?, d: text) -> integer { if len(n ?? d) == 0 { 0 } else { 1 } }
+
+fn main() {
+  ws = ["", "a", "é", "", "bcd", ""];
+  e = count_empty(ws);
+  p = count_present(ws);
+  assert(e == 3 && p == 3 && e + p == len(ws), "elements: {e} {p}");
+  fs = [W { s: "" }, W { s: "xy" }, W { s: "é" }];
+  f = present_fields(fs);
+  assert(f == 2, "fields: {f}");
+  a = peel("abcde");
+  z = peel("");
+  assert(a == 5 && z == 0, "peel: {a} {z}");
+  assert(blank("  \t ") && !blank("  x ") && blank(""), "trim: {blank("  \t ")} {blank("  x ")}");
+  n: text? = null;
+  assert(orelse(n, "") == 0 && orelse(n, "zz") == 1 && orelse("q", "") == 1, "coalesce: {orelse(n, "")} {orelse(n, "zz")} {orelse("q", "")}");
+  b0 = bounds("");
+  b1 = bounds("é");
+  assert(b0 == 23 && b1 == 20, "boundaries: {b0} {b1}");
+  empty: vector<integer> = [];
+  v0 = vcode(empty);
+  v1 = vcode([7]);
+  v3 = vcode([5, 6, 7]);
+  assert(v0 == 9 && v1 == 22 && v3 == 22, "vector length: {v0} {v1} {v3}");
+  t2 = tcode(["", ""]);
+  assert(t2 == 22, "two empty texts are two elements: {t2}");
+}

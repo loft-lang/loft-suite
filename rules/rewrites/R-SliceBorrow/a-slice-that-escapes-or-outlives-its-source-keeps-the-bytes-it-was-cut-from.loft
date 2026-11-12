@@ -1,0 +1,119 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE THAT ESCAPES OR OUTLIVES ITS SOURCE KEEPS THE BYTES IT WAS CUT FROM
+// (`@FR-R-SliceBorrow`'s decline boundary, with `@FR-R-TextBorrow`).  R-SliceBorrow makes a text
+// local bound to `s[a..b]` of a plain text PARAMETER the `&str` the slice answers — admitted only
+// when every mention is a text VALUE read ("never a rebind to a built text, an append, a `&t`
+// link, a `&text` argument, a tuple, a store, a return, a capture or a yield"), and it declines
+// "a `&text` or rebound parameter, a record FIELD bound from a slice (a store write), a
+// generator".  A slice admitted by mistake would read the parameter's bytes AFTER the function
+// changed them, or after the frame is gone.  The neighbouring cell checks the chain the rule
+// ADMITS (a vector's element sliced twice, a slice by `find`, an owned root); this one is the
+// OTHER side of the boundary — a slice returned, pushed into a vector, held in a record, taken
+// of a `&text` parameter the body then appends to, of a parameter the body then rebinds — and
+// shapes it admits beside them: a slice in the arms of an `if`, a slice of a slice walked by
+// characters, over multi-byte text; and a slice of a loop's walked element, which the walk
+// rebinds each pass and the rule declines (`seg` in `walk`).
+//
+// Axes this file MOVES (over the existing cell):  the slice's use (returned, pushed to a
+// vector, stored in a record, compared, walked, sized), the source's fate (appended through a
+// `&text` parameter, rebound, unchanged), the source (a parameter, a loop-walked element, a
+// slice of a slice), the text (ASCII, 2-byte, 3-byte characters), the bounds (negative from the
+// end, past the end).
+// Axes it HOLDS FIXED:  the source is a parameter or a walked element (never an owned local —
+// the neighbouring cell's decline); the interpreter's bytecode copies every slice either way.
+//
+// Expected values by hand.
+//   head("héllo") = line[0..3] = "hé" (h one byte, é two) returned: "hé".
+//   grow("abcd"): head = "ab"; the parameter `&text` becomes "abcd!": "ab/abcd!"; the
+//       caller's variable reads "abcd!" afterwards.
+//   rebind("wxyz"): head = [1..3] = "xy"; the parameter then becomes "<wxyz>": "xy<wxyz>".
+//   pieces("abcd"): [0..2], [1..3], [2..4] = ["ab","bc","cd"] (a vector of three).
+//   hold("abcdef"): [1..4] = "bcd" stored in a record: "bcd".
+//   stats("éaé€x") — bytes é(0,1) a(2) é(3,4) €(5,6,7) x(8):  a = [0..5] = "éaé" (5 bytes),
+//       its walk counts é as 10, a as 1: 10 + 1 + 10 = 21;  b = [-4..] = bytes 5..9 = "€x" (4
+//       bytes);  c = b[0..3] = "€" (3 bytes), a slice of a slice;  "21/5/4/€/1" with the last
+//       the character count of c.
+//   arms("héllo", true) = [0..3] = "hé" → "hé|3";  arms("héllo", false) = [3..] = "llo" →
+//       "llo|3".
+//   walk(["héllo", "abc", "a"]) takes [1..3] of each: "é" (bytes 1..3), "bc", and for "a" the
+//       range 1..3 clamps to 1..1, empty: "é,bc,,".
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main (rustc refuses a
+//   wrong admission of the append and the rebind, so those are the compile channel on native,
+//   the rest the value one); reach read on the interpreter's decision pass under
+//   `LOFT_TRACE_TEXT_BORROW=1`; the rustc half was not built.
+// CHANNEL: the asserts (and the native compile).
+// HOLDS: the interpreter copies each slice and is the oracle.
+
+struct Hold { s: text }
+
+fn head(line: text) -> text { h = line[0..3]; h }
+
+fn grow(line: &text) -> text {
+  h = line[0..2];
+  line += "!";
+  "{h}/{line}"
+}
+
+fn rebind(line: text) -> text {
+  h = line[1..3];
+  line = "<{line}>";
+  "{h}{line}"
+}
+
+fn pieces(line: text) -> vector<text> {
+  out: vector<text> = [];
+  for i in 0..3 {
+    p = line[i..i + 2];
+    out += [p];
+  }
+  out
+}
+
+fn hold(line: text) -> Hold { k = line[1..4]; Hold { s: k } }
+
+fn stats(line: text) -> text {
+  a = line[0..5];
+  n = 0;
+  for ch in a { if ch == 'é' { n += 10; } else { n += 1; } }
+  b = line[-4..];
+  c = b[0..3];
+  "{n}/{size(a)}/{size(b)}/{c}/{len(c)}"
+}
+
+fn arms(line: text, front: boolean) -> text {
+  t = if front { line[0..3] } else { line[3..] };
+  "{t}|{size(t)}"
+}
+
+fn walk(words: const vector<text>) -> text {
+  out = "";
+  for w in words {
+    seg = w[1..3];
+    out += "{seg},";
+  }
+  out
+}
+
+fn main() {
+  h = head("héllo");
+  assert(h == "hé" && size(h) == 3, "returned: {h}");
+  a = "abcd";
+  g = grow(a);
+  assert(g == "ab/abcd!" && a == "abcd!", "appended through the parameter: {g} {a}");
+  r = rebind("wxyz");
+  assert(r == "xy<wxyz>", "rebound: {r}");
+  p = pieces("abcd");
+  assert(len(p) == 3 && p[0] == "ab" && p[1] == "bc" && p[2] == "cd", "pushed: {p}");
+  k = hold("abcdef");
+  assert(k.s == "bcd" && len(k.s) == 3, "stored: {k.s}");
+  s = stats("éaé€x");
+  assert(s == "21/5/4/€/1", "chain and walk: {s}");
+  t1 = arms("héllo", true);
+  t2 = arms("héllo", false);
+  assert(t1 == "hé|3" && t2 == "llo|3", "arms: {t1} {t2}");
+  w = walk(["héllo", "abc", "a"]);
+  assert(w == "é,bc,,", "walked: {w}");
+}

@@ -1,0 +1,186 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR BUILT IN THE RETURN BUFFER IS THE VECTOR THE CALLER READS (`@FR-R-RetAdopt`).  A
+// function that returns a plain vector through a hidden buffer, and whose every delivery into it
+// is ONE result local, has that local ADOPT the buffer: the result is built where it must end up,
+// the delivery copy is never made, and "the bare ENTRY clear stays — it is the buffer's reuse
+// contract across calls".  So what the caller reads must be exactly the vector the function
+// built — not a leftover of an earlier call that used the buffer, not the buffer's old length —
+// whether the function returns the local at the end or from inside a loop, builds it by
+// appending a recursive call's result, returns an empty vector, or has a SECOND result local
+// (which the rule declines, keeping the delivery).  The neighbouring cell reads one mesh into a
+// local and into the field of the record it reads; this one moves the element, the exits, the
+// way the caller takes the result, and the order of calls that reuse the buffer.
+//
+// Axes this file MOVES (over the existing cell):  the exits (a `return` of the result local
+// before an append that follows it, so the local is delivered at two places), the element
+// (integer, a record of two integers, a text), the build (appends, a recursive call's result
+// appended), the result's length (0, 1, 500), the caller's use of it (bound, rebound to a
+// SHORTER result, appended to another vector, handed straight to a call, stored in a field, two
+// live results at once, in a loop), and the shapes the scope pass already builds in the buffer
+// (`evens`, `upto`) or that have a second result local (`pair`), which the rule does not own.
+// Axes it HOLDS FIXED:  the callee reads no vector of the caller's.
+//
+// Expected values by hand.
+//   tail_mark(n, cut) = the even numbers below n; then, unless n > cut, a trailing −1.
+//   tail_mark(7, 3) = [0,2,4,6] (length 4, Σ 12); rebound at once to tail_mark(3, 5) = [0,2,−1]
+//   — length 3, not 4;  tail_mark(0, 5) = [−1];  tail_mark(0, −1) = [] (the early return of an
+//   empty result);  tail_mark(1000, 3): 500 elements, Σ = 2·(0 + … + 499) = 249500;
+//   tail_mark(1000, 5000): the same 500 and the −1, 501 elements, Σ 249499, last −1.
+//   [100] += tail_mark(5, 9) = [100,0,2,4,−1]: length 5, Σ 105.   m.out = tail_mark(9, 3) =
+//   [0,2,4,6,8]: length 5, Σ 20.   total(tail_mark(6, 99)) = 0 + 2 + 4 − 1 = 5.   Two live: a =
+//   tail_mark(4, 99) = [0,2,−1] (length 3, Σ 1) and then b = tail_mark(6, 99) = [0,2,4,−1]
+//   (length 4, Σ 5): a is still length 3, Σ 1.
+//   loop k in 0..5 of 10·len + last: k=0 ([−1]) → 9; k=1 ([0,−1]) → 19; k=2 → 19; k=3 ([0,2,−1])
+//   → 29; k=4 → 29: total 105.
+//   evens(7) = [0,2,4,6] (Σ 12) rebound to evens(3) = [0,2] (length 2); evens(0) = []; evens(1)
+//   = [0]; upto(n, stop) = squares below the first i == stop: upto(10, 4) = [0,1,4,9] (Σ 14);
+//   upto(3, 10) = [0,1,4] (Σ 5); upto(5, 0) = [].   pair(true) = [1,2]; pair(false) = [3,4,5].
+//   grid(n, cut) = points (i, i²) below n, then (−1, −1) unless n > cut:  grid(4, 2) = 4 points,
+//   Σx 6, Σy 14, last y 9;  rebound to grid(2, 5) = (0,0), (1,1), (−1,−1): length 3, last y −1;
+//   grid(5, 9): 5 points and the sentinel, 6, last x −1.
+//   words(n, cut) = "w0" … below n, then "end" unless n > cut:  words(3, 1) = w0 w1 w2 joined
+//   "w0w1w2";  words(2, 9) = "w0w1end".
+//   pre(n) = pre(n − 1) then n:  pre(4) = [1,2,3,4] (Σ 10); pre(0) = [].
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_ADOPT=1` ("bad=false" for `tail_mark`, `grid`, `words` and `pre`; the others
+//   are built in the buffer by the scope pass, `pair` declines) and by the emitted C differing
+//   under `LOFT_NO_RETBUF_ADOPT=1`.
+// CHANNEL: the asserts and the leak gate.
+// HOLDS: the switch A/B on all three backends; the interpreter's adoption is its own clause
+//   (`State::retbuf_adopt`), so `--interpret` is read against the hand values, not an oracle.
+
+struct Pt { x: integer, y: integer }
+struct Out { out: vector<integer> }
+
+fn evens(n: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..n { if i % 2 == 0 { out += [i]; } }
+  out
+}
+
+fn tail_mark(n: integer, cut: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..n { if i % 2 == 0 { out += [i]; } }
+  if n > cut { return out; }
+  out += [-1];
+  out
+}
+
+fn upto(n: integer, stop: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  for i in 0..n {
+    if i == stop { return out; }
+    out += [i * i];
+  }
+  out
+}
+
+fn pair(flag: boolean) -> vector<integer> {
+  a: vector<integer> = [1, 2];
+  b: vector<integer> = [3, 4, 5];
+  if flag { a } else { b }
+}
+
+fn grid(n: integer, cut: integer) -> vector<Pt> {
+  out: vector<Pt> = [];
+  for i in 0..n { out += [Pt { x: i, y: i * i }]; }
+  if n > cut { return out; }
+  out += [Pt { x: -1, y: -1 }];
+  out
+}
+
+fn words(n: integer, cut: integer) -> vector<text> {
+  out: vector<text> = [];
+  for i in 0..n { out += ["w{i}"]; }
+  if n > cut { return out; }
+  out += ["end"];
+  out
+}
+
+fn pre(n: integer) -> vector<integer> {
+  out: vector<integer> = [];
+  if n > 0 {
+    out += pre(n - 1);
+    out += [n];
+  }
+  out
+}
+
+fn total(v: const vector<integer>) -> integer { s = 0; for x in v { s += x; } s }
+
+fn test_one_buffer_across_calls() {
+  v = tail_mark(7, 3);
+  assert(len(v) == 4 && total(v) == 12 && v[3] == 6, "tail_mark(7, 3): {len(v)} {total(v)}");
+  v = tail_mark(3, 5);
+  assert(len(v) == 3 && total(v) == 1 && v[2] == -1, "rebound shorter: {len(v)} {total(v)}");
+  z = tail_mark(0, 5);
+  e = tail_mark(0, -1);
+  assert(len(z) == 1 && z[0] == -1 && len(e) == 0, "empty and one: {len(z)} {len(e)}");
+  big = tail_mark(1000, 3);
+  assert(len(big) == 500 && total(big) == 249500 && big[499] == 998, "grown: {len(big)} {total(big)}");
+  big2 = tail_mark(1000, 5000);
+  assert(len(big2) == 501 && total(big2) == 249499 && big2[500] == -1, "grown, then the tail: {len(big2)} {total(big2)}");
+  a = tail_mark(4, 99);
+  b = tail_mark(6, 99);
+  assert(len(a) == 3 && total(a) == 1 && len(b) == 4 && total(b) == 5, "two live: {len(a)} {total(a)} {len(b)} {total(b)}");
+}
+
+fn test_the_callers_use_of_the_result() {
+  acc = [100];
+  acc += tail_mark(5, 9);
+  assert(len(acc) == 5 && total(acc) == 105, "appended: {len(acc)} {total(acc)}");
+  m = Out { out: [] };
+  m.out = tail_mark(9, 3);
+  assert(len(m.out) == 5 && total(m.out) == 20, "stored: {len(m.out)} {total(m.out)}");
+  assert(total(tail_mark(6, 99)) == 5, "handed on: {total(tail_mark(6, 99))}");
+  t = 0;
+  for k in 0..5 {
+    r = tail_mark(k, 99);
+    t += len(r) * 10 + (r[len(r) - 1] ?? -1);
+  }
+  assert(t == 105, "in a loop: {t}");
+}
+
+fn test_scope_built_shapes_and_a_second_result_local() {
+  v = evens(7);
+  assert(len(v) == 4 && total(v) == 12, "evens(7): {len(v)} {total(v)}");
+  v = evens(3);
+  z = evens(0);
+  o = evens(1);
+  assert(len(v) == 2 && total(v) == 2 && len(z) == 0 && len(o) == 1, "evens: {len(v)} {len(z)} {len(o)}");
+  u1 = upto(10, 4);
+  u2 = upto(3, 10);
+  u3 = upto(5, 0);
+  assert(len(u1) == 4 && total(u1) == 14 && len(u2) == 3 && total(u2) == 5 && len(u3) == 0, "upto: {len(u1)} {total(u1)} {len(u2)} {total(u2)} {len(u3)}");
+  p1 = pair(true);
+  p2 = pair(false);
+  assert(len(p1) == 2 && p1[1] == 2 && len(p2) == 3 && p2[2] == 5, "pair: {len(p1)} {len(p2)}");
+}
+
+fn test_records_texts_and_recursion() {
+  g = grid(4, 2);
+  sx = 0;
+  sy = 0;
+  for e in g { sx += e.x; sy += e.y; }
+  assert(len(g) == 4 && sx == 6 && sy == 14 && g[3].y == 9, "grid(4, 2): {len(g)} {sx} {sy}");
+  g = grid(2, 5);
+  assert(len(g) == 3 && g[2].y == -1 && g[1].y == 1, "rebound: {len(g)}");
+  h = grid(5, 9);
+  assert(len(h) == 6 && h[5].x == -1 && h[4].y == 16, "sentinel: {len(h)}");
+  w = words(3, 1);
+  w2 = words(2, 9);
+  assert(len(w) == 3 && join(w, "") == "w0w1w2" && join(w2, "") == "w0w1end", "words: {join(w, "")} {join(w2, "")}");
+  p = pre(4);
+  e = pre(0);
+  assert(len(p) == 4 && p[0] == 1 && p[3] == 4 && total(p) == 10 && len(e) == 0, "pre: {len(p)} {total(p)} {len(e)}");
+}
+
+fn main() {
+  test_one_buffer_across_calls();
+  test_the_callers_use_of_the_result();
+  test_scope_built_shapes_and_a_second_result_local();
+  test_records_texts_and_recursion();
+}

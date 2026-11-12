@@ -1,0 +1,146 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEYED LOOKUP BY SEVERAL INTEGERS OR A TEXT FINDS THE ENTRY ITS KEY NAMES
+// (`@FR-R-TypedKeyed`'s COMPOUND and TEXT clauses).  `h[a, b, c]` on a hash keyed by two to four
+// integer parts is `OpGetHashInts` — hashed as the general entry hashes the parts' longs and
+// compared part by part — and `h[name]` on a hash keyed by one text is `OpGetHashText` —
+// hashed as a string and compared against each entry's key text in place.  The answer must be
+// the general lookup's: the entry whose parts ALL match, in order; null for a key that is
+// absent, however close.  The neighbouring cell is the removal clause (one integer key, 400
+// churned entries); this one is the lookup of the OTHER key shapes, with the cases a wrong
+// digest or a partial comparison gets wrong: parts that differ only in order, a part past 32
+// bits, a negative part, a key that is a prefix of another, the empty text, multi-byte text,
+// letters of another case, a displaced duplicate, and a removal on the shapes the removal
+// clause leaves to the general entry.
+//
+// Axes this file MOVES (over the existing cell):  the key's shape (three integers, four
+// integers, one text; an unsigned byte, which no typed form lists, as the control), the
+// parts' values (negative, 2^40, order-swapped), the text (empty, ASCII prefixes, 2-, 3-,
+// 4-byte characters, case), the operation (hit, miss, duplicate insert, removal).
+// Axes it HOLDS FIXED:  the collection is a `hash` field of a struct.
+//
+// Expected values by hand.
+//   Triples a in -2..3, b in 0..4, c in [1, 2^40] (loops nest in that order): serial s =
+//   ((a + 2)·4 + b)·2 + ci, ci = 0 for c = 1, 1 for c = 2^40; 40 entries, val = s, Σ 0..39 = 780.
+//     [1,2,1] → (3·4+2)·2 = 28;  [2,1,1] → (4·4+1)·2 = 34;  [-2,0,2^40] → 1;  [1,2,3] absent.
+//     After re-adding [1,2,1] with val 999 the length is still 40.  After removing [-2,0,1]
+//     (val 0) the length is 39, the sum 780, and a lookup of it null; [-2,0,2^40] still 1.
+//   Quads a,b,c,d in 0..3: val = a·27 + b·9 + c·3 + d, 81 entries, Σ 0..80 = 3240;
+//     [2,0,1,0] → 54 + 3 = 57; [0,1,0,2] → 9 + 2 = 11; [3,0,0,0] absent.
+//   Words: "" 0, "a" 1, "ab" 2, "abc" 3, "é" 4, "é€" 5, "😀" 6, "Ab" 7.  Absent: "b", "abcd",
+//   "ABC", "é€😀".  Then "k0" … "k199" with count i: 200 more, 208 in all; removing every
+//   third (i = 0, 3, … 198: 67 names, Σ 3j for j in 0..67 = 3·2211 = 6633) leaves 141; the
+//   counts of the survivors sum to 19900 − 6633 = 13267.
+//   Bytes (u8 key): 200 → 2, 255 → 3, 0 → 1; 7 absent.  Words displaced: "ab" re-added with
+//   count 70 reads 70 and the length is unchanged.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_REWRITE_CENSUS=` counting `R-TypedKeyed/compound` and `R-TypedKeyed/text`, and the C
+//   emitted differing under `LOFT_NO_TYPED_KEYED=1`.
+
+struct T3 { a: integer, b: integer, c: integer, val: integer }
+struct By3 { rows: hash<T3[a, b, c]> }
+
+struct T4 { a: integer, b: integer, c: integer, d: integer, val: integer }
+struct By4 { rows: hash<T4[a, b, c, d]> }
+
+struct W { word: text, count: integer }
+struct ByWord { rows: hash<W[word]> }
+
+struct N { w: u8, v: integer }
+struct ByByte { rows: hash<N[w]> }
+
+fn val3(db: By3, a: integer, b: integer, c: integer) -> integer {
+  e = db.rows[a, b, c];
+  if e == null { -1 } else { e.val }
+}
+
+fn val4(db: By4, a: integer, b: integer, c: integer, d: integer) -> integer {
+  e = db.rows[a, b, c, d];
+  if e == null { -1 } else { e.val }
+}
+
+fn count_of(db: ByWord, w: text) -> integer {
+  e = db.rows[w];
+  if e == null { -1 } else { e.count }
+}
+
+fn test_three_integer_parts() {
+  big = 1099511627776;
+  db = By3 { rows: [] };
+  for a in -2..3 { for b in 0..4 { for ci in 0..2 {
+    c = if ci == 0 { 1 } else { big };
+    db.rows += [T3 { a: a, b: b, c: c, val: ((a + 2) * 4 + b) * 2 + ci }];
+  } } }
+  sum = 0;
+  for a in -2..3 { for b in 0..4 { sum += val3(db, a, b, 1) + val3(db, a, b, big); } }
+  assert(len(db.rows) == 40 && sum == 780, "triples: {len(db.rows)} {sum}");
+  r1 = val3(db, 1, 2, 1);
+  r2 = val3(db, 2, 1, 1);
+  r3 = val3(db, -2, 0, big);
+  r4 = val3(db, 1, 2, 3);
+  assert(r1 == 28 && r2 == 34 && r3 == 1 && r4 == -1, "order and width: {r1} {r2} {r3} {r4}");
+  db.rows += [T3 { a: 1, b: 2, c: 1, val: 999 }];
+  assert(len(db.rows) == 40 && val3(db, 1, 2, 1) == 999, "displaced: {len(db.rows)} {val3(db, 1, 2, 1)}");
+  db.rows[-2, 0, 1] = null;
+  assert(len(db.rows) == 39 && val3(db, -2, 0, 1) == -1 && val3(db, -2, 0, big) == 1, "removed: {len(db.rows)} {val3(db, -2, 0, 1)}");
+}
+
+fn test_four_integer_parts() {
+  db = By4 { rows: [] };
+  for a in 0..3 { for b in 0..3 { for c in 0..3 { for d in 0..3 {
+    db.rows += [T4 { a: a, b: b, c: c, d: d, val: a * 27 + b * 9 + c * 3 + d }];
+  } } } }
+  sum = 0;
+  for a in 0..3 { for b in 0..3 { for c in 0..3 { for d in 0..3 { sum += val4(db, a, b, c, d); } } } }
+  assert(len(db.rows) == 81 && sum == 3240, "quads: {len(db.rows)} {sum}");
+  r1 = val4(db, 2, 0, 1, 0);
+  r2 = val4(db, 0, 1, 0, 2);
+  r3 = val4(db, 3, 0, 0, 0);
+  assert(r1 == 57 && r2 == 11 && r3 == -1, "quad order: {r1} {r2} {r3}");
+}
+
+fn test_a_text_key() {
+  db = ByWord { rows: [] };
+  names = ["", "a", "ab", "abc", "é", "é€", "😀", "Ab"];
+  for i in 0..8 { db.rows += [W { word: names[i]!, count: i }]; }
+  hits = "";
+  for n in names { hits += "{count_of(db, n)}"; }
+  assert(hits == "01234567" && len(db.rows) == 8, "present: {hits} {len(db.rows)}");
+  m1 = count_of(db, "b");
+  m2 = count_of(db, "abcd");
+  m3 = count_of(db, "ABC");
+  m4 = count_of(db, "é€😀");
+  assert(m1 == -1 && m2 == -1 && m3 == -1 && m4 == -1, "absent: {m1} {m2} {m3} {m4}");
+  db.rows += [W { word: "ab", count: 70 }];
+  assert(count_of(db, "ab") == 70 && len(db.rows) == 8, "displaced: {count_of(db, "ab")} {len(db.rows)}");
+  for i in 0..200 { db.rows += [W { word: "k{i}", count: i }]; }
+  assert(len(db.rows) == 208, "grown: {len(db.rows)}");
+  for i in 0..200 { if i % 3 == 0 { db.rows["k{i}"] = null; } }
+  live = 0;
+  total = 0;
+  for i in 0..200 {
+    c = count_of(db, "k{i}");
+    if c >= 0 { live += 1; total += c; }
+  }
+  assert(len(db.rows) == 141 && live == 133 && total == 13267, "churn: {len(db.rows)} {live} {total}");
+  assert(count_of(db, "é€") == 5 && count_of(db, "") == 0, "survivors: {count_of(db, "é€")} {count_of(db, "")}");
+}
+
+fn test_an_unsigned_byte_key_is_the_control() {
+  db = ByByte { rows: [] };
+  db.rows += [N { w: 200, v: 2 }];
+  db.rows += [N { w: 255, v: 3 }];
+  db.rows += [N { w: 0, v: 1 }];
+  a = db.rows[200]; b = db.rows[255]; c = db.rows[0];
+  assert(a != null && a.v == 2 && b != null && b.v == 3 && c != null && c.v == 1, "bytes present");
+  assert(db.rows[7] == null && len(db.rows) == 3, "byte absent: {len(db.rows)}");
+}
+
+fn main() {
+  test_three_integer_parts();
+  test_four_integer_parts();
+  test_a_text_key();
+  test_an_unsigned_byte_key_is_the_control();
+}

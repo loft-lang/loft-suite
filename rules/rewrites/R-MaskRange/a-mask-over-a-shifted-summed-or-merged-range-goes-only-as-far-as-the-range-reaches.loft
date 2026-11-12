@@ -1,0 +1,195 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MASK OVER A SHIFTED, SUMMED OR MERGED RANGE GOES ONLY AS FAR AS THE RANGE REACHES
+// (`@FR-R-MaskRange` crossed with `@FR-R-Range`).  `e & m`, `m = 2^k - 1`, is `e` exactly when
+// `e` provably lies in `0 ..= m`, whatever operator produced `e`: a right shift of a masked
+// byte, a sum or a product of masked nibbles, an `if` whose arms agree on one range, an `or`
+// or a `xor` of two small ranges — and stays a mask when the range overruns it by one bit, when
+// an arm of an `if` is unranged, when the mask is the wide `2^32 - 1`.  The neighbouring cell
+// feeds one leaf the kinds of ARGUMENT fact (literal, counter, parameter) through `+`, `*`,
+// `^`, `>>` and one `if` whose arms disagree; this one holds the fact fixed (always an inner
+// mask of the argument) and moves the OPERATOR between the mask and the proof, its width, and
+// the edge by one bit.  The `??` of `x / c` goes only for a literal divisor: a ranged
+// numerator over a literal 2.0 and 1e300 loses its fallback, over a parameter divisor keeps it.
+// A mask dropped one bit too early answers a value above `m`; one kept too long is invisible
+// to the answer, so each pair below has the dropped form (whose value could exceed the mask)
+// and the kept one (which does exceed it before masking).
+//
+// Axes this file MOVES (over the existing cell):  the operator under the mask (`>>`, `+`, `*`,
+// `|`, `^`, a merge of two `if` arms), the mask's width (1 bit to 32 bits: 15, 31, 255,
+// 2^32 - 1), the operand order (`255 & e`), the edge (the range ends at m; the range ends one
+// bit past it), the divisor's spelling (a literal, a parameter).
+// Axes it HOLDS FIXED:  every argument is a local bound to a literal (a literal argument is
+// folded away before any mask is looked at) or a loop counter, and passes an inner mask.
+//
+// Expected values by hand (the arithmetic beside each assertion):
+//   nib(x) = ((x & 255) >> 4) & 15 — range 0..15, mask dropped: nib(300) = 44 >> 4 = 2;
+//   nib(255) = 15; nib(-1) = 255 >> 4 = 15; nib(16) = 1; Σ nib(i), i in 0..40: 16 zeros, 16
+//   ones, 8 twos = 32.  bad(x) = ((x & 255) >> 2) & 15 — range 0..63, mask stays:
+//   bad(255) = 63 & 15 = 15; bad(200) = 50 & 15 = 2.  sw(x) = 255 & (x & 255), the mask first:
+//   sw(300) = 44; sw(-1) = 255.
+//   sum5(a, b) = ((a & 15) + (b & 15)) & 31, range 0..30: sum5(9, 9) = 18; sum5(-1, -1) = 30.
+//   sum4 masks the same sum with 15 (stays): sum4(9, 9) = 18 & 15 = 2; sum4(15, 15) = 30 & 15 = 14.
+//   prod = ((a & 15) * (b & 15)) & 255, range 0..225: prod(15, 15) = 225; prod(7, 9) = 63.
+//   prod2 = ((a & 31) * (b & 31)) & 255, range 0..961 (stays): prod2(31, 31) = 961 - 3·256 = 193;
+//   prod2(7, 9) = 63.
+//   Wide masks (2^32 - 1 = 4294967295): lo32(-1) = 4294967295.  wide = ((x & 65535) * 65536) &
+//   4294967295, range to 4294901760: wide(65535) = 4294901760; wide(3) = 196608.  wide2 scales by
+//   65537, range to 65535·65537 = 4294967295 exactly (dropped): wide2(65535) = 4294967295.
+//   wide3 scales by 65538, range to 4295032830 (stays): wide3(65535) = 4295032830 - 4294967296 =
+//   65534; wide3(3) = 196614.
+//   xo(a, b) = ((a & 7) ^ (b & 15)) & 15, range 0..15: xo(7, 15) = 8; xo(5, 12) = 9.
+//   xo2 = ((a & 7) ^ (b & 31)) & 15, range 0..31 (stays): xo2(0, 31) = 15; xo2(7, 31) = 24 & 15 = 8.
+//   orr(a, b) = ((a & 3) | (b & 12)) & 15: orr(3, 12) = 15; orr(2, 8) = 10.
+//   agree(x, f) = y & 15 with y = x & 15 or x & 7: agree(255, true) = 15; agree(255, false) = 7;
+//   agree(-1, false) = 7.  disagree: one arm is x itself, unranged, mask stays: disagree(-1,
+//   false) = 15; disagree(21, false) = 5; disagree(21, true) = 21 & 15 = 5.
+//   merge(x, f): the arms assign different ranges: merge(255, true) = 3; merge(255, false) = 7.
+//   merge2: both arms assign 0..7: (x & 7) or ((x >> 1) & 7): merge2(15, true) = 7; merge2(15,
+//   false) = 7; merge2(8, false) = 4; merge2(8, true) = 0.
+//   fl(x) = ((x & 7) as float / 2.0 ?? -1.0) + 0.5: fl(13) = 5 / 2 + 0.5 = 3.0; fl(-1) = 7 / 2 +
+//   0.5 = 4.0.  tiny(7) = 7 / 1e300 + 0 = 7e-300, positive and below 1e-299.  dv(3, 2.0) = 3 / 2 +
+//   0.5 = 2.0.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` (`OpLandInt` nodes in the tests: 6 / 24 / 8 in `a_shifted_range` /
+//   `merged_ranges` / `or_and_xor_ranges`, against 18 / 30 / 36 under `LOFT_NO_MASK_RANGE=1`;
+//   the `??` fallbacks of `test_the_fallback_of_a_division` 7 against 2) and by
+//   `LOFT_TRACE_INLINE_LEAF=1` naming the reductions per test.  The fallback sits in operand
+//   position (`+ 0.5`): as a leaf's whole result it is not reduced.
+// CHANNEL: the asserts.
+// HOLDS: the interpreter is the oracle, and the switch A/B is the falsifier (both backends
+//   share the IR rewrite).
+
+fn nib(x: integer) -> integer { ((x & 255) >> 4) & 15 }
+fn bad(x: integer) -> integer { ((x & 255) >> 2) & 15 }
+fn sw(x: integer) -> integer { 255 & (x & 255) }
+fn sum5(a: integer, b: integer) -> integer { ((a & 15) + (b & 15)) & 31 }
+fn sum4(a: integer, b: integer) -> integer { ((a & 15) + (b & 15)) & 15 }
+fn prod(a: integer, b: integer) -> integer { ((a & 15) * (b & 15)) & 255 }
+fn prod2(a: integer, b: integer) -> integer { ((a & 31) * (b & 31)) & 255 }
+fn lo32(x: integer) -> integer { (x & 4294967295) & 4294967295 }
+fn wide(x: integer) -> integer { ((x & 65535) * 65536) & 4294967295 }
+fn wide2(x: integer) -> integer { ((x & 65535) * 65537) & 4294967295 }
+fn wide3(x: integer) -> integer { ((x & 65535) * 65538) & 4294967295 }
+fn xo(a: integer, b: integer) -> integer { ((a & 7) ^ (b & 15)) & 15 }
+fn xo2(a: integer, b: integer) -> integer { ((a & 7) ^ (b & 31)) & 15 }
+fn orr(a: integer, b: integer) -> integer { ((a & 3) | (b & 12)) & 15 }
+fn agree(x: integer, f: boolean) -> integer {
+  y = if f { x & 15 } else { x & 7 };
+  y & 15
+}
+fn disagree(x: integer, f: boolean) -> integer {
+  y = if f { x & 15 } else { x };
+  y & 15
+}
+fn merge(x: integer, f: boolean) -> integer {
+  y = 0;
+  if f { y = x & 3; } else { y = x & 7; }
+  y & 15
+}
+fn merge2(x: integer, f: boolean) -> integer {
+  y = 0;
+  if f { y = x & 7; } else { y = (x >> 1) & 7; }
+  y & 7
+}
+fn fl(x: integer) -> float { (((x & 7) as float) / 2.0 ?? -1.0) + 0.5 }
+fn tiny(x: integer) -> float { (((x & 7) as float) / 1e300 ?? -1.0) + 0.0 }
+fn dv(x: integer, d: float) -> float { (((x & 7) as float) / d ?? -1.0) + 0.5 }
+
+// Every argument is a LOCAL bound to a literal: a literal argument is folded into the body before
+// any mask is looked at (`nib(300)` is the constant 2), while a local keeps its value and its
+// one-point range, so the inner mask is a real mask and the outer one is the proof under test.
+fn test_a_shifted_range() {
+  a = 300;
+  b = 255;
+  c = -1;
+  d = 16;
+  s = 0;
+  for i in 0..40 { s += nib(i); }
+  r1 = nib(a);
+  r2 = nib(b);
+  r3 = nib(c);
+  r4 = nib(d);
+  assert(r1 == 2 && r2 == 15 && r3 == 15 && r4 == 1 && s == 32, "nib {r1} {r2} {r3} {r4} {s}");
+  r5 = bad(b);
+  e = 200;
+  r6 = bad(e);
+  assert(r5 == 15 && r6 == 2, "bad {r5} {r6}");
+  r7 = sw(a);
+  r8 = sw(c);
+  assert(r7 == 44 && r8 == 255, "sw {r7} {r8}");
+}
+
+fn test_a_summed_and_a_multiplied_range() {
+  nine = 9;
+  m1 = -1;
+  f15 = 15;
+  f31 = 31;
+  seven = 7;
+  assert(sum5(nine, nine) == 18 && sum5(m1, m1) == 30, "sum5 {sum5(nine, nine)} {sum5(m1, m1)}");
+  assert(sum4(nine, nine) == 2 && sum4(f15, f15) == 14, "sum4 {sum4(nine, nine)} {sum4(f15, f15)}");
+  assert(prod(f15, f15) == 225 && prod(seven, nine) == 63, "prod {prod(f15, f15)} {prod(seven, nine)}");
+  assert(prod2(f31, f31) == 193 && prod2(seven, nine) == 63, "prod2 {prod2(f31, f31)} {prod2(seven, nine)}");
+}
+
+fn test_a_wide_mask() {
+  m1 = -1;
+  top = 65535;
+  three = 3;
+  assert(lo32(m1) == 4294967295, "lo32 {lo32(m1)}");
+  assert(wide(top) == 4294901760 && wide(three) == 196608, "wide {wide(top)} {wide(three)}");
+  assert(wide2(top) == 4294967295, "wide2 {wide2(top)}");
+  assert(wide3(top) == 65534 && wide3(three) == 196614, "wide3 {wide3(top)} {wide3(three)}");
+}
+
+fn test_or_and_xor_ranges() {
+  zero = 0;
+  two = 2;
+  three = 3;
+  five = 5;
+  seven = 7;
+  eight = 8;
+  twelve = 12;
+  f15 = 15;
+  f31 = 31;
+  assert(xo(seven, f15) == 8 && xo(five, twelve) == 9, "xo {xo(seven, f15)} {xo(five, twelve)}");
+  assert(xo2(zero, f31) == 15 && xo2(seven, f31) == 8, "xo2 {xo2(zero, f31)} {xo2(seven, f31)}");
+  assert(orr(three, twelve) == 15 && orr(two, eight) == 10, "orr {orr(three, twelve)} {orr(two, eight)}");
+}
+
+fn test_merged_ranges() {
+  big = 255;
+  m1 = -1;
+  n21 = 21;
+  n15 = 15;
+  n8 = 8;
+  yes = true;
+  no = false;
+  assert(agree(big, yes) == 15 && agree(big, no) == 7 && agree(m1, no) == 7, "agree {agree(big, yes)} {agree(big, no)} {agree(m1, no)}");
+  assert(disagree(m1, no) == 15 && disagree(n21, no) == 5 && disagree(n21, yes) == 5, "disagree {disagree(m1, no)} {disagree(n21, no)} {disagree(n21, yes)}");
+  assert(merge(big, yes) == 3 && merge(big, no) == 7, "merge {merge(big, yes)} {merge(big, no)}");
+  assert(merge2(n15, yes) == 7 && merge2(n15, no) == 7 && merge2(n8, no) == 4 && merge2(n8, yes) == 0, "merge2 {merge2(n15, yes)} {merge2(n15, no)} {merge2(n8, no)} {merge2(n8, yes)}");
+}
+
+fn test_the_fallback_of_a_division() {
+  k = 13;
+  m1 = -1;
+  sv = 7;
+  th = 3;
+  dd = 2.0;
+  assert(fl(k) == 3.0 && fl(m1) == 4.0, "fl {fl(k)} {fl(m1)}");
+  t = tiny(sv);
+  assert(t > 0.0 && t < 1e-299, "tiny {t}");
+  assert(dv(th, dd) == 2.0, "dv {dv(th, dd)}");
+}
+
+fn main() {
+  test_a_shifted_range();
+  test_a_summed_and_a_multiplied_range();
+  test_a_wide_mask();
+  test_or_and_xor_ranges();
+  test_merged_ranges();
+  test_the_fallback_of_a_division();
+}

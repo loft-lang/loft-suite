@@ -1,0 +1,96 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSTRUCTOR LITERAL KEEPS ITS ARGUMENTS EVALUATED ONCE AND ITS VECTORS APART
+// (`@FR-R-CtorLiteral`).  `x = ctor(args)` where the constructor's body is a record literal over
+// its parameters is replaced by that literal written over `x`: a vector-literal argument is built
+// in its field, a vector variable is appended whole, a scalar field is its operator expression
+// over the arguments.  The callee's writes now run between the argument evaluations, so an
+// argument that calls user code, or reads what a write can change, keeps the call.  Whichever
+// form runs, the record must hold what the call would have given: each field from its own
+// argument, a vector variable passed twice copied twice (never aliased), an empty literal an
+// empty field, a long literal whole, and the arguments run once, in order.
+//
+// Axes this file MOVES:  the arguments (a literal, the same vector variable for two fields, an
+//                        empty literal, a 14-element literal beyond the 11 whose reservation
+//                        is dropped, a call that counts, a constructor result's field), the
+//                        site (top level, a loop record rebound every pass, a second
+//                        assignment to the local), the scalar field's operator (a product
+//                        plus a constant, overflow to the null sentinel).
+// Axes it HOLDS FIXED:   one constructor, `Bx { total, items, extra, tail }`, three vector
+//                        fields (one never given an argument: the literal's `[]`).
+// Over the existing cell it ADDS: the vector variable passed for two fields and written after
+//                        the build, the empty and the long literal, the argument that calls,
+//                        the rebinding, the nested constructor, a field computed to null.
+//
+// Expected values by hand (isum() adds a vector's elements; bx_new(n, a, b) has total = 2n + 1).
+//   k1  bx_new(4, [1, 2, 3], [9]): total 9, items sum 6 (len 3), extra len 0, tail sum 9.
+//   k2  v = [5, 6]; x = bx_new(1, v, v); v += [7]: x.items = [5, 6] sum 11, x.tail = [5, 6]
+//       sum 11, v = [5, 6, 7] sum 18 (each field its own copy).
+//   k3  bx_new(0, [1..14], []): the 14 elements sum 14·15/2 = 105 (len 14), total 1.
+//   k4  bx_new(0, [], []): total 1, every vector empty.
+//   k5  bx_new(9223372036854775807, [1], [2]): 2n overflows -> null total; items [1], tail [2].
+//   k6  loop over i in 0..5: bx_new(i, [i, i + 1], [i * 2]): per pass total 2i + 1, items sum
+//       2i + 1, tail sum 2i -> 6i + 2; Σ i = 10 -> 60 + 10 = 70.  Once read by fields alone (a
+//       loop record: the call is written in place), once handed to isum() (the call stays).
+//   k7  c = 0: bx_new(inc(c), [inc(c)], [inc(c)]): the arguments run left to right once: n = 1
+//       (total 3), items [2], tail [3], c = 3.
+//   k8  x = bx_new(1, [1], []) then x = bx_new(2, [2], [3]): the second wins: total 5, items [2],
+//       tail [3].
+//   k9  y = bx_new(x.total, x.items, x.tail) after k8's x: total 2·5 + 1 = 11, items [2], tail [3];
+//       x unchanged (total 5).
+//   k10 bx_new(2, bx_new(1, [4], [5]).items, [6]): inner items [4]; outer total 5, items [4],
+//       tail [6].
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_TRACE_CTOR_LITERAL=1 loft --interpret` (the calls rewritten and the sites declined);
+//   LOFT_NO_CTOR_LITERAL=1 must answer the same.  The IR phase runs on the interpreter and
+//   `--ship`; the suite's `--native-c` lane runs the cell with the calls kept.
+
+struct Bx { total: integer, items: vector<integer>, extra: vector<integer>, tail: vector<integer> }
+
+fn bx_new(n: integer, a: vector<integer>, b: vector<integer>) -> Bx {
+  Bx { total: n * 2 + 1, items: a, extra: [], tail: b }
+}
+
+fn inc(c: &integer) -> integer { c += 1; c }
+
+fn isum(v: const vector<integer>) -> integer { s = 0; for e in v { s += e; } s }
+
+fn main() {
+  k1 = bx_new(4, [1, 2, 3], [9]);
+  assert(k1.total == 9 && isum(k1.items) == 6 && len(k1.items) == 3 && len(k1.extra) == 0 && isum(k1.tail) == 9 && len(k1.tail) == 1, "k1 {k1.total} {k1.items} {k1.tail}");
+  v = [5, 6];
+  k2 = bx_new(1, v, v);
+  v += [7];
+  assert(k2.total == 3 && isum(k2.items) == 11 && isum(k2.tail) == 11 && len(k2.items) == 2 && len(k2.tail) == 2 && isum(v) == 18 && len(v) == 3, "k2 {k2.items} {k2.tail} {v}");
+  k3 = bx_new(0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], []);
+  assert(k3.total == 1 && len(k3.items) == 14 && isum(k3.items) == 105 && len(k3.tail) == 0, "k3 {len(k3.items)} {isum(k3.items)}");
+  k4 = bx_new(0, [], []);
+  assert(k4.total == 1 && len(k4.items) == 0 && len(k4.extra) == 0 && len(k4.tail) == 0, "k4 {k4.total}");
+  k5 = bx_new(9223372036854775807, [1], [2]);
+  assert(k5.total == null && isum(k5.items) == 1 && isum(k5.tail) == 2, "k5 {k5.total}");
+  t = 0;
+  for i in 0..5 {
+    b = bx_new(i, [i, i + 1], [i * 2]);
+    t += b.total + (b.items[0] ?? -1000) + (b.items[1] ?? -1000) + (b.tail[0] ?? -1000);
+  }
+  assert(t == 70, "k6 {t}");
+  t2 = 0;
+  for i in 0..5 {
+    b2 = bx_new(i, [i, i + 1], [i * 2]);
+    t2 += b2.total + isum(b2.items) + isum(b2.tail);
+  }
+  assert(t2 == 70, "k6 handed on {t2}");
+  c = 0;
+  k7 = bx_new(inc(c), [inc(c)], [inc(c)]);
+  assert(k7.total == 3 && len(k7.items) == 1 && k7.items[0] == 2 && len(k7.tail) == 1 && k7.tail[0] == 3 && c == 3, "k7 {k7.total} {k7.items} {k7.tail} {c}");
+  x = bx_new(1, [1], []);
+  assert(x.total == 3 && len(x.tail) == 0, "k8 first {x.total}");
+  x = bx_new(2, [2], [3]);
+  assert(x.total == 5 && isum(x.items) == 2 && len(x.items) == 1 && isum(x.tail) == 3, "k8 {x.total} {x.items} {x.tail}");
+  y = bx_new(x.total, x.items, x.tail);
+  assert(y.total == 11 && isum(y.items) == 2 && isum(y.tail) == 3 && x.total == 5, "k9 {y.total} {x.total}");
+  k10 = bx_new(2, bx_new(1, [4], [5]).items, [6]);
+  assert(k10.total == 5 && isum(k10.items) == 4 && len(k10.items) == 1 && isum(k10.tail) == 6, "k10 {k10.total} {k10.items} {k10.tail}");
+}

@@ -1,0 +1,162 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SPLIT BOUND TO A NAME ANSWERS THE VECTOR IT NEVER BUILDS (`@FR-R-SplitTable`).  `parts =
+// line.split(c)` with a character CONSTANT `c`, read only by `len(parts)`, `parts[i]` (bare, under
+// `?`, under `?? d`, bound to a `text?`) and `for p in parts`, is lowered to one pass that records
+// the pieces as a table of slices; the vector is never built.  The reads must answer what the
+// vector's reads answer: the pieces in order, an empty piece between adjacent separators and
+// after a trailing one, NO pieces for an empty text, a negative index from the end, the absent
+// text past either end; the source evaluated once, and a source parameter the function writes
+// AFTER the bind read as it was.  Every other mention — returned, appended to, an element
+// written, handed to a call, rebound, a variable separator — keeps the vector and must answer
+// the same.  The one suite cell that sits beside this rule (the walked-text borrow, a header
+// lookup) holds the separator, the source and the reads fixed; this one moves them.
+//
+// Axes this file MOVES (over the existing cell):  the separator (',' ';' and the 2-byte 'é' and
+// 3-byte '€'), the source's shape (empty, only separators, a trailing / leading / doubled
+// separator, multi-byte pieces), the read (`len`, `?? d`, `?`, a negative index, past the end,
+// bound to a `text?`, a walk, a `rev` walk), the source's fate (a parameter written after the
+// bind, a call evaluated once), the bind's place (a loop body, two tables in one body), and the
+// declining mentions.
+// Axes it HOLDS FIXED:  the table is bound to a local `vector<text>` by the standard `split`.
+//
+// Expected values by hand (a piece is "[p]"; `?` marks an absent read).
+//   shape(",") splits "a,,b," into a, "", b, "" → "4:[a][][b][]";  "" → no pieces "0:";
+//   "," → two empty pieces "2:[][]";  "abc" → "1:[abc]";  ",x" → "2:[][x]";  ",,," → four
+//   empty pieces "4:[][][][]".
+//   mb3 (split on '€') records "size/len;" per piece: "x€yé€" → x (1/1), yé (3/2), "" (0/0);
+//   "😀€€é" → 😀 (4/1), "" (0/0), é (2/1).  mb2 (split on 'é'): "éaéb" → "" (0/0), a (1/1), b (1/1).
+//   idx("p,qq,rrr") = last "rrr", index -9 "none", index 7 "none", first "p", third "rrr"; for
+//   the empty text every read is absent: "none|none|none||".
+//   probe("k1,k2,k3", 2) = "<k3>", 3 = "null", -1 = "<k3>"; probe("k1,", 1) = "<>" (an empty piece
+//   is present); probe("", 0) = "null".
+//   late("ab,cd") reads the last piece "cd" and the parameter "ab,cd!" after the append.
+//   once: src evaluated once → "3mo" and one note in the log.
+//   rows(["1,2,3", "10,20", "", "7"]): pieces 3 + 2 + 0 + 1 = 6; Σ = 6 + 30 + 0 + 7 = 43.
+//   zip("a,b,c", "1;2") = "a1" "b2" "c-" → "a1b2c-".
+//   dec("u,v"): a (appended "Z") 3 pieces, last Z → "3Z"; b[0] = "Q" with 2 pieces → "Q2"; c handed
+//   to a call → 2; d two pieces, then rebound to x,y,z → "2>3z"; e a variable separator → 2:
+//   "3Z Q2 2 2>3z 2" (none of these binds is a table: `dec` is absent from the census).
+//   rv("x1,y2,z3") walks the pieces reversed: "z3y2x1".
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_REWRITE_CENSUS_FN=` counting `R-SplitTable` per function on the C emission (0 under
+//   `LOFT_NO_SPLIT_TABLE=1`) and the emitted C differing under the switch.  The rustc-native
+//   writer applies it too; it was not built.
+// CHANNEL: the asserts.
+// HOLDS: the interpreter keeps the vector and is the oracle.
+
+fn shape(line: text) -> text {
+  parts = line.split(',');
+  r = "{len(parts)}:";
+  for i in 0..len(parts) { r += "[{parts[i] ?? "?"}]"; }
+  r
+}
+
+fn mb3(line: text) -> text {
+  parts = line.split('€');
+  r = "";
+  for i in 0..len(parts) {
+    p = parts[i] ?? "";
+    r += "{size(p)}/{len(p)};";
+  }
+  r
+}
+
+fn mb2(line: text) -> text {
+  parts = line.split('é');
+  r = "";
+  for p in parts { r += "{size(p)}/{len(p)};"; }
+  r
+}
+
+fn idx(line: text) -> text {
+  parts = line.split(',');
+  a = parts[-1] ?? "none";
+  b = parts[-9] ?? "none";
+  c = parts[7] ?? "none";
+  d = parts[0]?;
+  e = parts[2]?;
+  "{a}|{b}|{c}|{d}|{e}"
+}
+
+fn probe(line: text, i: integer) -> text {
+  parts = line.split(',');
+  p: text? = parts[i];
+  if p == null { "null" } else { "<{p}>" }
+}
+
+fn late(line: text) -> text {
+  parts = line.split(',');
+  line += "!";
+  "{parts[len(parts) - 1]?}/{line}"
+}
+
+fn src(log: vector<integer>) -> text { log += [len(log)]; "m,n,o" }
+fn once(log: vector<integer>) -> text {
+  parts = src(log).split(',');
+  "{len(parts)}{parts[0]?}{parts[2]?}"
+}
+
+fn rows(lines: const vector<text>) -> text {
+  n = 0;
+  s = 0;
+  for line in lines {
+    parts = line.split(',');
+    n += len(parts);
+    for p in parts { s += p as integer ?? 0; }
+  }
+  "{n} {s}"
+}
+
+fn zip(a: text, b: text) -> text {
+  xs = a.split(',');
+  ys = b.split(';');
+  r = "";
+  for i in 0..len(xs) { r += "{xs[i] ?? "-"}{ys[i] ?? "-"}"; }
+  r
+}
+
+fn count(v: vector<text>) -> integer { len(v) }
+
+fn dec(src: text) -> text {
+  a = src.split(',');
+  a += ["Z"];
+  b = src.split(',');
+  b[0] = "Q";
+  c = src.split(',');
+  n = count(c);
+  d = src.split(',');
+  dn = len(d);
+  d = "x,y,z".split(',');
+  sep = ',';
+  e = src.split(sep);
+  "{len(a)}{a[len(a) - 1]?} {b[0]?}{len(b)} {n} {dn}>{len(d)}{d[2]?} {len(e)}"
+}
+
+fn rv(line: text) -> text {
+  parts = line.split(',');
+  out = "";
+  for p in rev(parts) { out += p; }
+  out
+}
+
+fn main() {
+  assert(shape("a,,b,") == "4:[a][][b][]" && shape("") == "0:" && shape(",") == "2:[][]", "shape {shape("a,,b,")} {shape("")} {shape(",")}");
+  assert(shape("abc") == "1:[abc]" && shape(",x") == "2:[][x]" && shape(",,,") == "4:[][][][]", "shape2 {shape("abc")} {shape(",x")} {shape(",,,")}");
+  assert(mb3("x€yé€") == "1/1;3/2;0/0;" && mb3("😀€€é") == "4/1;0/0;2/1;", "mb3 {mb3("x€yé€")} {mb3("😀€€é")}");
+  assert(mb2("éaéb") == "0/0;1/1;1/1;", "mb2 {mb2("éaéb")}");
+  assert(idx("p,qq,rrr") == "rrr|none|none|p|rrr" && idx("") == "none|none|none||", "idx {idx("p,qq,rrr")} {idx("")}");
+  assert(probe("k1,k2,k3", 2) == "<k3>" && probe("k1,k2,k3", 3) == "null" && probe("k1,k2,k3", -1) == "<k3>", "probe {probe("k1,k2,k3", 2)} {probe("k1,k2,k3", 3)} {probe("k1,k2,k3", -1)}");
+  assert(probe("k1,", 1) == "<>" && probe("", 0) == "null", "probe2 {probe("k1,", 1)} {probe("", 0)}");
+  assert(late("ab,cd") == "cd/ab,cd!", "late {late("ab,cd")}");
+  log: vector<integer> = [];
+  o = once(log);
+  assert(o == "3mo" && len(log) == 1, "once {o} {len(log)}");
+  r = rows(["1,2,3", "10,20", "", "7"]);
+  assert(r == "6 43", "rows {r}");
+  assert(zip("a,b,c", "1;2") == "a1b2c-", "zip {zip("a,b,c", "1;2")}");
+  assert(dec("u,v") == "3Z Q2 2 2>3z 2", "dec {dec("u,v")}");
+  assert(rv("x1,y2,z3") == "z3y2x1", "rv {rv("x1,y2,z3")}");
+}

@@ -1,0 +1,119 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN APPENDED FORMAT GOES INTO ITS DESTINATION UNLESS A HOLE READS IT (`@FR-R-FormatAppend`).
+// `x += "…{e}…"` writes the format's parts straight onto the text variable `x` — a local, a
+// `&text` parameter, a promoted return buffer — in order.  Where a hole reads `x` (`len(x)`, a
+// slice of `x`, `x` itself) the parts written so far would be visible to it, so the format
+// must keep its work text and the hole must see `x` as it stood before the statement.  A
+// `for` hole, a field destination and an element destination keep the work text too.  The
+// answer is the same text either way; this cell checks it on the shapes that decide.
+//
+// Axes this file MOVES:  the statement form (`x += "…"` and the C rebind `x = x + "…"`), the
+//                        destination (local, `&text` parameter, return buffer, struct
+//                        field, vector element), what the hole is (a plain value, `len(x)`,
+//                        `x[a..b]`, `x`, a `for` hole), the part types written (text,
+//                        character, boolean, `#x`, width + precision, a null integer).
+// Axes it HOLDS FIXED:   text destinations only.
+// Over the existing cell it ADDS: the `+=` form (the existing cell has only `x = x + …`),
+//                        `&text`, field, element and return-buffer destinations, a `for`
+//                        hole, and the part-type ladder written in.
+//
+// Expected values by hand:
+//   s = "k7"; s += "[{s}]" -> "k7[k7]"; s += "{len(s)}" -> len is 6 -> "k7[k7]6";
+//   s += "{s[0..2]}" -> "k7[k7]6k7".
+//   t = "="; t += "{for i in 1..4 {i*3}}" -> "=[3,6,9]" (3,6,9);
+//   t += "{for _ in 0..2 {len(t)}}" -> len("=[3,6,9]") = 8 -> "[8,8]" -> "=[3,6,9][8,8]".
+//   tag(t, n): t += "{n}:{len(t)};" with len read BEFORE the statement's own writes:
+//     "" -> "7:0;" (len 4) -> "7:0;8:4;" (len 8) -> "7:0;8:4;9:8;".
+//   put(t, [3, 14, 159]) with "<{x:02}>": "<03>" "<14>" "<159>" -> "<03><14><159>"; an empty
+//     vector adds nothing.
+//   field: l.line = "m"; l.line += "{l.line}-{len(l.line)}" -> "m" + "m" + "-" + "1" = "mm-1".
+//   element: v = ["p", "q"]; v[1] += "{v[1]}!" -> "q" + "q!" = "qq!"; v[0] stays "p".
+//   grow(n): r = "z"; n times r += "{r}" doubles: n=0 "z", n=1 "zz", n=3 eight z's.
+//   build(n): "{i}:{i*i};" for i in 0..n: n=4 -> "0:0;1:1;2:4;3:9;", n=1 "0:0;", n=0 "".
+//   parts: "!" + "é" + "true" + "0xff" + (2.26 at width 6, one decimal = "   2.3")
+//          + (-17 right-aligned in 5 = "  -17") + (null integer = "null")
+//          = "!étrue0xff   2.3  -17null".
+//   rebind: rb(t, n): t = t + "<{n}>" from "" with 5 then 6 -> "<5><6>";
+//           rl(t): t = t + "{len(t)}." from "ab" -> "ab2." -> "ab2.4." (len 2, then 4).
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `loft introspect` of `tag`/`put` (LOFT_NO_FORMAT_APPEND=1 brings back the work text in
+//   `put`, `tag` is identical both ways: the decline) and the C emit of `rb` (LOFT_NO_FORMAT_INTO=1).
+
+struct Log { line: text }
+
+fn tag(t: &text, n: integer) { t += "{n}:{len(t)};"; }
+
+fn put(t: &text, v: vector<integer>) { for x in v { t += "<{x:02}>"; } }
+
+fn grow(n: integer) -> text {
+  r = "z";
+  for _i in 0..n { r += "{r}"; }
+  r
+}
+
+fn build(n: integer) -> text {
+  r = "";
+  for i in 0..n { r += "{i}:{i * i};"; }
+  r
+}
+
+fn rb(t: &text, n: integer) { t = t + "<{n}>"; }
+
+fn rl(t: &text) { t = t + "{len(t)}."; }
+
+fn main() {
+  s = "k7";
+  s += "[{s}]";
+  assert(s == "k7[k7]" && len(s) == 6, "s1: {s}");
+  s += "{len(s)}";
+  assert(s == "k7[k7]6", "s2: {s}");
+  s += "{s[0..2]}";
+  assert(s == "k7[k7]6k7" && len(s) == 9, "s3: {s}");
+  t = "=";
+  t += "{for i in 1..4 {i * 3}}";
+  assert(t == "=[3,6,9]", "t1: {t}");
+  t += "{for _ in 0..2 {len(t)}}";
+  assert(t == "=[3,6,9][8,8]", "t2: {t}");
+  g = "";
+  tag(g, 7);
+  assert(g == "7:0;", "g1: {g}");
+  tag(g, 8);
+  assert(g == "7:0;8:4;", "g2: {g}");
+  tag(g, 9);
+  assert(g == "7:0;8:4;9:8;" && len(g) == 12, "g3: {g}");
+  p = "";
+  put(p, [3, 14, 159]);
+  assert(p == "<03><14><159>", "p1: {p}");
+  none: vector<integer> = [];
+  put(p, none);
+  assert(p == "<03><14><159>", "p2 empty adds nothing: {p}");
+  l = Log { line: "m" };
+  l.line += "{l.line}-{len(l.line)}";
+  assert(l.line == "mm-1", "l: {l.line}");
+  v = ["p", "q"];
+  v[1] += "{v[1]}!";
+  assert(v[0] == "p" && v[1] == "qq!" && len(v) == 2, "v: {v[0]} {v[1]}");
+  assert(grow(0) == "z" && grow(1) == "zz" && grow(3) == "zzzzzzzz", "grow {grow(0)} {grow(1)} {grow(3)}");
+  assert(build(4) == "0:0;1:1;2:4;3:9;" && build(1) == "0:0;" && build(0) == "", "build {build(4)} {build(1)} {build(0)}");
+  ch = 'é';
+  b = true;
+  n = 255;
+  f = 2.26;
+  m = -17;
+  nn: integer? = null;
+  x = "!";
+  x += "{ch}{b}{n:#x}{f:6.1}{m:>5}{nn}";
+  assert(x == "!étrue0xff   2.3  -17null", "parts: {x}");
+  r1 = "";
+  rb(r1, 5);
+  rb(r1, 6);
+  assert(r1 == "<5><6>", "rb: {r1}");
+  r2 = "ab";
+  rl(r2);
+  assert(r2 == "ab2.", "rl1: {r2}");
+  rl(r2);
+  assert(r2 == "ab2.4.", "rl2: {r2}");
+}

@@ -1,0 +1,209 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STRAIGHT-LINE APPEND TO A RECORD FIELD IS ITS OWN SLOT FOR EVERY ELEMENT SHAPE
+// (`@FR-R-FieldAppend`).  `r.f += [x]` outside any loop, over a plain vector field of a struct,
+// is emitted as the field's own append — the slot claimed at the field's offset with the
+// element's size, prefilled with the element's defaults unless the literal writes every field,
+// the length bumped at the finish — where the template dispatched per element.  The bare clause
+// does the same for a `v += [x]` in a loop the header hoist declines.  Whatever the element —
+// a partial struct literal (a declared default, a null, a zero, a text), a character, a
+// struct-enum variant of any width, a keyed collection field that keeps the template — the
+// vector must hold exactly the elements appended, in order, with every omitted field at its
+// default, across the growth steps.
+//
+// Axes this file MOVES:  the element shape (partial struct literal, integer, character,
+//                        struct-enum variants of three widths, keyed collections), the count
+//                        (zero, one, thirty through a recursion that appends straight-line
+//                        past several growth steps), the field's siblings (three vector fields
+//                        of one record), the form (field clause, bare clause with a writer
+//                        call in the loop).
+// Axes it HOLDS FIXED:   the parent is a plain struct local; no push header holds the field.
+// Over the existing cell it ADDS: the field clause on partial literals (its default / null /
+//                        text prefill), the enum clause, the scalar and character elements,
+//                        the keyed fields that must NOT take the clause, and growth.
+//
+// Expected values by hand.  Pt { x: n } omits y (declared default 7), tag ("") and z (an
+// `integer?`, null).
+//   grow(b, 30) appends n = 30 down to 1: pts x = 30, 29, ..., 1: pts[0].x = 30, pts[14].x = 16,
+//     pts[29].x = 1, Σx = 465; every y = 7: Σy = 210; every tag "" and z null (count 30 each);
+//     ints n * n: Σ n² for 1..30 = 30·31·61/6 = 9455, ints[0] = 900, ints[29] = 1;
+//     chars 'é' for even n, 'z' for odd: 15 of each.
+//   grow(b, 0) and grow(b, 1): lengths 0 and 1 (x = 1, y = 7).
+//   add(s, k) appends Rect { w: k, h: k + 1, tag: 9 }, Circle { r: k }, Dot:  add(s, 1), add(s, 2)
+//     give positions 0 Rect(1, 2, 9), 1 Circle(1), 2 Dot, 3 Rect(2, 3, 9), 4 Circle(2), 5 Dot;
+//     Σ w·h = 2 + 6 = 8, Σ r = 3, Σ tag = 18, 2 dots, length 6.
+//   keyed: a sorted<Item[id]> field appended 5, 3, 9 iterates 3, 5, 9; a hash<Entry[id]> field
+//     (a separate record type: two collections of one type in a record are one linked group)
+//     appended the same finds id 9's v = 90, id 3's v = 30, id 4 absent, and has 3 entries.
+//   two(5): a gets Pt { x: i } for i in 0..5 (Σx 10; y 7 each = 35; tag "") and mk(i + 100) for
+//     the even i = 0, 2, 4 (x 100, 102, 104 = 306; y = 2x = 200 + 204 + 208 = 612; tags t100,
+//     t102, t104): 8 records, Σx = 316, Σy = 647, tags "t100t102t104".  b gets mk(i): 5
+//     records, Σx 10, Σy = 2·(0+1+2+3+4) = 20, tags "t0t1t2t3t4".
+//   dyn(3, v): x = 0, 1, 2 from mk's, y the default 7, tags "t0t1t2": "3:3:21:t0t1t2";
+//     dyn(0, v) "0:0:0:".
+//   whiler(4): x 0..3 (Σ 6), y 7 each (28), tags "t0t1t2t3"; whiler(200) breaks when the
+//     vector holds 101 records: Σx = 0 + ... + 100 = 5050, Σy = 707, tags t0...t100.
+//
+// @falsified-at: none — a coverage cell for a rewrite already correct on main; reach shown by
+//   `LOFT_REWRITE_CENSUS_FN=<file> loft --native-c`: `R-FieldAppend` 3 in `add` and 1 in `grow`
+//   (the field clause), `R-FieldAppend/bare` in `two` (3) and `whiler` (1); `dyn` is a decline that must answer the same.  The C
+//   writer takes the clause unconditionally; `LOFT_NO_FIELD_APPEND=1` / `LOFT_NO_BARE_APPEND=1`
+//   switch it on rustc-native only (not built here).  The interpreter is the oracle.
+
+struct Pt { x: integer, y: integer = 7, tag: text, z: integer? }
+struct Bag { pad: integer, pts: vector<Pt>, ints: vector<integer>, chars: vector<character> }
+enum Sh { Rect { w: integer, h: integer, tag: integer }, Circle { r: integer }, Dot }
+struct Scene { n: integer, shapes: vector<Sh> }
+struct Item { id: integer, v: integer }
+struct Entry { id: integer, v: integer }
+struct Sorted { by_id: sorted<Item[id]> }
+struct Hashed { table: hash<Entry[id]> }
+
+fn grow(b: Bag, n: integer) {
+  if n == 0 { return; }
+  b.pts += [Pt { x: n }];
+  b.ints += [n * n];
+  b.chars += [if n % 2 == 0 { 'é' } else { 'z' }];
+  grow(b, n - 1);
+}
+
+fn add(s: Scene, k: integer) {
+  s.shapes += [Rect { w: k, h: k + 1, tag: 9 }];
+  s.shapes += [Circle { r: k }];
+  s.shapes += [Dot];
+}
+
+fn describe(sh: Sh) -> text {
+  match sh {
+    Rect { w, h, tag } => "R{w}x{h}/{tag}",
+    Circle { r } => "C{r}",
+    Dot => "D",
+  }
+}
+
+fn mk(k: integer) -> Pt { Pt { x: k, y: k * 2, tag: "t{k}" } }
+
+fn sums(v: vector<Pt>) -> text {
+  sx = 0;
+  sy = 0;
+  tags = "";
+  for p in v { sx += p.x; sy += p.y; tags += p.tag; }
+  "{len(v)}:{sx}:{sy}:{tags}"
+}
+
+// the bare clause: two vectors appended in one loop, one of them from a call's result, the
+// other from a literal beside a conditional second append
+fn two(n: integer) -> text {
+  a: vector<Pt> = [];
+  b: vector<Pt> = [];
+  for i in 0..n {
+    a += [Pt { x: i }];
+    b += [mk(i)];
+    if i % 2 == 0 { a += [mk(i + 100)]; }
+  }
+  "{sums(a)} | {sums(b)}"
+}
+
+// a vector parameter appended in a loop that calls a writer in between
+fn dyn(n: integer, v: vector<Pt>) -> text {
+  for i in 0..n {
+    t = mk(i);
+    v += [Pt { x: t.x, tag: t.tag }];
+  }
+  sums(v)
+}
+
+// a `while` with a `break` once the vector holds more than 100 records (growth past several steps)
+fn whiler(n: integer) -> text {
+  out: vector<Pt> = [];
+  i = 0;
+  while i < n {
+    j = mk(i);
+    out += [Pt { x: i, tag: j.tag }];
+    i += 1;
+    if len(out) > 100 { break; }
+  }
+  sums(out)
+}
+
+fn tags_to(n: integer) -> text {
+  out = "";
+  for i in 0..n { out += "t{i}"; }
+  out
+}
+
+fn main() {
+  b = Bag { pad: 3, pts: [], ints: [], chars: [] };
+  grow(b, 30);
+  assert(len(b.pts) == 30 && len(b.ints) == 30 && len(b.chars) == 30 && b.pad == 3, "lengths {len(b.pts)} {len(b.ints)} {len(b.chars)}");
+  sx = 0;
+  sy = 0;
+  empties = 0;
+  nulls = 0;
+  for p in b.pts {
+    sx += p.x;
+    sy += p.y;
+    if p.tag == "" { empties += 1; }
+    if p.z == null { nulls += 1; }
+  }
+  assert(sx == 465 && sy == 210 && empties == 30 && nulls == 30, "pts {sx} {sy} {empties} {nulls}");
+  assert(b.pts[0].x == 30 && b.pts[14].x == 16 && b.pts[29].x == 1, "pts order {b.pts[0].x} {b.pts[14].x} {b.pts[29].x}");
+  si = 0;
+  for q in b.ints { si += q; }
+  assert(si == 9455 && b.ints[0] == 900 && b.ints[29] == 1, "ints {si} {b.ints[0]} {b.ints[29]}");
+  acute = 0;
+  zed = 0;
+  for c in b.chars { if c == 'é' { acute += 1; } else if c == 'z' { zed += 1; } }
+  assert(acute == 15 && zed == 15 && b.chars[0] == 'é' && b.chars[29] == 'z', "chars {acute} {zed}");
+  b0 = Bag { pad: 0, pts: [], ints: [], chars: [] };
+  grow(b0, 0);
+  assert(len(b0.pts) == 0 && len(b0.ints) == 0, "zero appends {len(b0.pts)}");
+  b1 = Bag { pad: 0, pts: [], ints: [], chars: [] };
+  grow(b1, 1);
+  assert(len(b1.pts) == 1 && b1.pts[0].x == 1 && b1.pts[0].y == 7 && b1.pts[0].tag == "" && b1.pts[0].z == null, "one append {len(b1.pts)}");
+
+  s = Scene { n: 0, shapes: [] };
+  add(s, 1);
+  add(s, 2);
+  assert(len(s.shapes) == 6, "shapes {len(s.shapes)}");
+  area = 0;
+  rad = 0;
+  tags = 0;
+  dots = 0;
+  for sh in s.shapes {
+    match sh {
+      Rect { w, h, tag } => { area += w * h; tags += tag; },
+      Circle { r } => { rad += r; },
+      Dot => { dots += 1; },
+    }
+  }
+  assert(area == 8 && rad == 3 && tags == 18 && dots == 2, "enum totals {area} {rad} {tags} {dots}");
+  assert(describe(s.shapes[0]) == "R1x2/9" && describe(s.shapes[1]) == "C1" && describe(s.shapes[2]) == "D", "positions 0-2 {describe(s.shapes[0])} {describe(s.shapes[1])} {describe(s.shapes[2])}");
+  assert(describe(s.shapes[3]) == "R2x3/9" && describe(s.shapes[4]) == "C2" && describe(s.shapes[5]) == "D", "positions 3-5 {describe(s.shapes[3])} {describe(s.shapes[4])} {describe(s.shapes[5])}");
+
+  kd = Sorted { by_id: [] };
+  kh = Hashed { table: [] };
+  kd.by_id += [Item { id: 5, v: 50 }];
+  kd.by_id += [Item { id: 3, v: 30 }];
+  kd.by_id += [Item { id: 9, v: 90 }];
+  kh.table += [Entry { id: 5, v: 50 }];
+  kh.table += [Entry { id: 3, v: 30 }];
+  kh.table += [Entry { id: 9, v: 90 }];
+  order = "";
+  for it in kd.by_id { order += "{it.id}"; }
+  assert(order == "359", "sorted field order {order}");
+  assert((kh.table[9].v ?? -1) == 90 && (kh.table[3].v ?? -1) == 30 && (kh.table[4].v ?? -1) == -1 && len(kh.table) == 3, "hash field lookups");
+
+  t2 = two(5);
+  assert(t2 == "8:316:647:t100t102t104 | 5:10:20:t0t1t2t3t4", "two {t2}");
+  v0: vector<Pt> = [];
+  d3 = dyn(3, v0);
+  assert(d3 == "3:3:21:t0t1t2", "dyn {d3}");
+  v1: vector<Pt> = [];
+  assert(dyn(0, v1) == "0:0:0:", "dyn zero");
+  w4 = whiler(4);
+  assert(w4 == "4:6:28:t0t1t2t3", "while {w4}");
+  w200 = whiler(200);
+  assert(w200 == "101:5050:707:" + tags_to(101), "while with a break {w200}");
+}
