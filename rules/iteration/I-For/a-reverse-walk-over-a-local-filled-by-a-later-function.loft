@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-For` — `rev(v)` reverses a collection however the local was bound.  A local bound
+// from a function declared FURTHER DOWN the file is typed only on the second pass, and the
+// first pass refused the walk: "rev() on a non-range expression must wrap a sorted, index, or
+// vector collection" about a receiver that is a vector.  Declaration order is no part of the
+// language, so the walk must answer what it answers with the function declared above.
+//
+// The cells vary the element kind (integer, text, a record) and the collection (a vector, a
+// sorted collection); the same walk over a function declared ABOVE is the control.  A `rev` over
+// an integer from a later function is still refused, once — not a cell here, since an expected
+// error in this file would also match the control's refusal of every walk.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the assertions.
+
+struct RevItem { k: integer, name: text }
+struct RevHold { all: sorted<RevItem[k]> }
+
+fn ints_above() -> vector<integer> { [1, 2, 3] }
+
+fn test_a_vector_of_integers_from_a_later_function() {
+  v = ints_below();
+  s = "";
+  for x in rev(v) { s += "{x}"; }
+  assert(s == "4321", "rev of a later fn's vector: {s}");
+}
+
+fn test_a_vector_of_texts_from_a_later_function() {
+  v = texts_below();
+  s = "";
+  for x in rev(v) { s += x; }
+  assert(s == "cba", "rev of a later fn's texts: {s}");
+}
+
+fn test_a_vector_of_records_from_a_later_function() {
+  v = items_below();
+  s = "";
+  for r in rev(v) { s += "{r.k}{r.name}"; }
+  assert(s == "2b1a", "rev of a later fn's records: {s}");
+}
+
+fn test_a_sorted_collection_from_a_later_function() {
+  h = hold_below();
+  s = "";
+  for r in rev(h.all) { s += "{r.k}"; }
+  assert(s == "975", "rev of a later fn's sorted: {s}");
+}
+
+fn test_the_same_walk_over_a_function_declared_above() {
+  v = ints_above();
+  s = "";
+  for x in rev(v) { s += "{x}"; }
+  assert(s == "321", "rev of an earlier fn's vector: {s}");
+}
+
+fn ints_below() -> vector<integer> { [1, 2, 3, 4] }
+fn texts_below() -> vector<text> { ["a", "b", "c"] }
+fn items_below() -> vector<RevItem> { [RevItem { k: 1, name: "a" }, RevItem { k: 2, name: "b" }] }
+fn hold_below() -> RevHold { RevHold { all: [RevItem { k: 7, name: "q" }, RevItem { k: 5, name: "p" }, RevItem { k: 9, name: "r" }] } }
