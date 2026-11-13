@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_C_FIRST_CHOICE_JOIN_ANY — the switch lets the C writer copy into a local that only views what it binds, and no exit frees the copy (C only)
+//
+// @FR-B-Copy: a choice handing another variable over whole is copied into a local that OWNS
+// what it binds.  `last_t = if n > 0 { def.attributes[n - 1].typedef[0] ?? TyVoid } else {
+// TyVoid }` keeps `def`'s borrow: the local is a view the exits never free, and its first bind
+// aliases the field.  The C writer copied it as it copies an owner's (`join_bind`), so every
+// run that took the field leaked the copy (the self-hosted elaborator's `call_args`: about
+// fifty records per program).  The bytecode writer asks whether the local owns
+// (`first_bind_choice_join`); the C writer asks the same.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  which arm the choice takes (the field, the `??` default, the else);
+//                        a loop around it.
+// Axes it HOLDS FIXED:   the field is the first element of a vector inside a parameter.
+//
+// @falsified-at: pending
+
+enum Ty { TyVoid, TyInt { w: integer } }
+struct A { name: text, typedef: vector<Ty> }
+struct D { attributes: vector<A> }
+
+fn kind(t: Ty) -> integer { match t { TyVoid => 1, TyInt { w } => 100 + w } }
+
+fn ca(def: D) -> integer {
+  n = len(def.attributes);
+  last_t = if n > 0 { def.attributes[n - 1].typedef[0] ?? TyVoid } else { TyVoid };
+  kind(last_t) + n
+}
+
+fn test_every_arm_in_a_loop() {
+  s = 0;
+  for i in 0..20 {
+    d = D { attributes: [A { name: "a", typedef: [TyInt { w: i }] }, A { name: "b", typedef: if i % 2 == 0 { [] } else { [TyInt { w: 2 * i }] } }] };
+    s += ca(d) + ca(D { attributes: [] });
+  }
+  assert(s == 1270, "{s}");
+}
+
+fn test_the_field_arm_once() {
+  r = ca(D { attributes: [A { name: "x", typedef: [TyInt { w: 7 }] }] });
+  assert(r == 108, "{r}");
+}
