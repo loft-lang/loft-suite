@@ -19,7 +19,8 @@
 //   The native side was not scored in this sweep.
 fn main() {
   // @EXPECT_ERROR: cannot implicitly narrow integer to u32
-  a: u32 = 4294967295;
+  // One past `u32`'s range: 4294967295 itself fits, and a literal in range is accepted.
+  a: u32 = 4294967296;
   // @EXPECT_ERROR: cannot implicitly narrow integer to i32
   b: i32 = 4294967295;
   // @EXPECT_ERROR: cannot implicitly narrow integer to u16
