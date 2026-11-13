@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_C_STALE_HELD_KEEP — the switch compares the answer with the store the local held on the previous pass, freed by then; a reused slot matches it, and the C copy keeps the answer unfreed
+//
+// @FR-H-Free: every exit releases what the frame owns.  `t` is bound in three loops, so it has
+// an owner witness that releases its store at the end of each pass.  The C writer compared the
+// call's answer with the store `t` held before the bind — a freed slot by then, which the
+// allocator hands to the next answer — and on a match it copied the answer and skipped its
+// free (the self-hosted elaborator's `fill_instance`, `t = substitute_var(…)`; C only).  A
+// value that reads `t` (`t = sv(t, …)`) still compares with it.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the bind (a view, a call's answer, a call reading the local); the
+//                        answer (fresh, an argument, a view of the parameter).
+// Axes it HOLDS FIXED:   one local bound in several loops; a vector of records.
+//
+// @ARMED: LOFT_STRICT_STORES=1 — the leaked answer shows as a store left at exit only when the
+//   allocator's slot reuse is checked strictly; the plain leak count reads the per-test runs clean.
+// @falsified-at: pending
+
+enum T { TInt, TRef { n: integer, dep: vector<integer> }, TVec { inner: T, dep: vector<integer> }, TOpt { inner: T } }
+fn deps(t: T) -> vector<integer> { match t { TRef { dep } => dep, TVec { dep } => dep, _ => [] } }
+fn wd(t: T, d: vector<integer>) -> T { match t { TRef { n } => TRef { n: n, dep: d }, TVec { inner } => TVec { inner: inner, dep: d }, _ => t } }
+fn sub(t: T, h: integer, b: T) -> T {
+  match t {
+    TRef { n } => if n == h { b } else { t },
+    TVec { inner, dep } => TVec { inner: sub(inner, h, b), dep: dep },
+    TOpt { inner } => { s = sub(inner, h, b); if (s is TOpt) { s } else { TOpt { inner: s } } },
+    _ => t
+  }
+}
+fn sv(t: T, h: integer, b: T) -> T {
+  match t {
+    TRef { n, dep } => if n == h { wd(b, deps(b) + dep) } else { t },
+    _ => sub(t, h, b)
+  }
+}
+fn sz(t: T) -> integer { match t { TInt => 1, TRef { n, dep } => 10 * n + len(dep), TVec { inner, dep } => 100 + sz(inner) + len(dep), TOpt { inner } => 1000 + sz(inner) } }
+struct V { name: text, tds: vector<T> }
+struct F { vars: vector<V> }
+fn walk(vs: vector<V>, b: T) -> integer {
+  f = F { vars: [] };
+  pre = 0;
+  for v in vs { t = v.tds[0] ?? TInt; pre += sz(t); }
+  for v in vs { t = sv(v.tds[0] ?? TInt, 3, b); c = v; c.tds = [t]; f.vars += [c]; }
+  s = 0;
+  for v in f.vars { t = v.tds[0] ?? TInt; s += sz(t); }
+  s + pre * 10000
+}
+fn reread(vs: vector<V>, b: T) -> integer {
+  s = 0;
+  for v in vs { t = v.tds[0] ?? TInt; t = sv(t, 3, b); s += sz(t); }
+  s
+}
+
+fn test_a_local_bound_in_each_pass() {
+  b = TRef { n: 7, dep: [1] };
+  vs = [V { name: "a", tds: [TRef { n: 3, dep: [2, 3] }] }, V { name: "b", tds: [] }, V { name: "c", tds: [TVec { inner: TRef { n: 3, dep: [] }, dep: [5] }] }];
+  w = walk(vs, b) + walk(vs, b);
+  assert(w == 3280492 && sz(b) == 71, "{w}");
+}
+
+fn test_a_call_reading_the_local() {
+  b = TRef { n: 7, dep: [1] };
+  vs = [V { name: "a", tds: [TRef { n: 3, dep: [2, 3] }] }, V { name: "b", tds: [] }, V { name: "c", tds: [TVec { inner: TRef { n: 4, dep: [] }, dep: [5] }] }];
+  r = reread(vs, b) + reread(vs, b);
+  assert(r == 2 * (73 + 1 + 141), "{r}");
+}
