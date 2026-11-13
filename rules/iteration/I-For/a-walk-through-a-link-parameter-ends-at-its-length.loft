@@ -13,6 +13,7 @@
 // the controls.  Each answer is `count * 100 + sum`.  A reverse walk and a removal through the
 // link were refused outright; they are `a-reverse-walk-and-a-removal-through-a-link-parameter`.
 //
+// @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
 // CHANNEL: the assertions, and the leak gate.
 
 struct RLink { n: integer }

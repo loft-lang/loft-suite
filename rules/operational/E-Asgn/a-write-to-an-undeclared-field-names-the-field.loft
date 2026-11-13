@@ -8,6 +8,7 @@
 // the author misspelled.  Both spellings of the write (`=` and `+=`) are cells; a declared field
 // written the same way is the control.
 //
+// @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, interpret expectations FAIL/2 -> 2/2 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/2 -> 2/2 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected errors (each names the field), and the control's assertion.
 
 struct P { x: integer, name: text }

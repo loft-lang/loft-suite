@@ -8,6 +8,7 @@
 // was a removal was told to drop the `&`.  A `&sorted` reverses too.  Both checks asked the type
 // without peeling the link.
 //
+// @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions (both refusals ended the run before them), and the leak gate.
 
 struct ERev { k: integer, t: text }

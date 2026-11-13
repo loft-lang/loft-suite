@@ -7,6 +7,7 @@
 // link's append through, growing the vector under its own cursor.  The control appends to a
 // different vector during the walk.
 //
+// @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected error, and the control's assertion.
 
 // @EXPECT_ERROR: Cannot add elements to 'v' while it is being iterated
