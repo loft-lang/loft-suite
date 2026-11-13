@@ -1,0 +1,100 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Ret`: a function's return is the JOIN of every delivery site, each early `return` and
+// the tail — and that holds while the function's own body is still being read.  `td` hands
+// back a fresh leaf on an early `return` and its argument `v` on the tail; the recursive call
+// `o2 += [td(o)]` sits between the two.  Its answer may be `o` itself, a view into the
+// caller's tree, so the append copies it and leaves its store alone.  Judged from the early
+// `return` alone, the signature read "always fresh" at the append, the append released the
+// store it copied from, and the loop read its next element out of the freed tree.
+//
+// The tree lives in a record field, a local, and is handed straight to another call; it is
+// bound first, rebound in a loop, and never bound.  Expected sums: the tree holds
+// 3 + 40 + 500 + 7 = 550; `td` turns the 7 into an 8, so its answer sums to 551.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, interpret 4 assertion failures -> 0, native exit 1 -> 0
+// CHANNEL: the assertions, the leak gate and strict stores.
+
+enum Nd {
+  NLeaf { n: integer },
+  NBlk { ops: vector<Nd> }
+}
+
+struct Ex {
+  code: Nd,
+  tp: integer
+}
+
+fn ex(code: Nd, tp: integer) -> Ex {
+  Ex { code: code, tp: tp }
+}
+
+fn mk(n: integer) -> Nd {
+  NLeaf { n: n }
+}
+
+fn td(v: Nd) -> Nd {
+  match v {
+    NLeaf { n } => {
+      if n == 7 {
+        return mk(8);
+      }
+      v
+    },
+    NBlk { ops } => {
+      o2: vector<Nd> = [];
+      for o in ops {
+        o2 += [td(o)];
+      }
+      NBlk { ops: o2 }
+    }
+  }
+}
+
+fn total(v: Nd) -> integer {
+  match v {
+    NLeaf { n } => n,
+    NBlk { ops } => {
+      t = 0;
+      for o in ops {
+        t += total(o);
+      }
+      t
+    }
+  }
+}
+
+fn tree() -> Nd {
+  NBlk { ops: [NLeaf { n: 3 }, NLeaf { n: 40 }, NBlk { ops: [NLeaf { n: 500 }, NLeaf { n: 7 }] }] }
+}
+
+fn test_a_field_of_a_record_bound_first() {
+  x = ex(tree(), 1);
+  r = td(x.code);
+  assert(total(r) == 551, "r {total(r)}");
+  assert(total(x.code) == 550, "x {total(x.code)}");
+}
+
+fn test_a_field_of_a_record_rebound_in_a_loop() {
+  x = ex(tree(), 1);
+  r = mk(0);
+  for i in 0..3 {
+    r = td(x.code);
+  }
+  assert(total(r) == 551, "r {total(r)}");
+  assert(total(x.code) == 550, "x {total(x.code)}");
+}
+
+fn test_a_field_of_a_record_handed_to_another_call() {
+  x = ex(tree(), 1);
+  assert(total(td(x.code)) == 551, "r");
+  assert(total(x.code) == 550, "x {total(x.code)}");
+}
+
+fn test_a_local_tree() {
+  y = tree();
+  r = td(y);
+  assert(total(r) == 551, "r {total(r)}");
+  assert(total(y) == 550, "y {total(y)}");
+}
