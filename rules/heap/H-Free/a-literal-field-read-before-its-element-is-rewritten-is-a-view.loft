@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_C_SKIPFREE_ELEMENT_COPY — the switch copies a field read into a temporary the frame never frees, and the C build leaks one record per rewrite
+//
+// @FR-H-Free: every exit releases what the frame owns.  `bl.operators[1] = NdIf { cond: cond,
+// t: wrapex(t, k).code, f: keep(f, k) }` rewrites the element its match bindings view, so each
+// field is read into a temporary first; `t`'s is the call's field, a view the call's own lift
+// releases.  The C writer copied it into a fresh record nobody freed (the self-hosted
+// elaborator's `sink_ncc`; C only).  `bl = block[0]` is a view (B-View), so the element is
+// rewritten in place: the values move with each pass.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the pass (each rewrites the element the next one reads).
+// Axes it HOLDS FIXED:   the field read is a call's record field; one rewritten element.
+//
+// @ARMED: LOFT_STRICT_STORES=1 — the leaked copies show as stores left at exit.
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdIf { cond: Node, t: Node, f: Node }, NdBlock { block: vector<Bl> } }
+struct Bl { name: text, operators: vector<Node>, k: integer }
+fn mk(k: integer) -> Node { NdInt { n: k } }
+struct Ex { code: Node, tp: integer }
+fn keep(n: Node, k: integer) -> Node { match n { NdInt { n: m } => NdInt { n: m + k }, _ => n } }
+fn wrapex(n: Node, k: integer) -> Ex { Ex { code: keep(n, k * 10), tp: k } }
+fn mkex(k: integer) -> Ex { Ex { code: NdInt { n: k }, tp: k } }
+fn sz(n: Node) -> integer { match n { NdInt { n } => n, NdIf { cond, t, f } => 100 + sz(cond) + sz(t) + sz(f), NdBlock { block } => { s = 1000; for o in block[0].operators { s += sz(o); } s }, _ => 0 } }
+fn sink(x: Node, k: integer) -> Node? {
+  match x {
+    NdBlock { block } => {
+      bl = block[0];
+      if bl.name != "ncc" || len(bl.operators) != 2 { return null; }
+      match bl.operators[1] {
+        NdIf { cond, t, f } => { bl.operators[1] = NdIf { cond: cond, t: wrapex(t, k).code, f: keep(f, k) }; },
+        _ => { return null; }
+      }
+      bl.k = 0;
+      NdBlock { block: [bl] }
+    },
+    _ => null
+  }
+}
+fn test_each_pass_rewrites_the_element() {
+  x = NdBlock { block: [Bl { name: "ncc", operators: [mk(1), NdIf { cond: mk(2), t: mk(3), f: mk(4) }], k: 5 }] };
+  y = NdBlock { block: [Bl { name: "other", operators: [], k: 0 }] };
+  s = 0;
+  for k in 0..4 { r = sink(x, k); if r != null { s += sz(r!); } if sink(y, k) == null { s += 1; } }
+  // passes: t 3,13,33,63 and f 4,5,7,10 ⇒ 1110 + 1121 + 1143 + 1176, and four absences
+  assert(s == 4554 && sz(x) == 1176, "{s} {sz(x)}");
+}
