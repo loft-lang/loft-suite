@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-F-Interp — a hole holds an expression; an empty `{}` holds none, and is almost always a
+// literal pair of braces the author meant.  It is refused once, at the `{`, naming the escape
+// (`{{}}`), and the line goes on as that pair: no cascade.  It was `Expect token )` and
+// `Expect token ;` at the end of the string, naming neither the hole nor the cure.  A doubled
+// pair renders as one (the control).
+//
+// @falsified-at: 2cc4b3c7c — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected error (one, and only it), and the control's assertion.
+
+// @EXPECT_ERROR: an empty `{}` in a text is a format hole with nothing in it
+fn test_an_empty_hole() {
+  s = "set {}";
+  assert(len(s) > 0, s);
+}
+
+fn test_a_doubled_pair_is_literal() {
+  assert("set {{}}" == "set " + "{" + "}", "set {{}}");
+}
