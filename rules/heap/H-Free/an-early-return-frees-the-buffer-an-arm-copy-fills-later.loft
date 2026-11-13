@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_ARM_COPY_FRESH_BUFFER — the arm copy takes a buffer the scan makes at the bind, missing from the frees of a return placed before it, and the entry-allocated store leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  A collection view materialised in a
+// branch arm (`ops = match tail { TrBlock { block } => block[0].operators, _ => [] }` before
+// `tail` is rebound) is refilled into a buffer allocated at function entry.  Made by the scan at
+// the bind, the buffer was absent from the frees of the `return` placed before it: one store
+// leaked per early exit.  The buffer the pass before the scan makes for the binding is in every
+// exit's frees.
+//
+// CHANNEL: the VALUES (hand-computed) and the strict-store leak gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the exit (before the loop, inside it, the end).
+// Axes it HOLDS FIXED:   the view is a `match` arm's collection field.
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: pending
+
+struct Op { operators: vector<Tr> }
+enum Tr { TrBlock { block: vector<Op> }, TrInt { n: integer }, TrNull }
+
+fn unspan(v: Tr) -> Tr { v }
+fn depth_of(v: Tr, stop: boolean) -> integer {
+  if stop {
+    return -1;
+  }
+  tail = unspan(v);
+  d = 0;
+  while tail is TrBlock {
+    ops = match tail { TrBlock { block } => block[0].operators, _ => [] };
+    if len(ops) == 0 {
+      return -2;
+    }
+    tail = unspan(ops[-1]);
+    d += 1;
+  }
+  match tail { TrInt { n } => d * 100 + n, _ => -3 }
+}
+
+fn test_each_exit_frees_the_buffer() {
+  inner = Tr::TrBlock { block: [Op { operators: [Tr::TrInt { n: 7 }] }] };
+  outer = Tr::TrBlock { block: [Op { operators: [Tr::TrNull, inner] }] };
+  empty = Tr::TrBlock { block: [Op { operators: [] }] };
+  s = "";
+  for _ in 0..2 { s += "{depth_of(outer, false)} {depth_of(outer, true)} {depth_of(empty, false)} {depth_of(Tr::TrInt { n: 4 }, false)} "; }
+  assert(s == "207 -1 -2 4 207 -1 -2 4 ", s);
+}

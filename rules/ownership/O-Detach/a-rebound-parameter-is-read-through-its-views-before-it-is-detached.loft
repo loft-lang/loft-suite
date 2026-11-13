@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_DETACH_VIEW_READS — the rebind frees the parameter's store before the value is built, and the value copies a view of that store
+//
+// @FR-O-Detach: a rebind detaches the binding after every read of it by the value — a read
+// through a VIEW of it too.  `bl = match code { NdBlock { block } => block[0], … }` views
+// `code`; `code = NdBlock { block: [bl] }` copies `bl`.  With the free placed before the build,
+// a parameter that owns its store (an earlier rebind made one) was copied from freed bytes: the
+// interpreter answered 0 (main; the self-hosted elaborator's `vector_return`).
+//
+// CHANNEL: the VALUES (hand-computed) and the double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  whether the parameter owns its store (rebound before, or the caller's);
+//                        whether the view is written before the rebind; the loop count.
+// Axes it HOLDS FIXED:   the view is a `match` payload's element; the value is a literal.
+//
+// @ARMED: LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+
+struct Blk { ops: vector<integer> }
+enum Nd { NdBlock { block: vector<Blk> }, NdNull }
+
+fn rework(code: Nd, fresh: boolean, again: boolean) -> Nd {
+  if fresh {
+    match code {
+      NdBlock { block } => {
+        cb = block[0];
+        cb.ops += [70];
+        code = Nd::NdBlock { block: [cb] };
+      },
+      _ => {}
+    }
+  }
+  bl = match code { NdBlock { block } => block[0], _ => return code };
+  if again {
+    bl.ops += [80];
+    code = Nd::NdBlock { block: [bl] };
+  }
+  code
+}
+
+fn total(n: Nd) -> integer {
+  match n { NdBlock { block } => { t = 0; for o in block[0].ops { t += o; } t * 10 + len(block[0].ops) }, _ => -1 }
+}
+
+fn test_a_view_of_an_owned_parameter_is_copied_before_the_free() {
+  s = "";
+  for c in 0..4 {
+    src = Nd::NdBlock { block: [Blk { ops: [5, 6] }] };
+    r = rework(src, c % 2 == 1, c >= 2);
+    s += "{total(r)}/{total(src)} ";
+  }
+  assert(s == "112/112 813/813 913/913 1614/813 ", s);
+}
+
+fn fresh_then_copy(code: Nd) -> Nd {
+  code = Nd::NdBlock { block: [Blk { ops: [7, 8] }] };
+  bl = match code { NdBlock { block } => block[0], _ => return code };
+  code = Nd::NdBlock { block: [bl] };
+  code
+}
+
+fn test_a_fresh_parameter_rebuilt_from_its_own_view() {
+  t = 0;
+  for _ in 0..3 { t += total(fresh_then_copy(Nd::NdNull)); }
+  assert(t == 456, "{t}");
+}

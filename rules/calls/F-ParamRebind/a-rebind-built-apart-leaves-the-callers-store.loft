@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_REBIND_FLAG_EARLY — the literal claims the rebind's detach for an in-place build it abandons, and the rebind frees the caller's store
+//
+// @FR-F-ParamRebind: a whole rebind of a parameter is local — the caller's store stays the
+// caller's.  `x = Box { items: [v], tag: 3 }` where `v` views `x` is first tried in place,
+// then built APART (the literal reads its own destination).  The in-place attempt told the
+// assignment its detach was done; the built-apart literal has none, so the rebind's plain free
+// released the caller's `s`, which then read the callee's new record (3/3 for 0/3).
+//
+// CHANNEL: the VALUES (hand-computed) and the double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the value (a literal over the view, a call over it, a scalar read
+//                        through it); whether the parameter was rebound before.
+// Axes it HOLDS FIXED:   a struct parameter; the view is a field element.
+//
+// @ARMED: LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+
+struct Blk { ops: vector<integer> }
+struct Box { items: vector<Blk>, tag: integer }
+
+fn tot(b: Blk) -> integer { t = 0; for o in b.ops { t += o; } t }
+fn mk(b: Blk) -> Box { Box { items: [b], tag: 2 } }
+fn show(b: Box) -> text { if len(b.items) > 0 { "{b.tag}/{tot(b.items[0])}" } else { "{b.tag}/-" } }
+
+fn copied(x: Box) -> Box {
+  v = x.items[0];
+  x = Box { items: [v], tag: 3 };
+  x
+}
+fn called(x: Box) -> Box {
+  v = x.items[0];
+  x = mk(v);
+  x
+}
+fn rebound_first(x: Box) -> Box {
+  x = Box { items: [Blk { ops: [7, 8] }], tag: 1 };
+  v = x.items[0];
+  x = Box { items: [v], tag: 4 };
+  x
+}
+
+fn test_the_callers_store_survives() {
+  s = Box { items: [Blk { ops: [1, 2] }], tag: 0 };
+  out = "";
+  for _ in 0..2 { out += "{show(copied(s))} {show(called(s))} {show(rebound_first(s))} {show(s)} "; }
+  assert(out == "3/3 2/3 4/15 0/3 3/3 2/3 4/15 0/3 ", out);
+}

@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LATE_CALL_JOIN — pass 1 leaves a local bound from a later function's `τ?` dense, so the use before that bind does not warn
+//
+// loft#2478 — `@FR-N-Join`: an inferred local is the join of every value bound to it, optional
+// iff one is.  A bind from a function declared BELOW the caller had no type on the first pass, so
+// a `τ?` answer left the local dense there, and the second pass read the uses before that bind
+// against the dense type: `return rb.n` said nothing, where the same function with the callee
+// declared ABOVE warned.  Declaration order is no part of the language: both warn alike.  A
+// later callee answering a dense type, a call nested in another and a `??` over the call widen
+// nothing.
+//
+// CHANNEL: the two warnings, and the VALUES (hand-computed).
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the callee's order (above, below); what it answers (`Ex?`, `Ex`); the
+//                        bind's value (the call, a call around it, a `??` over it).
+// Axes it HOLDS FIXED:   a record type; the use before the nullable bind is a `return`.
+//
+// @EXPECT_WARNING: `ra` is `Ex?`
+// @EXPECT_WARNING: `rb` is `Ex?`
+// @falsified-at: pending
+
+struct Ex { n: integer }
+fn one(k: integer) -> Ex { Ex { n: k } }
+fn maybe_above(k: integer) -> Ex? { if k > 2 { Ex { n: k * 2 } } else { null } }
+
+fn above(k: integer) -> integer {
+  if k > 5 {
+    ra = one(k);
+    return ra.n;
+  }
+  ra = maybe_above(k);
+  if ra == null { return -1; }
+  ra!.n
+}
+
+fn below(k: integer) -> integer {
+  if k > 5 {
+    rb = one(k);
+    return rb.n;
+  }
+  rb = maybe_below(k);
+  if rb == null { return -1; }
+  rb!.n
+}
+
+fn dense_below(k: integer) -> integer {
+  if k > 5 {
+    rd = one(k);
+    return rd.n;
+  }
+  rd = always(k);
+  rd.n
+}
+
+fn nested_below(k: integer) -> integer {
+  if k > 5 {
+    rn = one(k);
+    return rn.n;
+  }
+  rn = wrap(maybe_below(k));
+  rn.n + (maybe_below(k) ?? one(7)).n
+}
+
+fn maybe_below(k: integer) -> Ex? { if k > 2 { Ex { n: k * 2 } } else { null } }
+fn always(k: integer) -> Ex { Ex { n: k * 3 } }
+fn wrap(e: Ex?) -> Ex { e ?? Ex { n: 0 } }
+
+fn test_either_order_answers_alike() {
+  s = "";
+  for k in [9, 3, 1] { s += "{above(k)}/{below(k)} "; }
+  assert(s == "9/9 6/6 -1/-1 ", s);
+}
+
+fn test_a_dense_or_nested_answer_widens_nothing() {
+  s = "";
+  for k in [9, 3, 1] { s += "{dense_below(k)}/{nested_below(k)} "; }
+  assert(s == "9/9 9/12 3/7 ", s);
+}
