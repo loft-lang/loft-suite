@@ -6,6 +6,7 @@
 // number handed to a text parameter (`println(i)`) said only "expected text, got integer".
 // The control renders the same value through the hole.
 //
+// @falsified-at: b30320a0f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected error, and the control's assertion.
 
 fn shown(t: text) -> integer { len(t) }

@@ -5,6 +5,7 @@
 // spells (`s.length`, `v.size`) is no member here, and the refusal names `len` rather than only
 // "Unknown field text.length".  The control reads `len`.
 //
+// @falsified-at: b30320a0f — interpret exit 1 -> 0, interpret expectations FAIL/2 -> 1/2 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/2 -> 1/2 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected errors, and the control's assertion.
 
 // @EXPECT_ERROR: the length is `len(s)`
