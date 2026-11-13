@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-O-Buffer: a call's hidden buffer is the frame's, refilled in place on every pass, and a
+// local bound from the call names that one store.  Rebinding the local on the next pass
+// displaces the store it is about to be refilled into, so nothing is freed there; the frame
+// frees the buffer once at its exit.  The store records follow this through the loop's passes:
+// the store the local holds from an earlier pass is the one the buffer names wherever it
+// exists (the self-hosted elaborator's `tuple_match`, whose `mc` the records read as freed by
+// its own rebind).
+//
+// CHANNEL: the VALUES (hand-computed), the LEAK and double-free gates, and the store records'
+// sweep (`scripts/own_sweep.py --oracle check-records`: CLEAN; STATIC under
+// `LOFT_RECORDS_NO_LIVE_WITNESS`).
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  how the inner loop leaves (to its end, a `continue`, an early
+//                        `return`); whether the record's field is null on a pass.
+// Axes it HOLDS FIXED:   one record local per outer pass; one join local built from it.
+//
+// @falsified-at: pending
+
+enum N { NB { b: boolean }, NI { i: integer, s: text }, NIf { a: N, c: N } }
+struct MC { cond: N?, refused: boolean }
+
+fn member_cond(k: integer, stop: integer) -> MC { MC { cond: if k % 3 == 0 { null } else { NI { i: k, s: "c{k}" } }, refused: k == stop } }
+fn v_if(a: N, c: N) -> N { NIf { a: a, c: c } }
+fn sz(n: N) -> integer { match n { NI { i, s } => i * 10 + len(s), NIf { a, c } => 1000 + sz(a) + sz(c), NB { b } => if b { 1 } else { 0 } } }
+
+fn go(arms: integer, pes: integer, stop: integer) -> integer {
+  total = 0;
+  for an in 0..arms {
+    cond: N? = null;
+    for pe in 0..pes {
+      if pe == 1 { continue; }
+      mc = member_cond(an * 10 + pe, stop);
+      if mc.refused { return -1; }
+      if mc.cond != null {
+        cond = if cond == null { mc.cond } else { v_if(cond!, mc.cond!) };
+      }
+    }
+    total += if cond == null { 0 } else { sz(cond!) };
+  }
+  total
+}
+
+fn test_every_pass_runs() {
+  r = go(2, 4, -5);
+  assert(r == 1258, "{r}");
+}
+
+fn test_an_early_return() {
+  r = go(3, 3, 12);
+  assert(r == -1, "{r}");
+}
+
+fn test_a_pass_with_nothing_bound() {
+  r = go(1, 1, -5);
+  assert(r == 0, "{r}");
+}
