@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_NCR_LIFT — the switch leaves a discharge read in place without an owner, and the copy it holds leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `schema(b, k)!.name == "y"` reads a field
+// straight off a discharge whose callee may answer a view of its argument: the discharge binds
+// the answer into its temporary by the join or copy arm, and read in place nothing owned that
+// temporary — one record per evaluation (the self-hosted elaborator's `default_into`; main,
+// both backends).  Lifted, it is the bound spelling `t = schema(b, k)!`.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the read (a field in a condition, a field in an expression, an
+//                        element, handed to a call); the callee (one argument's view, one of
+//                        several arguments).
+// Axes it HOLDS FIXED:   the callee is a loft function answering `Sc?`.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+
+struct Sc { name: text, size: integer, tags: vector<integer> }
+struct Bundle { schemas: vector<Sc> }
+fn schema(b: Bundle, tp: integer) -> Sc? { if tp < len(b.schemas) { b.schemas[tp] } else { null } }
+fn pick(a: Sc, c: Sc, k: integer) -> Sc? { if k == 0 { null } else if k == 1 { a } else { c } }
+fn show(s: Sc) -> integer { s.size + len(s.name) }
+fn inl(b: Bundle, a: Sc, c: Sc, k: integer) -> integer {
+  r = show(schema(b, k)!);                 // a view-answering discharge handed to a user call
+  r += pick(a, c, k + 1)!.size * 10;        // a field read off a several-argument callee
+  r += schema(b, k)!.tags[0] * 100;         // an element read
+  if schema(b, k)!.name == "y" { r += 1000; }
+  r
+}
+fn into(b: Bundle, tp: integer, nullable: boolean) -> integer {
+  r = 0;
+  if !nullable && schema(b, tp)!.name == "y" { r = 7; }
+  r + schema(b, tp)!.size
+}
+
+fn test_read_in_place() {
+  b = Bundle { schemas: [Sc { name: "x", size: 3, tags: [4] }, Sc { name: "y", size: 5, tags: [6] }] };
+  a = Sc { name: "a", size: 11, tags: [] };
+  c = Sc { name: "c", size: 13, tags: [] };
+  s = 0;
+  for k in 0..2 { s += inl(b, a, c, k); }
+  t = 0;
+  for k in 0..2 { t += into(b, k, false) * 10 + into(b, k, true); }
+  assert(s == 2250 && t == 158 && b.schemas[1].tags[0] == 6 && a.size == 11, "{s} {t}");
+}
