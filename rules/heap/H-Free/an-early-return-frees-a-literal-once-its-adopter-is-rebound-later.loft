@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LATE_OWNER_DISARM — the switch leaves the literal's buffer a guarded free at the early return, which releases the store the local's rebind already released (interpreter)
+//
+// @FR-H-Free: every exit releases what the frame owns there, once.  A local first bound from a
+// literal adopts the literal's buffer, and a later rebind releases what the local displaces.
+// The tail therefore frees the buffer through the local alone; an early `return` written
+// before the rebind must do the same.  It paired the buffer's own free against the local,
+// which frees it wherever the local moved on — after the rebind had released it already (the
+// self-hosted elaborator's `tuple_match`: `result = TyVoid; … return …; … result = b.tp`).
+//
+// CHANNEL: the VALUES (hand-computed) and the double-free gate.  The freed store is usually
+// taken again by the copy the rebind makes, which hides the second free behind the guard, so
+// the cell fails reliably under `LOFT_STRICT_STORES=1` on the interpreter.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the literal (an enum unit, a struct, an enum variant with fields);
+//                        the rebind (a field of a record, a call); the exit (an early return
+//                        before and after the rebind, the tail).
+// Axes it HOLDS FIXED:   one local; the early return is inside a loop.
+//
+// @falsified-at: pending
+
+enum Ty { TyVoid, TyUnknown { n: integer }, TyInt { w: integer } }
+struct P { x: integer, y: integer }
+struct B { code: integer, tp: Ty, p: P }
+
+fn body(k: integer) -> B { B { code: k, tp: TyInt { w: k * 2 }, p: P { x: k, y: k + 1 } } }
+fn mkp(k: integer) -> P { P { x: k * 10, y: 7 } }
+fn tw(t: Ty) -> integer { match t { TyVoid => 1, TyUnknown { n } => 10 + n, TyInt { w } => 100 + w } }
+
+fn unit_literal_field_rebind(arms: vector<integer>) -> integer {
+  r = TyVoid;
+  for k in arms { if k < 0 { return -1000 - tw(r); } b = body(k); r = b.tp; }
+  tw(r)
+}
+
+fn struct_literal_field_rebind(arms: vector<integer>) -> integer {
+  r = P { x: 1, y: 2 };
+  for k in arms { if k < 0 { return -1000 - r.x; } bb = body(k); r = bb.p; }
+  r.x * 100 + r.y
+}
+
+fn struct_literal_call_rebind(arms: vector<integer>) -> integer {
+  r = P { x: 1, y: 2 };
+  for k in arms { if k < 0 { return -1000 - r.x; } r = mkp(k); }
+  r.x * 100 + r.y
+}
+
+fn variant_literal_rebound_once(arms: vector<integer>) -> integer {
+  r = TyUnknown { n: 5 };
+  for k in arms { if k < 0 { return -1000 - tw(r); } bb = body(k); if tw(r) < 100 { r = bb.tp; } }
+  tw(r)
+}
+
+fn test_a_unit_literal_rebound_from_a_field() {
+  assert(unit_literal_field_rebind([1, 2]) == 104 && unit_literal_field_rebind([1, -1]) == -1102, "{unit_literal_field_rebind([1, -1])}");
+  assert(unit_literal_field_rebind([-1]) == -1001 && unit_literal_field_rebind([]) == 1, "{unit_literal_field_rebind([-1])}");
+}
+
+fn test_a_struct_literal_rebound_from_a_field() {
+  assert(struct_literal_field_rebind([1, 2]) == 203 && struct_literal_field_rebind([1, -1]) == -1001, "{struct_literal_field_rebind([1, -1])}");
+  assert(struct_literal_field_rebind([-1]) == -1001 && struct_literal_field_rebind([]) == 102, "{struct_literal_field_rebind([])}");
+}
+
+fn test_a_struct_literal_rebound_from_a_call() {
+  assert(struct_literal_call_rebind([1, 2]) == 2007 && struct_literal_call_rebind([1, -1]) == -1010, "{struct_literal_call_rebind([1, -1])}");
+  assert(struct_literal_call_rebind([-1]) == -1001 && struct_literal_call_rebind([]) == 102, "{struct_literal_call_rebind([])}");
+}
+
+fn test_a_variant_literal_rebound_once() {
+  assert(variant_literal_rebound_once([1, 2]) == 102 && variant_literal_rebound_once([1, -1]) == -1102, "{variant_literal_rebound_once([1, -1])}");
+  assert(variant_literal_rebound_once([-1]) == -1015 && variant_literal_rebound_once([]) == 15, "{variant_literal_rebound_once([])}");
+}
