@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_S1_JOIN — the switch binds the arm's call plainly into its own buffer, so where the call answers its argument the buffer names the argument's store and the exit frees that store twice
+//
+// @FR-O-Move: a store has one owner, and each exit frees it once.  An `if` arm whose value is
+// an owning call is bound into the call's own buffer (`__ref_N = without_deps(x, __ref_N)`).
+// `without_deps` answers its argument when there is nothing to strip, a fresh store
+// otherwise, so the buffer must JOIN on the argument: copy where the answer is the
+// argument's store, adopt where it is fresh.  Bound plainly, it named the argument's store
+// and the frame freed it through both (the self-hosted elaborator's `arm_delivery`).
+//
+// CHANNEL: the VALUES (hand-computed) and the double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  which answer the call gives (its argument, a fresh store); which
+//                        arm runs (the plain call, the call inside a literal); a loop.
+// Axes it HOLDS FIXED:   the join lands in a vector field of a record local.
+//
+// @falsified-at: pending
+
+enum T { TU { n: integer, dep: vector<integer> }, TO { inner: T } }
+struct B { result: vector<T>, k: integer }
+
+fn base(t: T) -> T { match t { TO { inner } => inner, _ => t } }
+fn deps(t: T) -> vector<integer> { match t { TU { dep } => dep, _ => [] } }
+fn with_deps(t: T, d: vector<integer>) -> T { match t { TU { n } => TU { n: n, dep: d }, _ => t } }
+fn without_deps(t: T) -> T { if len(deps(t)) == 0 { return t; } with_deps(t, []) }
+
+fn ad(result: T) -> B {
+  bl = B { result: [], k: 1 };
+  bl.result = [if result is TO { TO { inner: without_deps(base(result)) } } else { without_deps(base(result)) }];
+  bl
+}
+
+fn sz(t: T) -> integer { match t { TU { n, dep } => n * 10 + len(dep), TO { inner } => 1000 + sz(inner) } }
+
+fn test_the_call_answers_its_argument() {
+  r = sz(ad(TU { n: 3, dep: [] }).result[0]);
+  assert(r == 30, "{r}");
+}
+
+fn test_the_call_answers_a_fresh_store() {
+  r = sz(ad(TU { n: 4, dep: [1, 2] }).result[0]);
+  assert(r == 40, "{r}");
+}
+
+fn test_the_call_inside_a_literal() {
+  r = sz(ad(TO { inner: TU { n: 5, dep: [] } }).result[0]);
+  assert(r == 1050, "{r}");
+}
+
+fn test_in_a_loop() {
+  s = 0;
+  for i in 0..6 {
+    r = if i % 3 == 0 { TU { n: i, dep: [] } } else if i % 3 == 1 { TU { n: i, dep: [1, 2] } } else { TO { inner: TU { n: i, dep: [] } } };
+    b = ad(r);
+    s += sz(b.result[0]);
+  }
+  assert(s == 2150, "{s}");
+}
