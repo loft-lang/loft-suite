@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LIFT_VIEW_GUARD — the switch lets the binding free the lifted arm's copy at its rebind beside the lift's own free
+//
+// @FR-B-Copy / @FR-H-FreeTwice (loft#2475): `c2 = bound ?? Owned` copies `bound` on the present
+// path into a temporary the scope pass lifts the arm into, and the binding — assigned again
+// later, so an owner — takes that copy.  The lift is the copy's one owner: the binding lets go
+// of it where it names it, at its rebind and at its scope end, and frees only what it owns
+// anywhere else.  Both used to release it, on both backends.
+//
+// CHANNEL: the VALUES (hand-computed) and the re-free / leak gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the bound arm (present, absent); the binding read before its rebind;
+//                        the rebind in a loop; an early return before the rebind.
+// Axes it HOLDS FIXED:   the default is a unit variant; one rebind to a unit variant.
+//
+// @falsified-at: pending
+
+enum Own { Owned, Unknown, Borrowed { base: integer } }
+
+fn mk(i: integer) -> Own? { if i == 0 { null } else { Borrowed { base: i } } }
+fn tag(o: Own?) -> integer { if o == null { -1 } else { match o! { Owned => 0, Unknown => 1, Borrowed { base } => 100 + base } } }
+
+fn rebound(n: integer) -> integer { bound = mk(n); c2 = bound ?? Owned; c2 = Unknown; tag(c2) * 1000 + tag(bound) }
+fn read_first(n: integer) -> integer { bound = mk(n); c2 = bound ?? Owned; s = tag(c2); c2 = Unknown; s * 10 + tag(c2) }
+fn in_a_loop(n: integer) -> integer { bound = mk(n); c2 = bound ?? Owned; for i in 0..2 { c2 = Unknown; } tag(c2) }
+fn early(n: integer) -> integer { bound = mk(n); c2 = bound ?? Owned; if n > 2 { return 500 + tag(c2); } c2 = Unknown; tag(c2) }
+
+fn test_rebound() {
+  assert(rebound(0) == 999 && rebound(4) == 1104, "{rebound(0)} {rebound(4)}");
+}
+
+fn test_read_before_the_rebind() {
+  assert(read_first(0) == 1 && read_first(4) == 1041, "{read_first(0)} {read_first(4)}");
+}
+
+fn test_rebound_in_a_loop() {
+  assert(in_a_loop(0) == 1 && in_a_loop(4) == 1, "{in_a_loop(4)}");
+}
+
+fn test_an_early_return() {
+  assert(early(0) == 1 && early(4) == 604, "{early(0)} {early(4)}");
+}

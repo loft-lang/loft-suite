@@ -16,8 +16,9 @@
 // each with the local's arm and the literal's arm taken; and a join the oracle answers
 // (`folded`, the C writer's half).
 //
-// Held FIXED, and filed apart: the FIRST bind of a binding assigned again later from
-// `b ?? <literal>` (the lifted arm's temp and the binding both free the copy): loft#2475.
+// Held FIXED, and guarded apart: the FIRST bind of a binding assigned again later from
+// `b ?? <literal>` (the lifted arm's temp and the binding both freed the copy, loft#2475):
+// `2475-a-first-bind-from-a-coalesce-then-rebound-frees-the-copy-once.loft`.
 //
 // @falsified-by: tests/falsified/a-branch-handing-back-a-local-copies-it-into-a-binding-assigned-before.patch — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions, the re-free failure and the leak gate.
