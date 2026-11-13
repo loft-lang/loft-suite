@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_NCC_CHOICE_JOIN — the switch binds the choice plainly, so the local names the `??`'s store and a rebind that releases what it displaces frees that store under the `??`'s own temporary
+//
+// @FR-B-Copy: a choice that hands a value over whole on one arm makes an independent value, and
+// a `??` arm hands over the store its subject answered (`chain = if p { f() ?? Leaf } else {
+// Leaf }`).  The local then owns what it binds: a later rebind (`chain = wrap(…, chain)`)
+// releases the store it displaces.  Bound plainly, the local named the store the `??`'s
+// temporary still held, and the frame freed it through both (the self-hosted elaborator's
+// `enum_field`).  The first bind is a join on the temporary: copied where the answer is its
+// store, adopted where it is the other arm's.
+//
+// CHANNEL: the VALUES (hand-computed) and the double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  which arm the first bind takes (the `??`, the literal); whether the
+//                        `??` answers its subject; how many rebinds follow (none, one, two).
+// Axes it HOLDS FIXED:   the subject is a nullable call answering into its hidden buffer.
+//
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdBoolean { b: boolean }, NdVar { n: integer }, NdCall { def_nr: integer, args: vector<Node> }, NdIf { cond: Node, t: Node, f: Node } }
+
+fn v_if(test: Node, t: Node, f: Node) -> Node { NdIf { cond: test, t: t, f: f } }
+fn cl(op: integer, args: vector<Node>) -> Node { NdCall { def_nr: op, args: args } }
+fn tag_in(place: Node, vs: vector<integer>) -> Node {
+  cond = NdNull;
+  for v in vs {
+    test = cl(1, [cl(2, [cl(3, [place, NdInt { n: 0 }])]), NdInt { n: v }]);
+    cond = if cond is NdNull { test } else { v_if(cond, NdBoolean { b: true }, test) };
+  }
+  cond
+}
+fn field_get(d: integer, r: Node) -> Node? {
+  if d < 0 { return null; }
+  cl(9, [r, NdInt { n: d }])
+}
+fn sz(n: Node) -> integer {
+  match n {
+    NdNull => 1, NdInt { n } => n, NdBoolean { b } => 2, NdVar { n } => 100 * n,
+    NdCall { def_nr, args } => { s = 1000 * def_nr; for a in args { s += sz(a); } s },
+    NdIf { cond, t, f } => 7 + sz(cond) + sz(t) + sz(f)
+  }
+}
+fn chain_of(place: Node, partial: boolean, groups: integer, at: integer) -> Node {
+  chain = if partial { field_get(at, cl(5, [])) ?? NdNull } else { NdNull };
+  for oi in 0..groups {
+    arm = field_get(oi, place) ?? NdNull;
+    chain = if !partial && oi == 0 { arm } else { v_if(tag_in(place, [oi, oi + 1]), arm, chain) };
+  }
+  chain
+}
+
+fn test_the_coalesce_arm_rebound_twice() {
+  r = sz(chain_of(NdVar { n: 2 }, true, 2, 4));
+  assert(r == 57241, "{r}");
+}
+
+fn test_the_literal_arm_rebound_twice() {
+  r = sz(chain_of(NdVar { n: 3 }, false, 2, 4));
+  assert(r == 31220, "{r}");
+}
+
+fn test_the_coalesce_arm_rebound_once() {
+  r = sz(chain_of(NdVar { n: 1 }, true, 1, 4));
+  assert(r == 35321, "{r}");
+}
+
+fn test_the_coalesce_falls_back_and_is_kept() {
+  r = sz(chain_of(NdVar { n: 1 }, true, 0, -1));
+  assert(r == 1, "{r}");
+}
