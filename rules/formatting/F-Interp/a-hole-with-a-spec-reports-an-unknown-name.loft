@@ -8,6 +8,7 @@
 // null `zz` and rendered nothing, with no diagnostic, on both backends.  A declared name with a
 // spec renders padded (the control).
 //
+// @falsified-by: tests/falsified/a-hole-with-a-spec-reports-an-unknown-name.patch — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected error, and the control's assertion.
 
 // @EXPECT_ERROR: Unknown variable 'zz'
