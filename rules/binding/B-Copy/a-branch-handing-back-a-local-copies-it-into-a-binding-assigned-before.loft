@@ -22,6 +22,8 @@
 //
 // @falsified-at: 9152f7fd3 — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions, the re-free failure and the leak gate.
+// ARMED: the leak gate the suite runner arms by default; no other switch.
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 enum Own { Owned, Unknown, Borrowed { base: integer }, Join { base: integer } }
 struct P { x: integer, t: text }

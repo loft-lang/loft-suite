@@ -9,6 +9,7 @@
 //
 // @falsified-at: 2cc4b3c7c — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected error (one, and only it), and the control's assertion.
+// HOLDS: the control's assertion passes on both trees, and no other diagnostic appears.
 
 // @EXPECT_ERROR: an empty `{}` in a text is a format hole with nothing in it
 fn test_an_empty_hole() {

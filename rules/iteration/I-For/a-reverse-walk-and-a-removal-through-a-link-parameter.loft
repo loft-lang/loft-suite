@@ -10,6 +10,8 @@
 //
 // @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions (both refusals ended the run before them), and the leak gate.
+// ARMED: the leak gate the suite runner arms by default; no other switch.
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 struct ERev { k: integer, t: text }
 

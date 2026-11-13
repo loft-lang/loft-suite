@@ -15,6 +15,8 @@
 //
 // @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
 // CHANNEL: the assertions, and the leak gate.
+// ARMED: the leak gate the suite runner arms by default; no other switch.
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 struct RLink { n: integer }
 enum ColLink { RedLink, GreenLink }

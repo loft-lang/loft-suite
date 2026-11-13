@@ -14,6 +14,7 @@
 //
 // @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions.
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 struct RevItem { k: integer, name: text }
 struct RevHold { all: sorted<RevItem[k]> }

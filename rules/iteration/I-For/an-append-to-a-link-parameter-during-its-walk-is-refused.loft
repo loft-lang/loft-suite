@@ -9,6 +9,7 @@
 //
 // @falsified-at: d3b9a8a89 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected error, and the control's assertion.
+// HOLDS: the control's assertion passes on both trees, and no other diagnostic appears.
 
 // @EXPECT_ERROR: Cannot add elements to 'v' while it is being iterated
 fn grow_in_its_walk(v: &vector<integer>) {

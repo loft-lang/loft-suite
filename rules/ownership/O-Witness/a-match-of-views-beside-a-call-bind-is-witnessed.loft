@@ -15,6 +15,8 @@
 //
 // @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions, the leak gate and strict stores.
+// ARMED: LOFT_STRICT_STORES=1 for the strict-store channel; the leak gate is the runner's default.
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 enum Tt {
   TInt,

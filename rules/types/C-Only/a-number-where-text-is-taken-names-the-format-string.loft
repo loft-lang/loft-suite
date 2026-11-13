@@ -8,6 +8,7 @@
 //
 // @falsified-at: b30320a0f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches)
 // CHANNEL: the expected error, and the control's assertion.
+// HOLDS: the control's assertion passes on both trees, and no other diagnostic appears.
 
 fn shown(t: text) -> integer { len(t) }
 

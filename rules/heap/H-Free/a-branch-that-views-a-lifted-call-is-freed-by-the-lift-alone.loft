@@ -17,6 +17,7 @@
 // Axes it HOLDS FIXED:   the field is a record of heap enums; the answer is read once.
 //
 // @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 enum N { NA { k: integer }, NB { s: text } }
 enum T { TA { n: integer }, TV { inner: integer } }

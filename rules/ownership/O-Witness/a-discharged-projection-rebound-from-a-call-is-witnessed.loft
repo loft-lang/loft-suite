@@ -16,6 +16,7 @@
 // Axes it HOLDS FIXED:   the element is a heap enum; the rebind is a call answering fresh.
 //
 // @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
 
 enum T { TA { n: integer, dep: vector<integer> }, TI { k: integer } }
 struct A { typedef: vector<T> }

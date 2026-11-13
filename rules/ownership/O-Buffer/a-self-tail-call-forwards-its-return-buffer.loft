@@ -12,6 +12,7 @@
 // @falsified-at: efbb7b00e — interpret exit 1 -> 0; native INERT (expected for a
 //   backend-divergence guard — only one side can move)
 // CHANNEL: strict stores and the leak gate (the values read right either way).
+// ARMED: LOFT_STRICT_STORES=1 for the strict-store channel; the leak gate is the runner's default.
 
 enum Nd {
   NBool { b: boolean },
