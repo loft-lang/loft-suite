@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_SCALAR_VECTOR_EXEMPT — the switch counts a scalar vector built inline as an argument the bracket cannot name, the copy of the answer loses its source-free, and every record the callee made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `ac = arm_typed(b.code, mkdeps(b.tp))`
+// copies the callee's answer and frees the store it came in, unless an argument holds that
+// store — so it must be able to name every argument's store.  A vector of scalars holds no
+// record, so a record answer never lies in it: it needs no name.  Counted as unnameable when it
+// was built inline, it cost the copy its source-free, one record per call (the self-hosted
+// elaborator's `match_expr`).  A callee answering a VECTOR may hand that vector back, and keeps
+// its protection.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the vector argument (built inline, a named local); what the callee
+//                        answers (a fresh record, the vector argument, a record held in a
+//                        vector-of-records argument); a loop with an early break.
+// Axes it HOLDS FIXED:   the vector's elements are integers.
+//
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdBlock { name: text, ops: vector<Node>, deps: vector<integer> } }
+struct B { code: Node, tp: integer }
+struct MArm { code: Node, k: integer }
+fn arm_typed(arm: Node, deps: vector<integer>) -> Node {
+  match arm {
+    NdBlock { name, ops } => NdBlock { name: name, ops: ops, deps: deps },
+    _ => arm
+  }
+}
+fn mkdeps(t: integer) -> vector<integer> { [t, 1] }
+fn sz(n: Node) -> integer { match n { NdInt { n } => n, NdBlock { name, ops, deps } => { s = 100 + len(name) + 10 * len(deps); for o in ops { s += sz(o); } s }, _ => 0 } }
+fn arms(bs: vector<B>, typed: boolean) -> integer {
+  out: vector<MArm> = [];
+  for b in bs {
+    ac = b.code;
+    if typed && b.tp > 0 {
+      ac = match b.code { NdBlock { name } => if name == "Object" { b.code } else { arm_typed(b.code, mkdeps(b.tp)) }, _ => b.code };
+    }
+    out += [MArm { code: ac, k: b.tp }];
+    if b.tp == 9 { break; }
+  }
+  s = 0;
+  for m in out { s += sz(m.code); }
+  s
+}
+struct R { n: integer, tag: text }
+struct Box { items: vector<R>, ks: vector<integer> }
+fn mkv(k: integer) -> vector<integer> { [k, k + 1] }
+fn rec(k: integer, ks: vector<integer>) -> R { R { n: k + len(ks), tag: "r{k}" } }
+fn same(ks: vector<integer>, k: integer) -> vector<integer> { if k > 0 { ks } else { [k] } }
+fn pick(b: Box, k: integer) -> R { if k < len(b.items) { b.items[k] } else { R { n: -1, tag: "none" } } }
+
+fn test_a_rebind_from_the_call() {
+  bs = [B { code: NdBlock { name: "arm", ops: [NdInt { n: 3 }], deps: [] }, tp: 1 }, B { code: NdBlock { name: "Object", ops: [], deps: [] }, tp: 2 }, B { code: NdInt { n: 9 }, tp: 3 }, B { code: NdBlock { name: "x", ops: [], deps: [7] }, tp: 0 }];
+  assert(arms(bs, true) == 352 && arms(bs, false) == 332, "{arms(bs, true)} {arms(bs, false)}");
+}
+
+fn test_an_early_break() {
+  cs = [B { code: NdBlock { name: "arm", ops: [NdInt { n: 3 }], deps: [] }, tp: 1 }, B { code: NdBlock { name: "brk", ops: [], deps: [] }, tp: 9 }, B { code: NdInt { n: 1 }, tp: 2 }];
+  assert(arms(cs, true) == 249, "{arms(cs, true)}");
+}
+
+fn test_what_the_callee_hands_back() {
+  b = Box { items: [R { n: 1, tag: "a" }, R { n: 2, tag: "b" }], ks: [9] };
+  s = 0;
+  t = "";
+  for k in 0..4 {
+    r = rec(k, mkv(k));
+    s += r.n;
+    v = same(mkv(k), k);
+    s += len(v) * 10;
+    w = b.ks;
+    w = same(w, k);
+    s += w[0] * 100;
+    p = pick(b, k);
+    t += p.tag;
+    r = rec(k, w);
+    s += r.n * 1000;
+  }
+  assert(s == 12784 && t == "abnonenone" && "{b.ks}" == "[9]", "{s} {t}");
+}
