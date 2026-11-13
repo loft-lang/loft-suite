@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_RET_SRC_OWNS — the switch keeps every early-leaving arm's source a never-freed view, and a record the arm made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  A `match` arm that can `return` before
+// its value is computed is read into a local first and copied into the return buffer from
+// there.  The local was never freed, as if it only viewed a record someone else releases;
+// an arm ending in a call's fresh record owns it, and it leaked one record per pass (the
+// self-hosted elaborator's `pattern_cond`, `v_if(lc.code, hc.code, …)` after `return null`).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  how the arm ends (a fresh call, a local's field, a parameter's field,
+//                        a whole owned local, a whole parameter, a nullable local, null).
+// Axes it HOLDS FIXED:   each arm leaves early on the same test; the result is `Node?`.
+//
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdBool { b: boolean }, NdIf { cond: Node, t: Node, f: Node } }
+struct Ex { code: Node, tp: integer }
+fn v_if(a: Node, b: Node, c: Node) -> Node { NdIf { cond: a, t: b, f: c } }
+fn mk(k: integer) -> Node { NdInt { n: k } }
+fn sz(n: Node) -> integer { match n { NdInt { n } => n, NdBool { b } => if b { 1 } else { 0 }, NdIf { cond, t, f } => 100 + sz(cond) + sz(t) + sz(f), _ => 0 } }
+// every arm but the first leaves early on k > 100; the arm's end is the axis
+fn pc(p: Ex, q: Node, k: integer) -> Node? {
+  match k % 7 {
+    0 => null,
+    1 => { if k > 100 { return null; } r = Ex { code: mk(k * 2), tp: 0 }; r.code },
+    2 => { if k > 100 { return null; } v_if(mk(k), mk(1), NdBool { b: false }) },
+    3 => { if k > 100 { return null; } p.code },
+    4 => { if k > 100 { return null; } o = mk(k + 1000); o },
+    5 => { if k > 100 { return null; } q },
+    _ => { if k > 100 { return null; } n: Node? = if k % 2 == 0 { mk(k) } else { null }; n }
+  }
+}
+
+fn walk() -> text {
+  p = Ex { code: mk(3), tp: 0 };
+  q = mk(4);
+  t = 0;
+  out = "";
+  for k in 0..14 { c = pc(p, q, k); if c != null { v = sz(c!); t += v; out += "{v} "; } else { out += "- "; } }
+  "{out}| {t} {sz(p.code)} {sz(q)}"
+}
+
+fn test_every_arm_ending() {
+  r = walk();
+  assert(r == "- 2 103 3 1004 4 6 - 16 110 3 1011 4 - | 2266 3 4", r);
+}
+
+fn test_the_early_exits() {
+  p = Ex { code: mk(3), tp: 0 };
+  q = mk(4);
+  n = 0;
+  for k in 101..115 { if pc(p, q, k) == null { n += 1; } }
+  assert(n == 14 && sz(p.code) == 3 && sz(q) == 4, "{n}");
+}
