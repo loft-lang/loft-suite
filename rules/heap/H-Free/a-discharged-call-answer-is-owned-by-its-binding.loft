@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_NCR_CALL_OWNS — the switch types a discharged call answer with the call's borrows, the binding reads as a view, and the copy the discharge holds leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `t = schema(b, k)!` discharges a call's
+// `Sc?` answer through a temporary that owns it — the bind of a call's record answer copies or
+// adopts.  Typed with the call's borrows, `t` read as a view of `b`, the temporary's scope ended
+// without freeing, and the record leaked once per discharge (the self-hosted elaborator's
+// `default_image`; main, both backends).  The discharge hands on an owned value.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  what the call answers (an argument's element through a buffer, an
+//                        argument itself, a fresh record, a struct-enum); how the discharge is
+//                        used (bound, consumed in place, a field read, rebound in a loop,
+//                        `?? return`).
+// Axes it HOLDS FIXED:   the callee is a loft function answering a record.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+
+struct Sc { name: text, size: integer }
+enum Ty { TInt { n: integer }, TRef { s: Sc } }
+struct Bundle { schemas: vector<Sc> }
+fn schema(b: Bundle, tp: integer) -> Sc? { if tp < len(b.schemas) { b.schemas[tp] } else { null } }
+fn pick(a: Sc, c: Sc, k: integer) -> Sc? { if k == 0 { null } else if k == 1 { a } else { c } }
+fn mint(k: integer) -> Sc? { if k < 0 { null } else { Sc { name: "m{k}", size: k } } }
+fn ty(k: integer) -> Ty? { if k < 0 { null } else if k == 0 { TInt { n: 7 } } else { TRef { s: Sc { name: "r", size: k } } } }
+fn tsz(t: Ty) -> integer { match t { TInt { n } => n, TRef { s } => s.size * 2 } }
+fn show(s: Sc) -> integer { s.size + len(s.name) }
+fn early(b: Bundle, k: integer) -> integer { s = schema(b, k) ?? return -5; s.size }
+fn all(b: Bundle, a: Sc, c: Sc) -> integer {
+  r = 0;
+  t = schema(b, 0)!;               // a call answering a view of its argument, via a buffer
+  r += t.size;                      // 3
+  u = pick(a, c, 1)!;               // a view of an argument, no buffer
+  r += u.size * 10;                 // 10 * 11 = 110
+  r += show(mint(4)!);              // consumed in place: 4 + 2 = 6
+  r += mint(5)!.size * 100;         // a field read: 500
+  y = ty(2)!;                       // a struct-enum: 4
+  r += tsz(y) + tsz(ty(0)!);        // 4 + 7
+  for k in 1..3 { t = schema(b, k - 1)!; r += t.size * 1000; }   // 3000 + 5000
+  r + early(b, 1) * 10000 + early(b, 9) * 100000                // 50000 - 500000
+}
+fn test_every_discharge() {
+  b = Bundle { schemas: [Sc { name: "x", size: 3 }, Sc { name: "y", size: 5 }] };
+  a = Sc { name: "a", size: 11 };
+  c = Sc { name: "c", size: 13 };
+  s = 0;
+  for _ in 0..2 { s += all(b, a, c); }
+  // per pass: 3 + 110 + 6 + 500 + 4 + 7 + 8000 + 50000 - 500000
+  assert(s == -882740 && b.schemas[0].size == 3 && a.size == 11 && c.name == "c", "{s}");
+}
