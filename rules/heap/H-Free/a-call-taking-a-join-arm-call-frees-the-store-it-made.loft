@@ -1,0 +1,89 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_JOIN_ARM_ARG_ROOT — the switch reads the join arm's call as a mint, the copy of the answer loses its source-free, and every store the callee made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `g = guard(x.code, if held { pt } else
+// { base(pt) }, k)` passes a choice whose second arm is a call into a frame buffer.  The copy
+// of `guard`'s answer frees the store the callee made unless an argument holds it, and it can
+// tell only when it can name every argument's store: the arm's buffer is that name once the
+// call has run.  Read as unnameable, the copy kept every store the callee made (the
+// self-hosted elaborator's `place_assignment`, one `Node` per compound assignment).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  what the callee answers (a fresh node, its first argument, the
+//                        choice argument on either arm); a loop.
+// Axes it HOLDS FIXED:   the choice is the callee's second argument; one buffer call per arm.
+//
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdCall { def_nr: integer, args: vector<Node> } }
+enum TypeT { TyInt { lo: integer }, TyOpt { inner: TypeT } }
+struct Ex { code: Node, tp: integer }
+
+fn ex(code: Node, tp: integer) -> Ex { Ex { code: code, tp: tp } }
+fn base(t: TypeT) -> TypeT { match t { TyOpt { inner } => base(inner), _ => t } }
+fn lo(t: TypeT) -> integer { match t { TyInt { lo } => lo, TyOpt { inner } => lo(inner) } }
+fn cl(d: integer, args: vector<Node>) -> Node { NdCall { def_nr: d, args: args } }
+fn mk(k: integer) -> Node { NdInt { n: k } }
+fn sz(n: Node) -> integer { match n { NdNull => 1, NdInt { n } => n, NdCall { def_nr, args } => { s = 100 * def_nr; for a in args { s += sz(a); } s } } }
+
+fn guard(code: Node, target: TypeT, k: integer) -> Node {
+  if lo(target) + k % 2 == 0 {
+    return code;
+  }
+  cl(9, [code, NdInt { n: k }])
+}
+
+fn pw(g: Node, k: integer) -> Node? {
+  if k % 3 == 0 { return null; }
+  NdCall { def_nr: 5, args: [g] }
+}
+
+fn pa(x: Ex, pt: TypeT, held: boolean, k: integer) -> Ex {
+  g = guard(x.code, if held { pt } else { base(pt) }, k);
+  cw = pw(g, k);
+  if cw == null {
+    return ex(NdNull, 0);
+  }
+  ex(cw!, 0)
+}
+
+// answers its first argument, its second, or a fresh node
+fn pick(a: Node, b: Node, w: integer) -> Node {
+  if w == 0 { return a; }
+  if w == 1 { return b; }
+  cl(7, [a, b])
+}
+
+fn go(a: Node, h: boolean, w: integer) -> integer {
+  g = pick(a, if h { a } else { mk(40) }, w);
+  sz(g)
+}
+
+fn looped(a: Node) -> integer {
+  t = 0;
+  for i in 0..4 { g = pick(a, if i % 2 == 0 { a } else { mk(i) }, i % 3); t += sz(g); }
+  t
+}
+
+fn test_the_guard_shape() {
+  s = 0;
+  for k in 0..12 {
+    x = Ex { code: NdInt { n: k }, tp: 1 };
+    s += sz(pa(x, TyOpt { inner: TyInt { lo: 0 } }, k % 4 < 2, k).code);
+  }
+  assert(s == 7676, "{s}");
+}
+
+fn test_what_the_callee_answers() {
+  a = mk(5);
+  r = "{go(a, true, 0)} {go(a, false, 0)} {go(a, true, 1)} {go(a, false, 1)} {go(a, true, 2)} {go(a, false, 2)}";
+  assert(r == "5 5 5 40 710 745", r);
+  assert(sz(a) == 5, "{sz(a)}");
+}
+
+fn test_in_a_loop() {
+  a = mk(5);
+  assert(looped(a) == 721, "{looped(a)}");
+}
