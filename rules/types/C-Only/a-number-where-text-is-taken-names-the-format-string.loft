@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-C-Only` — no implicit coercion turns a number into text: the change is written, and the
+// refusal says how — a format string (`"{i}"`), naming the argument where it is a name.  A
+// number handed to a text parameter (`println(i)`) said only "expected text, got integer".
+// The control renders the same value through the hole.
+//
+// CHANNEL: the expected error, and the control's assertion.
+
+fn shown(t: text) -> integer { len(t) }
+
+// @EXPECT_ERROR: a format string turns a value into text: `"{i}"`
+fn test_a_number_handed_to_text() {
+  i = 12;
+  assert(shown(i) == 2, "number");
+}
+
+fn test_the_format_string_renders_it() {
+  i = 12;
+  assert(shown("{i}") == 2, "{i}");
+}

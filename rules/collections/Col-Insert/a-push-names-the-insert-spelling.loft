@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Insert` — an element joins a vector by `v += [x]`.  A member another language spells
+// (`v.push(x)`) is no member of a vector, and the refusal names the loft spelling rather than
+// only "Unknown field vector<integer>.push".  The control appends with `+=`.
+//
+// CHANNEL: the expected error, and the control's assertion.
+
+// @EXPECT_ERROR: an element is added with `v += [x]`
+fn test_a_push() {
+  v = [1, 2];
+  v.push(3);
+  assert(len(v) == 3, "push");
+}
+
+fn test_the_insert_spelling() {
+  v = [1, 2];
+  v += [3];
+  assert(len(v) == 3, "{v}");
+}

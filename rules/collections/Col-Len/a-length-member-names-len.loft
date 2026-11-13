@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-Col-Len` — a collection's or a text's length is `len(x)`.  A member another language
+// spells (`s.length`, `v.size`) is no member here, and the refusal names `len` rather than only
+// "Unknown field text.length".  The control reads `len`.
+//
+// CHANNEL: the expected errors, and the control's assertion.
+
+// @EXPECT_ERROR: the length is `len(s)`
+fn test_a_text_length_member() {
+  s = "abc";
+  assert(s.length == 3, "length");
+}
+
+// @EXPECT_ERROR: the length is `len(v)`
+fn test_a_vector_size_member() {
+  v = [1, 2];
+  assert(v.size == 2, "size");
+}
+
+fn test_len() {
+  s = "abc";
+  v = [1, 2];
+  assert(len(s) == 3 && len(v) == 2, "len");
+}
