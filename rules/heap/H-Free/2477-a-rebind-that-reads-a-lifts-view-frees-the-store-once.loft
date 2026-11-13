@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LIFT_LET_GO — the switch keeps both frees, so the rebind's displaced free and the lift release one store twice
+//
+// @FR-H-FreeTwice: a store is released once.  `x = if via { lit(k).x } else { make(k) }` leaves
+// `x` naming a field of a hoisted lift's record on the `via` path, and the lift releases that
+// store.  A rebind whose value reads `x` (`x = ex(x.code, x.tp)`) cannot let go of it before the
+// value is computed, so the code generator's displaced free releases it after the bind; the
+// lift lets go of it instead (loft#2477, found in the self-hosted elaborator's `index`).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the path (the lift's view, a fresh call); a loop; a view of `x` held
+//                        across the rebind; two rebinds; an early return.
+// Axes it HOLDS FIXED:   the lift is a call's record; `x` is a record local.
+//
+// @falsified-at: pending
+struct In { n: integer, t: text }
+struct Ex { code: text, tp: In }
+struct Lit { x: Ex, k: integer }
+
+fn make(k: integer) -> Ex { Ex { code: "c{k}", tp: In { n: k, t: "t{k}" } } }
+fn lit(k: integer) -> Lit { Lit { x: make(k), k: k } }
+fn ex(c: text, t: In) -> Ex { Ex { code: c, tp: t } }
+
+fn once(k: integer, via: boolean) -> text {
+  x = if via { lit(k).x } else { make(k) };
+  x = ex(x.code, x.tp);
+  "{x.code}:{x.tp.n}:{x.tp.t}"
+}
+
+fn looped(k: integer, via: boolean) -> text {
+  s = "";
+  for i in 0..3 {
+    x = if via { lit(k + i).x } else { make(k + i) };
+    x = ex("{x.code}+", x.tp);
+    s += "{x.code}:{x.tp.n} ";
+  }
+  s
+}
+
+fn held(k: integer, via: boolean) -> text {
+  x = if via { lit(k).x } else { make(k) };
+  w = x.tp;
+  x = ex(x.code, x.tp);
+  "{x.code}:{w.n}:{w.t}"
+}
+
+fn twice(k: integer, via: boolean) -> text {
+  x = if via { lit(k).x } else { make(k) };
+  x = ex(x.code, x.tp);
+  x = ex("{x.code}!", x.tp);
+  "{x.code}:{x.tp.t}"
+}
+
+fn early(k: integer, via: boolean) -> text {
+  x = if via { lit(k).x } else { make(k) };
+  x = ex(x.code, x.tp);
+  if k == 1 { return "early {x.code}"; }
+  "{x.code}:{x.tp.t}"
+}
+
+fn test_once() {
+  assert(once(1, true) == "c1:1:t1" && once(2, false) == "c2:2:t2", "{once(1, true)} {once(2, false)}");
+}
+
+fn test_in_a_loop() {
+  assert(looped(1, true) == "c1+:1 c2+:2 c3+:3 ", looped(1, true));
+  assert(looped(5, false) == "c5+:5 c6+:6 c7+:7 ", looped(5, false));
+}
+
+fn test_a_view_held_across() {
+  assert(held(1, true) == "c1:1:t1" && held(2, false) == "c2:2:t2", "{held(1, true)}");
+}
+
+fn test_two_rebinds() {
+  assert(twice(1, true) == "c1!:t1" && twice(2, false) == "c2!:t2", "{twice(1, true)}");
+}
+
+fn test_an_early_return() {
+  assert(early(1, true) == "early c1" && early(2, true) == "c2:t2" && early(1, false) == "early c1", "{early(2, true)}");
+}
