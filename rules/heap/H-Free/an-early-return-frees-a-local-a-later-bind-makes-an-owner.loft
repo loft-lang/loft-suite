@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LATE_OWNER_RESCAN — the switch decides the early return's frees from the local's deps where the return stands, before the bind that makes it an owner, and the store leaks on that path
+//
+// @FR-H-Free: every exit releases what the frame owns there.  `cond` takes a view of
+// `mc.cond` on its first pass and `mc` is rebound on the next, so that bind is materialised
+// and `cond` owns a copy — a fact the scope pass learns at the bind, below the early `return`
+// in the loop.  Decided where the return stands, the return read `cond` as a view and skipped
+// it while the frame's exit freed it: the store leaked on every early exit (the self-hosted
+// elaborator's `tuple_match`).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  where the loop leaves (early, after one pass, at the end); whether
+//                        `cond` holds the view's copy or a fresh `v_if` when it leaves.
+// Axes it HOLDS FIXED:   one record local rebound per pass; the view is a nullable field.
+//
+// @falsified-at: pending
+
+enum N { NB { b: boolean }, NI { i: integer, s: text }, NIf { a: N, c: N } }
+struct MC { cond: N?, refused: boolean }
+
+fn member_cond(k: integer, stop: integer) -> MC { MC { cond: NI { i: k, s: "c{k}" }, refused: k == stop } }
+fn v_if(a: N, c: N) -> N { NIf { a: a, c: c } }
+fn sz(n: N) -> integer { match n { NI { i, s } => i * 10 + len(s), NIf { a, c } => 1000 + sz(a) + sz(c), NB { b } => if b { 1 } else { 0 } } }
+
+fn go(n: integer, stop: integer) -> integer {
+  cond: N? = null;
+  for pe in 1..n + 1 {
+    mc = member_cond(pe, stop);
+    if mc.refused { return -1; }
+    if mc.cond != null {
+      cond = if cond == null { mc.cond } else { v_if(cond!, mc.cond!) };
+    }
+  }
+  if cond == null { 0 } else { sz(cond!) }
+}
+
+fn test_leaves_holding_the_copy() {
+  assert(go(3, 2) == -1, "{go(3, 2)}");
+}
+
+fn test_leaves_holding_a_fresh_join() {
+  assert(go(4, 3) == -1, "{go(4, 3)}");
+}
+
+fn test_runs_to_the_end() {
+  assert(go(2, 0) == 1034 && go(3, 0) == 2066, "{go(2, 0)} {go(3, 0)}");
+}

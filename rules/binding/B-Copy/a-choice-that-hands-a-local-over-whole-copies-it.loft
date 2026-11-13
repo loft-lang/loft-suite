@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CHOICE_VAR_JOIN — the switch binds the choice plainly, so the local names the other local's store beside it and an early return frees that store twice
+//
+// @FR-B-Copy: a whole-value bind of another variable makes an independent value, and so does a
+// choice that hands one over whole on one of its arms (`class = bound ?? Owned`,
+// `class = if c { bound! } else { Owned }`).  Bound plainly, `class` named `bound`'s store
+// beside it, and an early `return` of something else released that store through both (the
+// self-hosted elaborator's `classify_var` and `tag_in`).  The choice is a join on `bound`:
+// copied where the answer is its store, adopted where it is the fresh arm's.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the choice (`??`, `if` with `!`); the exit (the tail, an early
+//                        return); a loop; the local rebound after the choice.
+// Axes it HOLDS FIXED:   the other arm is a fresh unit variant; one other local.
+//
+// @falsified-at: pending
+
+enum Own { Owned, Borrowed { base: integer }, Join { base: integer } }
+
+fn ok(o: Own) -> integer { match o { Owned => 0, Borrowed { base } => 100 + base, Join { base } => 1000 + base } }
+
+fn early(k: integer) -> Own {
+  bound: Own? = null;
+  if k > 0 { bound = Borrowed { base: k }; }
+  class = Owned;
+  class = bound ?? Owned;
+  if k == 3 { return Owned; }
+  class
+}
+
+fn with_unwrap(k: integer) -> Own {
+  bound: Own? = null;
+  if k > 0 { bound = Borrowed { base: k }; }
+  class = Owned;
+  class = if k > 1 { bound! } else { Owned };
+  if k == 3 { return Owned; }
+  class
+}
+
+fn in_a_loop(k: integer) -> Own {
+  bound: Own? = null;
+  if k > 0 { bound = Borrowed { base: k }; }
+  class = Owned;
+  for i in 0..2 { class = bound ?? Owned; }
+  if k == 3 { return Owned; }
+  class
+}
+
+fn rebound_after(k: integer) -> Own {
+  bound: Own? = null;
+  if k > 0 { bound = Borrowed { base: k }; }
+  class = Owned;
+  class = bound ?? Owned;
+  bound = Join { base: 7 };
+  if k == 3 { return Owned; }
+  class
+}
+
+fn test_early_return() {
+  assert(ok(early(0)) == 0 && ok(early(3)) == 0 && ok(early(9)) == 109, "{ok(early(0))} {ok(early(3))} {ok(early(9))}");
+}
+
+fn test_with_unwrap() {
+  assert(ok(with_unwrap(1)) == 0 && ok(with_unwrap(3)) == 0 && ok(with_unwrap(9)) == 109, "{ok(with_unwrap(1))} {ok(with_unwrap(9))}");
+}
+
+fn test_in_a_loop() {
+  assert(ok(in_a_loop(3)) == 0 && ok(in_a_loop(9)) == 109, "{ok(in_a_loop(9))}");
+}
+
+fn test_rebound_after() {
+  assert(ok(rebound_after(3)) == 0 && ok(rebound_after(9)) == 109, "{ok(rebound_after(9))}");
+}
