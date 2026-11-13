@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_C_NULL_FREES_ENTRY — the switch frees the store the caller handed in when a call copied into the promoted buffer answers null (C only)
+//
+// @FR-O-Buffer: a local promoted onto its function's return buffer holds the store its CALLER
+// handed in until it is rebound, and the function never releases that store.  A recursive
+// `rw` rebinds `r = rw(inner, …)` and answers `r` itself on one arm, so `r` is the buffer; where
+// the recursion answers null, the bind of null into `r` released what `r` held — the caller's
+// buffer — and the caller handed that freed store to its next call.  C only (the bytecode and
+// Rust writers declined there); the self-hosted elaborator's `rewrite_unknown`.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / use-after-free gate.  The freed buffer
+// answers right until it is reused, so the cell fails reliably under `LOFT_POISON=1` or
+// `LOFT_STRICT_STORES=1`.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the arm the null comes back through (a wrapping arm, the arm that
+//                        answers `r` itself); calls before and after it that reuse the buffer.
+// Axes it HOLDS FIXED:   one caller, its loop handing the same buffer to every call.
+//
+// @falsified-at: efbb7b00e (LOFT_STRICT_STORES=1) — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+
+enum T { TU { n: integer }, TV { inner: T, dep: vector<integer> }, TO { inner: T }, TI { k: integer } }
+
+fn kk(t: T) -> integer { match t { TI { k } => k, TU { n } => n, TV { inner } => 100 + kk(inner), TO { inner } => 1000 + kk(inner) } }
+
+fn rw(t: T, stub: integer, target: T) -> T? {
+  match t {
+    TU { n } => if n == stub { target } else { null },
+    TV { inner, dep } => { r = rw(inner, stub, target); if r == null { null } else { TV { inner: r!, dep: dep } } },
+    TO { inner } => { r = rw(inner, stub, target); if r == null { null } else if (r! is TO) { r } else { TO { inner: r! } } },
+    _ => null
+  }
+}
+
+fn sum_over(ts: vector<T>) -> integer {
+  target = TI { k: 9 };
+  c = 0;
+  for x in ts {
+    r = rw(x, 1, target);
+    if r != null { c += kk(r!); }
+  }
+  c * 10 + kk(target)
+}
+
+fn test_a_null_through_a_wrapping_arm() {
+  ts = [TV { inner: TU { n: 2 }, dep: [] }, TV { inner: TU { n: 1 }, dep: [] }, TU { n: 1 }];
+  assert(sum_over(ts) == 1189, "{sum_over(ts)}");
+}
+
+fn test_a_null_through_the_arm_that_answers_r() {
+  ts = [TO { inner: TU { n: 2 } }, TO { inner: TU { n: 1 } }, TV { inner: TU { n: 1 }, dep: [] }];
+  assert(sum_over(ts) == 11189, "{sum_over(ts)}");
+}
