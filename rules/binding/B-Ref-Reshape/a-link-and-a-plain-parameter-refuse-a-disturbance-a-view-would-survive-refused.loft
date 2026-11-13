@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CALLEE_DISTURB — the switch hides a callee's disturbance, so the calls that disturb a viewed place are no longer refused
 //
 // `@FR-B-Ref-Reshape` crossed with `@FR-B-Ref-Alias` (and calls.md F-ParamHeap): a `&` projection is
 // a LINK that never materialises (B-Ref-Alias), so a disturbance of its container while it is

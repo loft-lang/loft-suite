@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CALLEE_DISTURB — the switch hides `drop_first`'s removal, so `e` stays a view and reads the element that moved into its slot
 //
 // `@FR-H-Materialise` crossed with `@FR-H-View` and `@FR-H-Copy`: a struct view (H-View)
 // aliases its place only while the place holds.  Where the container is disturbed — a removal,
@@ -48,9 +49,10 @@ fn test_a_field_view_across_a_reassignment() {
 }
 
 fn test_a_callee_removal() {
-  v = [P { x: 1, t: "a", xs: [] }, P { x: 2, t: "b", xs: [] }];
+  v = [P { x: 1, t: "a", xs: [] }, P { x: 2, t: "b", xs: [] }, P { x: 3, t: "c", xs: [] }];
   e = v[1];
   drop_first(v);
+  assert(e.x == 2 && e.t == "b", "the copy holds the value at the bind: {e.x} {e.t}");
   e.x = 99;
-  assert(e.x == 99 && len(v) == 1 && v[0].x == 2, "a callee disturbs: {v[0].x}");
+  assert(e.x == 99 && len(v) == 2 && v[0].x == 2 && v[1].x == 3, "a callee disturbs: {v[0].x} {v[1].x}");
 }

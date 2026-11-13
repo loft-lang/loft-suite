@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CALLEE_DISTURB — the switch hides the callees' growth and removal, so the `grow` and `drop_first` calls are no longer refused
 //
 // `@FR-H-View-Drop` crossed with `@FR-B-View`: every shape where B-View MATERIALISES a view —
 // its container disturbed while the view is live — is refused at the disturbance when the
