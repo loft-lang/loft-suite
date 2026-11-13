@@ -1,0 +1,87 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Copy` — a binding that already holds a value, rebound from a value BRANCH that hands
+// back another live local on one path (`c = b ?? Owned`, `c = if k { b } else { lit }`), COPIES
+// that local's record, exactly as the bare `c = b` copies it.  The branch keeps its value form
+// (an arm is a literal's work-ref), whose lowering is the runtime join (`OpBindOrCopy`: the
+// local's arm copied, a fresh arm adopted) — but the ownership oracle answers `Owned` for an
+// owned local's arm, so the join was declined and the binding named the local's record: both
+// freed it at scope exit ("a store was freed twice", both backends; the self-hosted ownership
+// oracle's `classify_var`).  A second half was the C writer's: it joined a CALL's answer only,
+// so a branch the oracle does answer `Join` for was bound plain there alone.
+//
+// Crossed: the renamed return buffer (`pick`), a plain local read after the rebind
+// (`local_kept`), the rebind in a loop (`looped`), a struct instead of a struct enum (`ppick`),
+// each with the local's arm and the literal's arm taken; and a join the oracle answers
+// (`folded`, the C writer's half).
+//
+// Held FIXED, and filed apart: the FIRST bind of a binding assigned again later from
+// `b ?? <literal>` (the lifted arm's temp and the binding both free the copy).
+//
+// CHANNEL: the assertions, the re-free failure and the leak gate.
+
+enum Own { Owned, Unknown, Borrowed { base: integer }, Join { base: integer } }
+struct P { x: integer, t: text }
+
+fn not_yet() -> Own { Borrowed { base: 65534 } }
+fn join(a: Own, c: Own) -> Own { if a == c { a } else { Join { base: 7 } } }
+fn mk(i: integer) -> Own { if i == 0 { not_yet() } else { Borrowed { base: i } } }
+
+fn fold(n: integer) -> Own? {
+  bound: Own? = null;
+  for i in 0..n { c = mk(i); bound = if bound == null { c } else { join(bound!, c) }; }
+  bound
+}
+
+fn pick(n: integer) -> Own {
+  class = Owned;
+  bound = fold(n);
+  class = bound ?? Owned;
+  if class == not_yet() { Owned } else { class }
+}
+
+fn local_kept(n: integer) -> text {
+  class = Unknown;
+  bound = fold(n);
+  class = bound ?? Owned;
+  r = "{class}";
+  r
+}
+
+fn looped(n: integer) -> text {
+  class = Owned;
+  s = "";
+  for k in 0..n {
+    bound = fold(k);
+    class = bound ?? Unknown;
+    s += "{class};";
+  }
+  s
+}
+
+fn pmk(i: integer) -> P? { if i == 0 { null } else { P { x: i, t: "p{i}" } } }
+
+fn ppick(n: integer) -> P {
+  q = P { x: 0, t: "start" };
+  b = pmk(n);
+  q = b ?? P { x: -1, t: "lit" };
+  if q.x == 2 { P { x: 99, t: "two" } } else { q }
+}
+
+// The bound local itself folded in this frame: the oracle answers `Join(base=bound)`.
+fn folded(n: integer) -> Own {
+  class = Owned;
+  bound: Own? = null;
+  for i in 0..n { c = mk(i); bound = if bound == null { c } else { join(bound!, c) }; }
+  class = bound ?? Owned;
+  if class == not_yet() { Owned } else { class }
+}
+
+fn main() {
+  a = "";
+  for r in 0..50 {
+    a = "{pick(0)} {pick(1)} {pick(2)} | {local_kept(0)} {local_kept(1)} {local_kept(2)} | {looped(3)} | {ppick(0).t} {ppick(1).t} {ppick(2).t} | {folded(0)} {folded(1)} {folded(3)}";
+  }
+  assert(a == "Owned {{}} Owned {{}} Join {{base:7}} | Owned {{}} Borrowed {{base:65534}} Join {{base:7}} | Unknown {{}};Borrowed {{base:65534}};Join {{base:7}}; | lit p1 two | Owned {{}} Owned {{}} Join {{base:7}}", a);
+}
