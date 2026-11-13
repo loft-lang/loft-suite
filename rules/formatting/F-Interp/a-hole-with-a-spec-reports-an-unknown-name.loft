@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-F-Interp — a hole holds an expression, and its `:` opens the format spec.  A name the
+// program never declared is reported in a hole with a spec exactly as in one without:
+// `"{zz:3}"` is `Unknown variable 'zz'`, as `"{zz}"` is.  The `name :` lookahead that opens a
+// typed declaration (`zz: integer = 0`) read the spec's `:` as one, so the hole declared a fresh
+// null `zz` and rendered nothing, with no diagnostic, on both backends.  A declared name with a
+// spec renders padded (the control).
+//
+// CHANNEL: the expected error, and the control's assertion.
+
+// @EXPECT_ERROR: Unknown variable 'zz'
+fn test_an_unknown_name_with_a_width() {
+  s = "a {zz:3} b";
+  assert(s == "a b", s);
+}
+
+fn test_a_declared_name_with_a_width_is_padded() {
+  q = 5;
+  assert("a {q:3} b" == "a   5 b", "a {q:3} b");
+}
