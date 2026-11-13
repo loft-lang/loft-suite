@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a captured local reassigned after its build is what this program checks.
 //
 // `@FR-L-CapOne` / `@FR-L-CapKeep` / `@FR-O-Witness` — two or more closures over one nullable
 // struct local re-assigned after the builds.  The re-assignment puts the local on the

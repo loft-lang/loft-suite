@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a captured local reassigned after its build is what this program checks.
 //
 // A capture that owns its store outright does not take over another local's frame-exit free.
 //
