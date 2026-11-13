@@ -3,13 +3,11 @@
 //
 // `@FR-B-Copy` — a binding that already holds a value, rebound from a value BRANCH that hands
 // back another live local on one path (`c = b ?? Owned`, `c = if k { b } else { lit }`), COPIES
-// that local's record, exactly as the bare `c = b` copies it.  The branch keeps its value form
-// (an arm is a literal's work-ref), whose lowering is the runtime join (`OpBindOrCopy`: the
-// local's arm copied, a fresh arm adopted) — but the ownership oracle answers `Owned` for an
-// owned local's arm, so the join was declined and the binding named the local's record: both
-// freed it at scope exit ("a store was freed twice", both backends; the self-hosted ownership
-// oracle's `classify_var`).  A second half was the C writer's: it joined a CALL's answer only,
-// so a branch the oracle does answer `Join` for was bound plain there alone.
+// that local's record, exactly as the bare `c = b` copies it.  The rebind is the runtime join on
+// that local (`bind_lowering::choice_var_arm`, R1: the local's arm copied, a fresh arm adopted);
+// bound plainly, the binding named the local's record and both freed it at scope exit ("a store
+// was freed twice"; the self-hosted ownership oracle's `classify_var`).  The C writer joins
+// whatever `re_bind` joins, not a call's answer alone.  `LOFT_NO_CHOICE_VAR_JOIN=1` binds plainly.
 //
 // Crossed: the renamed return buffer (`pick`), a plain local read after the rebind
 // (`local_kept`), the rebind in a loop (`looped`), a struct instead of a struct enum (`ppick`),
@@ -19,8 +17,10 @@
 // Held FIXED, and guarded apart: the FIRST bind of a binding assigned again later from
 // `b ?? <literal>` (the lifted arm's temp and the binding both freed the copy, loft#2475):
 // `2475-a-first-bind-from-a-coalesce-then-rebound-frees-the-copy-once.loft`.
+
+// `--native` still binds the choice plainly (the rustc writer joins a call's answer only).
 //
-// @falsified-by: tests/falsified/a-branch-handing-back-a-local-copies-it-into-a-binding-assigned-before.patch — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-at: 9152f7fd3 — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the assertions, the re-free failure and the leak gate.
 
 enum Own { Owned, Unknown, Borrowed { base: integer }, Join { base: integer } }
