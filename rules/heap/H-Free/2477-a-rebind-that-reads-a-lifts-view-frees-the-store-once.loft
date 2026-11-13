@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @catches: LOFT_NO_LIFT_LET_GO — the switch keeps both frees, so the rebind's displaced free and the lift release one store twice
 //
-// @FR-H-FreeTwice: a store is released once.  `x = if via { lit(k).x } else { make(k) }` leaves
+// @FR-H-Free, @FR-H-FreeTwice: every exit releases what the frame owns, and a store once.  `x = if via { lit(k).x } else { make(k) }` leaves
 // `x` naming a field of a hoisted lift's record on the `via` path, and the lift releases that
 // store.  A rebind whose value reads `x` (`x = ex(x.code, x.tp)`) cannot let go of it before the
 // value is computed, so the code generator's displaced free releases it after the bind; the
