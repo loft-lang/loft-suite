@@ -10,8 +10,8 @@
 // Rust writers declined there); the self-hosted elaborator's `rewrite_unknown`.
 //
 // CHANNEL: the VALUES (hand-computed) and the LEAK / use-after-free gate.  The freed buffer
-// answers right until it is reused, so the cell fails reliably under `LOFT_POISON=1` or
-// `LOFT_STRICT_STORES=1`.
+// answers right until it is reused, so the cell fails reliably under `LOFT_STRICT_STORES=1`
+// (on C, `-DLOFT_STRICT_STORES`); `LOFT_POISON=1` did not move it against main.
 // HOLDS: every cell, on every backend.
 // Axes this file MOVES:  the arm the null comes back through (a wrapping arm, the arm that
 //                        answers `r` itself); calls before and after it that reuse the buffer.
