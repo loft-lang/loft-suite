@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_KEPT_ELEMENT_COPY — the switch binds `cond = mc.cond` plainly into a kept local, the next pass's call rewrites the record it views, and the answer is wrong on the interpreter
+//
+// @FR-B-Copy, @FR-H-FreeTwice: `cond` adopts a literal's buffer (`cond = NdIf { a: cond!, … }`) and
+// is also rebound from a projection of a call's answer (`cond = mc.cond`) in a loop inside a
+// block.  Bound plainly there, `cond` viewed `mc`'s record, the next pass's call refilled it, and
+// the first condition read the second's value (`NdIf(5, 5)` for `NdIf(4, 5)`: a wrong answer on
+// the interpreter, a double free on both backends; main).  The projection is copied as into an
+// owner, and the copy is released at the rebind that displaces it.  The pooled buffer of `mc`'s
+// call is declined where an early `return` frees `mc` without asking it (the self-hosted
+// elaborator's `tuple_match`, refusing a later member).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  how many members join (1–4); where the loop leaves (an early return
+//                        before the call, after it, the end); repeated calls.
+// Axes it HOLDS FIXED:   the loop sits in a block; `member_cond` answers a record.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdIf { a: Node, b: Node } }
+struct MC { cond: Node?, refused: boolean }
+struct Ex { code: Node, tp: integer }
+fn ex(c: Node, t: integer) -> Ex { Ex { code: c, tp: t } }
+struct VA { cond: Node?, binds: vector<integer> }
+fn variant_arm(pe: integer) -> VA? { if pe == 9 { null } else { VA { cond: NdInt { n: pe }, binds: if pe == 8 { [1] } else { [] } } } }
+fn member_cond(pe: integer) -> MC {
+  va = variant_arm(pe);
+  if va == null { return MC { cond: null, refused: true }; }
+  if len(va!.binds) > 0 { return MC { cond: null, refused: true }; }
+  MC { cond: va!.cond, refused: false }
+}
+fn sz(n: Node) -> integer { match n { NdInt { n } => n, NdIf { a, b } => 100 + sz(a) + sz(b), _ => 0 } }
+fn tuple_match(pes: vector<integer>) -> Ex {
+  {
+  cond: Node? = null;
+  for pe in pes {
+    if pe == 0 { continue; }
+    if pe < 0 { return ex(NdNull, -1); }
+    mc = member_cond(pe);
+    if mc.refused { return ex(NdNull, -2); }
+    if mc.cond != null { cond = if cond == null { mc.cond } else { NdIf { a: cond!, b: mc.cond! } }; }
+  }
+  ex(cond ?? NdNull, 1)
+  }
+}
+fn shown(pes: vector<integer>) -> text { r = tuple_match(pes); "{r.tp}:{sz(r.code)}" }
+
+fn test_the_joins() {
+  for _ in 0..2 {
+    s = "{shown([4])} {shown([4, 5])} {shown([4, 5, 6])} {shown([4, 5, 6, 7])} {shown([0, 0])}";
+    assert(s == "1:4 1:109 1:215 1:322 1:0", s);
+  }
+}
+
+fn test_the_early_exits() {
+  for _ in 0..2 {
+    s = "{shown([1, -1])} {shown([1, 2, -1])} {shown([3, 9])} {shown([1, 2, 9])}";
+    assert(s == "-1:0 -1:0 -2:0 -2:0", s);
+  }
+}
