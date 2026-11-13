@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-E-Asgn — an assignment's left side is a PLACE.  A field the struct does not declare is
+// none, and a write to it is refused as the read is: `Unknown field P.z`, at the field.  The
+// first pass left the receiver standing as the place, so `p.z = 3` re-typed `p` itself and
+// reported "Variable 'p' cannot change type from P to integer" — about a variable, not the field
+// the author misspelled.  Both spellings of the write (`=` and `+=`) are cells; a declared field
+// written the same way is the control.
+//
+// CHANNEL: the expected errors (each names the field), and the control's assertion.
+
+struct P { x: integer, name: text }
+
+// @EXPECT_ERROR: Unknown field P.z
+fn test_a_plain_write_to_an_undeclared_field() {
+  p = P { x: 1, name: "a" };
+  p.z = 3;
+  assert(p.x == 1, "p");
+}
+
+// @EXPECT_ERROR: Unknown field P.nme
+fn test_a_compound_write_to_an_undeclared_field() {
+  p = P { x: 1, name: "a" };
+  p.nme += "b";
+  assert(p.x == 1, "p");
+}
+
+fn test_a_declared_field_is_written() {
+  p = P { x: 1, name: "a" };
+  p.x = 4;
+  p.name += "b";
+  assert(p.x == 4 && p.name == "ab", "{p.x} {p.name}");
+}

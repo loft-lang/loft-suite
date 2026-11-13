@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-For` — a body cannot append to the collection it walks; the parser refuses it.
+// `@FR-B-Ref-Uniform` makes a `&vector` parameter that collection, so the append is refused
+// through the link as on the vector itself.  The check asked the unpeeled type and let the
+// link's append through, growing the vector under its own cursor.  The control appends to a
+// different vector during the walk.
+//
+// CHANNEL: the expected error, and the control's assertion.
+
+// @EXPECT_ERROR: Cannot add elements to 'v' while it is being iterated
+fn grow_in_its_walk(v: &vector<integer>) {
+  for x in v { if x > 1 { v += [0]; } }
+}
+
+fn test_the_append_is_refused() {
+  a = [1, 2];
+  grow_in_its_walk(a);
+  assert(len(a) == 2, "{a}");
+}
+
+fn grow_another(v: vector<integer>, w: &vector<integer>) {
+  for x in v { if x > 1 { w += [x]; } }
+}
+
+fn test_an_append_to_another_vector_is_not() {
+  a = [1, 2, 3];
+  b: vector<integer> = [];
+  grow_another(a, b);
+  assert("{b}" == "[2,3]", "{b}");
+}

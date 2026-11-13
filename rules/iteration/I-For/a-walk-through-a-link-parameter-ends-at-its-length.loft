@@ -1,0 +1,117 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-For` × `@FR-B-Ref-Uniform` — a `for` over a `&vector` PARAMETER ends where the vector
+// does, at its length, exactly as a walk over the vector itself.  Every vector decision of the
+// walk asked the unpeeled type, so the link fell to the item-absent end test and a null ELEMENT
+// ended the walk: `[1, null, 3]` walked one element, `[null, 2]` none, on every backend, with no
+// diagnostic.  A local link (`w = &k`) reads as the vector and always walked it whole.
+//
+// The cells vary the null's position (first, middle, last, none), the element kind (`integer?`,
+// `float?`, `boolean?`, `text?`, `u8?`, an enum, a record that cannot be null), a record's field
+// handed to the link and the walk repeated in a loop; the by-value walk and the local link are
+// the controls.  Each answer is `count * 100 + sum`.  A reverse walk and a removal through the
+// link were refused outright; they are `a-reverse-walk-and-a-removal-through-a-link-parameter`.
+//
+// CHANNEL: the assertions, and the leak gate.
+
+struct RLink { n: integer }
+enum ColLink { RedLink, GreenLink }
+struct BagLink { items: vector<integer?>, n: integer }
+
+fn walked(v: &vector<integer?>) -> integer {
+  c = 0;
+  s = 0;
+  for x in v { c += 1; s += x ?? 0; }
+  v += [0];
+  c * 100 + s
+}
+
+fn walked_floats(v: &vector<float?>) -> integer {
+  c = 0;
+  for x in v { c += 1; }
+  v += [0.0];
+  c
+}
+
+fn walked_records(v: &vector<RLink>) -> integer {
+  c = 0;
+  s = 0;
+  for r in v { c += 1; s += r.n; }
+  v += [RLink { n: 0 }];
+  c * 100 + s
+}
+
+fn counted_bools(v: &vector<boolean?>) -> integer {
+  c = 0;
+  for x in v { c += 1; }
+  v += [true];
+  c
+}
+
+fn counted_texts(v: &vector<text?>) -> integer {
+  c = 0;
+  for x in v { c += 1; }
+  v += ["z"];
+  c
+}
+
+fn counted_narrow(v: &vector<u8?>) -> integer {
+  c = 0;
+  for x in v { c += 1; }
+  v += [1];
+  c
+}
+
+fn counted_enums(v: &vector<ColLink?>) -> integer {
+  c = 0;
+  for x in v { c += 1; }
+  v += [RedLink];
+  c
+}
+
+fn by_value(v: vector<integer?>) -> integer {
+  c = 0;
+  s = 0;
+  for x in v { c += 1; s += x ?? 0; }
+  c * 100 + s
+}
+
+fn test_a_null_element_does_not_end_the_walk() {
+  a: vector<integer?> = [1, null, 3];
+  b: vector<integer?> = [null, 2];
+  c: vector<integer?> = [1, 2, null];
+  d: vector<integer?> = [];
+  assert(walked(a) == 304 && walked(b) == 202 && walked(c) == 303 && walked(d) == 0, "forward");
+}
+
+fn test_other_element_kinds() {
+  f: vector<float?> = [1.5, null, 2.5];
+  g = [RLink { n: 1 }, RLink { n: 2 }, RLink { n: 3 }];
+  assert(walked_floats(f) == 3 && walked_records(g) == 306, "kinds");
+}
+
+fn test_more_element_kinds_a_field_and_a_loop() {
+  b: vector<boolean?> = [true, false, null, true];
+  t: vector<text?> = ["a", null, ""];
+  u: vector<u8?> = [1, null, 3];
+  e: vector<ColLink?> = [RedLink, null, GreenLink];
+  assert(counted_bools(b) == 4 && counted_texts(t) == 3 && counted_narrow(u) == 3 && counted_enums(e) == 3, "kinds");
+  bag = BagLink { items: [1, null, 3], n: 0 };
+  tot = 0;
+  for r in 0..3 {
+    k: vector<integer?> = [null, 5];
+    tot += walked(k);
+  }
+  // the field: 1 + 0 + 3 over 3 elements; the loop: 3 rounds of 2 elements summing 5
+  assert(walked(bag.items) == 304 && len(bag.items) == 4 && tot == 615, "field {tot}");
+}
+
+fn test_the_controls() {
+  k: vector<integer?> = [1, null, 3];
+  w = &k;
+  lc = 0;
+  for x in w { lc += 1; }
+  w += [9];
+  assert(by_value([1, null, 3]) == 304 && lc == 3, "controls");
+}

@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Ref-Uniform` × `@FR-I-For` — a `&vector` parameter is walked exactly as the vector: it
+// reverses (`rev(v)`), and an `x#remove` during its walk is a change to it, so the `&` it needs
+// is not "never modified".  `rev(v)` was refused as "must wrap a sorted, index, or vector
+// collection" about a receiver that is one, and a function whose only change to its `&vector`
+// was a removal was told to drop the `&`.  A `&sorted` reverses too.  Both checks asked the type
+// without peeling the link.
+//
+// CHANNEL: the assertions (both refusals ended the run before them), and the leak gate.
+
+struct ERev { k: integer, t: text }
+
+fn walked_back(v: &vector<integer?>) -> integer {
+  c = 0;
+  for x in rev(v) { c = c * 10 + (x ?? 0); }
+  v += [0];
+  c
+}
+
+fn sorted_back(s: &sorted<ERev[k]>) -> text {
+  r = "";
+  for e in rev(s) { r += e.t; }
+  s += [ERev { k: 9, t: "z" }];
+  r
+}
+
+fn nulls_removed(v: &vector<integer?>) -> integer {
+  for x in v { if x == null { x#remove; } }
+  len(v)
+}
+
+fn test_a_link_parameter_reverses() {
+  e: vector<integer?> = [1, null, 3];
+  srt: sorted<ERev[k]> = [ERev { k: 2, t: "b" }, ERev { k: 1, t: "a" }, ERev { k: 3, t: "c" }];
+  // 3, the null as 0, then 1; the sorted one by descending key, then the appended record
+  assert(walked_back(e) == 301 && len(e) == 4, "vector {len(e)}");
+  assert(sorted_back(srt) == "cba" && len(srt) == 4, "sorted {len(srt)}");
+}
+
+fn test_a_removal_is_a_change_to_the_link() {
+  h: vector<integer?> = [1, null, 3, null];
+  n = nulls_removed(h);
+  assert(n == 2 && len(h) == 2, "removed: {n} {len(h)}");
+}
