@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_WITNESS_NULL_BUFFER — the switch reads a choice of buffer calls as held by the buffers, and the store a call made into a null buffer is released by nothing
+//
+// @FR-O-Witness: a local whose ownership is mixed — a store of its own on one path, a view on
+// another — has a witness that releases what it owns.  A choice of calls answering through
+// their hidden buffers (`tail = if c { unspan(n) } else { NdNull }`) owns, on every run, the
+// store a call made: the caller hands a null buffer, the callee makes the store in its own
+// frame, and the caller's buffer stays null.  Read as held by the buffers, a local the parser
+// typed as a view (deps naming the buffer, or another variable a later bind reads) released
+// nothing (loft#2476; the self-hosted elaborator's `vector_return` and `member`).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  why the local is a view (bound once from the choice; rebound from a
+//                        parameter's field); which arm runs (the call, the literal, a nested
+//                        call); a loop around it.
+// Axes it HOLDS FIXED:   the callee answers a record it makes or copies.
+//
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdSpan { inner: Node }, NdBlock { block: vector<Blk> } }
+struct Blk { operators: vector<Node> }
+enum Syn { SMember { re: integer, name: text }, SName { name: text } }
+struct Ex { code: integer, tp: integer }
+struct Holder { ex: Ex }
+
+fn unspan(n: Node) -> Node {
+  match n {
+    NdSpan { inner } => unspan(inner),
+    _ => n
+  }
+}
+
+fn val(n: Node) -> integer { match n { NdInt { n } => n, NdNull => -1, _ => 0 } }
+
+fn vr(code: Node) -> integer {
+  bl = match code { NdBlock { block } => block[0], _ => return 0 };
+  tail = if len(bl.operators) > 0 { unspan(bl.operators[-1]) } else { NdNull };
+  val(tail)
+}
+
+fn expression(n: integer) -> Ex { Ex { code: n * 10, tp: n % 3 } }
+
+fn member(nodes: vector<Syn>, re: integer, h: Holder) -> Ex {
+  x = match nodes[re] {
+    SMember { re: rre, name: rn } => if re % 2 == 0 { member(nodes, rre, h) } else { expression(re) },
+    _ => expression(re)
+  };
+  if x.tp == 1 {
+    x = h.ex;
+  }
+  Ex { code: x.code + 1, tp: x.tp }
+}
+
+fn test_a_view_bound_once_from_the_choice() {
+  s = 0;
+  for i in 0..10 {
+    c = NdBlock { block: [Blk { operators: [NdInt { n: 1 }, NdSpan { inner: NdInt { n: i } }] }] };
+    e = NdBlock { block: [Blk { operators: [] }] };
+    s += vr(c) + vr(e) + vr(NdInt { n: 3 });
+  }
+  assert(s == 35, "{s}");
+}
+
+fn test_a_local_a_later_bind_makes_a_view() {
+  nodes = [SName { name: "a" }, SMember { re: 0, name: "b" }, SMember { re: 1, name: "c" }, SMember { re: 2, name: "d" }, SMember { re: 3, name: "e" }];
+  h = Holder { ex: Ex { code: 500, tp: 0 } };
+  s = 0;
+  for i in 0..10 { for k in 0..5 { s += member(nodes, k, h).code; } }
+  assert(s == 10670, "{s}");
+}
