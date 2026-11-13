@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_TRANSITIVE_VIEW_READ — the switch sees only a direct view of the local, so the rebind frees the old store before the value copies out of it
+//
+// @FR-O-Detach: a rebind `b = value` keeps the store `b` displaces until the value is built
+// whenever the value may read it.  It reads it through any view of `b`: `bl = block[0]` out of
+// a match capture of `b.code` views the capture, which views `b`.  Freed before the value, the
+// copy of `bl` into the new record read a released store, and the answer was wrong with nothing
+// reported (the self-hosted elaborator's `parse_code`, on the interpreter).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.  A copy out of a
+// released store answers right while nothing has reused that store, so the values fail
+// reliably under `LOFT_POISON=1`, which overwrites every store it releases.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  where the view is taken (inside the match arm, bound out of the
+//                        match); how far it is from `b` (the capture, an element of it, a copy
+//                        of that element into a second local); a write to the view first.
+// Axes it HOLDS FIXED:   the subject is a heap-enum field of a record local; the rebind is a
+//                        call answering a fresh record.
+//
+// @falsified-at: efbb7b00e (LOFT_POISON=1) — interpret exit 1 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+
+struct Blk { k: integer, ops: vector<integer> }
+enum Node { NdBlock { block: vector<Blk> }, NdInt { n: integer } }
+struct Ex { code: Node, tp: integer }
+
+fn ex(c: Node, t: integer) -> Ex { Ex { code: c, tp: t } }
+fn start(k: integer) -> Ex { ex(NdBlock { block: [Blk { k: k, ops: [1, 2] }] }, 0) }
+fn total(b: Ex) -> integer { match b.code { NdBlock { block } => block[0].k * 100 + len(block[0].ops), _ => -1 } }
+
+fn bound_out_of_the_match(k: integer) -> integer {
+  b = start(k);
+  bl = match b.code { NdBlock { block } => block[0], _ => Blk { k: 0, ops: [] } };
+  b = ex(NdBlock { block: [bl] }, 5);
+  total(b)
+}
+
+fn copied_into_a_second_local(k: integer) -> integer {
+  b = start(k);
+  bl = match b.code { NdBlock { block } => block[0], _ => Blk { k: 0, ops: [] } };
+  c = bl;
+  b = ex(NdBlock { block: [c] }, 5);
+  total(b)
+}
+
+fn inside_the_arm(k: integer) -> integer {
+  b = start(k);
+  match b.code {
+    NdBlock { block } => {
+      bl = block[0];
+      n = len(bl.ops);
+      bl.ops = bl.ops[0..n - 1] + [9, 9];
+      b = ex(NdBlock { block: [bl] }, 5);
+    },
+    _ => {}
+  }
+  total(b)
+}
+
+fn test_bound_out_of_the_match() {
+  assert(bound_out_of_the_match(1) == 102 && bound_out_of_the_match(2) == 202, "{bound_out_of_the_match(1)} {bound_out_of_the_match(2)}");
+}
+
+fn test_copied_into_a_second_local() {
+  assert(copied_into_a_second_local(3) == 302, "{copied_into_a_second_local(3)}");
+}
+
+fn test_inside_the_arm() {
+  assert(inside_the_arm(1) == 103 && inside_the_arm(2) == 203, "{inside_the_arm(1)} {inside_the_arm(2)}");
+}

@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_NCR_TEMP_VIEW — the switch reads the discharged projection as a mint, so the local takes no witness and frees the store it only viewed
+//
+// @FR-O-Witness: a local that VIEWS on one bind and MINTS on another releases only what it
+// minted.  A discharged projection (`def_of(ds, 0).attrs[i]!.typedef[0]`) is a view of the
+// record the call answered, which the frame's inline container holds; the `!` checks it in a
+// temporary of its own before the read goes on.  Read as a mint, the local was never mixed, took
+// no witness, and freed the viewed store at its scope end beside the container (the self-hosted
+// elaborator's `variant_arm`).  The same bind without the `!` was always witnessed.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the `!` (present, absent); the rebind (conditional, unconditional,
+//                        none); a loop; an owning `!` (`mk(k)!`), which stays a mint.
+// Axes it HOLDS FIXED:   the element is a heap enum; the rebind is a call answering fresh.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+
+enum T { TA { n: integer, dep: vector<integer> }, TI { k: integer } }
+struct A { typedef: vector<T> }
+struct D { attrs: vector<A> }
+
+fn defs() -> vector<D> { [D { attrs: [A { typedef: [TA { n: 1, dep: [] }] }, A { typedef: [TI { k: 7 }] }] }] }
+fn def_of(ds: vector<D>, i: integer) -> D { ds[i] }
+fn with_deps(t: T, d: vector<integer>) -> T { match t { TA { n } => TA { n: n, dep: d }, _ => t } }
+fn kind(t: T) -> integer { match t { TA { n, dep } => n * 10 + len(dep), TI { k } => k } }
+fn mk(k: integer) -> T? { if k > 0 { TA { n: k, dep: [] } } else { null } }
+
+fn rebound_when_it_matches(ds: vector<D>, k: integer) -> integer {
+  ft = def_of(ds, 0).attrs[0]!.typedef[0];
+  if ft is TA { ft = with_deps(ft, [k]); }
+  kind(ft)
+}
+
+fn rebound_always(ds: vector<D>, k: integer) -> integer {
+  ft = def_of(ds, 0).attrs[0]!.typedef[0];
+  ft = with_deps(ft, [k, k]);
+  kind(ft)
+}
+
+fn in_a_loop(ds: vector<D>) -> integer {
+  s = 0;
+  for f in [0, 1] {
+    ft = def_of(ds, 0).attrs[f]!.typedef[0];
+    if ft is TA { ft = with_deps(ft, [f, f]); }
+    s += kind(ft);
+  }
+  s
+}
+
+fn without_the_check(ds: vector<D>, k: integer) -> integer {
+  ft = def_of(ds, 0).attrs[0].typedef[0];
+  if ft is TA { ft = with_deps(ft, [k]); }
+  kind(ft)
+}
+
+fn an_owning_check(k: integer) -> integer {
+  ft = mk(k)!;
+  if ft is TA { ft = with_deps(ft, [k]); }
+  kind(ft)
+}
+
+fn test_rebound_when_it_matches() {
+  ds = defs();
+  assert(rebound_when_it_matches(ds, 4) == 11, "{rebound_when_it_matches(ds, 4)}");
+}
+
+fn test_rebound_always() {
+  ds = defs();
+  assert(rebound_always(ds, 4) == 12, "{rebound_always(ds, 4)}");
+}
+
+fn test_in_a_loop() {
+  ds = defs();
+  assert(in_a_loop(ds) == 19, "{in_a_loop(ds)}");
+}
+
+fn test_without_the_check() {
+  ds = defs();
+  assert(without_the_check(ds, 4) == 11, "{without_the_check(ds, 4)}");
+}
+
+fn test_an_owning_check() {
+  assert(an_owning_check(2) == 21, "{an_owning_check(2)}");
+}

@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LIFT_VIEW_GUARD — the switch frees the local as an owner on the path where it views the lifted call's store, which the lift frees too
+//
+// @FR-H-Free / @FR-H-FreeTwice: a store is released once, by its owner.  A branch arm that reads
+// a field out of a call's answer (`if c { mk(5).x } else { fresh(6) }`) has that answer held by
+// a temporary the frame frees, so a local bound from the branch VIEWS the temporary's store on
+// that path and OWNS the fresh one on the other.  It is freed only on the path where it owns —
+// at its scope end and when it is rebound — and the temporary frees the other.  Both used to
+// free the viewed store (the self-hosted elaborator's `coalesce`, on both backends); a single
+// arm `d = mk(5).x` was always right, because there the local's dep names the temporary.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the branch (`if`, `match`); which arms view (one, both); a rebind
+//                        after the view path; a loop that rebinds every pass.
+// Axes it HOLDS FIXED:   the field is a record of heap enums; the answer is read once.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+
+enum N { NA { k: integer }, NB { s: text } }
+enum T { TA { n: integer }, TV { inner: integer } }
+struct Ex { code: N, tp: T }
+struct Built { x: Ex, items: vector<N>, elem: T }
+
+fn mk(k: integer) -> Built { Built { x: Ex { code: NA { k: k }, tp: TA { n: k } }, items: [NA { k: 1 }], elem: TA { n: 0 } } }
+fn fresh(k: integer) -> Ex { Ex { code: NB { s: "e{k}" }, tp: TA { n: k } } }
+fn kn(n: N) -> integer { match n { NA { k } => k, NB { s } => len(s) } }
+
+fn one_arm_views(c: boolean) -> integer {
+  d = if c { mk(5).x } else { fresh(6) };
+  kn(d.code)
+}
+
+fn a_match_arm_views(sel: integer, c: boolean) -> integer {
+  d = match sel { 1 => if c { mk(5).x } else { fresh(6) }, _ => fresh(70) };
+  kn(d.code)
+}
+
+fn both_arms_view(c: boolean) -> integer {
+  d = if c { mk(5).x } else { mk(6).x };
+  kn(d.code)
+}
+
+fn rebound_after(c: boolean) -> integer {
+  d = if c { mk(5).x } else { fresh(6) };
+  first = kn(d.code);
+  d = fresh(900);
+  first * 10 + kn(d.code)
+}
+
+fn in_a_loop(c: boolean) -> integer {
+  s = 0;
+  d = fresh(1);
+  for i in 0..3 {
+    d = if c && i != 1 { mk(5 + i).x } else { fresh(6 + i) };
+    s += kn(d.code) + i * 100;
+  }
+  s
+}
+
+fn test_one_arm_views() {
+  assert(one_arm_views(true) == 5 && one_arm_views(false) == 2, "{one_arm_views(true)} {one_arm_views(false)}");
+}
+
+fn test_a_match_arm_views() {
+  assert(a_match_arm_views(1, true) == 5 && a_match_arm_views(1, false) == 2 && a_match_arm_views(2, true) == 3,
+    "{a_match_arm_views(1, true)} {a_match_arm_views(1, false)} {a_match_arm_views(2, true)}");
+}
+
+fn test_both_arms_view() {
+  assert(both_arms_view(true) == 5 && both_arms_view(false) == 6, "{both_arms_view(true)} {both_arms_view(false)}");
+}
+
+fn test_rebound_after_the_view_path() {
+  assert(rebound_after(true) == 54 && rebound_after(false) == 24, "{rebound_after(true)} {rebound_after(false)}");
+}
+
+fn test_in_a_loop() {
+  assert(in_a_loop(true) == 314 && in_a_loop(false) == 306, "{in_a_loop(true)} {in_a_loop(false)}");
+}
