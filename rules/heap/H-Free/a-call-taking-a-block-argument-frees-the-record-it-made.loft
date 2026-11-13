@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_BLOCK_ARG_ROOT — the switch reads a block argument as an unnameable mint, the copy of the answer loses its source-free, and the record the callee made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `last(match code { NdBlock { block } =>
+// block[0].ops, _ => [] })` passes a block: a `match` arm's projection or a vector literal.  The
+// copy of `last`'s answer frees the store the answer came in unless an argument holds it, and
+// after the call the block's value is named by its last operator — the literal's work variable
+// or the projection's root.  Read as unnameable, the copy kept the fresh `NdNull` `last` made on
+// an empty vector (the self-hosted elaborator's `text_instance_carried`; main, both backends).
+// An answer that IS an element of the argument stays protected.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the block (a `match` arm, an `if` of a literal and a field, a block
+//                        with a statement first); what the callee answers (fresh, an element of
+//                        a literal, an element of a field).
+// Axes it HOLDS FIXED:   the argument is a vector of records.
+//
+// @ARMED: LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+
+enum Node { NdNull, NdInt { n: integer }, NdSpan { pos: integer, inner: Node }, NdBlock { block: vector<Bl> } }
+struct Bl { operators: vector<Node>, k: integer }
+struct Box { items: vector<Node> }
+fn mk(k: integer) -> Node { NdInt { n: k } }
+fn last(ops: vector<Node>) -> Node { if len(ops) == 0 { NdNull } else { ops[-1] } }
+fn first(ops: vector<Node>, d: Node) -> Node { if len(ops) == 0 { d } else { ops[0] } }
+fn unspan(n: Node) -> Node { match n { NdSpan { inner } => unspan(inner), _ => n } }
+fn sz(n: Node) -> integer { match n { NdInt { n } => n, NdSpan { inner } => 100 + sz(inner), NdNull => -1, _ => 0 } }
+fn carried(code: Node) -> integer {
+  tail = unspan(last(match code { NdBlock { block } => block[0].operators, _ => [] }));
+  sz(tail)
+}
+fn lit(k: integer) -> integer { t = last(if k > 0 { [mk(k), mk(k + 1)] } else { [] }); sz(t) }
+fn held(b: Box, k: integer) -> integer { t = first(if k > 0 { b.items } else { [mk(9)] }, mk(5)); sz(t) }
+fn blk(b: Box, k: integer) -> integer { t = last({ x = k * 2; if x > 2 { b.items } else { [mk(x)] } }); sz(t) }
+
+fn test_a_match_argument() {
+  a = NdBlock { block: [Bl { operators: [NdInt { n: 1 }, NdSpan { pos: 3, inner: NdInt { n: 7 } }], k: 0 }] };
+  b = NdBlock { block: [Bl { operators: [], k: 0 }] };
+  c = NdInt { n: 4 };
+  t = 0;
+  for _ in 0..3 { t += carried(a) * 100 + carried(b) * 10 + carried(c); }
+  assert(t == 2067, "{t}");
+}
+
+fn test_literal_field_and_block_arguments() {
+  b = Box { items: [mk(3), mk(4)] };
+  s = 0;
+  for k in 0..4 { s += lit(k) * 10000 + held(b, k) * 100 + blk(b, k); }
+  assert(s == 81810 && sz(b.items[0]) == 3 && sz(b.items[1]) == 4, "{s}");
+}
