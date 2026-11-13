@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_PROTECT_AFTER_CALL — the switch protects the arguments' stores from before the call, so a callee that re-points a `&` argument and answers the store it put there has that store freed under the argument
+//
+// @FR-O-Move: a caller that COPIES a call's answer into a store of its own then releases the
+// answer's store, except a store one of the call's reference arguments still holds.  "Still"
+// is the rule: the arguments are read after the call.  A callee can re-point a `&` argument,
+// so the store the argument held before the call may be the one it answers (it must be
+// released) and the store the argument holds after it may be the one it answers (it must
+// not be).  The C writer compares against the arguments after the call; the interpreter's
+// bracket protected what they held before it, which freed `w`'s new store under `w` when
+// the callee answered it (`h`: `70 0` and a double free) and leaked the old one when the
+// callee answered that.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  what the callee answers (the argument's new store, its old store,
+//                        a fresh copy of it); the bind (first, rebind, in a loop); how many
+//                        `&` arguments it re-points (one, two swapped); whether the re-point
+//                        is on every path.
+// Axes it HOLDS FIXED:   the argument is a whole record local; the answer is bound to a local.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+
+struct P { n: integer }
+
+fn answers_the_new(p: &P) -> P { p = P { n: p.n + 1 }; p }
+fn answers_the_old(p: &P) -> P { y = p; p = P { n: p.n + 1 }; y }
+fn swaps(a: &P, b: &P) -> P { t = a; a = b; b = P { n: t.n + 10 }; t }
+fn maybe(p: &P, c: boolean) -> P { y = p; if c { p = P { n: p.n + 1 }; } y }
+
+fn test_the_answer_is_the_arguments_new_store() {
+  w = P { n: 3 };
+  r = answers_the_new(w);
+  r.n = 70;
+  assert(r.n == 70 && w.n == 4, "the copy is its own: {r.n} {w.n}");
+}
+
+fn test_the_answer_is_the_arguments_old_store() {
+  w = P { n: 3 };
+  r = answers_the_old(w);
+  assert(r.n == 3 && w.n == 4, "first bind: {r.n} {w.n}");
+  q = P { n: 0 };
+  t = q.n;
+  q = answers_the_old(w);
+  assert(t == 0 && q.n == 4 && w.n == 5, "rebind: {q.n} {w.n}");
+}
+
+fn test_two_arguments_swapped() {
+  x = P { n: 1 };
+  y = P { n: 2 };
+  r = swaps(x, y);
+  assert(r.n == 1 && x.n == 2 && y.n == 11, "{r.n} {x.n} {y.n}");
+}
+
+fn test_a_re_point_on_one_path() {
+  w = P { n: 3 };
+  r = maybe(w, true);
+  u = maybe(w, false);
+  assert(r.n == 3 && u.n == 4 && w.n == 4, "{r.n} {u.n} {w.n}");
+}
+
+fn test_in_a_loop() {
+  w = P { n: 3 };
+  s = 0;
+  for i in 0..3 {
+    r = answers_the_old(w);
+    s += r.n + i;
+  }
+  assert(s == 15 && w.n == 6, "{s} {w.n}");
+}
