@@ -138,6 +138,9 @@ class Result:
     __slots__ = ("cell", "mode", "ok", "secs", "output", "store_limit")
 
 
+DOUBLE_FREE = re.compile(r"\[double-free\] ([1-9][0-9]*) re-free|\[double-free\] store #[0-9]+ freed again")
+
+
 def run_cell(loft, cell, mode, timeout):
     with open(cell, encoding="utf-8", errors="replace") as fh:
         src = fh.read()
@@ -169,6 +172,11 @@ def run_cell(loft, cell, mode, timeout):
                            errors="replace", timeout=timeout + 10)
         r.ok = p.returncode == 0
         r.output = p.stdout + p.stderr
+        # A cell that arms `LOFT_DOUBLE_FREE` asks the census: a re-free of an already-free
+        # slot is a free the compiler emitted twice, refused only because nothing took the slot
+        # in between — the defect, which the exit code does not carry.
+        if env.get("LOFT_DOUBLE_FREE") and DOUBLE_FREE.search(r.output):
+            r.ok = False
     except subprocess.TimeoutExpired as e:
         r.ok = False
         r.output = f"TIMEOUT after {timeout + 10}s\n" + (e.stdout or "") + (e.stderr or "")

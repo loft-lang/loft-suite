@@ -11,9 +11,12 @@
 // CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
 // HOLDS: every cell, on every backend.
 // Axes this file MOVES:  how the arm ends (a fresh call, a local's field, a parameter's field,
-//                        a whole owned local, a whole parameter, a nullable local, null).
+//                        a whole owned local, a whole parameter, a nullable local, null, a
+//                        struct literal — whose record is the literal buffer's, freed once).
 // Axes it HOLDS FIXED:   each arm leaves early on the same test; the result is `Node?`.
 //
+// @ARMED: LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1 — a literal arm's record freed by the return
+//   source and by the literal's buffer is a re-free of an already-free slot, reported only so.
 // @falsified-at: pending
 
 enum Node { NdNull, NdInt { n: integer }, NdBool { b: boolean }, NdIf { cond: Node, t: Node, f: Node } }
@@ -54,4 +57,29 @@ fn test_the_early_exits() {
   n = 0;
   for k in 101..115 { if pc(p, q, k) == null { n += 1; } }
   assert(n == 14 && sz(p.code) == 3 && sz(q) == 4, "{n}");
+}
+
+enum Lit { LNull, LInt { n: integer }, LIns { items: vector<Lit> } }
+struct LEx { code: Lit, tp: integer }
+fn lsz(n: Lit) -> integer { match n { LInt { n } => n, LIns { items } => { s = 100; for i in items { s += lsz(i); } s }, _ => 0 } }
+fn lmk(k: integer) -> Lit { LInt { n: k } }
+fn lit_arms(x: Lit, k: integer) -> Lit? {
+  match x {
+    LIns { items } => { if len(items) == 0 { return null; } items[0] = lmk(k); LIns { items: items } },
+    LInt { n } => { if n > 100 { return null; } LInt { n: n + k } },
+    _ => { r = LEx { code: lmk(k * 3), tp: 0 }; r.code }
+  }
+}
+
+fn test_an_arm_ending_in_a_literal() {
+  a = LIns { items: [lmk(1), lmk(2)] };
+  b = LInt { n: 5 };
+  c = LNull;
+  s = 0;
+  for k in 0..4 {
+    p = lit_arms(a, k); if p != null { s += lsz(p!); }
+    q = lit_arms(b, k); if q != null { s += lsz(q!); }
+    r = lit_arms(c, k); if r != null { s += lsz(r!); }
+  }
+  assert(s == 458 && lsz(b) == 5, "{s}");
 }
