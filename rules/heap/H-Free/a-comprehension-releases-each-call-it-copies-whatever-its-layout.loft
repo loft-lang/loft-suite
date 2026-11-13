@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_COMP_LINE_PEEL — the switch keeps a comprehension body that starts a new source line in its block, so the slot reads the call's declared borrow and leaks every store the call made
+//
+// @FR-H-Free: every exit releases what the frame owns there.  A comprehension whose body is
+// one call (`[for x in es { f(x, d) }]`) owns each answer: it copies it into the element and
+// releases it.  The call here answers its argument on one arm and a store it makes on the
+// others, so the slot must take the copy-or-adopt.  Written inside a function that spans
+// several lines, the body carried a line marker, read as a second operator, and the slot
+// kept the call's borrow: every store the call made leaked, one per element (the self-hosted
+// elaborator's `with_deps` on a tuple type).  The layout of the source is no part of the
+// meaning: this file keeps the multi-line shape on purpose.
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  which arm the call answers through (its argument, a store it made,
+//                        a nested call); a recursive call; the comprehension in a literal field
+//                        and bound to a local first.
+// Axes it HOLDS FIXED:   the body is one call on the comprehension's own line.
+//
+// @falsified-at: pending
+
+enum T { TInt, TText { dep: vector<integer> }, TRef { n: integer, dep: vector<integer> }, TTuple { elems: vector<T> }, TOpt { inner: T } }
+
+fn with_deps(t: T, deps: vector<integer>) -> T {
+  match t {
+    TText { dep: _ } => TText { dep: deps },
+    TRef { n } => TRef { n: n, dep: deps },
+    TOpt { inner } => TOpt { inner: with_deps(inner, deps) },
+    TTuple { elems } => TTuple { elems: [for x in elems { with_deps(x, deps) }] },
+    _ => t
+  }
+}
+
+fn bound_first(es: vector<T>, deps: vector<integer>) -> vector<T> {
+  v = [for x in es { with_deps(x, deps) }];
+  v
+}
+
+fn sz(t: T) -> integer {
+  match t {
+    TInt => 1,
+    TText { dep } => 10 + len(dep),
+    TRef { n, dep } => 100 * n + len(dep),
+    TTuple { elems } => { s = 1000; for e in elems { s += sz(e); } s },
+    TOpt { inner } => 5 + sz(inner)
+  }
+}
+
+fn test_in_a_literal_field_recursively() {
+  t = TTuple { elems: [TText { dep: [] }, TRef { n: 2, dep: [] }, TInt, TOpt { inner: TText { dep: [1] } }] };
+  s = 0;
+  for i in 0..10 { s += sz(with_deps(t, [i, 1])); }
+  assert(s == 12320, "{s}");
+}
+
+fn test_bound_to_a_local_first() {
+  s = 0;
+  for e in bound_first([TText { dep: [] }, TInt, TRef { n: 3, dep: [7] }], [4, 5, 6]) { s += sz(e); }
+  assert(s == 13 + 1 + 303, "{s}");
+}
