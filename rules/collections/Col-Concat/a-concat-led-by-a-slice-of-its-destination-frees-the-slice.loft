@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_SELF_SLICE_DEPS — the switch types the destination with the slice's scratch store, which the exit then never frees
+//
+// @FR-Col-Concat: `a + b` is a new vector and neither operand changes.  A concatenation whose
+// first operand is a slice of its own destination (`out = out[0..at] + [g] + out[at..]`, an
+// insertion) copies that slice into a scratch store and appends the copy into the
+// destination's own store.  Typed with the slice's deps, the destination named the scratch
+// store as its own, and no exit freed it: one vector per call (the self-hosted elaborator's
+// `sorted_groups`).
+//
+// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  which operand is the slice (first, first and last, last); the
+//                        destination (a local returned, a local read in a loop).
+// Axes it HOLDS FIXED:   the element is a record with a text field.
+//
+// @falsified-at: pending
+
+struct G { name: text, en: integer }
+
+fn sorted_groups(groups: vector<G>) -> vector<G> {
+  out: vector<G> = [];
+  for g in groups {
+    at = len(out);
+    for o in out {
+      if at == len(out) && (g.name < o.name || (g.name == o.name && g.en < o.en)) {
+        at = o#index;
+      }
+    }
+    out = out[0..at] + [g] + out[at..len(out)];
+  }
+  out
+}
+
+fn first_only(groups: vector<G>) -> integer {
+  out: vector<G> = [];
+  for g in groups { out = out[0..len(out)] + [g]; }
+  len(out)
+}
+
+fn last_only(groups: vector<G>) -> integer {
+  out: vector<G> = [];
+  for g in groups { out = [g] + out[0..len(out)]; }
+  len(out)
+}
+
+fn walk(groups: vector<G>) -> text {
+  s = "";
+  for x in sorted_groups(groups) { s += "{x.name}{x.en} "; }
+  s
+}
+
+fn test_an_insertion_by_slices() {
+  for r in 0..3 {
+    s = walk([G { name: "b", en: 1 }, G { name: "a", en: 2 }, G { name: "a", en: 0 }]);
+    assert(s == "a0 a2 b1 ", s);
+  }
+}
+
+fn test_the_slice_first_or_last() {
+  gs = [G { name: "x", en: 1 }, G { name: "y", en: 2 }];
+  assert(first_only(gs) == 2 && last_only(gs) == 2, "{first_only(gs)} {last_only(gs)}");
+}
