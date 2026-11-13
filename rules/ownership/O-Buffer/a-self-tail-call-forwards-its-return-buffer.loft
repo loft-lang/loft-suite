@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_TAIL_JUMP_FREES_BUFFER — the switch keeps the buffer's return-time release on the tail jump and the entry snapshot inside the loop.
+//
+// `@FR-O-Buffer`: a self tail call becomes a loop, and its jump hands the function's own return
+// buffer to the next pass as that pass's buffer.  `proof` builds its fallback `none` in the
+// buffer (renamed to it), then tail-calls itself.  On a null buffer the first pass allocates
+// into it; the jump must neither release that store nor take the entry snapshot again, or the
+// next pass writes into a freed record and the final release declines a store nobody else
+// frees.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: strict stores and the leak gate (the values read right either way).
+
+enum Nd {
+  NBool { b: boolean },
+  NVar { n: integer },
+  NSpan { inner: Nd },
+  NIf { cond: Nd, t: Nd, f: Nd }
+}
+
+struct DivProof {
+  v: integer,
+  then: boolean
+}
+
+fn is_true(t: Nd) -> boolean {
+  match t {
+    NBool { b } => b,
+    _ => false
+  }
+}
+
+fn proof(test: Nd) -> DivProof {
+  none = DivProof { v: -1, then: false };
+  match test {
+    NSpan { inner } => proof(inner),
+    NVar { n } => DivProof { v: n, then: true },
+    NIf { cond, t, f: _ } => if is_true(t) { proof(cond) } else { none },
+    _ => none
+  }
+}
+
+fn test_a_jump_then_a_fresh_answer() {
+  a = proof(NSpan { inner: NIf { cond: NVar { n: 4 }, t: NBool { b: true }, f: NBool { b: false } } });
+  assert(a.v == 4 && a.then, "a {a.v}");
+}
+
+fn test_the_buffer_itself_answered() {
+  b = proof(NIf { cond: NVar { n: 5 }, t: NBool { b: false }, f: NBool { b: false } });
+  assert(b.v == -1 && !b.then, "b {b.v}");
+}
+
+fn test_two_jumps() {
+  c = proof(NSpan { inner: NSpan { inner: NVar { n: 6 } } });
+  assert(c.v == 6 && c.then, "c {c.v}");
+}
+
+fn test_jumps_into_the_buffer_answer() {
+  d = proof(NSpan { inner: NIf { cond: NBool { b: true }, t: NBool { b: true }, f: NVar { n: 1 } } });
+  assert(d.v == -1 && !d.then, "d {d.v}");
+}

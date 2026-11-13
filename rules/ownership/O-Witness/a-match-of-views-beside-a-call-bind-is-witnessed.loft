@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CHOICE_VIEW — the switch reads a `match` or `if` of views as no view, so the local is never mixed and is freed as an owner of the record it views.
+//
+// `@FR-O-Witness`: a local whose assignments mix ownership releases through its owner witness,
+// and a CHOICE whose arms view storage is a view like a plain field read.
+// `vt = match v.tp { TRv { inner } => inner, _ => v.tp }` views `v` on both paths; beside a bind
+// of `vt` from a call, the local owns on one path and views on the other.  Read as no view, the
+// choice left `vt` an owner: its exit free released `v`'s record, and `v`'s own free released it
+// again.  The same name bound inside an `if` arm that yields a value is the elaborator's shape:
+// the scope pass splits the two bindings, and they share one witness.
+//
+// Expected sums: `width` counts a leaf `TVec { n }` as n and a `TRv` as 10 plus its inner.
+// Built with w = 7, `v.tp` is `TRv { TVec 7 }` (17), its inner 7, `v.c` 5.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the assertions, the leak gate and strict stores.
+
+enum Tt {
+  TInt,
+  TRv { inner: Tt },
+  TVec { n: integer }
+}
+
+struct Ex {
+  c: integer,
+  tp: Tt
+}
+
+fn mk(c: integer, t: Tt) -> Ex {
+  Ex { c: c, tp: t }
+}
+
+fn wrap(t: Tt) -> Tt {
+  TRv { inner: t }
+}
+
+fn width(t: Tt) -> integer {
+  match t {
+    TInt => 1,
+    TRv { inner } => 10 + width(inner),
+    TVec { n } => n
+  }
+}
+
+fn split_names(w: integer) -> integer {
+  v = if w > 100 {
+    vt = wrap(TVec { n: w });
+    mk(5, vt)
+  } else {
+    mk(5, TRv { inner: TVec { n: w } })
+  };
+  vt = match v.tp { TRv { inner } => inner, _ => v.tp };
+  width(vt) + v.c
+}
+
+fn view_then_call(w: integer) -> integer {
+  v = mk(5, TRv { inner: TVec { n: w } });
+  vt = match v.tp { TRv { inner } => inner, _ => v.tp };
+  r = width(vt) + v.c;
+  if w > 100 {
+    vt = wrap(TVec { n: w });
+    r += width(vt);
+  }
+  r
+}
+
+fn if_of_views(w: integer) -> integer {
+  v = mk(5, TRv { inner: TVec { n: w } });
+  vt = if v.c > 0 { v.tp } else { v.tp };
+  r = width(vt) + v.c;
+  if w > 100 {
+    vt = wrap(TVec { n: w });
+    r += width(vt);
+  }
+  r
+}
+
+fn test_the_same_name_bound_in_a_value_arm_and_after_it() {
+  assert(split_names(7) == 12, "7: inner 7 + 5, got {split_names(7)}");
+  assert(split_names(200) == 205, "200: inner 200 + 5, got {split_names(200)}");
+}
+
+fn test_a_match_of_views_then_a_call() {
+  assert(view_then_call(7) == 12, "7: 7 + 5, got {view_then_call(7)}");
+  assert(view_then_call(200) == 415, "200: 205 + 210, got {view_then_call(200)}");
+}
+
+fn test_an_if_of_views_then_a_call() {
+  assert(if_of_views(7) == 22, "7: 17 + 5, got {if_of_views(7)}");
+  assert(if_of_views(200) == 425, "200: 215 + 210, got {if_of_views(200)}");
+}
