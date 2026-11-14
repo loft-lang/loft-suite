@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for this directory's qualified-call cell (`@FR-Disp-Hint`): two lone
+// definitions whose parameters give a hint — a `vector<integer>` for a bare literal, a
+// `fn(integer) -> integer` for an untyped lambda.  The cell beside it declares functions of
+// the same names with other parameters.  Run on its own it is a cell too: its own calls take
+// the hints.
+//
+// @falsified-at: none — a conformance guard; the library's own calls answered as hand-computed
+//   on the build that added it, interpret and native-c.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the answers.
+// HOLDS: the library's bare calls take their own definitions' hints.
+
+pub fn dh_count(v: vector<integer>) -> integer { len(v) * 100 }
+pub fn dh_apply(f: fn(integer) -> integer, x: integer) -> integer { f(x) }
+
+fn test_the_library_hints_its_own_calls() {
+  n = dh_count([4, 5]);
+  a = dh_apply(|x| { x * 3 }, 7);
+  assert(n == 200 && a == 21, "library alone: {n} {a}");
+}

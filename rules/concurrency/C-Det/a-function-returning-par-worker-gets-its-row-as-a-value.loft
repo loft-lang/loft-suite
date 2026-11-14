@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-C-Det` — a `par` worker that answers a FUNCTION is handed its row as every other worker
+// is: a primitive element as its value, a struct element as its reference.  On the interpreter
+// the function queue handed the element's reference whatever the worker declared, so a worker
+// that chose its answer by an integer row read pointer bits and chose the same function for
+// every row; both compiled backends were right.
+//
+// Axes it MOVES: the row's source and type (an integer range, a vector of integers, a vector
+// of structs — the one row a reference is right for), the thread count (1, 2, 8), and whether
+// the worker's choice depends on the row at all (the control, right before the fix).  Each cell
+// states its answer by hand: the rows' results as two-digit groups in row order.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 4fc5b305f (the installed main, 2026.11.20261113) — interpret fails the assert in
+//   `test_an_integer_range_row` ("range rows 0, 1, 2 on 1 threads: 151515"); `--native-c` passes
+//   there, as a backend-divergence guard's compiled row must.
+//   CHANNEL: the assert's VALUE, on the interpreter alone.
+//   HOLDS: `test_a_choice_that_ignores_the_row` passes on both trees — the control.
+
+struct RowS { n: integer }
+
+fn add5(x: integer) -> integer { x + 5 }
+fn add7(x: integer) -> integer { x + 7 }
+
+fn by_int(i: integer) -> fn(integer) -> integer { if i == 1 { add7 } else { add5 } }
+fn by_struct(r: RowS) -> fn(integer) -> integer { if r.n == 1 { add7 } else { add5 } }
+fn fixed(i: integer) -> fn(integer) -> integer { if i < 100000 { add5 } else { add5 } }
+
+fn test_an_integer_range_row() {
+  for t in [1, 2, 8] {
+    got = 0;
+    for i in 0..3 par(f = by_int(i), t) { got = got * 100 + f(10); }
+    assert(got == 151715, "range rows 0, 1, 2 on {t} threads: {got}");
+  }
+}
+
+fn test_an_integer_vector_row() {
+  rows = [1, 0, 1, 2];
+  for t in [1, 2, 8] {
+    got = 0;
+    for i in rows par(f = by_int(i), t) { got = got * 100 + f(10); }
+    assert(got == 17151715, "vector rows 1, 0, 1, 2 on {t} threads: {got}");
+  }
+}
+
+fn test_a_struct_row() {
+  rows = [RowS { n: 0 }, RowS { n: 1 }, RowS { n: 1 }];
+  for t in [1, 2, 8] {
+    got = 0;
+    for r in rows par(f = by_struct(r), t) { got = got * 100 + f(10); }
+    assert(got == 151717, "struct rows 0, 1, 1 on {t} threads: {got}");
+  }
+}
+
+fn test_a_choice_that_ignores_the_row() {
+  got = 0;
+  for i in 0..3 par(f = fixed(i), 2) { got = got * 100 + f(10); }
+  assert(got == 151515, "every row answers add5: {got}");
+}
+
+fn main() {
+  test_an_integer_range_row();
+  test_an_integer_vector_row();
+  test_a_struct_row();
+  test_a_choice_that_ignores_the_row();
+}
