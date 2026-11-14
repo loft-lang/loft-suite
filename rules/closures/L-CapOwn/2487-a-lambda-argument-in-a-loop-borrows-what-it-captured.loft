@@ -1,0 +1,119 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A lambda written as a call's argument inside a loop borrows what it captured: its record is
+// released with the statement, every pass, and the captured value is still the frame's.
+//
+// The closure record adopted the captured vector's store, as a closure that is its capture's
+// last holder does.  In a loop body that is wrong: the first pass's release freed the store
+// the second pass reads and the frame releases again (@FR-L-CapOwn, @FR-H-FreeTwice,
+// loft#2487).  A record built for an argument of a function that only CALLS that parameter
+// can be held nowhere past the statement, so it is confined to the pass like a lambda bound
+// to a loop-body local, and its cascade releases nothing.
+//
+// Axes this file MOVES:  the loop (`for`, `while`, nested); how many lambdas one body holds;
+//                        what is captured (a vector, a record); a capture assigned inside the
+//                        loop.
+// Axes it HOLDS FIXED:   the callee only calls its parameter (`each`).
+//
+// Controls, right throughout: the same lambda outside a loop, one bound before the loop, and
+// one bound to a loop-body local and called there.
+//
+// The second free is an error on both backends, so no instrument is needed to see it.
+//
+// @falsified-at: 5330b3690 — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: none.  The store records report it with the cure off
+//   (`LOFT_NO_ARGUMENT_CLOSURE_CONFINED=1`, `scripts/own_sweep.py --cell <this file> --oracle
+//   check-records`: CAUGHT).
+//   HOLDS: every channel the line above does not name is equal on BOTH trees.
+
+struct Box { n: integer }
+fn each(v: vector<integer>, f: fn(integer)) { for x in v { f(x); } }
+
+fn in_a_for() -> integer {
+  seen = [0, 0, 0];
+  for _ in 0..2 { each([1, 2], fn(x: integer) { seen[x] += 1; }); }
+  seen[1] * 10 + seen[2]
+}
+
+fn in_a_while() -> integer {
+  seen = [0, 0, 0];
+  k = 0;
+  while k < 3 { each([1], fn(x: integer) { seen[x] += 2; }); k += 1; }
+  seen[1]
+}
+
+fn two_lambdas() -> integer {
+  seen = [0, 0, 0];
+  for _ in 0..2 {
+    each([1], fn(x: integer) { seen[x] += 1; });
+    each([2], fn(x: integer) { seen[x] += 5; });
+  }
+  seen[1] * 100 + seen[2]
+}
+
+fn a_record_capture() -> integer {
+  b = Box { n: 1 };
+  for _ in 0..3 { each([4], fn(x: integer) { b.n += x; }); }
+  b.n
+}
+
+fn nested_loops() -> integer {
+  seen = [0, 0, 0];
+  for _ in 0..2 { for _ in 0..2 { each([1, 2], fn(x: integer) { seen[x] += 1; }); } }
+  seen[1] * 10 + seen[2]
+}
+
+fn assigned_in_the_loop() -> integer {
+  total = 0;
+  for k in 0..2 {
+    seen = [k, 0, 0];
+    each([1, 2], fn(x: integer) { seen[x] += 1; });
+    total += seen[0] * 100 + seen[1] * 10 + seen[2];
+  }
+  total
+}
+
+fn outside_a_loop() -> integer {
+  seen = [0, 0, 0];
+  each([1, 2], fn(x: integer) { seen[x] += 7; });
+  seen[1] + seen[2]
+}
+
+fn bound_before_the_loop() -> integer {
+  seen = [0, 0, 0];
+  f = fn(x: integer) { seen[x] += 1; };
+  for _ in 0..2 { each([1, 2], f); }
+  seen[1] * 10 + seen[2]
+}
+
+fn bound_in_the_loop() -> integer {
+  seen = [0, 0, 0];
+  for _ in 0..2 { g = fn(x: integer) { seen[x] += 3; }; g(1); }
+  seen[1]
+}
+
+fn test_a_for_loop() { r = in_a_for(); assert(r == 22, "for {r}"); }
+fn test_a_while_loop() { r = in_a_while(); assert(r == 6, "while {r}"); }
+fn test_two_lambdas_in_one_body() { r = two_lambdas(); assert(r == 210, "two {r}"); }
+fn test_a_captured_record() { r = a_record_capture(); assert(r == 13, "record {r}"); }
+fn test_nested_loops() { r = nested_loops(); assert(r == 44, "nested {r}"); }
+fn test_a_capture_assigned_in_the_loop() { r = assigned_in_the_loop(); assert(r == 122, "assigned {r}"); }
+fn test_the_controls() {
+  a = outside_a_loop();
+  assert(a == 14, "outside {a}");
+  b = bound_before_the_loop();
+  assert(b == 22, "bound before {b}");
+  c = bound_in_the_loop();
+  assert(c == 6, "bound in {c}");
+}
+
+fn main() {
+  test_a_for_loop();
+  test_a_while_loop();
+  test_two_lambdas_in_one_body();
+  test_a_captured_record();
+  test_nested_loops();
+  test_a_capture_assigned_in_the_loop();
+  test_the_controls();
+}
