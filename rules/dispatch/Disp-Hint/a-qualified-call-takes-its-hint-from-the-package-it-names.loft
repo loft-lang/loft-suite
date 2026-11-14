@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A QUALIFIED CALL TAKES ITS HINT FROM THE PACKAGE IT NAMES (`@FR-Disp-Hint`): a lone
+// definition keeps its hint, and the definition `disp_hint_fixture_lib::dh_count(…)` names is
+// the package's — never a function of the same name the calling program declares.  So a bare
+// literal builds at the package's parameter type and an untyped lambda reads the package's
+// `fn(…)` parameter, positional or named, while the program's own same-named functions keep
+// their own hints for the bare calls.
+//
+// Values hand-computed: `[4, 5]` → 2 elements, 200; `[4, 5, 6]` → 300; `|x| { x * 3 }` at 7
+// → 21; the program's `dh_count([DhRow])` → 1 + 1000; its `dh_apply("ab", 1)` → 2 + 1.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none yet — before the fix the literal cells were refused ("cannot store
+//   integer elements in a vector<DhRow>") and the lambda cell too ("Cannot infer type for
+//   lambda parameter"); `make falsify` records the receipt.
+// CHANNEL: the asserts (and the refusal, before the fix).
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: the bare calls of the program's own `dh_count` / `dh_apply` keep their hints.
+
+use disp_hint_fixture_lib;
+
+struct DhRow { n: text }
+
+fn dh_count(v: vector<DhRow>) -> integer { len(v) + 1000 }
+
+fn dh_apply(t: text, x: integer) -> integer { t.size() + x }
+
+fn test_a_literal_builds_at_the_packages_parameter() {
+  q = disp_hint_fixture_lib::dh_count([4, 5]);
+  assert(q == 200, "qualified literal: {q}");
+  b = dh_count([DhRow { n: "a" }]);
+  assert(b == 1001, "bare literal: {b}");
+}
+
+fn test_a_named_literal_builds_at_the_packages_parameter() {
+  q = disp_hint_fixture_lib::dh_count(v: [4, 5, 6]);
+  assert(q == 300, "qualified named literal: {q}");
+  b = dh_count(v: [DhRow { n: "a" }]);
+  assert(b == 1001, "bare named literal: {b}");
+}
+
+fn test_a_lambda_reads_the_packages_parameter() {
+  q = disp_hint_fixture_lib::dh_apply(|x| { x * 3 }, 7);
+  assert(q == 21, "qualified lambda: {q}");
+  b = dh_apply("ab", 1);
+  assert(b == 3, "bare text: {b}");
+}
+
+fn main() {
+  test_a_literal_builds_at_the_packages_parameter();
+  test_a_named_literal_builds_at_the_packages_parameter();
+  test_a_lambda_reads_the_packages_parameter();
+}
