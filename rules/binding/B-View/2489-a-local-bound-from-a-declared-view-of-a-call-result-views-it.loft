@@ -21,7 +21,7 @@
 //
 // The second free is an error on both backends, so no instrument is needed to see it.
 //
-// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-at: 5330b3690 — interpret exit 1 -> 0, native exit 1 -> 0
 //   ARMED: none.  The store records report it with the cure off (`LOFT_NO_LIFT_CALL_VIEW=1`,
 //   `scripts/own_sweep.py --cell <this file> --oracle check-records`: CAUGHT).
 //   HOLDS: every channel the line above does not name is equal on BOTH trees.
