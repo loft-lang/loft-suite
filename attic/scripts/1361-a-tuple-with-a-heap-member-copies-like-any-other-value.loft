@@ -159,7 +159,9 @@ fn destructure_param(p: (vector<integer>, integer)) -> integer {
   len(a) + b
 }
 
-fn test_destructure_from_parameter_views() {
+fn test_destructure_from_parameter_copies() {
   t = ([1, 2], 5);
-  assert(destructure_param(t) == 8, "off a borrowed base every member views (B-View-Base)");
+  // A by-value tuple parameter is the callee's own tuple (`@FR-F-ParamTuple`), so a destructure
+  // off it copies like one off a local, and the caller's tuple keeps its two elements.
+  assert(destructure_param(t) == 7 && len(t.0) == 2, "a destructure off the parameter copies");
 }
