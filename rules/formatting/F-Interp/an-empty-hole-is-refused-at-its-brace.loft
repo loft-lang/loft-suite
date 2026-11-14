@@ -18,5 +18,7 @@ fn test_an_empty_hole() {
 }
 
 fn test_a_doubled_pair_is_literal() {
-  assert("set {{}}" == "set " + "{" + "}", "set {{}}");
+  // `"{"` is not a literal brace: it opens a hole, so `"{" + "}"` is ONE text whose hole is the
+  // expression `" + "`.  A literal brace is doubled on both sides.
+  assert("set {{}}" == "set " + "{{" + "}}", "set {{}}");
 }
