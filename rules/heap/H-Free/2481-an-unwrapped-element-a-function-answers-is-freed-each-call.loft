@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_NCR_CALL_OWNS — the `!` discharge of the call's answer is read as a view, so the record the callee copied it into is never freed
+//
+// @FR-H-Free: every exit releases what the frame owns.  `t = get(ts, i)!` where
+// `get(ts: vector<S>, i) -> S? { ts[i] }`: the element comes back through the call's buffer as a
+// copy, and the `!` discharge hands that copy to `t`, which owns it.  Read as a view of `ts`, it
+// was never released: one store per call, on both backends (loft#2481, main before #2480).  The
+// null-tested spelling and an element read without a function released it already.
+//
+// CHANNEL: the values (hand-computed) and the leak gate.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the element's fields (scalars only, a heap field); the spelling (`!`,
+//                        an explicit null test, an inline element read).
+// Axes it HOLDS FIXED:   the callee answers an element of its vector parameter.
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: pending
+// ARMED: LOFT_STRICT_STORES=1 — the leak is reported at exit.
+// HOLDS: every assertion passes on both trees.
+
+struct S { a: integer, v: integer }
+struct H { a: integer, v: vector<integer> }
+fn get(ts: vector<S>, i: integer) -> S? { ts[i] }
+fn geth(ts: vector<H>, i: integer) -> H? { ts[i] }
+fn unwrapped(ts: vector<S>, i: integer) -> integer { t = get(ts, i)!; t.a + t.v }
+fn tested(ts: vector<S>, i: integer) -> integer { t = get(ts, i); if t == null { return 0; } t!.a + t!.v }
+fn inline(ts: vector<S>, i: integer) -> integer { t = ts[i]!; t.a + t.v }
+fn heap(ts: vector<H>, i: integer) -> integer { t = geth(ts, i)!; t.a + len(t.v) }
+
+fn test_each_spelling_releases_the_copy() {
+  ts: vector<S> = [S { a: 1, v: 1 }, S { a: 2, v: 2 }];
+  hs: vector<H> = [H { a: 1, v: [1, 2] }, H { a: 2, v: [3] }];
+  s = 0;
+  for i in 0..50 { s += unwrapped(ts, i % 2) + tested(ts, i % 2) * 1000 + inline(ts, i % 2) * 1000000 + heap(hs, i % 2) * 1000000000; }
+  // each kind sums 25 * 2 + 25 * 4 = 150; heap: 25 * 3 + 25 * 3 = 150
+  assert(s == 150150150150, "{s}");
+}
