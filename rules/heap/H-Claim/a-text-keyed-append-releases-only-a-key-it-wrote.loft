@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `c += [R { key: t, … }]` into a collection keyed by a text claims the element, writes the
+// key and files it.  Writing a key releases the text the key field held before, as
+// `keys::set_key` does; a claim is not zeroed (`@FR-H-Claim`), so the claimed element's key
+// field must start as no text, or the release frees whatever record number the slot held
+// last — a record some other value may own.
+//
+// Axes it MOVES: the key's source (a variable, a format), a key that repeats (the second
+// append replaces the first element), and a claim reused after the elements were removed.
+// Every value is hand-computed.
+//
+// @falsified-at: none — the defect moves no value in a plain run: the C build with
+//   `-DLOFT_POISON_CLAIM` is its channel (`scripts/c_sweep.py --poison`), where the release
+//   reads the poisoned key field and the program faults before its first line.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+
+struct Word96 { word: text, count: integer }
+struct Words96 { words: hash<Word96[word]>, notes: vector<text> }
+
+fn a_variable_key_with_a_repeat() {
+  ws = ["apple", "pear", "repeat", "fig", "repeat", "plum"];
+  h = Words96 { words: [], notes: [] };
+  for w in ws { h.words += [Word96 { word: w, count: len(w) }]; }
+  n = 0;
+  for e in h.words { n += e.count; }
+  got = "{len(h.words)} {n} {h.words["repeat"].count} {h.words["fig"].word}";
+  assert(got == "5 22 6 fig", "a variable key: {got}");
+}
+
+fn a_claim_reused_after_removal() {
+  ws = ["apple", "pear", "repeat", "fig", "repeat", "plum"];
+  h = Words96 { words: [], notes: [] };
+  for w in ws { h.words += [Word96 { word: w, count: len(w) }]; }
+  for w in ws { h.words[w] = null; }
+  for w in ws { h.notes += ["note-{w}"]; }
+  for w in ws { h.words += [Word96 { word: "{w}!", count: len(w) * 10 }]; }
+  n = 0;
+  for e in h.words { n += e.count; }
+  got = "{len(h.words)} {n} {h.words["fig!"].count} {h.notes[2]} {h.notes[5]}";
+  assert(got == "5 220 30 note-repeat note-plum", "a reused claim: {got}");
+}
+
+
+fn main() {
+  a_variable_key_with_a_repeat();
+  a_claim_reused_after_removal();
+}
