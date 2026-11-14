@@ -1,0 +1,115 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A local bound from a DECLARED view of a call's result views that result: the store is
+// released once, by the temporary that holds the call's answer.
+//
+// `fn field(self: const JsonValue, name: text) -> JsonValue[self]` says its answer lies in
+// `self`'s store.  With `self` a variable the parser gives the bound local that dependency;
+// with `self` a call (`json_parse(text).field("terrain")`) there was no variable to name when
+// the local was typed, so it was typed an owner, and after the call was lifted into a
+// temporary both released the parsed store (@FR-B-View, @FR-H-FreeTwice, loft#2489).
+//
+// Axes this file MOVES:  the view (`field`, a chain of two, `item`); how often the local is
+//                        bound (once; twice, the second bind from another parse); a loop that
+//                        parses every round.
+// Axes it HOLDS FIXED:   the standard library's JSON accessors as the declared views.
+//
+// Controls: `bound_first` binds the parsed value to a name before reading it, which was right
+// throughout; `user_fn` answers a record through a function WITH a loft body, whose bind owns
+// its answer (a view there would leave the copy unfreed).
+//
+// The second free is an error on both backends, so no instrument is needed to see it.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: none.  The store records report it with the cure off (`LOFT_NO_LIFT_CALL_VIEW=1`,
+//   `scripts/own_sweep.py --cell <this file> --oracle check-records`: CAUGHT).
+//   HOLDS: every channel the line above does not name is equal on BOTH trees.
+
+struct Inner { n: integer }
+struct Outer { inner: Inner }
+fn mk(n: integer) -> Outer { Outer { inner: Inner { n: n } } }
+fn inner_of(o: Outer) -> Inner { o.inner }
+
+fn one(text: text) -> float {
+  t = json_parse(text).field("terrain");
+  t.field("storey").as_number()
+}
+
+fn chain(text: text) -> float {
+  t = json_parse(text).field("terrain").field("storey");
+  t.as_number()
+}
+
+fn element(text: text) -> integer {
+  t = json_parse(text).item(1);
+  t.as_long() as integer
+}
+
+fn twice(text: text) -> integer {
+  t = json_parse(text).field("a");
+  r = t.as_long() as integer;
+  t = json_parse("[7]").item(0);
+  r * 100 + (t.as_long() as integer)
+}
+
+fn in_a_loop() -> integer {
+  sum = 0;
+  for k in 1..4 {
+    t = json_parse("{{\"v\": {k}0}}").field("v");
+    sum += t.as_long() as integer;
+  }
+  sum
+}
+
+fn bound_first(text: text) -> float {
+  doc = json_parse(text);
+  t = doc.field("terrain");
+  t.field("storey").as_number()
+}
+
+fn user_fn(n: integer) -> integer {
+  i = inner_of(mk(n));
+  i.n
+}
+
+fn test_a_field_off_a_parse() {
+  r = one("{{\"terrain\": {{\"storey\": 2.6}}}}");
+  assert(r == 2.6, "one {r}");
+}
+
+fn test_a_chain_of_two_views() {
+  r = chain("{{\"terrain\": {{\"storey\": 3.5}}}}");
+  assert(r == 3.5, "chain {r}");
+}
+
+fn test_an_array_item() {
+  r = element("[10, 20, 30]");
+  assert(r == 20, "element {r}");
+}
+
+fn test_bound_twice() {
+  r = twice("{{\"a\": 3}}");
+  assert(r == 307, "twice {r}");
+}
+
+fn test_a_parse_every_round() {
+  r = in_a_loop();
+  assert(r == 60, "loop {r}");
+}
+
+fn test_the_controls() {
+  a = bound_first("{{\"terrain\": {{\"storey\": 4.25}}}}");
+  assert(a == 4.25, "bound first {a}");
+  b = user_fn(41);
+  assert(b == 41, "user fn {b}");
+}
+
+fn main() {
+  test_a_field_off_a_parse();
+  test_a_chain_of_two_views();
+  test_an_array_item();
+  test_bound_twice();
+  test_a_parse_every_round();
+  test_the_controls();
+}
