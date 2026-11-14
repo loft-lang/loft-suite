@@ -1,0 +1,171 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A function whose tail branch can `return` from inside an arm copies each arm into its return
+// buffer where the arm ends, so every record it handled is released exactly once.
+//
+// Copied WHOLE, such a branch was first bound to a local (so that the buffer was minted only on
+// the path that copies, loft#2384), and no one answer fitted that local: an arm ending in a
+// literal or in a call handed it a buffer the frame frees, an arm ending in a view handed it the
+// caller's record.  Freed, it freed a call arm's buffer a second time; not freed, its guarded
+// copy of a view arm was nobody's — one record per call (@FR-O-Complete, loft#2488).
+//
+// Axes this file MOVES:  what the arms end in (a literal beside a view; calls beside a view; a
+//                        match-bound field; a view of one of two fields); whether the match has
+//                        a `return` inside an arm; whether the caller drops or reads the answer.
+// Axes it HOLDS FIXED:   a record enum of one level, a match with a wildcard arm as the tail.
+//
+// The control is `c4`: no `return` inside the match, so its branch was always copied whole
+// without the local.  The last test writes through an answer and reads the source again: the
+// answer is a copy on every arm.
+//
+// Both gates are channels: `c2` was freed twice (an error on both backends), `c1`, `c3` and
+// `c6` leaked with every value right.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: none — the second free is an error on both backends with no instrument.  The leak
+//   half is read with `LOFT_NATIVE_LEAK_CHECK=1` / `LOFT_STRICT_STORES=1`, and the store
+//   records report both with the cure off (`LOFT_NO_RET_ARM_COPY=1`,
+//   `scripts/own_sweep.py --cell <this file> --oracle check-records`: CAUGHT).
+//   HOLDS: every channel the line above does not name is equal on BOTH trees.
+
+struct Spec { min: integer, max: integer }
+enum Ty { TyVoid, TySingle, TyInt { spec: Spec } }
+enum Node {
+  NdNum { v: integer },
+  NdFn { t: vector<Ty> },
+  NdOne { one: Ty },
+  NdTwo { a: vector<Ty>, b: vector<Ty> },
+}
+
+fn fresh(n: integer) -> Ty { TyInt { spec: Spec { min: n, max: n + 1 } } }
+
+// A view arm beside a literal arm.
+fn c1(node: Node) -> Ty {
+  match node {
+    NdNum { v } => { if v > 100 { return TyVoid; } TyInt { spec: Spec { min: 11, max: v } } }
+    NdFn { t } => t[0] ?? TyVoid,
+    _ => TySingle,
+  }
+}
+
+// A view arm beside calls, no literal arm.
+fn c2(node: Node) -> Ty {
+  match node {
+    NdNum { v } => { if v > 100 { return fresh(1); } fresh(v) }
+    NdFn { t } => t[0] ?? fresh(22),
+    _ => fresh(23),
+  }
+}
+
+// The view is a match-bound record field.
+fn c3(node: Node) -> Ty {
+  match node {
+    NdNum { v } => { if v > 100 { return TyVoid; } TyInt { spec: Spec { min: 31, max: v } } }
+    NdOne { one } => one,
+    _ => TySingle,
+  }
+}
+
+// The control: no `return` inside the match.
+fn c4(node: Node) -> Ty {
+  match node {
+    NdNum { v } => TyInt { spec: Spec { min: 41, max: v } },
+    NdFn { t } => t[0] ?? TyVoid,
+    _ => TySingle,
+  }
+}
+
+// A view of one of two fields.
+fn c6(node: Node) -> Ty {
+  match node {
+    NdNum { v } => { if v > 100 { return TyVoid; } TyInt { spec: Spec { min: 61, max: v } } }
+    NdTwo { a, b } => a[0] ?? b[0] ?? TyVoid,
+    _ => TySingle,
+  }
+}
+
+// One number per answer: 1000 * min + max for a `TyInt`, -1 void, -2 single.
+fn key(r: Ty) -> integer {
+  match r {
+    TyInt { spec } => 1000 * spec.min + spec.max,
+    TyVoid => -1,
+    TySingle => -2,
+  }
+}
+
+fn view_node() -> Node { NdFn { t: [TyInt { spec: Spec { min: 7, max: 71 } }] } }
+
+fn test_a_view_arm_beside_a_literal_arm() {
+  f = view_node();
+  e = NdFn { t: [] };
+  assert(key(c1(f)) == 7071, "view {key(c1(f))}");
+  assert(key(c1(e)) == -1, "absent {key(c1(e))}");
+  assert(key(c1(NdNum { v: 5 })) == 11005, "literal {key(c1(NdNum { v: 5 }))}");
+  assert(key(c1(NdNum { v: 500 })) == -1, "early {key(c1(NdNum { v: 500 }))}");
+  assert(key(c1(NdOne { one: TySingle })) == -2, "wildcard");
+}
+
+fn test_a_view_arm_beside_call_arms() {
+  f = view_node();
+  e = NdFn { t: [] };
+  assert(key(c2(f)) == 7071, "view {key(c2(f))}");
+  assert(key(c2(e)) == 22023, "absent {key(c2(e))}");
+  assert(key(c2(NdNum { v: 5 })) == 5006, "call {key(c2(NdNum { v: 5 }))}");
+  assert(key(c2(NdNum { v: 500 })) == 1002, "early {key(c2(NdNum { v: 500 }))}");
+  assert(key(c2(NdOne { one: TySingle })) == 23024, "wildcard");
+}
+
+fn test_a_match_bound_field_as_the_view() {
+  one = NdOne { one: TyInt { spec: Spec { min: 8, max: 81 } } };
+  assert(key(c3(one)) == 8081, "field {key(c3(one))}");
+  assert(key(c3(NdNum { v: 5 })) == 31005, "literal");
+  assert(key(c3(view_node())) == -2, "wildcard");
+}
+
+fn test_no_return_inside_the_match() {
+  assert(key(c4(view_node())) == 7071, "view");
+  assert(key(c4(NdFn { t: [] })) == -1, "absent");
+  assert(key(c4(NdNum { v: 5 })) == 41005, "literal");
+}
+
+fn test_a_view_of_one_of_two_fields() {
+  two = NdTwo { a: [], b: [TyInt { spec: Spec { min: 9, max: 91 } }] };
+  assert(key(c6(two)) == 9091, "second field {key(c6(two))}");
+  assert(key(c6(view_node())) == -2, "wildcard");
+}
+
+fn test_a_dropped_answer_is_released() {
+  f = view_node();
+  n = NdNum { v: 5 };
+  for _i in 0..10 {
+    c1(f);
+    c1(n);
+    c2(f);
+    c2(n);
+    c3(NdOne { one: TySingle });
+    c6(n);
+  }
+  assert(key(c1(f)) == 7071, "after the drops");
+}
+
+fn test_the_answer_is_a_copy() {
+  f = view_node();
+  r = c1(f);
+  match r {
+    TyInt { spec } => { spec.max = 999; }
+    _ => {}
+  }
+  assert(key(r) == 7999, "written {key(r)}");
+  assert(key(c1(f)) == 7071, "the source {key(c1(f))}");
+}
+
+fn main() {
+  test_a_view_arm_beside_a_literal_arm();
+  test_a_view_arm_beside_call_arms();
+  test_a_match_bound_field_as_the_view();
+  test_no_return_inside_the_match();
+  test_a_view_of_one_of_two_fields();
+  test_a_dropped_answer_is_released();
+  test_the_answer_is_a_copy();
+}
