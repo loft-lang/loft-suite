@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Ret`, loft#2511 — a function that hands up a stored `reference<T>` through `??`
+// (`h.link ?? S { n: 31 }`) returns a FRESH copy of the record, as the plain spelling does
+// (loft#1977).  `??` binds the read to its `__ncc` local and hands the local up on the arm where
+// it is set, so the return was not seen as reading a stored reference: the callee handed the
+// caller the holder's own record, and the caller's release freed the holder's store a second
+// time.  Each cell holds `S { n: 5 }` (`6` one field deeper) behind the reference; the fallback
+// records number 31..36 so each arm is told apart, and every expected value is worked from those.
+//
+// @falsified-at: 0de1794d4 — interpret exit 1 -> 0, interpret 2 assertion failures -> 0; native INERT.
+//   CHANNEL: the run under `LOFT_STORES=warn` — the control frees the holder's store twice on the
+//   interpreter at each set link, which fails the cell; the C backend's test runner hides it (its
+//   `main` run, not `--tests`, reports the double free).
+//   HOLDS: the null-link arms were clean on the control; the answers were right throughout.
+//   Score it again with `make falsify GUARD=<this file> REF=0de1794d4`.
+
+struct S { n: integer }
+struct H { link: reference<S>? }
+struct W { inner: H }
+
+fn rdm(s: S) -> integer { s.n }
+fn rf_or(h: H) -> S { h.link ?? S { n: 31 } }
+fn rf_nest(w: W) -> S { w.inner.link ?? S { n: 32 } }
+fn get_or(self: H) -> S { self.link ?? S { n: 33 } }
+fn rf_arm(h: H, k: integer) -> S { if k > 0 { h.link ?? S { n: 34 } } else { S { n: 35 } } }
+fn rf_ret(h: H, k: integer) -> S { if k > 0 { return h.link ?? S { n: 36 }; } S { n: 37 } }
+
+fn test_the_set_link_is_copied() {
+  f = H { link: S { n: 5 } };
+  assert_eq(rdm(rf_or(f)), 5, "or set");
+  b = rf_or(f);
+  b.n = 99;
+  assert_eq(f.link.n ?? -1, 5, "the holder keeps its record");
+  assert_eq(b.n, 99, "the copy took the write");
+}
+
+fn test_the_null_link_answers_the_fallback() {
+  g = H { };
+  assert_eq(rdm(rf_or(g)), 31, "or null");
+}
+
+fn test_one_field_deeper_and_as_a_method() {
+  w = W { inner: H { link: S { n: 6 } } };
+  e = W { inner: H { } };
+  f = H { link: S { n: 5 } };
+  g = H { };
+  assert_eq(rdm(rf_nest(w)), 6, "nest set");
+  assert_eq(rdm(rf_nest(e)), 32, "nest null");
+  assert_eq(rdm(f.get_or()), 5, "method set");
+  assert_eq(rdm(g.get_or()), 33, "method null");
+}
+
+fn test_in_an_arm_and_a_mid_body_return() {
+  f = H { link: S { n: 5 } };
+  g = H { };
+  assert_eq(rdm(rf_arm(f, 1)), 5, "arm set");
+  assert_eq(rdm(rf_arm(g, 1)), 34, "arm null");
+  assert_eq(rdm(rf_arm(f, 0)), 35, "arm else");
+  assert_eq(rdm(rf_ret(f, 1)), 5, "ret set");
+  assert_eq(rdm(rf_ret(g, 1)), 36, "ret null");
+  assert_eq(rdm(rf_ret(f, 0)), 37, "ret tail");
+}
+
+fn test_a_thousand_calls_release_each_copy() {
+  f = H { link: S { n: 5 } };
+  g = H { };
+  t = 0;
+  for _ in 0..1000 { t += rdm(rf_or(f)) + rdm(rf_or(g)); }
+  assert_eq(t, 36000, "1000 * (5 + 31)");
+  assert_eq(f.link.n ?? -1, 5, "the holder after the loop");
+}
