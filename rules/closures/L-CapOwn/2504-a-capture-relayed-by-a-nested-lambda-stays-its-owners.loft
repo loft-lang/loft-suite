@@ -1,0 +1,101 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-CapOwn` (loft#2504): a lambda nested in a lambda RELAYS its enclosing lambda's
+// capture — it reads it out of the enclosing closure record — so the record the inner lambda's
+// build makes points at a store that belongs further out, and only borrows it.  A write
+// through the capture in the enclosing lambda (`ok[0] = …`) left a variable of the name
+// behind, and the ownership test read that variable as "owned": the inner record adopted the
+// store, the enclosing lambda's end freed it, and the outer record freed it again — a double
+// free on the interpreter, a null read on the C backend, and on a second call the vector gone.
+//
+// Every expected value is computed by hand.
+//
+// Axes this file MOVES:  the enclosing lambda writes the capture or not; how many calls (once,
+//                        twice, fifty in a loop); the nesting depth (two, three); the inner
+//                        lambda escaping the enclosing one; the capture's kind (a vector, a
+//                        struct, a text); a relayed capture beside one of the enclosing
+//                        lambda's own locals.
+// Axes it HOLDS FIXED:   the capture is made by `main` and relayed through one `__closure`.
+//
+// @falsified-at: 39701d652 — interpret exit 1 -> 0, interpret 2 assertion failures -> 0, native
+//   exit 1 -> 0, native 4 assertion failures -> 0
+//   CHANNEL: assertions and the store freed twice, both backends.
+//   ARMED: nothing.
+//   WITNESS: on the control the interpreter stops on "a store was freed twice" and the C
+//     backend on `ok[0] is null` in the twice-called test.
+//   HOLDS: the not-written control answers 3 on both trees; no leak with the cure.
+//   RECORDS: `own_sweep.py --oracle check-records` reads CAUGHT on this shape with the cure off
+//     (`LOFT_NO_RELAY_CAPTURE_BORROW=1`), CLEAN with it.
+
+struct S2504 { n: integer, t: text }
+
+fn once2504(n: integer, f: fn(integer)) { f(n); }
+fn make2504(f: fn(integer) -> fn(integer), n: integer) -> fn(integer) { f(n) }
+
+fn test_a_written_capture_relayed_to_an_inner_lambda() {
+  ok = [0];
+  f = fn(n: integer) { ok[0] = ok[0]! + 10; once2504(n, fn(m: integer) { ok[0] = ok[0]! + m; }); };
+  once2504(1, f);
+  once2504(2, f);
+  assert(ok[0]! == 23, "twice: {ok[0]!}");
+}
+
+fn test_called_once_and_not_written_controls() {
+  a = [0];
+  f = fn(n: integer) { a[0] = a[0]! + 10; once2504(n, fn(m: integer) { a[0] = a[0]! + m; }); };
+  once2504(1, f);
+  b = [0];
+  g = fn(n: integer) { once2504(n, fn(m: integer) { b[0] = b[0]! + m; }); };
+  once2504(1, g);
+  once2504(2, g);
+  assert("{a[0]!} {b[0]!}" == "11 3", "controls: {a[0]!} {b[0]!}");
+}
+
+fn test_three_levels_and_a_loop() {
+  ok = [0];
+  f = fn(n: integer) {
+    ok[0] = ok[0]! + 100;
+    once2504(n, fn(m: integer) { once2504(m, fn(k: integer) { ok[0] = ok[0]! + k; }); });
+  };
+  once2504(1, f);
+  once2504(2, f);
+  lp = [0];
+  g = fn(n: integer) { lp[0] = lp[0]! + 1; once2504(n, fn(m: integer) { lp[0] = lp[0]! + m; }); };
+  for i in 0..50 { once2504(i, g); }
+  assert("{ok[0]!} {lp[0]!}" == "203 1275", "depth/loop: {ok[0]!} {lp[0]!}");
+}
+
+fn test_an_inner_lambda_that_escapes() {
+  ok = [0];
+  g = fn(n: integer) -> fn(integer) { ok[0] = ok[0]! + n; fn(m: integer) { ok[0] = ok[0]! + m * 10; } };
+  h = make2504(g, 1);
+  h(2);
+  h(3);
+  assert(ok[0]! == 51, "escape: {ok[0]!}");
+}
+
+fn test_a_struct_and_a_text_capture() {
+  s = S2504 { n: 0, t: "" };
+  t = "x";
+  f = fn(n: integer) {
+    s.n = s.n + 10;
+    t = "{t}y";
+    once2504(n, fn(m: integer) { s.n = s.n + m; s.t = "{s.t}{m}"; });
+  };
+  once2504(1, f);
+  once2504(2, f);
+  assert("{s.n} {s.t} {t}" == "23 12 xyy", "kinds: {s.n} {s.t} {t}");
+}
+
+fn test_a_relayed_capture_beside_an_own_local() {
+  ok = [0];
+  f = fn(n: integer) {
+    ok[0] = ok[0]! + 10;
+    own = [n, n];
+    once2504(n, fn(m: integer) { ok[0] = ok[0]! + m + len(own); });
+  };
+  once2504(1, f);
+  once2504(2, f);
+  assert(ok[0]! == 27, "mixed: {ok[0]!}");
+}
