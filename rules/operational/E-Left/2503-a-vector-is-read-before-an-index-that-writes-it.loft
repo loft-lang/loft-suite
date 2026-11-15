@@ -1,0 +1,82 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Left` for a VECTOR operand (loft#2503, the old D-op-3): in `v[set(v)]` the vector
+// is reduced to its value before the index runs, so the element read is the one the vector
+// held BEFORE `set` wrote it.  Both backends read the written vector: `[1, 2, 3]` replaced by
+// `[7, 8, 9]` through a `&` parameter answered 7 where the rule answers 1, silently.  A text
+// operand already took its value into a temp first; a vector now does the same, with a store
+// of its own, only when the index can write it.
+//
+// Every expected value is computed by hand from E-Left.
+//
+// Axes this file MOVES:  how the index writes the vector (replaced through `&`, an element
+//                        written through `&`, an element written through a plain parameter,
+//                        a push through a plain parameter); the element kind (integer, a
+//                        record with a text field); where the vector lives (a local, a `&`
+//                        parameter); a loop that writes it on every pass.
+// Axes it HOLDS FIXED:   the read is an index (`OpGetVector`); an index that only READS the
+//                        vector (`len`, a reading function) answers the same either way and
+//                        is the control.
+//
+// @falsified-at: 0b1c81580 — interpret exit 1 -> 0, interpret 4 assertion failures -> 0, native
+//   exit 1 -> 0, native 8 assertion failures -> 0
+//   CHANNEL: assertions, both backends.
+//   ARMED: nothing.
+//   WITNESS: on the control `v[swap2503(v)]` answers 7 where this file wants 1.
+//   HOLDS: `test_a_push_through_a_plain_parameter_lands` and the read-only controls answer the
+//     same on both trees; no leak or panic.
+
+struct P2503 { name: text, n: integer }
+
+fn swap2503(w: &vector<integer>) -> integer { w = [7, 8, 9]; 0 }
+fn poke2503(w: &vector<integer>) -> integer { w[0] = 7; 0 }
+fn plain_poke2503(w: vector<integer>) -> integer { w[0] = 5; 0 }
+fn push2503(w: vector<integer>) -> integer { w += [4]; 0 }
+fn bump2503(w: &vector<integer>) -> integer { w[0] = w[0] + 1; 0 }
+fn peek2503(w: vector<integer>) -> integer { len(w) - 3 }
+fn swap_p2503(w: &vector<P2503>) -> integer { w = [P2503 { name: "zz", n: 9 }]; 0 }
+fn pick2503(v: &vector<integer>) -> integer { v[swap2503(v)]! }
+
+fn test_a_replaced_vector_is_read_as_it_was() {
+  v = [1, 2, 3];
+  r = v[swap2503(v)];
+  assert("{r} {len(v)} {v[0]}" == "1 3 7", "replace: {r} {len(v)} {v[0]}");
+}
+
+fn test_an_element_written_by_the_index_is_read_as_it_was() {
+  v = [1, 2, 3];
+  r = v[poke2503(v)];
+  u = [1, 2, 3];
+  s = u[plain_poke2503(u)];
+  assert("{r} {v[0]} {s} {u[0]}" == "1 7 1 5", "element: {r} {v[0]} {s} {u[0]}");
+}
+
+fn test_a_push_through_a_plain_parameter_lands() {
+  v = [1, 2, 3];
+  r = v[push2503(v)];
+  assert("{r} {len(v)}" == "1 4", "push: {r} {len(v)}");
+}
+
+fn test_a_record_vector_and_a_parameter_vector() {
+  v = [P2503 { name: "aa", n: 1 }, P2503 { name: "bb", n: 2 }];
+  r = v[swap_p2503(v)];
+  w = [1, 2, 3];
+  q = pick2503(w);
+  assert("{r.name} {r.n} {len(v)} {v[0].name} {q} {w[0]}" == "aa 1 1 zz 1 7",
+    "record/param: {r.name} {r.n} {len(v)} {v[0].name} {q} {w[0]}");
+}
+
+fn test_each_pass_reads_the_vector_before_its_write() {
+  v = [10, 20];
+  t = 0;
+  for _i in 0..5 { t += v[bump2503(v)]; }
+  assert("{t} {v[0]}" == "60 15", "loop: {t} {v[0]}");
+}
+
+fn test_controls_an_index_that_only_reads() {
+  v = [1, 2, 3];
+  a = v[len(v) - 1];
+  b = v[peek2503(v)];
+  assert("{a} {b} {len(v)}" == "3 1 3", "reads: {a} {b} {len(v)}");
+}
