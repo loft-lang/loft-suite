@@ -8,6 +8,9 @@
 // it in a collection and a field.  Every value is computed by hand: each call `h(2)` or `f(2)`
 // adds 1 to `seen[2]`, and `count` adds its argument to the running total.
 //
+// @falsified-at: none — a conformance guard: these shapes answer the same on 39701d652, before
+//   the refusal of `2492-…`, and it holds them where the refusal must not reach.
+//
 // Axes this file MOVES: what the callee does (calls it, forwards it to a caller, captures it,
 //   keeps it),
 //   what is passed (a capturing lambda, a function name, a lambda capturing nothing).

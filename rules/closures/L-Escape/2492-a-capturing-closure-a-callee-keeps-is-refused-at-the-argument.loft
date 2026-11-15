@@ -15,6 +15,13 @@
 // Axes it HOLDS FIXED: each closure captures one vector.
 // The admitted side — a callee that only calls, a plain function kept — is `2492b-…` beside it.
 //
+// @falsified-at: 39701d652 — interpret exit 1 -> 0, interpret expectations FAIL/7 -> 0/7, native
+//   exit 1 -> 0, native expectations FAIL/7 -> 0/7
+//   CHANNEL: the compile diagnostic, one per argument.
+//   WITNESS: on 39701d652 the program compiles and runs: the interpreter stops on a corrupt
+//     reference, the C backend reads the capture as nothing.
+//   HOLDS: `2492b-…` beside it, the admitted shapes, on both trees.
+//
 // @EXPECT_ERROR: a capturing closure cannot be passed to 'keep' as 'f'
 // @EXPECT_ERROR: a capturing closure cannot be passed to 'keep' as 'f'
 // @EXPECT_ERROR: a capturing closure cannot be passed to 'set_one' as 'f'
