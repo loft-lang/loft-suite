@@ -1,0 +1,109 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-LongRef`, loft#2500 — a `reference<E>` field links a STRUCT-ENUM `E` as it links a
+// struct (loft#2163): every `vector<E>` is laid out by reference, an `array<E>` of record
+// slots.  The declaration alone does it — `Hit.at` is never used below — so every element
+// read must follow the slot to its record.  `v[i]` did; a `for` loop read the slot itself as
+// the record, its discriminant junk, so a `match` on the loop variable took no arm and the
+// program answered null with nothing said.
+//
+// Each cell walks a vector of known records and spells what it read; the expected text is the
+// literal it was built from: a local vector, a struct's field, a match binding's vector
+// (nested records), a reverse walk, a copy out to another vector, and a vector grown past its
+// first allocation (91 + (100 + … + 119) = 2281).
+//
+// @falsified-at: 0de1794d4 — interpret exit 1 -> 0, interpret 6 assertion failures -> 0,
+//   native exit 1 -> 0, native 12 assertion failures -> 0.
+//   CHANNEL: the asserts — every cell that walks with `for` fails on the control, both backends.
+//   WITNESS: `spell(v)` read "null" for "L31;C32/1;": the loop variable named the 4-byte slot.
+//   HOLDS: leak, panic and free-refusals are unmoved on both trees and both backends.
+//   Score it again with `make falsify GUARD=<this file> REF=0de1794d4`.
+
+enum Node {
+  Leaf { v: integer },
+  Call { op: integer, args: vector<Node> },
+}
+
+struct Hit { at: reference<Node> }
+
+struct Tree { code: vector<Node> }
+
+fn kind(n: Node) -> text {
+  match n {
+    Call { op, args } => "C{op}/{len(args)}",
+    Leaf { v } => "L{v}",
+  }
+}
+
+fn spell(v: vector<Node>) -> text {
+  r = "";
+  for a in v {
+    r += kind(a) + ";";
+  }
+  r
+}
+
+fn test_a_local_vector() {
+  v: vector<Node> = [Leaf { v: 31 }, Call { op: 32, args: [Leaf { v: 33 }] }];
+  assert_eq(spell(v), "L31;C32/1;", "for over a local vector");
+  assert_eq(kind(v[0]), "L31", "v[0]");
+  assert_eq(kind(v[1]), "C32/1", "v[1]");
+}
+
+fn test_a_field_vector() {
+  t = Tree { code: [Leaf { v: 41 }, Leaf { v: 42 }, Call { op: 43, args: [] }] };
+  r = "";
+  for a in t.code {
+    r += kind(a) + ";";
+  }
+  assert_eq(r, "L41;L42;C43/0;", "for over a struct's field");
+}
+
+fn test_a_match_binding_and_nested_records() {
+  n = Call { op: 61, args: [Call { op: 62, args: [Leaf { v: 63 }] }, Leaf { v: 64 }] };
+  r = "";
+  match n {
+    Call { op: _, args } => {
+      for a in args {
+        r += kind(a) + ";";
+      }
+    },
+    _ => {},
+  }
+  assert_eq(r, "C62/1;L64;", "for over a match binding");
+}
+
+fn test_a_reverse_walk() {
+  v: vector<Node> = [Leaf { v: 71 }, Leaf { v: 72 }, Leaf { v: 73 }];
+  r = "";
+  for a in rev(v) {
+    r += kind(a) + ";";
+  }
+  assert_eq(r, "L73;L72;L71;", "for over rev(v)");
+}
+
+fn test_a_copy_out() {
+  v: vector<Node> = [Leaf { v: 81 }, Call { op: 82, args: [] }];
+  w: vector<Node> = [];
+  w += [v[1]];
+  w += [v[0]];
+  assert_eq(spell(w), "C82/0;L81;", "elements copied to another vector");
+  assert_eq(len(w), 2, "its length");
+}
+
+fn test_a_grown_vector() {
+  v: vector<Node> = [Leaf { v: 91 }];
+  for i in 0..20 {
+    v += [Leaf { v: 100 + i }];
+  }
+  s = 0;
+  for a in v {
+    match a {
+      Leaf { v: x } => { s += x; },
+      _ => {},
+    }
+  }
+  assert_eq(s, 2281, "the sum of every element");
+  assert_eq(len(v), 21, "its length");
+}

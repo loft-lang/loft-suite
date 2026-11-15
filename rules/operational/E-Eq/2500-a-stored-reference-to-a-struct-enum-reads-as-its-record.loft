@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Eq`, loft#2500 — a read of a stored `reference<E>` field, for a struct-enum `E`, is a
+// value of `E`: `==` compares the record it names by content, and `&a == &b` asks whether two
+// names are one record, as for every other `E`.  Before, the read was typed apart from every
+// other `E` record, so two equal records compared `false`, `x == v[0]` was refused, and the
+// identity question — the reason to keep a reference at all — could not be asked.
+//
+// Expected values by hand: two `Leaf { v: 5 }` hold the same content and are two records; a
+// reference names the element it was taken from and no other.  The last cell is the shape that
+// needs it: collect the second argument of every `op 7` call by reference, then ask from the
+// root which node each one IS.  The two candidates are structurally equal, so only identity
+// can tell them apart — each must match exactly one node.
+//
+// @falsified-at: 0de1794d4 — interpret exit 1 -> 0, native exit 1 -> 0.
+//   CHANNEL: the compile — the control refuses `x == v[1]` and `&a == &h1.at`, so the program
+//   does not run there.
+//   WITNESS: "No matching operator '==' on 'Node' and 'Node'".
+//   HOLDS: leak, panic and free-refusals are unmoved on both trees and both backends.
+//   Score it again with `make falsify GUARD=<this file> REF=0de1794d4`.
+
+enum Node {
+  Leaf { v: integer },
+  Call { op: integer, args: vector<Node> },
+}
+
+struct Hit { at: reference<Node> }
+
+fn kind(n: Node) -> text {
+  match n {
+    Call { op, args: _ } => "C{op}",
+    Leaf { v } => "L{v}",
+  }
+}
+
+fn test_content_through_a_reference() {
+  v: vector<Node> = [Leaf { v: 5 }, Leaf { v: 5 }, Leaf { v: 7 }];
+  h0 = Hit { at: &v[0] };
+  h1 = Hit { at: &v[1] };
+  h2 = Hit { at: &v[2] };
+  assert(h0.at == h1.at, "two equal records compare equal by content");
+  assert(h0.at != h2.at, "two different records do not");
+  x = h0.at;
+  assert_eq(kind(x), "L5", "the read is a Node");
+  assert(x == v[1], "and compares with an element");
+}
+
+fn test_identity_through_a_reference() {
+  v: vector<Node> = [Leaf { v: 5 }, Leaf { v: 5 }];
+  h0 = Hit { at: &v[0] };
+  h1 = Hit { at: &v[1] };
+  assert(!(&h0.at == &h1.at), "two equal records are two records");
+  assert(&h0.at == &h0.at, "a record is itself");
+  same = 0;
+  at = -1;
+  for a in v {
+    if &a == &h1.at {
+      same += 1;
+      at = a#index;
+    }
+  }
+  assert_eq(same, 1, "one element is the referenced record");
+  assert_eq(at, 1, "the one it was taken from");
+}
+
+fn find(n: Node, out: vector<Hit>) {
+  match n {
+    Call { op, args } => {
+      if op == 7 && len(args) > 1 {
+        out += [Hit { at: &args[1] }];
+      }
+      for a in args {
+        find(a, out);
+      }
+    },
+    _ => {},
+  }
+}
+
+fn hits(n: Node, target: Hit, count: &integer) {
+  match n {
+    Call { op: _, args } => {
+      for a in args {
+        t = target.at;
+        if &a == &t {
+          count += 1;
+        }
+        hits(a, target, count);
+      }
+    },
+    _ => {},
+  }
+}
+
+fn test_nodes_collected_by_identity() {
+  root = Call { op: 1, args: [Call { op: 7, args: [Leaf { v: 1 }, Leaf { v: 5 }] }, Call { op: 2, args: [Call { op: 7, args: [Leaf { v: 1 }, Leaf { v: 5 }] }] }] };
+  found: vector<Hit> = [];
+  find(root, found);
+  assert_eq(len(found), 2, "two `op 7` calls");
+  for h in found {
+    count = 0;
+    hits(root, h, count);
+    assert_eq(count, 1, "candidate {h#index} is one node of the tree");
+  }
+}
