@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2492, `@FR-L-Escape` — the admitted side of `2492-…`: a capturing closure passed to a
+// callee that only CALLS it, directly or through another function, or that captures it in a
+// lambda it returns (the record keeps the closure half, `@FR-L-Fn`), works; and a callee that
+// keeps its parameter still takes a plain function, a lambda that captures nothing, and keeps
+// it in a collection and a field.  Every value is computed by hand: each call `h(2)` or `f(2)`
+// adds 1 to `seen[2]`, and `count` adds its argument to the running total.
+//
+// Axes this file MOVES: what the callee does (calls it, forwards it to a caller, captures it,
+//   keeps it),
+//   what is passed (a capturing lambda, a function name, a lambda capturing nothing).
+
+struct Reg2492b { hs: vector<fn(integer)> }
+struct One2492b { h: fn(integer) }
+
+fn call_two(f: fn(integer)) { f(2); }
+fn forward(f: fn(integer)) { call_two(f); }
+fn keep_b(r: Reg2492b, f: fn(integer)) { r.hs += [f]; }
+fn set_b(o: One2492b, f: fn(integer)) { o.h = f; }
+fn nop2492b(_x: integer) { }
+fn wrap2492b(f: fn(integer)) -> fn(integer) { fn(x: integer) { f(x); f(x); } }
+fn say2492b(x: integer) { println("say {x}"); }
+
+fn test_a_callee_that_calls_takes_a_capturing_closure() {
+  seen = [0, 0, 0];
+  call_two(fn(x: integer) { seen[x] += 1; });
+  forward(fn(x: integer) { seen[x] += 1; });
+  bound = fn(x: integer) { seen[x] += 1; };
+  call_two(bound);
+  w = wrap2492b(fn(x: integer) { seen[x] += 1; });
+  w(2);
+  assert(seen[2]! == 5, "called: {seen[2]!}");
+}
+
+fn test_a_callee_that_keeps_takes_a_plain_function() {
+  r = Reg2492b { hs: [] };
+  keep_b(r, say2492b);
+  keep_b(r, fn(x: integer) { println("plain {x}"); });
+  for h in r.hs { h(2); }
+  o = One2492b { h: nop2492b };
+  set_b(o, say2492b);
+  o.h(3);
+  assert(len(r.hs) == 2, "kept: {len(r.hs)}");
+}

@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2492, `@FR-L-Escape` — a capturing closure passed to a parameter its callee KEEPS is
+// refused at the argument.  A collection element holds a plain function (@C116) and so does a
+// fn field written from anything but an inline lambda; a fn-typed parameter says nothing about
+// what its caller passes, so the callee's write kept the function number and dropped the
+// closure: a corrupt reference on the interpreter, a capture reading nothing on the C backend.
+// The caller is the one that sees the closure, so the refusal is there, once per argument.
+//
+// Axes this file MOVES: where the callee keeps it (a collection, a field it assigns, a struct
+//   it builds), how it gets there (directly, forwarded through another function, through a
+//   local of the callee), what the caller passes (an inline lambda, a local bound to one), and
+//   whether the callee is defined before or after the call.
+// Axes it HOLDS FIXED: each closure captures one vector.
+// The admitted side — a callee that only calls, a plain function kept — is `2492b-…` beside it.
+//
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'keep' as 'f'
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'keep' as 'f'
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'set_one' as 'f'
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'make_one' as 'f'
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'outer' as 'f'
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'keep_local' as 'f'
+// @EXPECT_ERROR: a capturing closure cannot be passed to 'later' as 'f'
+
+struct Reg2492 { hs: vector<fn(integer)> }
+struct One2492 { h: fn(integer) }
+
+fn nop2492(_x: integer) { }
+fn keep(r: Reg2492, f: fn(integer)) { r.hs += [f]; }
+fn set_one(o: One2492, f: fn(integer)) { o.h = f; }
+fn make_one(f: fn(integer)) -> One2492 { One2492 { h: f } }
+fn outer(r: Reg2492, f: fn(integer)) { keep(r, f); }
+fn keep_local(r: Reg2492, f: fn(integer)) { g = f; r.hs += [g]; }
+
+fn main() {
+  seen = [0, 0, 0];
+  r = Reg2492 { hs: [] };
+  keep(r, fn(x: integer) { seen[x] += 1; });
+  bound = fn(x: integer) { seen[x] += 1; };
+  keep(r, bound);
+  o = One2492 { h: nop2492 };
+  set_one(o, fn(x: integer) { seen[x] += 1; });
+  m = make_one(fn(x: integer) { seen[x] += 1; });
+  outer(r, fn(x: integer) { seen[x] += 1; });
+  keep_local(r, fn(x: integer) { seen[x] += 1; });
+  later(r, fn(x: integer) { seen[x] += 1; });
+  m.h(1);
+}
+
+fn later(r: Reg2492, f: fn(integer)) { r.hs += [f]; }
