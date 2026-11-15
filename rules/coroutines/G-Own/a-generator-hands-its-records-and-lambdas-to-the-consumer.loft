@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A generator yielding a value the consumer takes over (`formal/coroutines.md` (G-Own)): a
+// `@FR-G-Own` — a generator yielding a value the consumer takes over (`formal/coroutines.md`): a
 // record literal, a call's record, a vector, a tuple holding a record, a lambda with a capture;
 // and one abandoned after its first value.  Each expected value is computed by hand.  The
 // surveys of the loft bytecode writer and runner read it too: there the generator must forget

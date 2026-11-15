@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A statement `match` over an integer subject written as a C `switch` (src/c/body/switch.rs):
+// `@FR-M-Match` — a statement `match` over an integer subject written as a C `switch` (src/c/body/switch.rs):
 // each arm runs exactly when the `if` chain it was lowered to runs it.  Every expected value is
 // computed by hand from the `if` chain's meaning: a long chain of plain arms; a short one (kept an
 // `if`); a guarded arm and plain arms after it (the `default`); a repeated literal (never
