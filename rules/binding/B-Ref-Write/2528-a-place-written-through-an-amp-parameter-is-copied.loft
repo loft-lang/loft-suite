@@ -1,0 +1,111 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLACE WRITTEN THROUGH AN `&` PARAMETER IS COPIED (`@FR-B-Ref-Write`, `@FR-B-Copy`).  A whole
+// record written through `&` becomes the caller's binding, so a place read — a view of another
+// record — reaches the caller as a copy.  A field read was copied; an ELEMENT read (`out =
+// args[1]!`, `out = h.items[1]!`) was installed as it was: the caller's local named the other
+// record, a write to it changed that record, and its release freed the store under its owner —
+// a wrong answer, then "a store was freed twice" (loft#2528).
+//
+// Axes it MOVES: the place's spelling (an element of an argument's vector field, an element read
+// out of a struct-enum's vector, an inline field — the control — and a fresh literal, which is
+// no place), the record kind (a struct, a struct enum), and a loop calling it again.  Values
+// hand-computed in each message.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: cea54d23d — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_AMP_FIELD_ONLY=1`; the records report
+//   `out` written a store of the argument `x`)
+// CHANNEL: the asserts (the argument's record changed, a wrong depth) and the run ("a store was
+//   freed twice").
+// ARMED: no instrument.
+// WITNESS: each message prints the values read.
+// HOLDS: the field and literal cells read the same before and after.
+
+enum Nd {
+  Leaf { v: integer },
+  Call { args: vector<Nd> },
+}
+
+struct P { v: integer }
+struct H { items: vector<P>, p: P }
+
+fn val(n: Nd) -> integer {
+  match n { Leaf { v } => v, Call { args } => 100 + len(args) }
+}
+
+fn pick(x: Nd, out: &Nd) -> integer {
+  match x {
+    Call { args } => {
+      if len(args) < 2 {
+        return -1;
+      }
+      out = args[1]!;
+      1
+    },
+    _ => -1,
+  }
+}
+
+fn depth(x: Nd) -> integer {
+  match x {
+    Call { args } => {
+      best = 0;
+      for a in args {
+        d = depth(a);
+        if d > best {
+          best = d;
+        }
+      }
+      best + 1
+    },
+    _ => 0,
+  }
+}
+
+fn walk(x: Nd) -> integer {
+  part: Nd = Nd::Leaf { v: 0 };
+  if pick(x, part) > 0 {
+    return depth(part) + 10;
+  }
+  depth(x)
+}
+
+fn elem(h: H, out: &P) { out = h.items[1]!; }
+fn field(h: H, out: &P) { out = h.p; }
+fn literal(out: &Nd) { out = Nd::Leaf { v: 77 }; }
+
+fn test_the_issue_walk() {
+  t = Nd::Call { args: [Nd::Leaf { v: 1 }, Nd::Call { args: [Nd::Leaf { v: 2 }] }] };
+  total = 0;
+  for _ in 0..3 {
+    total += walk(t);
+  }
+  // The part is `Call { [Leaf] }`, depth 1: 1 + 10 = 11, three times.
+  assert(total == 33, "three walks of 11: {total}");
+  assert(val(t) == 102, "the argument is untouched: {val(t)}");
+}
+
+fn test_a_struct_element_and_its_controls() {
+  h = H { items: [P { v: 10 }, P { v: 20 }], p: P { v: 30 } };
+  for _ in 0..2 {
+    b = P { v: 0 };
+    elem(h, b);
+    b.v += 1;
+    assert(b.v == 21 && h.items[1]!.v == 20, "a copy of the element: {b.v} {h.items[1]!.v}");
+    d = P { v: 0 };
+    field(h, d);
+    d.v += 1;
+    assert(d.v == 31 && h.p.v == 30, "a copy of the field: {d.v} {h.p.v}");
+    c: Nd = Nd::Leaf { v: 0 };
+    literal(c);
+    assert(val(c) == 77, "a literal is installed: {val(c)}");
+  }
+}
+
+fn main() {
+  test_the_issue_walk();
+  test_a_struct_element_and_its_controls();
+  println("a place written through an & parameter is copied: every cell holds");
+}
