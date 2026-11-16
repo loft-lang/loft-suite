@@ -19,6 +19,8 @@
 //   CHANNEL: the store freed twice, both backends (three of the five tests; the other two hold).
 //   ARMED: `LOFT_NO_ARGUMENT_BUILD_SHARE=1` brings it back on this tree.
 //   RECORDS: `own_sweep.py --oracle check-records` reads CAUGHT on these shapes with the cure off.
+//   HOLDS: leak, panic and expectations are equal on both trees for the two tests that pass
+//     on both; every assertion passes on the cured tree.
 
 fn pass2512(f: fn(integer)) -> fn(integer) { f }
 fn pick2512(f: fn(integer), g: fn(integer), k: integer) -> fn(integer) { if k > 0 { f } else { g } }

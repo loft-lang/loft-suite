@@ -19,6 +19,8 @@
 //     outlives the loop holds).
 //   ARMED: `LOFT_NO_RETURNED_CLOSURE_CONFINED=1` brings it back on this tree.
 //   RECORDS: `own_sweep.py --oracle check-records` reads CAUGHT on these shapes with the cure off.
+//   HOLDS: leak, panic and expectations are equal on both trees for the holder that outlives
+//     the loop; every assertion passes on the cured tree.
 
 fn pass2514(f: fn(integer)) -> fn(integer) { f }
 
