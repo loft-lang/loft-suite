@@ -15,7 +15,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: bba257da1 — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_TAIL_READS_WHOLE_STATEMENT=1`)
+// @falsified-at: b37c8af6f — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_TAIL_READS_WHOLE_STATEMENT=1`)
 // CHANNEL: the asserts — an empty record (`:0`) where a field or `null` was owed.
 // ARMED: no instrument.
 // WITNESS: each message prints the answer.
