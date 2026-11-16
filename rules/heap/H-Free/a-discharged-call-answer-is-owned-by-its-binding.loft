@@ -8,8 +8,6 @@
 // without freeing, and the record leaked once per discharge (the self-hosted elaborator's
 // `default_image`; main, both backends).  The discharge hands on an owned value.
 //
-// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  what the call answers (an argument's element through a buffer, an
 //                        argument itself, a fresh record, a struct-enum); how the discharge is
 //                        used (bound, consumed in place, a field read, rebound in a loop,
@@ -18,10 +16,14 @@
 //                        parsed, its return borrows known before its body is).
 // Axes it HOLDS FIXED:   the callee is a loft function answering a record.
 //
-// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
-// @falsified-at: 399ad6edf (loft) — test_a_recursive_discharge: interpret leaked kt=100 T×5 -> clean,
-//   native leaked kt=100 T×5 -> clean.  test_every_discharge: pending (LOFT_NO_NCR_CALL_OWNS=1
-//   fails it on both backends).
+// @falsified-at: ae63e2b50 (loft) — test_a_recursive_discharge: interpret leaked kt=101 T×5 -> clean,
+//   native leaked kt=101 T×5 -> clean.
+// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+// ARMED: LOFT_LEAK_CHECK=1 (the suite arms it); LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+//   LOFT_DOUBLE_FREE=1 for the double-free side.
+// WITNESS: at ae63e2b50 the recursive cell leaves `kt=101 T×5` at exit, on both backends.
+// HOLDS: test_every_discharge passes on both trees (LOFT_NO_NCR_CALL_OWNS=1 fails it on both
+//   backends, the control for its half of the rule).
 
 struct Sc { name: text, size: integer }
 enum Ty { TInt { n: integer }, TRef { s: Sc } }
