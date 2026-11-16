@@ -13,11 +13,15 @@
 // Axes this file MOVES:  what the call answers (an argument's element through a buffer, an
 //                        argument itself, a fresh record, a struct-enum); how the discharge is
 //                        used (bound, consumed in place, a field read, rebound in a loop,
-//                        `?? return`).
+//                        `?? return`); where the callee is (above the caller, or the caller
+//                        itself: a recursive call names the function whose body is being
+//                        parsed, its return borrows known before its body is).
 // Axes it HOLDS FIXED:   the callee is a loft function answering a record.
 //
 // @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
-// @falsified-at: pending
+// @falsified-at: 399ad6edf (loft) — test_a_recursive_discharge: interpret leaked kt=100 T×5 -> clean,
+//   native leaked kt=100 T×5 -> clean.  test_every_discharge: pending (LOFT_NO_NCR_CALL_OWNS=1
+//   fails it on both backends).
 
 struct Sc { name: text, size: integer }
 enum Ty { TInt { n: integer }, TRef { s: Sc } }
@@ -50,4 +54,39 @@ fn test_every_discharge() {
   for _ in 0..2 { s += all(b, a, c); }
   // per pass: 3 + 110 + 6 + 500 + 4 + 7 + 8000 + 50000 - 500000
   assert(s == -882740 && b.schemas[0].size == 3 && a.size == 11 && c.name == "c", "{s}");
+}
+
+// k 0: the first entry; k 2: element `pos` of it, through a recursive discharge; k 1: that
+// element's `inner`, through a second one.
+enum T { TI { n: integer }, TV { inner: T }, TT { elems: vector<T> } }
+struct H { ts: vector<T> }
+fn held(h: H, k: integer, pos: integer) -> T? {
+  if k == 0 {
+    return h.ts[0];
+  }
+  if k == 1 {
+    vt = held(h, 2, pos) ?? return null;
+    return match vt {
+      TV { inner } => inner,
+      _ => null,
+    };
+  }
+  tp = held(h, 0, pos) ?? return null;
+  match tp {
+    TT { elems } => {
+      at = pos;
+      return if at < 0 { null } else { elems[at] };
+    },
+    _ => return null,
+  }
+}
+fn tname(t: T?) -> text {
+  match t ?? TI { n: -1 } { TI { n } => "i{n}", TV { inner } => "v", TT { elems } => "t{len(elems)}" }
+}
+fn test_a_recursive_discharge() {
+  h = H { ts: [TT { elems: [TI { n: 1 }, TV { inner: TI { n: 42 } }] }] };
+  got = "{tname(held(h, 2, 1))} {tname(held(h, 2, 0))} {tname(held(h, 1, 1))} {tname(held(h, 1, 0))} {tname(held(h, 2, -1))} {tname(held(h, 0, 0))}";
+  // element 1 is the TV, element 0 is TI 1; the TV's inner is TI 42; TI 1 has no inner and a
+  // negative position is absent (both null); the entry itself holds two elements
+  assert(got == "v i1 i42 i-1 i-1 t2", got);
 }
