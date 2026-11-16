@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT MATCH WHOSE ARM MAY RETURN KEEPS ITS VALUE (`@FR-H-Free`: a store is released only
+// once nothing reads it).  A `match` whose arm leaves by `return` keeps its value form, and its
+// value is an `if` chain over the temp an element read binds (`_ncr_N`).  That temp was the
+// match block's own, so its exit free ran after the block's value: the interpreter read a
+// released text — garbage bytes — and the C backend, which copies, answered right (loft#2526).
+//
+// Axes it MOVES: the leaves of the value (one element read, two different element reads, a
+// literal), whether the leaving arm runs, and a loop around it (one buffer per call, reused per
+// pass).  Values hand-computed in each message.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 1df105e9b — interpret exit 1 -> 0 (`LOFT_NO_TEXT_TAIL_THROUGH_IF=1`); C exit 0 both ways
+// CHANNEL: the asserts — the interpreter reads garbage bytes for the text.
+// ARMED: no instrument.
+// WITNESS: each message prints the text.
+// HOLDS: the C backend answers the same before and after.
+
+struct Box {
+  names: vector<text>,
+}
+
+struct Level {
+  end: text,
+  n: integer,
+}
+
+fn pick(b: Box, i: integer) -> vector<Level> {
+  e = match i { 1 => if i > 0 { b.names[i]! } else { return [] }, _ => "lit" };
+  levels: vector<Level> = [Level { end: e, n: i }];
+  levels
+}
+
+fn pick_two(b: Box, i: integer, k: integer) -> text {
+  e = match i {
+    1 => if k > 0 { b.names[k]! } else if k == 0 { b.names[0]! } else { return "gone" },
+    _ => "lit",
+  };
+  "{e}/{len(e)}"
+}
+
+fn test_one_element_read() {
+  b = Box { names: ["v0_a", "v1__range_end", "v2_c"] };
+  ls = pick(b, 1);
+  assert(ls[0]!.end == "v1__range_end", "the element: {ls[0]!.end}");
+  lit = pick(b, 3);
+  assert(lit[0]!.end == "lit", "the literal arm: {lit[0]!.end}");
+}
+
+fn test_two_element_reads_and_the_leaving_arm() {
+  b = Box { names: ["zero", "one", "two"] };
+  assert(pick_two(b, 1, 2) == "two/3", "the k > 0 read: {pick_two(b, 1, 2)}");
+  assert(pick_two(b, 1, 0) == "zero/4", "the k == 0 read: {pick_two(b, 1, 0)}");
+  assert(pick_two(b, 1, -1) == "gone", "the leaving arm: {pick_two(b, 1, -1)}");
+  assert(pick_two(b, 2, 1) == "lit/3", "the literal arm: {pick_two(b, 2, 1)}");
+}
+
+fn test_in_a_loop() {
+  b = Box { names: ["a", "bb", "ccc"] };
+  total = 0;
+  for k in 0..30 {
+    total += len(pick_two(b, 1, k % 3));
+  }
+  // k % 3 = 0, 1, 2 → "a/1", "bb/2", "ccc/3": lengths 3, 4, 5 — ten times each.
+  assert(total == 120, "thirty calls: {total}");
+}
+
+fn main() {
+  test_one_element_read();
+  test_two_element_reads_and_the_leaving_arm();
+  test_in_a_loop();
+  println("a text match whose arm may return keeps its value: every cell holds");
+}
