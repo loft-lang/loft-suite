@@ -1,0 +1,80 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFERENCE FIELD OF A STRUCT-ENUM IS REPOINTED BY ASSIGNMENT (`@FR-B-Ref-StoredRef`).  An
+// assignment to a `reference<E>` field stores a pointer to the right side's record, whatever
+// `E` is: `h.s = &c` and `h.s = c` both make `h.s` name `c`, and the record `h.s` named before
+// is left as it was.  A READ of such a field answers `E` itself for a struct-enum (`@FR-E-Eq`,
+// loft#2500), and the assignment once took its target type from that read: it copied `c` INTO
+// whatever the field pointed at — the old target overwritten, a null field storing nothing —
+// and refused `h.s = &c` as a bare `&`.  A struct `reference<S>` beside it is the control.
+//
+// Axes it MOVES: the field's nullability (absent before, or holding a link), the spelling
+// (`= &c`, `= c`), the referent (a struct-enum, a struct).  Values hand-computed: a circle of
+// radius 2 has area 12, a square of side 3 has 9 and of side 4 has 16, the fallback square of
+// side 5 has 25, which a field that stored nothing would read.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 828676f45 with the cure off (`parse_assign_op`'s stored-reference place typing) —
+//   fails on both backends: `h.s = &c` into a nullable field does not compile; measured before
+//   the cure on c17418021, `h.s = c` read the fallback (25) and repointing a field overwrote
+//   the record it named (the old circle read 9).
+// CHANNEL: the compile (`= &c`), the asserts (`= c`, the repoint).
+// ARMED: no instrument.
+// WITNESS: each message prints the area read through the field and the old target's area.
+// HOLDS: the struct control reads the same before and after.
+
+enum Sh { Circle { r: integer }, Sq { s: integer } }
+struct Opt { s: reference<Sh>? }
+struct Held { s: reference<Sh> }
+struct P { v: integer }
+struct PHeld { s: reference<P> }
+
+fn area(x: Sh) -> integer {
+  match x { Circle { r } => 3 * r * r, Sq { s } => s * s }
+}
+
+fn test_a_link_into_an_absent_field_is_stored() {
+  c: Sh = Circle { r: 2 };
+  f: Sh = Sq { s: 5 };
+  o = Opt { };
+  o.s = &c;
+  assert(o.s != null, "the link was stored");
+  assert(area(o.s ?? f) == 12, "the field names c: {area(o.s ?? f)}");
+}
+
+fn test_a_plain_assignment_stores_the_link_too() {
+  c: Sh = Circle { r: 2 };
+  f: Sh = Sq { s: 5 };
+  o = Opt { };
+  o.s = c;
+  assert(area(o.s ?? f) == 12, "`= c` stores the link as `= &c` does: {area(o.s ?? f)}");
+}
+
+fn test_repointing_leaves_the_old_target_alone() {
+  c: Sh = Circle { r: 2 };
+  d: Sh = Sq { s: 3 };
+  h = Held { s: &c };
+  h.s = &d;
+  d = Sq { s: 4 };
+  assert(area(h.s) == 16, "the field follows d: {area(h.s)}");
+  assert(area(c) == 12, "c is not overwritten: {area(c)}");
+}
+
+fn test_a_struct_reference_is_repointed_the_same_way() {
+  c = P { v: 7 };
+  d = P { v: 3 };
+  h = PHeld { s: &c };
+  h.s = &d;
+  d.v = 4;
+  assert(h.s.v == 4, "the field follows d: {h.s.v}");
+  assert(c.v == 7, "c is not overwritten: {c.v}");
+}
+
+fn main() {
+  test_a_link_into_an_absent_field_is_stored();
+  test_a_plain_assignment_stores_the_link_too();
+  test_repointing_leaves_the_old_target_alone();
+  test_a_struct_reference_is_repointed_the_same_way();
+}
