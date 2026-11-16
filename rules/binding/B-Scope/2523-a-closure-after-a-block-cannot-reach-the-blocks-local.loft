@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CLOSURE AFTER A BLOCK CANNOT REACH THE BLOCK'S LOCAL (`@FR-B-Scope`: a local bound inside a
+// block ends at its `}`).  A loop body binds `fi`; after the loop `fi` does not exist, so a
+// closure written there that assigns `fi` binds a local of its own, as the same assignment
+// outside a closure would.  The capture context offered the ended binding, so the closure shared
+// the loop's `fi` — a view of `m.memo[1]` the record then held as its own: the closure's write
+// replaced that element's contents (`memo[1]` lost an item, the totals came out 7 and 5) and the
+// record's release freed `m`'s store a second time (loft#2523).  A closure built while the
+// binding is open still captures it (the controls).
+//
+// Axes it MOVES: how many closures follow the loop (one, two), and whether the binding the
+// closure names is still open (the loop's own local, built inside the loop; a local bound
+// before the loop and rebound in it).  Values hand-computed: `m.memo` holds `[1]` and `[2, 3]`.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 14f6589ba — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_NO_ENDED_CAPTURE_SCOPE=1`;
+//   the records checker reads CAUGHT on the same shape without its asserts)
+// CHANNEL: the asserts (wrong totals, `memo[1]` shrunk) and the run ("a store was freed twice").
+// ARMED: no instrument.
+// WITNESS: each message prints the total and the element's length.
+// HOLDS: the controls read the same before and after.
+
+struct In { items: vector<integer> }
+struct Memo { memo: vector<In> }
+
+fn of(m: Memo, d: integer) -> In {
+  m.memo[d]!
+}
+
+fn each(v: vector<integer>, f: fn(integer)) {
+  for x in v {
+    f(x);
+  }
+}
+
+fn memo() -> Memo {
+  Memo { memo: [In { items: [1] }, In { items: [2, 3] }] }
+}
+
+fn test_two_closures_after_the_loop_bind_their_own() {
+  m = memo();
+  total = [0];
+  for d in 0..2 {
+    fi = of(m, d);
+    total[0] = total[0]! + len(fi.items);
+  }
+  each([0, 1], fn(d: integer) { fi = of(m, d); total[0] = total[0]! + len(fi.items); });
+  each([0, 1], fn(d: integer) { fi = of(m, d); total[0] = total[0]! + len(fi.items); });
+  assert(total[0]! == 9, "three passes of 1 + 2: {total[0]!}");
+  assert(len(m.memo[1]!.items) == 2, "memo[1] is untouched: {len(m.memo[1]!.items)}");
+}
+
+fn test_one_closure_after_the_loop_binds_its_own() {
+  m = memo();
+  total = [0];
+  for d in 0..2 {
+    fi = of(m, d);
+    total[0] = total[0]! + len(fi.items);
+  }
+  each([0, 1], fn(d: integer) { fi = of(m, d); total[0] = total[0]! + len(fi.items); });
+  assert(total[0]! == 6, "two passes of 1 + 2: {total[0]!}");
+  assert(len(m.memo[1]!.items) == 2, "memo[1] is untouched: {len(m.memo[1]!.items)}");
+}
+
+fn test_a_local_bound_before_the_loop_is_still_captured() {
+  m = memo();
+  total = [0];
+  fi = of(m, 0);
+  for d in 0..2 {
+    fi = of(m, d);
+  }
+  each([5, 6], fn(k: integer) { total[0] = total[0]! + len(fi.items) + k; });
+  assert(total[0]! == 15, "the closure reads the rebound fi, memo[1]: {total[0]!}");
+}
+
+fn test_a_closure_inside_the_block_captures_its_local() {
+  m = memo();
+  total = [0];
+  if len(m.memo) == 2 {
+    fi = of(m, 1);
+    each([10, 20], fn(k: integer) { total[0] = total[0]! + len(fi.items) * k; });
+  }
+  assert(total[0]! == 60, "2 * 10 + 2 * 20: {total[0]!}");
+}
+
+fn main() {
+  test_two_closures_after_the_loop_bind_their_own();
+  test_one_closure_after_the_loop_binds_its_own();
+  test_a_local_bound_before_the_loop_is_still_captured();
+  test_a_closure_inside_the_block_captures_its_local();
+  println("a closure after a block cannot reach the block's local: every cell holds");
+}
