@@ -16,7 +16,7 @@
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 //
-// @falsified-at: 828676f45 with the cure off (`parse_assign_op`'s stored-reference place typing) —
+// @falsified-at: fee285e03 with the cure off (`parse_assign_op`'s stored-reference place typing) —
 //   fails on both backends: `h.s = &c` into a nullable field does not compile; measured before
 //   the cure on c17418021, `h.s = c` read the fallback (25) and repointing a field overwrote
 //   the record it named (the old circle read 9).
