@@ -1,0 +1,170 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-H-Free — a store is freed once, wherever it dies.  A `-> T?` function whose tail is a
+// `match` hands up the arm's answer; an arm that answers a VIEW (an element of a vector the frame
+// holds) has it copied into a work ref first, and that work ref IS the answer, so the frame's
+// exit must not free it.  The exit learns which stores the answer may live in by reading the
+// `match` block's value past the block's trailing cleanup.  Where a local of the block was bound
+// from a call that may answer in one of SEVERAL buffers (the callee has a work-buffer parameter
+// beside its return buffer), that local's free is a guarded one — `if OpDistinctStore(v, b₁) {
+// if OpDistinctStore(v, b₂) { OpFreeRef(v) } }` — and each cell below ends its tail `match` with
+// such a free.  Read as the block's value, it hid the answer's work ref: the exit freed it and
+// the caller, which had adopted that store, freed it again.
+//
+// @falsified-at: 61090e945 (loft) — every cell: "a store was freed twice … freed again by `vt`",
+//   interpret and native.
+// CHANNEL: the double-free refusal (`LOFT_REFREE_FAILS=1`) and the VALUES (hand-computed).
+// ARMED: LOFT_REFREE_FAILS=1 LOFT_STRICT_STORES=1; the suite's LOFT_LEAK_CHECK=1 for the leak
+//   side of the same exit.
+// WITNESS: at 61090e945 the first cell stops with `a store was freed twice: store #13 freed
+//   held … by __ref_5, freed again held … by vt`, on both backends.
+// HOLDS: the control cell (no work-buffer local, so a plain free) passes on both trees.
+// Axes this file MOVES:  how the recursive answer is unwrapped (`?? return null`, `!`), how many
+//                        work-buffer parameters the callee has (one, two: a deeper guard).
+// Axes it HOLDS FIXED:   the tail `match` is its own block (a local is bound before it), the
+//                        materialised arm reads an element of a match binding's vector.
+
+enum Ty { TI { n: integer }, TT { elems: vector<Ty> }, TR { n: integer } }
+enum Nd { NVar { n: integer }, NGet { var: integer, idx: integer }, NCall { k: integer, args: vector<Nd> } }
+struct F { types: vector<Ty> }
+
+fn base(t: Ty) -> Ty { t }
+fn unspan(n: Nd) -> Nd { n }
+
+// One work-buffer parameter (`seen`), the recursive answer unwrapped with `?? return null`.
+fn held(f: F, v: Nd) -> Ty? {
+  seen: vector<integer> = [];
+  seen += [len(f.types)];
+  if len(seen) > 5 {
+    return null;
+  }
+  g = f.types;
+  match unspan(v) {
+    NVar { n } => g[n],
+    NGet { var, idx } => match base(g[var]!) {
+      TT { elems } => elems[idx],
+      _ => null,
+    },
+    NCall { k, args } => {
+      if k == 1 && len(args) > 0 {
+        vt = held(f, args[0]!) ?? return null;
+        return match vt {
+          TT { elems } => elems[0],
+          _ => null,
+        };
+      }
+      null
+    },
+  }
+}
+
+// The same with `!`.
+fn held_bang(f: F, v: Nd) -> Ty? {
+  seen: vector<integer> = [];
+  seen += [len(f.types)];
+  if len(seen) > 5 {
+    return null;
+  }
+  g = f.types;
+  match unspan(v) {
+    NVar { n } => g[n],
+    NGet { var, idx } => match base(g[var]!) {
+      TT { elems } => elems[idx],
+      _ => null,
+    },
+    NCall { k, args } => {
+      if k == 1 && len(args) > 0 {
+        vt = held_bang(f, args[0]!)!;
+        return match vt {
+          TT { elems } => elems[0],
+          _ => null,
+        };
+      }
+      null
+    },
+  }
+}
+
+// Two work-buffer parameters, so the guarded free is three witnesses deep.
+fn held_two(f: F, v: Nd) -> Ty? {
+  seen: vector<integer> = [];
+  seen += [len(f.types)];
+  if len(seen) > 5 {
+    return null;
+  }
+  more: vector<integer> = [];
+  more += [2];
+  if len(more) > 5 {
+    return null;
+  }
+  g = f.types;
+  match unspan(v) {
+    NVar { n } => g[n],
+    NGet { var, idx } => match base(g[var]!) {
+      TT { elems } => elems[idx],
+      _ => null,
+    },
+    NCall { k, args } => {
+      if k == 1 && len(args) > 0 {
+        vt = held_two(f, args[0]!) ?? return null;
+        return match vt {
+          TT { elems } => elems[0],
+          _ => null,
+        };
+      }
+      null
+    },
+  }
+}
+
+// The control: no work-buffer local, so `vt`'s free is a plain one.
+fn held_plain(f: F, v: Nd) -> Ty? {
+  g = f.types;
+  match unspan(v) {
+    NVar { n } => g[n],
+    NGet { var, idx } => match base(g[var]!) {
+      TT { elems } => elems[idx],
+      _ => null,
+    },
+    NCall { k, args } => {
+      if k == 1 && len(args) > 0 {
+        vt = held_plain(f, args[0]!) ?? return null;
+        return match vt {
+          TT { elems } => elems[0],
+          _ => null,
+        };
+      }
+      null
+    },
+  }
+}
+
+fn name(t: Ty?) -> text { match t ?? TR { n: -1 } { TI { n } => "i{n}", TT { elems } => "t{len(elems)}", TR { n } => "r{n}" } }
+
+fn sample() -> F { F { types: [TT { elems: [TT { elems: [TI { n: 5 }] }, TR { n: 7 }] }] } }
+
+// The element read (`r7`), the recursion through a nested element (`i5`), the entry itself (`t2`).
+fn test_one_work_buffer() {
+  f = sample();
+  got = "{name(held(f, NGet { var: 0, idx: 1 }))}|{name(held(f, NCall { k: 1, args: [NGet { var: 0, idx: 0 }] }))}|{name(held(f, NVar { n: 0 }))}";
+  assert(got == "r7|i5|t2", got);
+}
+
+fn test_an_unwrap_in_place() {
+  f = sample();
+  got = "{name(held_bang(f, NGet { var: 0, idx: 1 }))}|{name(held_bang(f, NCall { k: 1, args: [NGet { var: 0, idx: 0 }] }))}|{name(held_bang(f, NVar { n: 0 }))}";
+  assert(got == "r7|i5|t2", got);
+}
+
+fn test_two_work_buffers() {
+  f = sample();
+  got = "{name(held_two(f, NGet { var: 0, idx: 1 }))}|{name(held_two(f, NCall { k: 1, args: [NGet { var: 0, idx: 0 }] }))}|{name(held_two(f, NVar { n: 0 }))}";
+  assert(got == "r7|i5|t2", got);
+}
+
+fn test_the_control_without_a_work_buffer() {
+  f = sample();
+  got = "{name(held_plain(f, NGet { var: 0, idx: 1 }))}|{name(held_plain(f, NCall { k: 1, args: [NGet { var: 0, idx: 0 }] }))}|{name(held_plain(f, NVar { n: 0 }))}";
+  assert(got == "r7|i5|t2", got);
+}
