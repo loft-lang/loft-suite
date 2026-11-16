@@ -1,0 +1,96 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-Col-Concat`.
+//
+// A concatenation that ends a function, its first operand a local vector of that function,
+// answers the local's elements then the other operand's (`(Col-Concat)`: `a + b` is a new
+// vector, `a`'s elements then `b`'s).
+//
+// `fn f() -> vector<integer> { a = [1, 2]; b = [3, 4]; a + b }` answered `[3, 4]`, on both
+// backends, no diagnostic.  The fresh vector of a concatenation in an expression was typed
+// with its first operand's deps.  The second pass re-types it when it mints the backing; the
+// first pass mints none, so there the function's last expression read as a value living in
+// the local `a`.  `a` then became the function's return buffer, and the delivery — clear the
+// buffer, append the result — cleared `a` before the concatenation read it.
+//
+// Axes this file MOVES:  the first operand (a local built from a literal, by appends, from a
+//                        concatenation, from a parameter's copy); the second (a local, a
+//                        parameter, a literal, another concatenation); the element (an
+//                        integer, a float, a text, a record); the chain's length (two, three).
+// Axes it HOLDS FIXED:   the concatenation is the function's last expression, not under
+//                        `return`, an `if` or a `match`; the result is dense.
+//
+// The controls were already right: the same concatenation under `return`, as an `if` arm,
+// with a parameter or a literal as its first operand.
+//
+// @falsified-at: 5e0fc7aa5 — interpret exit 1 -> 0, interpret 7 assertion failures -> 0
+//   Measured by hand, not by `falsify`: the seven fail on the interpreter of the daily build
+//   2026.11.20261108, and the same wrong answers came from the interpreter and the C backend
+//   at 5e0fc7aa5.  With the cure all eight pass on the interpreter, the C backend and rustc.
+//   HOLDS: the four controls pass on both trees.
+struct P { n: integer, s: text }
+
+fn two_locals() -> vector<integer> { a = [1, 2]; b = [3, 4]; a + b }
+
+fn local_then_parameter(b: const vector<integer>) -> vector<integer> { a = [1, 2]; a + b }
+
+fn local_then_literal() -> vector<integer> { a = [1, 2]; a + [3, 4] }
+
+fn three() -> vector<integer> { a = [1, 2]; b = [3, 4]; c = [5]; a + b + c }
+
+fn texts() -> vector<text> { a = ["p", "q"]; b = ["r"]; a + b }
+
+fn records() -> vector<P> { a = [P { n: 1, s: "one" }]; b = [P { n: 2, s: "two" }]; a + b }
+
+fn grown_then_bound() -> vector<float> {
+  a: vector<float> = [];
+  for i in 0..3 { a += [i as float]; }
+  c = a + [9.0];
+  a + c
+}
+
+// The controls.
+fn under_return() -> vector<integer> { a = [1, 2]; b = [3, 4]; return a + b; }
+
+fn in_an_arm(f: boolean) -> vector<integer> { a = [1, 2]; b = [3, 4]; if f { a + b } else { b + a } }
+
+fn parameter_first(a: const vector<integer>) -> vector<integer> { b = [3, 4]; a + b }
+
+fn literal_first() -> vector<integer> { b = [3, 4]; [1, 2] + b }
+
+fn test_two_locals() {
+  assert("{two_locals()}" == "[1,2,3,4]", "two locals: {two_locals()}");
+}
+
+fn test_a_local_then_a_parameter() {
+  assert("{local_then_parameter([3, 4])}" == "[1,2,3,4]", "a parameter second: {local_then_parameter([3, 4])}");
+}
+
+fn test_a_local_then_a_literal() {
+  assert("{local_then_literal()}" == "[1,2,3,4]", "a literal second: {local_then_literal()}");
+}
+
+fn test_a_chain_of_three() {
+  assert("{three()}" == "[1,2,3,4,5]", "three: {three()}");
+}
+
+fn test_texts() {
+  r = texts();
+  assert(len(r) == 3 && r[0] == "p" && r[1] == "q" && r[2] == "r", "texts: {r}");
+}
+
+fn test_records() {
+  r = records();
+  assert(len(r) == 2 && r[0].n == 1 && r[0].s == "one" && r[1].n == 2 && r[1].s == "two", "records: {r}");
+}
+
+fn test_a_local_grown_by_appends_then_a_concatenation_of_itself() {
+  assert("{grown_then_bound()}" == "[0,1,2,0,1,2,9]", "grown, then with a concatenation of itself: {grown_then_bound()}");
+}
+
+fn test_the_controls() {
+  assert("{under_return()}" == "[1,2,3,4]", "under return: {under_return()}");
+  assert("{in_an_arm(true)}" == "[1,2,3,4]" && "{in_an_arm(false)}" == "[3,4,1,2]", "an arm: {in_an_arm(true)} {in_an_arm(false)}");
+  assert("{parameter_first([1, 2])}" == "[1,2,3,4]", "a parameter first: {parameter_first([1, 2])}");
+  assert("{literal_first()}" == "[1,2,3,4]", "a literal first: {literal_first()}");
+}
