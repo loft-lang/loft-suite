@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MATCH SUBJECT FROM A LATER FUNCTION KEEPS ITS OWN TEMP (`@FR-M-Match`: the subject is
+// evaluated once, into a temp of its own type).  A subject that comes from a function declared
+// LOWER in the file has no type on the first pass, so that pass mints no temp for it, and the
+// second pass does.  When the temps were numbered by a counter, the second pass's extra temp
+// took the next match's first-pass name and type, and every later match moved one name along:
+// a struct-enum read into an `integer` temp.  No part of the first match has to run (loft#2520).
+// The control (`live_unwrap`) runs its match; its neighbour's temp has the same layout, which
+// is why it passed before the cure.
+//
+// Axes it MOVES: the untyped subject's kind (an unwrapped struct-enum `x!`, a scalar, a plain
+// enum), whether its match runs, and where the next match sits (after it, or nested in its arm).
+// Values hand-computed: `make_b(3)` is `Pb { name: "bee", n: 21 }`; `later(3)` holds `[3, 4]`.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: c10d11b64 — interpret exit 139 -> 0, C exit 2 -> 0 (the control is the tree before
+//   the cure, `Function::match_subject`)
+// CHANNEL: the run (interpreter: a crash or a refused free) and the build (C refuses the
+//   program: "an integer expected, a Ref found").
+// ARMED: no instrument.
+// WITNESS: each message prints the text the cell produced.
+// HOLDS: the control cell reads the same before and after.
+
+enum A { Pa { items: vector<integer> }, Qa }
+enum B { Pb { name: text, n: integer }, Qb }
+enum C { Red, Green, Blue }
+
+fn make_b(k: integer) -> B {
+  if k > 0 { Pb { name: "bee", n: k * 7 } } else { Qb }
+}
+
+fn dead_unwrap(k: integer) -> text {
+  x = later(k);
+  if k < 0 {
+    match x! { Pa { items } => { println("never {len(items)}"); }, _ => {} }
+  }
+  s = match make_b(k) { Pb { name, n } => "{name}:{n}", Qb => "qb" };
+  t = match k + 1 { 4 => "four", _ => "other" };
+  "{s} {t}"
+}
+
+fn live_unwrap(k: integer) -> text {
+  x = later(k);
+  c = 0;
+  match x! { Pa { items } => { c = len(items) * 100 + items[1]; }, _ => {} }
+  s = match make_b(k) { Pb { name, n } => "{name}:{n}", Qb => "qb" };
+  "{c} {s}"
+}
+
+fn scalar_late(k: integer) -> text {
+  a = match later_int(k) { _ => "any" };
+  s = match make_b(k) { Pb { name, n } => "{name}:{n}", Qb => "qb" };
+  "{a} {s}"
+}
+
+fn plain_late(k: integer) -> text {
+  a = match later_c(k) { Red => "red", Green => "green", Blue => "blue" };
+  s = match make_b(k) { Pb { name, n } => "{name}:{n}", Qb => "qb" };
+  "{a} {s}"
+}
+
+fn nested_late(k: integer) -> text {
+  r = "";
+  match later(k)! {
+    Pa { items } => {
+      r = match make_b(items[0]) { Pb { name, n } => "{name}:{n}", Qb => "qb" };
+    },
+    _ => {}
+  }
+  t = match k * 2 { 6 => "six", _ => "other" };
+  "{r} {t}"
+}
+
+fn later(k: integer) -> A? { Pa { items: [k, k + 1] } }
+fn later_int(k: integer) -> integer { k * 10 }
+fn later_c(k: integer) -> C { if k == 3 { Green } else { Red } }
+
+fn main() {
+  r1 = dead_unwrap(3);
+  assert(r1 == "bee:21 four", "a dead match over `x!`: {r1}");
+  r2 = live_unwrap(3);
+  assert(r2 == "204 bee:21", "the control, run: {r2}");
+  r3 = scalar_late(3);
+  assert(r3 == "any bee:21", "a scalar subject: {r3}");
+  r5 = plain_late(3);
+  assert(r5 == "green bee:21", "a plain-enum subject: {r5}");
+  r6 = nested_late(3);
+  assert(r6 == "bee:21 six", "a match nested in the arm: {r6}");
+  println("a match subject from a later function keeps its own temp: every cell holds");
+}
