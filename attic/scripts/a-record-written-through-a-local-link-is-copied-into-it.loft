@@ -9,7 +9,7 @@
 // write through `c` onto the record it already names is that record.
 //
 // @falsified-at: e820d0b04 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
-// @falsified-by: tests/falsified/a-record-written-through-a-local-link-is-copied-into-it.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// @falsified-by: tests/falsified/a-record-written-through-a-local-link-is-copied-into-it.patch — interpret exit 1 -> 0, native exit 1 -> 0
 // HOLDS: leak, panic and free-refusal are clean on both trees and both backends.
 //
 // CHANNEL: the assertions — a field of the source and of the linked record, each written AFTER the
