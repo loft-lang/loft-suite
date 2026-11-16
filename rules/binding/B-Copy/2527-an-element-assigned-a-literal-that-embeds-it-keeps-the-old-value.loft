@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ELEMENT ASSIGNED A LITERAL THAT EMBEDS IT KEEPS THE OLD VALUE (`@FR-B-Copy`: every operand
+// is read before the literal's first write into its place).  `e[0] = Node { v: 8, next: e[0] }`
+// stages the right-hand `e[0]` before writing — as a VIEW of the element, which the literal's
+// `v` write overwrote before the out-of-line `next` field copied it in: the new node's `next`
+// read `v: 8` for `v: 9` on both backends, with nothing said (loft#2527).  The element is
+// inline, so it is copied either way; the copy is now taken before the writes.
+//
+// Axes it MOVES: the place (an element of a local vector, an element of a field's vector, an
+// inline field, an out-of-line field — the demote's road), and a loop re-wrapping one element.
+// Values hand-computed in each message.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: 79c121823 — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_STRUCT_ELEMENT_SELF_READ_VIEW=1`)
+// CHANNEL: the asserts — the embedded old value reads the new one.
+// ARMED: no instrument.
+// WITNESS: each message prints the value and the embedded one.
+// HOLDS: the field places read the same before and after.
+
+struct Node { v: integer, next: Node? }
+struct H { a: Node, items: vector<Node>, link: Node? }
+
+fn tail_of(n: Node?) -> integer {
+  if n == null { -1 } else { n!.v }
+}
+
+fn test_an_element_of_a_local_vector() {
+  e: vector<Node> = [Node { v: 9, next: null }];
+  e[0] = Node { v: 8, next: e[0] };
+  assert(e[0]!.v == 8 && tail_of(e[0]!.next) == 9, "8 over 9: {e[0]!.v} {tail_of(e[0]!.next)}");
+}
+
+fn test_the_field_places() {
+  h = H { a: Node { v: 5, next: null }, items: [Node { v: 3, next: null }], link: Node { v: 7, next: null } };
+  h.a = Node { v: 4, next: h.a };
+  assert(h.a.v == 4 && tail_of(h.a.next) == 5, "an inline field: {h.a.v} {tail_of(h.a.next)}");
+  h.items[0] = Node { v: 2, next: h.items[0] };
+  assert(tail_of(h.items[0]!.next) == 3, "an element of a field: {tail_of(h.items[0]!.next)}");
+  h.link = Node { v: 6, next: h.link };
+  assert(tail_of(h.link!.next) == 7, "an out-of-line field: {tail_of(h.link!.next)}");
+}
+
+fn test_a_loop_rewrapping_one_element() {
+  e: vector<Node> = [Node { v: 0, next: null }];
+  for i in 1..6 {
+    e[0] = Node { v: i * 10, next: e[0] };
+  }
+  // The chain reads 50, 40, 30, 20, 10, 0: a sum of 150 over six nodes.
+  sum = 0;
+  n = 0;
+  p: Node? = e[0];
+  while p != null { sum += p!.v; n += 1; p = p!.next; }
+  assert(sum == 150 && n == 6, "six nodes summing 150: {n} {sum}");
+}
+
+fn main() {
+  test_an_element_of_a_local_vector();
+  test_the_field_places();
+  test_a_loop_rewrapping_one_element();
+  println("an element assigned a literal that embeds it keeps the old value: every cell holds");
+}
