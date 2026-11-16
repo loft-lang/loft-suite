@@ -1,0 +1,140 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TAIL AFTER AN EARLY RETURN OF A LOCAL DELIVERS ITS OWN VALUE (`@FR-F-Ret`).  A function that
+// returns a record local early (`return deeper`) hands that local the caller's return buffer;
+// the tail is then copied into the same buffer.  The copy was declined whenever the function's
+// last STATEMENT read the buffer local — and a match arm that binds the local and returns it
+// early reads it — although the value the tail delivers never does.  The tail's view was
+// answered raw: an empty record on both paths, the struct it owed and the `null` alike
+// (loft#2525).
+//
+// Axes it MOVES: the tail's form (`if`, `match`), what it delivers (a field of a parameter, a
+// literal, `null`), the record kind (a struct, a struct enum) and which path answers (the early
+// return, the tail).  Values hand-computed in each message.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: bba257da1 — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_TAIL_READS_WHOLE_STATEMENT=1`)
+// CHANNEL: the asserts — an empty record (`:0`) where a field or `null` was owed.
+// ARMED: no instrument.
+// WITNESS: each message prints the answer.
+// HOLDS: the early-return path answers the same before and after.
+
+struct Pos {
+  file: text,
+  line: integer,
+}
+
+enum Nd {
+  Leaf { v: integer },
+  Sp { pos: Pos, inner: Nd },
+}
+
+enum Tag {
+  At { n: integer },
+  Off,
+}
+
+fn show(p: Pos?) -> text {
+  if p == null { "null" } else { "{p!.file}:{p!.line}" }
+}
+
+fn inner_pos(n: Nd) -> Pos? {
+  match n {
+    Sp { pos, inner } => {
+      deeper = inner_pos(inner);
+      if deeper != null {
+        return deeper;
+      }
+      if pos.line != 0 { pos } else { null }
+    },
+    _ => null,
+  }
+}
+
+fn inner_pos_match(n: Nd) -> Pos? {
+  match n {
+    Sp { pos, inner } => {
+      deeper = inner_pos_match(inner);
+      if deeper != null {
+        return deeper;
+      }
+      match pos.line {
+        0 => null,
+        _ => pos,
+      }
+    },
+    _ => null,
+  }
+}
+
+fn literal_tail(n: Nd, k: integer) -> Pos? {
+  match n {
+    Sp { inner } => {
+      deeper = literal_tail(inner, k);
+      if deeper != null {
+        return deeper;
+      }
+      if k > 0 { Pos { file: "lit", line: k } } else { null }
+    },
+    _ => null,
+  }
+}
+
+fn tag_of(n: Nd, k: integer) -> Tag? {
+  match n {
+    Sp { pos, inner } => {
+      deeper = tag_of(inner, k);
+      if deeper != null {
+        return deeper;
+      }
+      if pos.line > k { At { n: pos.line } } else { null }
+    },
+    _ => null,
+  }
+}
+
+fn tree() -> Nd {
+  Nd::Sp {
+    pos: Pos { file: "f", line: 7 },
+    inner: Nd::Sp { pos: Pos { file: "", line: 0 }, inner: Nd::Leaf { v: 1 } },
+  }
+}
+
+fn test_an_if_tail() {
+  a = show(inner_pos(tree()));
+  assert(a == "f:7", "the outer node's position: {a}");
+  b = show(inner_pos(Nd::Sp { pos: Pos { file: "", line: 0 }, inner: Nd::Leaf { v: 1 } }));
+  assert(b == "null", "no position anywhere: {b}");
+  c = show(inner_pos(Nd::Sp { pos: Pos { file: "o", line: 3 }, inner: Nd::Sp { pos: Pos { file: "i", line: 9 }, inner: Nd::Leaf { v: 1 } } }));
+  assert(c == "i:9", "the inner one, by the early return: {c}");
+}
+
+fn test_a_match_tail() {
+  a = show(inner_pos_match(tree()));
+  assert(a == "f:7", "a match tail: {a}");
+}
+
+fn test_a_literal_tail() {
+  a = show(literal_tail(Nd::Sp { pos: Pos { file: "", line: 0 }, inner: Nd::Leaf { v: 1 } }, 4));
+  assert(a == "lit:4", "a literal built at the tail: {a}");
+  b = show(literal_tail(Nd::Sp { pos: Pos { file: "", line: 0 }, inner: Nd::Leaf { v: 1 } }, 0));
+  assert(b == "null", "the literal's null arm: {b}");
+}
+
+fn test_a_struct_enum_tail() {
+  t = tag_of(tree(), 5);
+  r = match t { At { n } => n, Off => -1, null => -2 };
+  assert(r == 7, "a struct-enum built at the tail: {r}");
+  u = tag_of(tree(), 9);
+  assert(u == null, "its null arm: {u != null}");
+}
+
+fn main() {
+  test_an_if_tail();
+  test_a_match_tail();
+  test_a_literal_tail();
+  test_a_struct_enum_tail();
+  println("a tail after an early return of a local delivers its own value: every cell holds");
+}
