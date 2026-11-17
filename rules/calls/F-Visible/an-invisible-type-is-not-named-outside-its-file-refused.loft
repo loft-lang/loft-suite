@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INVISIBLE TYPE IS NOT NAMED OUTSIDE ITS FILE (`@FR-F-Visible`).  A type that is not `pub` and
+// that no `pub` item of its file names is INVISIBLE outside it: it cannot even be named, so a
+// signature that names it reads as naming a type that is not there — and says nothing of the
+// library's private declarations.  The fixture library's `VeSeed` is used only by a private
+// function.  This refusal comes a compile pass before the others of this rule, so it has its own
+// file; they are `what-has-no-pub-consent-is-refused-outside-its-file-refused.loft`.
+//
+// @falsified-at: none — a conformance guard: refused as the rule says on the tree of the suite pin
+//   that adds this cell, interpret and native-c; a corrupted expectation fails the file.
+//   CHANNEL: the expected error (it must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   HOLDS: the Rust twin `an_invisible_type_is_not_named` in tests/pub_visibility.rs.
+//
+// @EXPECT_ERROR: Undefined type VeSeed
+
+use f_visible_fixture_lib::*;
+
+fn take_a_seed(s: VeSeed) -> integer { 1 }

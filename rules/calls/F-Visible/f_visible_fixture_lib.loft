@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE FIXTURE LIBRARY for this directory's cells (`@FR-F-Visible`): one type of each visibility a
+// file's declarations can have outside it.  `VeSeed` is INVISIBLE (not `pub`, no `pub` item names
+// it); `VeUnit` and `VeMood` are NAME ONLY (not `pub`, but a `pub` function's signature names
+// them); `VeOpen` is `pub` with every field `pub`, so a literal of it is legal outside; `VeMixed`
+// is `pub` with one private field; `VeCol` is a `pub` enum.  The cells beside it reach it with
+// `use` (the flat file in the script's own directory is where `use` resolves it).  Run on its own
+// it is a cell too: a file reaches every item it declares, `pub` or not.
+//
+// @falsified-at: none — a conformance guard; the library's own uses answered as hand-computed,
+//   interpret and native.
+//   CHANNEL: the asserts.
+//   ARMED: no instrument.
+//   HOLDS: nothing outside the library is reached when it runs alone.
+
+pub struct VeOpen { pub a: integer, pub b: text }
+pub struct VeMixed { pub a: integer, b: integer }
+struct VeUnit { pub name: text, hp: integer }
+struct VeSeed { s: integer }
+enum VeMood { Calm, Angry }
+pub enum VeCol { Red, Green }
+
+pub fn ve_spawn(name: text) -> VeUnit { VeUnit { name: name, hp: 10 } }
+pub fn ve_hp_of(u: VeUnit) -> integer { u.hp }
+pub fn ve_mixed(a: integer) -> VeMixed { VeMixed { a: a, b: a * 2 } }
+pub fn ve_b_of(m: VeMixed) -> integer { m.b }
+pub fn ve_mood(angry: boolean) -> VeMood { if angry { VeMood.Angry } else { VeMood.Calm } }
+pub fn ve_is_angry(m: VeMood) -> boolean { match m { Angry => true, _ => false } }
+fn ve_seed(s: integer) -> VeSeed { VeSeed { s: s } }
+
+fn test_the_file_reaches_every_item_it_declares() {
+  u = ve_spawn("orc");
+  u.hp = 12;
+  m = VeMixed { a: 1, b: 5 };
+  s = "{u.name} {u.hp} {m.b} {ve_seed(3).s} {ve_is_angry(ve_mood(true))} {ve_is_angry(VeMood.Calm)}";
+  assert(s == "orc 12 5 3 true false", "own items: {s}");
+}

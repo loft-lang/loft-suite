@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// WHAT HAS NO `pub` CONSENT IS REFUSED OUTSIDE ITS FILE, ONCE (`@FR-F-Visible`, @C140).  Outside the
+// fixture library: a literal of a NAME-ONLY type is refused, naming the cure (build it with the
+// library's functions); a literal of a `pub` type with a private field is refused, naming that
+// field; a private field is refused to a read and to a write; a variant of a name-only enum is
+// hidden, spelled bare in a pattern or qualified (`VeMood.Calm`).  Each refusal is said once and
+// names what it refuses: a qualified variant once read "`VeMood` is a variant of `VeMood`"
+// (loft#2541), and a refused struct literal was refused again for each private field it fills
+// (loft#2542).  Each function is one refusal; an error no expectation names fails the file.  An
+// INVISIBLE type is refused a compile pass earlier, which a file with these never reaches:
+// `an-invisible-type-is-not-named-outside-its-file-refused.loft`.
+//
+// @falsified-by: tests/falsified/what-has-no-pub-consent-is-refused-outside-its-file-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/6 -> 0/6 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/6 -> 0/6 (the suite's verdict, not a count of matches)
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   WITNESS: the control names `VeMood` as its own variant and adds a second error to each of the
+//   two refused literals.
+//   HOLDS: the four other refusals, on both trees.
+//
+// @EXPECT_ERROR: `VeUnit` is not `pub` in `f_visible_fixture_lib`, so it cannot be built outside that file
+// @EXPECT_ERROR: `VeMixed` cannot be built outside `f_visible_fixture_lib`: its field `b` is not `pub`
+// @EXPECT_ERROR: field `hp` of `VeUnit` is not `pub` in `f_visible_fixture_lib`
+// @EXPECT_ERROR: field `hp` of `VeUnit` is not `pub` in `f_visible_fixture_lib`
+// @EXPECT_ERROR: `Angry` is a variant of `VeMood`, which is not `pub` in `f_visible_fixture_lib`
+// @EXPECT_ERROR: `Calm` is a variant of `VeMood`, which is not `pub` in `f_visible_fixture_lib`
+
+use f_visible_fixture_lib::*;
+
+fn build_a_name_only_type() -> text { u = VeUnit { name: "x", hp: 1 }; u.name }
+fn build_a_pub_type_with_a_private_field() -> integer { m = VeMixed { a: 1, b: 2 }; m.a }
+fn read_a_private_field() -> integer { u = ve_spawn("orc"); u.hp }
+fn write_a_private_field() -> text { u = ve_spawn("orc"); u.hp = 3; u.name }
+fn match_a_hidden_variant() -> integer { match ve_mood(true) { Angry => 1, _ => 0 } }
+fn qualify_a_hidden_variant() -> boolean { ve_is_angry(VeMood.Calm) }

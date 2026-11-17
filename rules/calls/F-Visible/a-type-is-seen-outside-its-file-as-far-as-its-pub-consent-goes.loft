@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TYPE IS SEEN OUTSIDE ITS FILE AS FAR AS ITS `pub` CONSENT GOES (`@FR-F-Visible`, @C140).
+// Everything a file declares is private to it, and `pub` gives consent.  Outside the fixture
+// library: a NAME-ONLY type — not `pub`, but a `pub` function's signature names it — is named,
+// passed and stored, and its `pub` field is read and written; a `pub` struct whose fields are all
+// `pub` is also built; a `pub` struct's `pub` field is read and written beside its private one,
+// which only the library's functions reach; a `pub` enum's variants are named.  The refusals —
+// building a name-only type, a private field, a hidden variant, an invisible type — are the
+// cells beside this one.  Values by hand: `ve_spawn("orc")` is name "orc", hp 10; `ve_mixed(3)`
+// is a 3, b 6.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c.
+//   CHANNEL: the asserts.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the refusal cells beside it; the Rust twins in tests/pub_visibility.rs.
+
+use f_visible_fixture_lib::*;
+
+struct Keep { u: VeUnit, tag: integer }
+
+fn show(u: VeUnit) -> text { "{u.name}" }
+
+fn test_a_name_only_type_is_named_passed_and_stored() {
+  u = ve_spawn("orc");
+  k = Keep { u: u, tag: 1 };
+  k.u.name = "elf";
+  s = "{show(u)} {ve_hp_of(u)} {k.u.name} {ve_hp_of(k.u)} {k.tag}";
+  assert(s == "orc 10 elf 10 1", "name only: {s}");
+}
+
+fn test_a_pub_type_with_every_field_pub_is_built() {
+  o = VeOpen { a: 3, b: "x" };
+  o.a += 1;
+  o.b += "y";
+  assert("{o.a} {o.b}" == "4 xy", "open: {o.a} {o.b}");
+}
+
+fn test_a_pub_field_beside_a_private_one_is_read_and_written() {
+  m = ve_mixed(3);
+  m.a = 5;
+  assert("{m.a} {ve_b_of(m)}" == "5 6", "mixed: {m.a} {ve_b_of(m)}");
+}
+
+fn test_a_pub_enum_names_its_variants() {
+  c = VeCol.Green;
+  n = match c { Red => 1, Green => 2 };
+  assert(n == 2 && ve_is_angry(ve_mood(true)) && !ve_is_angry(ve_mood(false)), "pub enum: {n}");
+}
