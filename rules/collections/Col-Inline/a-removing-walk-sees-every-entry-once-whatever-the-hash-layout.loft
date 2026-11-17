@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REMOVING WALK SEES EVERY ENTRY ONCE, WHATEVER THE HASH LAYOUT (`@FR-Col-Inline`, `@FR-Col-Layouts`,
+// @C105, @C152).  A hash of an ADMITTED element type keeps its entries in the bucket table, and an
+// entry moves only when the table grows or a store is loaded or compacted: a removal leaves a
+// tombstone, so a walk that removes as it goes (`h[e.k] = null` — `#remove` is refused in a hash
+// walk) sees every entry exactly once, and a view of one entry reads it across the removal of
+// others.  A type that a `reference<T>` field names is NOT admitted (nothing stored may name an
+// entry), so its table keeps the entries out of line — and answers the same.  Which layout a new
+// table takes is the build's policy (LOFT_NO_HASH_TAG, LOFT_NO_HASH_INLINE) and a value never
+// depends on it: the nightly switch-ab reruns this cell under both switches, where any moved
+// answer reads as a defect.  Values by hand: keys 0..11, v = 10·k, sum 660; the multiples of
+// three (0, 3, 6, 9) removed leave 8, `h[4].v` 40, `h[3]` absent.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c, under the default layout and with
+//   LOFT_NO_HASH_TAG and LOFT_NO_HASH_INLINE.
+//   CHANNEL: the asserts and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the Rust twins — tests/store_persist_loft.rs (every layout in one store) and
+//   src/hash.rs's layout flags.
+
+struct E { k: integer, v: integer }
+struct R { k: integer, v: integer }
+struct Pin { at: reference<R> }
+
+fn walk_admitted() -> text {
+  h: hash<E[k]> = [];
+  for i in 0..12 { h += [E { k: i, v: i * 10 }]; }
+  seen = 0;
+  sum = 0;
+  for e in h {
+    seen += 1;
+    sum += e.v;
+    if e.k % 3 == 0 { h[e.k] = null; }
+  }
+  "{seen} {sum} {len(h)} {h[4].v ?? -1} {h[3].v ?? -1}"
+}
+
+fn walk_not_admitted() -> text {
+  h: hash<R[k]> = [];
+  for i in 0..12 { h += [R { k: i, v: i * 10 }]; }
+  seen = 0;
+  sum = 0;
+  for e in h {
+    seen += 1;
+    sum += e.v;
+    if e.k % 3 == 0 { h[e.k] = null; }
+  }
+  "{seen} {sum} {len(h)} {h[4].v ?? -1} {h[3].v ?? -1}"
+}
+
+fn test_an_admitted_hash_walk_that_removes_sees_every_entry_once() {
+  assert(walk_admitted() == "12 660 8 40 -1", "admitted: {walk_admitted()}");
+}
+
+fn test_a_type_a_reference_names_answers_the_same() {
+  assert(walk_not_admitted() == "12 660 8 40 -1", "not admitted: {walk_not_admitted()}");
+}
+
+fn test_a_view_of_an_entry_reads_it_across_other_removals() {
+  h: hash<E[k]> = [];
+  for i in 0..12 { h += [E { k: i, v: i * 10 }]; }
+  five = h[5];
+  h[2] = null;
+  h[7] = null;
+  h[11] = null;
+  assert("{five.v ?? -1} {len(h)} {h[5].v ?? -1}" == "50 9 50", "view across removals: {five.v ?? -1} {len(h)}");
+}
