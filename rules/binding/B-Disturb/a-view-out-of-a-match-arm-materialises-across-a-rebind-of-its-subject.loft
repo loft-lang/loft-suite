@@ -1,6 +1,17 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A VIEW OUT OF A MATCH ARM MATERIALISES ACROSS A REBIND OF ITS SUBJECT (`@FR-B-Disturb`,
+// `@FR-B-View`, `@FR-H-Materialise`).  Reassigning a match's subject ends the places inside it, so
+// a view taken in an arm — of a payload field, or through the payload binding into an element —
+// that is still read after the reassignment is given its own copy.  It holds whichever arm the
+// view is bound in (the first, or a later one that sits in the lowering's `else if` chain) and
+// however the view leaves the arm (read inside it, or bound to a local outside it).  Two sections,
+// each with its cells and receipt: a view bound in a later arm, and a payload view read after the
+// subject is rebound.
+//
+// ── a-view-bound-in-a-later-match-arm-materialises-across-a-rebind ──
+//
 // `match at { Leaf {…} => …, Call { args } => { at = pick(args[0]); len(args) } }` read a
 // released store: `len(args)` answered 0 on both backends, quietly, and under `--interpret`
 // the rebind's own `args[0]` read null.  The same arm written FIRST answered right.
@@ -34,6 +45,29 @@
 //   use-after cell (its second argument reads null).
 //   HOLDS: every first-arm twin and the three spellings that were already right pass on both
 //   trees; no other cell moves.
+//
+// ── a-match-payload-view-read-after-its-subject-is-rebound-is-a-copy ──
+//
+// @catches: LOFT_NO_PAYLOAD_VIEW_FRAME — the payload binding's view closes with the arm, the bound element names no root, and the reassignment of the subject leaves it reading a freed store
+//
+// @FR-B-Disturb: reassigning a base ends the places inside it; a view still read afterwards gets
+// its own copy (`(H-Materialise)`).  `bl = match code { NdBlock { block } => block[0], … }` views
+// `code` through the payload binding `block`, whose view was owned by the ARM and closed before
+// `bl` was bound — so `code = …` freed what `bl` read (main: a fault on the interpreter, a wrong
+// answer or a fault in C; the self-hosted elaborator's `vector_return` and `yield_is_fresh`).
+//
+// Axes this file MOVES:  the subject (a local, a parameter rebound first); the new value (an
+//                        unrelated variant, a literal copying the view); a loop rebinding the
+//                        subject from the view (the elaborator's walk).
+// Axes it HOLDS FIXED:   the view is a `match` payload's element.
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: 348c6cbaa (switch A/B, `LOFT_NO_PAYLOAD_VIEW_FRAME=1`, armed as above) — interpret
+//   1 of 2 tests fail; native-c 2 of 2 fail, strict stores reporting `not freed at program exit:
+//   kt=101 Tr×2`.
+//   CHANNEL: the VALUES (hand-computed) and the strict-store gate.
+//   WITNESS: the failed values and the two never-freed `Tr` stores on C.
+//   HOLDS: every cell, on every backend — with the cure on, 2 of 2 pass on both backends.
 
 enum N {
   Leaf { n: integer },
@@ -195,4 +229,51 @@ fn test_the_spellings_that_were_already_right() {
     }
   }
   assert(leaf_n(b) == 71, "through a temporary: {leaf_n(b)}");
+}
+
+struct Blk { ops: vector<integer> }
+enum Nd { NdBlock { block: vector<Blk> }, NdNull }
+struct Op { operators: vector<Tr> }
+enum Tr { TrBlock { block: vector<Op> }, TrInt { n: integer }, TrNull }
+
+fn tot(b: Blk) -> integer { t = 0; for o in b.ops { t += o; } t }
+
+fn local_unrelated() -> integer {
+  code = Nd::NdBlock { block: [Blk { ops: [7, 8] }] };
+  bl = match code { NdBlock { block } => block[0], _ => return 0 };
+  code = Nd::NdNull;
+  tot(bl) * 100 + len(bl.ops)
+}
+fn param_rebuilt(code: Nd) -> integer {
+  code = Nd::NdBlock { block: [Blk { ops: [7, 8] }] };
+  bl = match code { NdBlock { block } => block[0], _ => return 0 };
+  code = Nd::NdBlock { block: [bl] };
+  tot(bl) * 100 + len(bl.ops)
+}
+fn unspan(v: Tr) -> Tr { v }
+fn depth_of(v: Tr) -> integer {
+  tail = unspan(v);
+  d = 0;
+  while tail is TrBlock {
+    ops = match tail { TrBlock { block } => block[0].operators, _ => [] };
+    if len(ops) == 0 {
+      return -2;
+    }
+    tail = unspan(ops[-1]);
+    d += 1;
+  }
+  match tail { TrInt { n } => d * 100 + n, _ => -3 }
+}
+
+fn test_the_view_outlives_its_subject() {
+  t = 0;
+  for _ in 0..3 { t += local_unrelated() * 10 + param_rebuilt(Nd::NdNull); }
+  assert(t == 49566, "{t}");
+}
+
+fn test_a_walk_rebinding_its_subject_from_the_view() {
+  inner = Tr::TrBlock { block: [Op { operators: [Tr::TrInt { n: 7 }] }] };
+  outer = Tr::TrBlock { block: [Op { operators: [Tr::TrNull, inner] }] };
+  empty = Tr::TrBlock { block: [Op { operators: [] }] };
+  assert("{depth_of(outer)} {depth_of(empty)} {depth_of(Tr::TrInt { n: 4 })}" == "207 -2 4", "walk");
 }
