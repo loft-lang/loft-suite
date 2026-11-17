@@ -1,0 +1,256 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// ONE PLACE NAMED THROUGH `&` PARAMETERS AND LINKS IS ONE PLACE (`@FR-B-Ref-Alias`: a `&τ`
+// parameter is a live LINK to the caller's place, for every τ).  One place handed to two `&`
+// parameters of one call is one place seen twice: a write through either lands in it, and a
+// rebind through one is what the other reads from then on.  It holds through every call form — a
+// direct call, a fn-ref, a method — and beside a BY-VALUE parameter naming the same record, which
+// keeps the record the call began with.  A `&` link to a `&vector` parameter shares the caller's
+// vector: an append through the link, the parameter or the caller's own name is one append.
+// Three sections, each with its cells and receipt: two `&` parameters (loft#2136), the other call
+// forms (loft#2136, loft#2150), and a link to a `&vector` parameter (loft#2424).
+//
+// ── 2136-one-place-handed-to-two-ref-parameters-is-one-place ──
+//
+// @FR-B-Ref-Alias — a `&τ` parameter is a live LINK to the caller's place, for every τ.  So one
+// place handed to two `&` parameters of one call is ONE place seen twice: a write through
+// either lands in it, and a REBIND through one (`a = …`) is what the other reads from then on.
+// @FR-B-Ref-Repoint is not involved: a rebind of a `&` parameter writes the caller's variable.
+//
+// loft#1605 was the scalar form (`add2(x, x)`).  This file is the heap form (loft#2136): a
+// record, a vector, a text, a tuple and a struct enum, each handed twice — and three times,
+// and through a forwarded `&` parameter, which hands its own link on twice.  Every value
+// below is hand-computed from the rule; the interpreter has always answered them.
+//
+// @falsified-at: 143dec434 — native: rustc refused the file (E0499 at every same-place call, the
+//   forwarded `*var_p` included), interpret unchanged (linux-probe run 39999242379).
+// CHANNEL: native exit (the compile), interpret unchanged.
+// WITNESS: on the control rustc reports E0499, "cannot borrow var_m as mutable more than once at
+//   a time", at `n_twice(cell, &mut var_m, &mut var_m, 5_i64)`, and the same for var_n and *var_p.
+// HOLDS: the interpreter passes on both trees; after the fix every assertion holds on both
+//   backends with nothing leaked.
+//
+// ── 2136-one-place-through-a-fn-ref-or-a-method-is-one-place ──
+//
+// @FR-B-Ref-Alias — the `2136-one-place-handed-to-two-ref-parameters` cell's rule, through the
+// call forms that file leaves out: a fn-ref call, a method call (`self` and a `&` parameter on
+// one record), and a `&` parameter beside a BY-VALUE parameter naming the same record.  The
+// last is the sharp one: a rebind through the `&` reaches the caller, while the by-value
+// parameter keeps the record the call began with (@FR-B-View) — so it reads the old length.
+//
+// A fn-ref call to a text-returning function with a `&text` parameter also broke the
+// interpreter (loft#2150) — a crash, or the caller's text read back empty: its fn-ref frame
+// trim counted that parameter as a work buffer and left a spare buffer on the frame.
+// Every value below is hand-computed from the rules.
+//
+// @falsified-at: 143dec434 — native: rustc refused the file (E0499 at the same-place calls, E0596
+//   at the by-value parameter's `_pre_` copy); interpret exit 1, one assertion failure
+//   (linux-probe run 40027924579).
+// CHANNEL: native exit (the compile); interpret assertion failures.
+// WITNESS: on the control rustc reports E0499 for var_m, var_t, var_v and var_n and E0596 for
+//   `_pre_44`, the copy the `&` parameter of `mixed(q, q)` was handed; the interpreter answers
+//   `fn-ref text: ` — `t` reads empty after the `&text` fn-ref call (loft#2150).
+// HOLDS: after both fixes every assertion holds on both backends with nothing leaked.
+//
+// ── 2424-a-link-to-a-ref-vector-parameter-shares-its-handle ──
+//
+// A `&` link to a `&vector` PARAMETER shares the caller's vector (`@FR-B-Ref-Alias`): an
+// append through the link, through the parameter or through the caller's own name is one
+// append to one vector, in both spellings of the link.
+//
+// Before loft#2424 the bind read the `&vector` parameter as a LINK to copy — the link-to-link
+// route a scalar or record link takes (`d = &c`) — instead of a collection handle to share.
+// `p = &a` left `p` typed as a link and never bound: an internal compiler error on both
+// backends for a read, a stack-store panic on the interpreter for an append.  The annotated
+// `p: &vector<integer> = a` was refused as a retype.
+//
+// The cells that can FAIL:
+//   c1  `p = &a`, append through `p`           — panic / ICE
+//   c2  `p = &a`, read `len(p)` after `a +=`   — ICE
+//   c3  `p: &vector<integer> = a`              — refused as a retype
+//   c4  a whole-value write through `p`        — the shared store is refilled in place
+//
+// The controls, each of which a too-wide fix would move:
+//   c5  a link to a vector LOCAL               — always shared
+//   c6  a link to a by-value vector parameter  — always shared
+//   c7  a link to a `&hash` parameter          — always shared
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: no instrument.  Ordinary assertions on every backend.
+//   WITNESS: the control does not build the file: an internal compiler error (`Incorrect var p`)
+//   on both backends, before any assertion runs.
+//   HOLDS: leak, panic and free-refusal are clean on both trees and both backends; the
+//   compile is the whole measurement, and HERE passes every assertion.
+//
+// CHANNEL: the assertions; the ICE and the panic are a plain run's exit code.
+
+struct Mp { name: text, cs: vector<integer> }
+struct Box { inner: Mp, tag: integer }
+enum Sh { Sq { s: integer }, Ci { r: integer } }
+
+fn twice(a: &Mp, b: &Mp, x: integer) -> integer {
+  b.cs += [x];
+  a.cs += [x + 1];
+  len(a.cs)
+}
+
+// A rebind through `a`: `b` reads the new record, and `b`'s write lands in it.
+fn rebind(a: &Mp, b: &Mp) -> text {
+  a = Mp { name: "new", cs: [9] };
+  r = "{b.name}:{len(b.cs)}";
+  b.cs += [0];
+  r
+}
+
+// A forwarded `&` parameter, handed on twice.
+fn fwd(p: &Mp) -> integer { twice(p, p, 20) }
+
+fn three(a: &Mp, b: &Mp, c: &Mp) -> text {
+  a.name = "x";
+  b.name += "y";
+  c.name += "z";
+  a.name
+}
+
+// A rebind through `b`, then a field write through `a`: it lands on the new record.
+fn rebind_then_write(a: &Mp, b: &Mp) {
+  b = Mp { name: "nb", cs: [] };
+  a.cs += [42];
+}
+
+fn tv(a: &vector<integer>, b: &vector<integer>) -> integer { a += [1]; b += [2]; len(a) }
+fn tt(a: &text, b: &text) -> text { a += "x"; b += "y"; a }
+fn tu(a: &(integer, integer), b: &(integer, integer)) -> integer { a.0 += 1; b.0 += 10; a.0 }
+fn te(a: &Sh, b: &Sh) -> integer {
+  a = Sq { s: 4 };
+  b = Ci { r: 9 };
+  match a { Sq { s } => s, Ci { r } => r * 100 }
+}
+
+fn test_one_place_handed_to_two_ref_parameters_is_one_place() {
+  m = Mp { name: "e" };
+  assert(twice(m, m, 5) == 2, "twice: {m.cs}");
+  assert("{m.cs}" == "[5,6]", "both appends reach m: {m.cs}");
+
+  assert(rebind(m, m) == "new:1", "b reads the record a rebound to");
+  assert(m.name == "new" && "{m.cs}" == "[9,0]", "the rebind and b's write reach m: {m.name} {m.cs}");
+
+  n = Mp { name: "f" };
+  assert(fwd(n) == 2 && "{n.cs}" == "[20,21]", "forwarded twice: {n.cs}");
+  assert(three(n, n, n) == "xyz" && n.name == "xyz", "three links: {n.name}");
+
+  q = Mp { name: "q", cs: [1] };
+  rebind_then_write(q, q);
+  assert(q.name == "nb" && "{q.cs}" == "[42]", "rebind then write: {q.name} {q.cs}");
+
+  // A field handed twice: two links to one record's field.
+  bx = Box { inner: Mp { name: "i" }, tag: 3 };
+  assert(twice(bx.inner, bx.inner, 1) == 2 && "{bx.inner.cs}" == "[1,2]", "field: {bx.inner.cs}");
+
+  v: vector<integer> = [];
+  assert(tv(v, v) == 2 && "{v}" == "[1,2]", "vector: {v}");
+  t = "s";
+  assert(tt(t, t) == "sxy" && t == "sxy", "text: {t}");
+  u = (0, 0);
+  assert(tu(u, u) == 11 && u.0 == 11, "tuple: {u.0}");
+  e: Sh = Sq { s: 1 };
+  assert(te(e, e) == 900, "a struct enum rebound through both");
+  println("2136 ok");
+}
+
+struct S2Mp { name: text, cs: vector<integer> }
+
+fn s2_twice(a: &S2Mp, b: &S2Mp, x: integer) -> integer {
+  b.cs += [x];
+  a.cs += [x + 1];
+  len(a.cs)
+}
+
+fn s2_rebind(a: &S2Mp, b: &S2Mp) -> text {
+  a = S2Mp { name: "new", cs: [9] };
+  r = "{b.name}:{len(b.cs)}";
+  b.cs += [0];
+  r
+}
+
+fn s2_tt(a: &text, b: &text) -> text { a += "x"; b += "y"; a }
+fn s2_tv(a: &vector<integer>, b: &vector<integer>) -> integer { a += [1]; b += [2]; len(a) }
+
+// `self` and `other` name one record.
+fn grow(self: &S2Mp, other: &S2Mp) -> integer {
+  self.cs += [1];
+  other.cs += [2];
+  len(self.cs)
+}
+
+// The `&` rebinds the caller's record; `b` keeps the one the call began with.
+fn mixed(a: &S2Mp, b: S2Mp) -> integer {
+  a = S2Mp { name: "m", cs: [5, 6, 7] };
+  a.cs += [8];
+  len(b.cs)
+}
+
+fn test_one_place_through_a_fn_ref_or_a_method_is_one_place() {
+  f = s2_twice;
+  m = S2Mp { name: "e" };
+  assert(f(m, m, 5) == 2 && "{m.cs}" == "[5,6]", "fn-ref: {m.cs}");
+  g = s2_rebind;
+  assert(g(m, m) == "new:1", "fn-ref s2_rebind: b reads the record a rebound to");
+  assert(m.name == "new" && "{m.cs}" == "[9,0]", "fn-ref s2_rebind reaches m: {m.name} {m.cs}");
+
+  h = s2_tt;
+  t = "s";
+  assert(h(t, t) == "sxy" && t == "sxy", "fn-ref text: {t}");
+  u = "p";
+  w = "q";
+  assert(h(u, w) == "px" && u == "px" && w == "qy", "fn-ref text, two places: {u} {w}");
+
+  k = s2_tv;
+  v: vector<integer> = [];
+  assert(k(v, v) == 2 && "{v}" == "[1,2]", "fn-ref vector: {v}");
+
+  n = S2Mp { name: "n" };
+  assert(n.grow(n) == 2 && "{n.cs}" == "[1,2]", "method: {n.cs}");
+
+  q = S2Mp { name: "q", cs: [1] };
+  assert(mixed(q, q) == 1, "the by-value parameter keeps the record the call began with");
+  assert(q.name == "m" && "{q.cs}" == "[5,6,7,8]", "the & s2_rebind reaches q: {q.name} {q.cs}");
+  println("2136 forms ok");
+}
+
+struct K { k: integer }
+
+fn c1(a: &vector<integer>) { p = &a; p += [3]; }
+fn c2(a: &vector<integer>) -> integer { p = &a; a += [9]; len(p) }
+fn c3(a: &vector<integer>) { p: &vector<integer> = a; p += [3]; }
+fn c4(a: &vector<integer>) { p = &a; p = [7, 8, 9, 10]; }
+fn c6(a: vector<integer>) { p = &a; p += [3]; }
+fn c7(a: &hash<K[k]>) { p = &a; p += [K { k: 2 }]; }
+
+fn test_a_link_to_a_ref_vector_parameter() {
+  x = [1, 2];
+  c1(x);
+  assert(len(x) == 3 && x[2] == 3, "c1: {len(x)}");
+  y = [1, 2];
+  assert(c2(y) == 3 && len(y) == 3, "c2: {len(y)}");
+  z = [1, 2];
+  c3(z);
+  assert(len(z) == 3, "c3: {len(z)}");
+  w = [1, 2];
+  c4(w);
+  assert(len(w) == 4 && w[0] == 7, "c4: {len(w)}");
+}
+
+fn test_the_controls() {
+  v = [1, 2];
+  p = &v;
+  p += [3];
+  assert(len(v) == 3, "c5: {len(v)}");
+  u = [1, 2];
+  c6(u);
+  assert(len(u) == 3, "c6: {len(u)}");
+  h: hash<K[k]> = [K { k: 1 }];
+  c7(h);
+  assert(len(h) == 2, "c7: {len(h)}");
+}
