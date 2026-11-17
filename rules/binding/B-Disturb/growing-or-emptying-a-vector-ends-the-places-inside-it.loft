@@ -1,6 +1,17 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// GROWING OR EMPTYING A VECTOR ENDS THE PLACES INSIDE IT, HOWEVER THE EVENT IS SPELLED
+// (`@FR-B-Disturb`, `@FR-H-Materialise`, `@FR-B-View`).  An append moves every element once the
+// vector outgrows its allocation, and ANY growth counts, not only one that provably crosses the
+// capacity; a clear removes every element; a method that grows, removes from or reassigns its
+// container disturbs it as a free function does.  A plain view bound before the event is copied
+// at its bind and answers the element it named.  A sort overwrites the places it has and ends
+// nothing.  Two sections, each with its cells and receipt: growth (loft#1373), and a clear or a
+// method (loft#2267).
+//
+// ── 1373-growing-a-container-ends-the-places-inside-it ──
+//
 // loft#1373 (`@FR-B-Disturb`, `@FR-H-Materialise`) — GROWING a container is a place-ending event.  `(B-Disturb)` in
 // `formal/binding.md` listed three (REMOVE, RE-KEY, REASSIGN); an append is a fourth, because
 // a vector that outgrows its allocation is copied into a larger record and every element
@@ -31,6 +42,27 @@
 //   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
 //   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
 //   both. The native side was not scored in this sweep.
+//
+// ── 2267-a-clear-or-a-method-ends-the-views-into-a-vector ──
+//
+// loft#2267 — `@FR-B-Disturb`: a clear REMOVES every element, and a method that grows, removes
+// from or reassigns its container disturbs it as a free function does.  A plain struct view
+// bound before such a call is copied out at the bind (`@FR-B-View`), so it answers the element
+// it named.  The disturbance summary read only `n_` functions, so `v.clear()` and every method
+// went unseen: the view read what the cleared or shifted storage held (C read `0 null` for a
+// cleared element, every backend the shifted element after a method's removal).
+// A SORT overwrites the places it has and disturbs nothing: a view and a `&` link into the
+// vector name the same places after it, now holding the sorted elements.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0,
+//   native exit 1 -> 0, native 2 assertion failures -> 0.
+//   WITNESS: on main every backend answers `2b 2b 1` for the method removal (the view reads
+//   the element that moved in), and C answers `0 0 null` for the clear.
+// CHANNEL: the VALUE of the view after the call, hand-computed, and the LEAK.
+// ARMED: no instrument.
+// HOLDS: every cell, on every backend.
+// @observes: LOFT_NO_CALLEE_DISTURB — the switch stops `clear` and a method ending the views into a vector, so their `view-copied` advice leaves its output.
+
 struct S { n: integer }
 struct W { a: vector<S>, b: vector<S> }
 struct O { inner: I }
@@ -121,7 +153,7 @@ fn a_sibling_fields_growth_does_not_disturb_this_view() {
   assert(w.a[0].n == 5, "control: and still writes through, because nothing disturbed it");
 }
 
-fn main() {
+fn test_growing_a_container_ends_the_places_inside_it() {
   a_sibling_fields_growth_does_not_disturb_this_view();
   a_view_read_after_growth_is_its_own_copy();
   the_answer_does_not_depend_on_the_capacity();
@@ -132,4 +164,72 @@ fn main() {
   the_nested_field_read_control_is_unchanged();
   a_view_with_no_disturbance_still_writes_through();
   println("ok");
+}
+
+struct S2S { n: integer, s: text }
+struct Bag { items: vector<S2S> }
+
+operator compare(self: S2S, other: S2S) -> Ordering { self.n.compare(other.n) }
+
+fn drop_first(self: Bag) { self.items.remove(0); }
+fn add(self: Bag, e: S2S) { self.items += [e]; }
+fn reset(self: &Bag) { self = Bag { items: [S2S { n: 7, s: "seven" }, S2S { n: 8, s: "eight" }] }; }
+
+fn across_clear() -> text {
+  v = [S2S { n: 1, s: "one" }, S2S { n: 2, s: "two" }];
+  e = v[0];
+  v.clear();
+  "{len(v)} {e.n} {e.s}"
+}
+
+fn across_method_removal() -> text {
+  b = Bag { items: [S2S { n: 1, s: "a" }, S2S { n: 2, s: "b" }] };
+  e = b.items[0];
+  b.drop_first();
+  "{e.n}{e.s} {b.items[0].n}{b.items[0].s} {len(b.items)}"
+}
+
+fn across_method_growth() -> text {
+  b = Bag { items: [S2S { n: 1, s: "a" }] };
+  e = b.items[0];
+  for i in 0..20 { b.add(S2S { n: i + 10, s: "g" }); }
+  "{e.n}{e.s} {len(b.items)}"
+}
+
+fn across_method_reset() -> text {
+  b = Bag { items: [S2S { n: 1, s: "a" }] };
+  e = b.items[0];
+  b.reset();
+  "{e.n}{e.s} {b.items[0].n}"
+}
+
+// A sort overwrites places: the view names v[0], which now holds the smallest.
+fn view_across_sort() -> text {
+  v = [S2S { n: 3, s: "c" }, S2S { n: 1, s: "a" }, S2S { n: 2, s: "b" }];
+  e = v[0];
+  v.sort();
+  "{e.n}{e.s} {v[0].n}{v[0].s}"
+}
+
+fn link_across_sort() -> text {
+  v = [S2S { n: 3, s: "c" }, S2S { n: 1, s: "a" }, S2S { n: 2, s: "b" }];
+  c = &v[0];
+  v.sort();
+  c.n = 9;
+  "{v[0].n}{v[0].s} {v[1].n}{v[1].s} {v[2].n}{v[2].s}"
+}
+
+fn test_a_clear_copies_the_view_out() {
+  assert(across_clear() == "0 1 one", "clear: {across_clear()}");
+}
+
+fn test_a_method_that_disturbs_copies_the_view_out() {
+  assert(across_method_removal() == "1a 2b 1", "removal: {across_method_removal()}");
+  assert(across_method_growth() == "1a 21", "growth: {across_method_growth()}");
+  assert(across_method_reset() == "1a 7", "reset: {across_method_reset()}");
+}
+
+fn test_a_sort_overwrites_the_places_it_has() {
+  assert(view_across_sort() == "1a 1a", "view: {view_across_sort()}");
+  assert(link_across_sort() == "9a 2b 3c", "link: {link_across_sort()}");
 }
