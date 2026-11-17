@@ -1,6 +1,25 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A TEMPLATE INSTANCE IS ITS HAND-WRITTEN TWIN, ITS VARIANTS INCLUDED (`@FR-G-Type`, with `@FR-G-Mono`).
+// `Tree<T>` is a template, never a type: `Tree<integer>` names an instance, which behaves in every use
+// as the struct or enum written out by hand — a recursive instance holds its tail out of line — and
+// a qualified variant (`Tree.Leaf`) belongs to the instance its target is.  Two sections, each with
+// its cells and receipt.
+//
+// ── a-template-instance-is-its-hand-written-twin-in-every-use ──
+//
+// `@FR-G-Type` crossed with `@FR-G-Mono` and `@FR-L-OutOfLine`: a template instance behaves as
+// its hand-written twin — a recursive `List<T>` holds its tail out of line at `text` and at
+// `integer`, a generic function over it specialises per instance, a template built inside a
+// generic function takes the caller's instance.  And `@FR-G-Select`: a concrete definition beats
+// a generic one for its own type, the generic takes every other.  Every cell held on both
+// backends when written; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
+//
+// ── a-qualified-variant-of-a-generic-enum-belongs-to-the-targets-instance ──
+//
 // A QUALIFIED VARIANT OF A GENERIC ENUM BELONGS TO THE TARGET'S INSTANCE (`@FR-G-Type`).  G-Type:
 // `Tree<T>` is a TEMPLATE, never a type; `Tree<integer>` names an instance.  So `Tree.Leaf` on
 // its own names no value — its instance is the one the target is: a typed local, a parameter of
@@ -21,6 +40,30 @@
 // WITNESS: each message prints the size read.
 // HOLDS: `heap/H-RefHome/a-generic-recursive-enum-links-its-nodes-through-locals`, the bare spelling.
 
+struct List<T> { v: T, next: List<T>? }
+struct Pair<T> { a: T, b: T }
+struct P { n: integer }
+
+fn len_of<T>(l: List<T>) -> integer { c = 0; cur: List<T>? = l; while cur != null { c += 1; cur = cur.next; } c }
+fn swap<T>(p: Pair<T>) -> Pair<T> { Pair { a: p.b, b: p.a } }
+fn show<T>(x: T) -> text { "gen" }
+fn show(x: integer) -> text { "int" }
+
+fn test_a_recursive_template() {
+  a: List<text> = List { v: "a", next: List { v: "b", next: List { v: "c", next: null } } };
+  b: List<integer> = List { v: 1, next: List { v: 2, next: null } };
+  assert(len_of(a) == 3 && (a.next.next.v ?? "-") == "c" && len_of(b) == 2, "lists");
+  pi: Pair<integer> = Pair { a: 1, b: 2 };
+  pt: Pair<text> = Pair { a: "x", b: "y" };
+  i = swap(pi);
+  t = swap(pt);
+  assert("{i.a} {i.b} {t.a} {t.b}" == "2 1 y x", "swap");
+}
+
+fn test_a_concrete_definition_beats_the_generic() {
+  assert("{show(1)} {show("a")} {show(P { n: 1 })}" == "int gen gen", "select");
+}
+
 enum Tree<T> {
   Leaf,
   Node { left: reference<Tree<T>>, value: T, right: reference<Tree<T>> },
@@ -36,7 +79,7 @@ fn size<T>(t: Tree<T>) -> integer {
 
 fn count(t: Tree<integer>) -> integer { size(t) }
 
-fn main() {
+fn test_a_qualified_variant_of_a_generic_enum_belongs_to_the_targets_instance() {
   l: Tree<integer> = Tree.Leaf;
   assert(size(l) == 0, "a typed local: {size(l)}");
   n: Tree<integer> = Node { left: &l, value: 1, right: &l };
