@@ -20,7 +20,8 @@
 //     an appended element, a postfix, a field assignment, a named local in a loop (loft#2370).
 //   test_the_fields_read_what_the_destination_held — an update bound to its own variable: a swap,
 //     a rotation of three, either field order, a `value struct`, text fields, a field read
-//     twice, the destination through a call; controls on another destination (loft#2368).
+//     twice, the destination through a call; controls on another destination (loft#2368: such
+//     an update is built apart and then bound, as an update with a postfix already was, loft#1304).
 //   test_one_nested_update_releases_the_first_literal, test_passed_straight_to_a_call,
 //     test_two_levels, test_in_a_loop — an update nested in an update's field (loft#2371).
 //   test_a_variant_base_typed_as_that_variant — the variant spelling over every base (local,
