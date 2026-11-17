@@ -1,0 +1,386 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE STRUCT IS TAGGED INTO ITS SLOT AND STAYS ABSENT ACROSS A CALL (`@FR-L-Null-Tag`,
+// loft#1138, loft#1139, loft#1198).  A value spelled `S?` is tagged on its way into a nullable slot
+// like the dense `S` beside it, an absent one stays absent past a function boundary, and a returned
+// tuple with a nullable member lands every member where its reader looks.  Three sections, each
+// with its cells and receipt.
+//
+// ── 1138-an-absent-nullable-struct-stays-absent-across-a-call ──
+//
+// An absent `S?` is still absent after it crosses a function boundary.
+//
+// `τ?` has two spellings.  Outside a slot it is `Optional(Reference(S))` and absence is the
+// reference null sentinel; stored INLINE — a `vector` element, an embedded field, a tuple
+// member — it is the tagged `__nullable<S>` and absence is discriminant `0` (`@FR-L-Null-Tag`).
+// Converting from the second to the first unwrapped by sub-referencing the `Some` variant's
+// payload and never consulted the discriminant.  A sub-ref into an ABSENT slot is a perfectly
+// valid `DbRef`, so absence had nowhere to go: `null` arrived at the callee, and came back from
+// a `-> S?` return, as a PRESENT record of zeroes, with no diagnostic on either backend.
+//
+// The axis is the BOUNDARY, not the container.  Every in-function position was already right —
+// testing in place, binding to a local, assigning to a declared `S?` local, discharging with
+// `??` — which is what made this survive: the obvious cells all pass, and only handing the
+// value to another function loses it.  All four of those stay here as controls, because a fix
+// that answered "absent" everywhere would satisfy the boundary cells alone.
+//
+// And it is not a tuple question, though a tuple is where it was found (loft#1134): all three
+// shapes @PLN25 gives a tagged slot reproduce it identically, so all three are cells.
+//
+// Both halves matter in each position.  A PRESENT value must survive the same crossing with its
+// fields intact — the cure answers the null sentinel on the absent branch, so a fix that got the
+// branch backwards would read every present value as absent and no absent-only cell would say so.
+//
+// @falsified-at: 418b302a — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   ⚠ That control is on no public ref, so this receipt records a falsification that
+//   cannot be re-run — see GUARDS.md § The patch receipt for the form that can be.
+//   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
+//   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
+//   both. The native side was not scored in this sweep.
+//
+// ── 1139-a-returned-tuple-with-a-nullable-member-round-trips ──
+//
+// A returned tuple with a nullable member reaches a vector and a declared local, and every
+// member lands where the reader looks for it.
+//
+// `v += [f()]` was REFUSED for `f() -> (integer, S?)` while the dense `-> (integer, S)` twin was
+// accepted, reporting a precision loss between `__tuple<integer,S?>` and `(integer, S?)` — two
+// spellings of one type. `unboxes_stored_tuple` compared members with `is_equal` alone, and the
+// two spellings of a nullable member (`Optional(Reference(S))` as written,
+// `Enum(__nullable<S>)` as stored — `@FR-L-Null-Tag`) are not equal.
+// (`@FR-T-Ret`: the returned tuple is an independent value, unpacked at the call site.)
+//
+// ⚠ Accepting the pair is only half of it, and the other half is why this file exists rather
+// than a one-line predicate change. Three sites DERIVE the synthetic `__tuple<…>` def back from
+// the element types they are handed, and that def is NAMED by the source spelling — so a list
+// read straight off the def's own attributes re-mints `__tuple<__nullable<S>,integer>`, a
+// DIFFERENT def with different offsets. Measured: the append wrote its scalar member at 16 and
+// the read looked at 24, and the payload came back one field high. Lifting the refusal without
+// that is strictly worse than the refusal, because it trades a program that will not compile
+// for one that answers quietly wrong.
+//
+// So the axis is not "leading or trailing member" — that is what a positional bound would fix,
+// and it would hold only for the last member. Every member AFTER a tagged one is displaced, so
+// the cells below move the tagged member through first, last, middle, and both ends of a
+// three-member tuple, and read a member on each side of it.
+//
+// Absence and a ZERO-valued payload are here for the same reason they are in 1134: the tag is
+// what distinguishes them, and a fix that dropped it would still satisfy every value cell whose
+// payload happens to be non-zero.
+//
+// @falsified-at: 2f7371aa — interpret exit 1 -> 0, native exit 1 -> 0
+//   ⚠ EXIT ONLY, and the reason is worth knowing before trusting this line. The control REFUSES
+//   the file, so not one assertion below ever runs there — the assert channel reads `0` on both
+//   sides and `make falsify` cannot score the values at all. What it proves is that the program
+//   went from rejected to accepted.
+//
+//   The VALUE half was falsified by hand instead, against the build that matters: acceptance
+//   WITHOUT the def fix, which is the state this file exists to make impossible. Every append
+//   cell is wrong there — `append lead` reads `a=9` for `a=4` (the payload one field high) and
+//   `k=0` for `k=3` (the scalar written at byte 16 and read at 24) — while every declared-local
+//   cell passes. That asymmetry is the measurement: a guard scored only on the parse would have
+//   called that build fixed.
+//   ⚠ That control is on no public ref, so this receipt records a falsification that
+//   cannot be re-run — see GUARDS.md § The patch receipt for the form that can be.
+//   HOLDS: assertions, leak, panic, free-refusal, expectations are equal on both trees.
+//   Falsify prints only the channels that MOVE and requires HERE to be clean, so each of
+//   those is clean on both. The native side was not scored in this sweep.
+//
+// ── 1198-a-nullable-source-is-tagged-into-its-slot ──
+//
+// A value spelled `S?` is TAGGED on its way into a nullable struct slot, exactly like the
+// dense `S` beside it.
+//
+// A struct field, a vector element and a tuple member declared `S?` all store the tagged
+// `__nullable<S>` — a discriminant, then the payload (`@FR-L-Null-Tag`, `formal/layout.md`).
+// Deciding to write that tag needs the SOURCE's type, and the source has two spellings that
+// mean one thing: the dense `S` and the `S?` a function returns or a local declares.  Three
+// writers asked for the dense spelling by hand and so could not see the other one, while the
+// tuple's writer asked the shared predicate and could.  For every `S?`-spelled source the
+// dense record therefore went in untagged, with two faces:
+//
+//   * a PRESENT value landed one field low, so every read came back one field HIGH — `s.a`
+//     answered `s.b`, and the last field read off the end of the record.  The displacement is
+//     one field wide whatever the payload's width, which is what says a missing payload BASE
+//     rather than a stray offset.
+//   * a value the callee decided at RUNTIME to withhold wrote nothing at all.  Assigning a
+//     null into an occupied slot was a silent no-op: the slot kept its previous value and
+//     went on reading PRESENT.
+//
+// Both faces are silent, both backends produce them identically, and no `null` is needed to
+// reach the first — `Holder { s: mk() }` on a plain accessor is enough.
+//
+// The controls are what make the cells mean something.  A DENSE source (a literal, and a
+// call declared `-> S`) was correct throughout and must stay correct: it is the half the
+// hand-written test could see, so a cell where it moves means the shared home broke what it
+// absorbed.  The TUPLE member is the second control — it already routed through that home,
+// so it is the reading of the rule the other three now agree with.
+//
+// The zero-valued first field is the cell that separates "the tag is written" from "the tag
+// is aliased onto the payload": with the discriminant sharing field `a`'s bytes, an ordinary
+// `S { a: 0, … }` reads back ABSENT and nothing says so.
+//
+// @falsified-at: 5a90e534 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   Both backends produce the table above byte-identically, so this is shared semantics
+//   rather than a parity bug.  The control stops at the FIRST cell — an assert ends the
+//   program — so the falsify channels prove the guard bites, and the per-cell evidence is
+//   the position x source matrix in the issue, run on both binaries.
+//   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
+//   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
+//   both. The native side was not scored in this sweep.
+
+struct T8S { t8_a: integer, t8_b: integer }
+struct T8Holder { t8_k: integer, t8_item: T8S? }
+
+fn t8_arg_absent(t8_x: T8S?) -> boolean { t8_x == null }
+fn t8_arg_value(t8_x: T8S?) -> integer { if t8_x == null { -1 } else { t8_x.t8_b } }
+fn t8_ret(t8_h: T8Holder) -> T8S? { t8_h.t8_item }
+
+fn test_an_absent_nullable_struct_stays_absent_across_a_call() {
+  // ---- shape 1: a struct FIELD declared `S?` ----
+  t8_h: vector<T8Holder> = [];
+  t8_h += [T8Holder { t8_k: 1, t8_item: null }];
+  t8_h += [T8Holder { t8_k: 2, t8_item: T8S { t8_a: 3, t8_b: 44 } }];
+
+  t8_absent = t8_h[0] ?? T8Holder { t8_k: -1, t8_item: T8S { t8_a: -9, t8_b: -9 } };
+  t8_present = t8_h[1] ?? T8Holder { t8_k: -1, t8_item: null };
+
+  // the four in-function positions — controls, right before the fix and after it
+  assert(t8_absent.t8_item == null, "tested in place, an absent field is absent");
+  t8_bound = t8_absent.t8_item;
+  assert(t8_bound == null, "bound to a local, it is still absent");
+  t8_decl: T8S? = t8_absent.t8_item;
+  assert(t8_decl == null, "assigned to a declared `S?` local, it is still absent");
+  assert((t8_absent.t8_item ?? T8S { t8_a: -9, t8_b: -9 }).t8_b == -9, "and `??` takes the default");
+
+  // the boundary, both directions and both halves
+  assert(t8_arg_absent(t8_absent.t8_item), "an absent field stays absent as an ARGUMENT");
+  assert(!t8_arg_absent(t8_present.t8_item), "and a present one stays present");
+  assert(t8_arg_value(t8_present.t8_item) == 44, "carrying its fields across the call");
+  assert(t8_ret(t8_absent) == null, "an absent field stays absent as a RETURN");
+  t8_r = t8_ret(t8_present);
+  assert(t8_r != null, "and a present one comes back present");
+  assert(t8_r.t8_b == 44, "with its fields");
+
+  // ---- shape 2: a `vector<S?>` ELEMENT ----
+  t8_q: vector<T8S?> = [];
+  t8_q += [null];
+  t8_q += [T8S { t8_a: 3, t8_b: 44 }];
+  t8_qa = t8_q[0];
+  t8_qp = t8_q[1];
+  assert(t8_qa == null, "an absent element is absent in place");
+  assert(t8_arg_absent(t8_qa), "and stays absent as an argument");
+  assert(!t8_arg_absent(t8_qp), "while a present element stays present");
+  assert(t8_arg_value(t8_qp) == 44, "carrying its fields");
+
+  // ---- shape 3: a TUPLE member ----
+  t8_v: vector<(integer, T8S?)> = [];
+  t8_v += [(7, null)];
+  t8_v += [(8, T8S { t8_a: 3, t8_b: 44 })];
+  for t8_t in t8_v {
+    if t8_t.0 == 7 {
+      assert(t8_t.1 == null, "an absent tuple member is absent in place");
+      assert(t8_arg_absent(t8_t.1), "and stays absent as an argument");
+    } else {
+      assert(!t8_arg_absent(t8_t.1), "a present tuple member stays present");
+      assert(t8_arg_value(t8_t.1) == 44, "carrying its fields");
+    }
+  }
+
+  // ---- the zero-valued first field, which no sentinel can distinguish by value ----
+  t8_z: vector<T8S?> = [];
+  t8_z += [T8S { t8_a: 0, t8_b: 0 }];
+  t8_ze = t8_z[0];
+  assert(t8_ze != null, "a present value of all zeroes is present in place");
+  assert(!t8_arg_absent(t8_ze), "and is still present after the call — the tag says so, not the bytes");
+}
+
+struct T9 { t9_a: integer, t9_b: integer }
+
+fn t9_first2() -> (T9?, integer)          { (T9 { t9_a: 4, t9_b: 9 }, 3) }
+fn t9_last2()  -> (integer, T9?)          { (3, T9 { t9_a: 4, t9_b: 9 }) }
+fn t9_mid3()   -> (integer, T9?, integer) { (3, T9 { t9_a: 4, t9_b: 9 }, 5) }
+fn t9_both3()  -> (T9?, integer, T9?)     { (T9 { t9_a: 4, t9_b: 9 }, 3, T9 { t9_a: 6, t9_b: 7 }) }
+fn t9_absent() -> (T9?, integer)          { (null, 3) }
+fn t9_dense()  -> (integer, T9)           { (3, T9 { t9_a: 4, t9_b: 9 }) }
+
+fn test_a_returned_tuple_with_a_nullable_member_round_trips() {
+  // ---- the filed shape: append a returned tuple to its own vector type ----
+  t9_v1: vector<(T9?, integer)> = [];
+  t9_v1 += [t9_first2()];
+  for t in t9_v1 {
+    t9_e = t.0;
+    assert(t9_e != null, "a leading nullable member survives the append");
+    assert(t9_e.t9_a == 4 && t9_e.t9_b == 9, "with its own fields");
+    assert(t.1 == 3, "and the member AFTER it is not displaced");
+  }
+  assert(len(t9_v1) == 1, "one element was appended");
+
+  t9_v2: vector<(integer, T9?)> = [];
+  t9_v2 += [t9_last2()];
+  for t in t9_v2 {
+    t9_e2 = t.1;
+    assert(t9_e2 != null && t9_e2.t9_a == 4, "a trailing nullable member survives the append");
+    assert(t.0 == 3, "with its neighbour intact");
+  }
+
+  // three members, the tagged one in the MIDDLE — a member on each side of it
+  t9_v3: vector<(integer, T9?, integer)> = [];
+  t9_v3 += [t9_mid3()];
+  for t in t9_v3 {
+    t9_e3 = t.1;
+    assert(t9_e3 != null && t9_e3.t9_a == 4, "a middle nullable member survives");
+    assert(t.0 == 3, "the member before it is undisturbed");
+    assert(t.2 == 5, "and so is the member after it");
+  }
+
+  // BOTH ends tagged — two displacements, so a fix that handles one would fail here
+  t9_v4: vector<(T9?, integer, T9?)> = [];
+  t9_v4 += [t9_both3()];
+  for t in t9_v4 {
+    t9_f = t.0;
+    t9_l = t.2;
+    assert(t9_f != null && t9_f.t9_a == 4, "the first of two tagged members");
+    assert(t9_l != null && t9_l.t9_a == 6, "and the second, with its own value");
+    assert(t.1 == 3, "with the scalar between them intact");
+  }
+
+  // ---- the same returns into a DECLARED local, the other consumer of that conversion ----
+  t9_x: (T9?, integer) = t9_first2();
+  t9_xe = t9_x.0;
+  assert(t9_xe != null && t9_xe.t9_a == 4, "a leading member into a declared local");
+  assert(t9_x.1 == 3, "with its neighbour");
+
+  t9_y: (integer, T9?, integer) = t9_mid3();
+  t9_ye = t9_y.1;
+  assert(t9_ye != null && t9_ye.t9_a == 4, "a middle member into a declared local");
+  assert(t9_y.0 == 3 && t9_y.2 == 5, "with both neighbours");
+
+  // the INFERRED local, which was correct all along — the control that says the DECLARATION
+  // is what routes through the conversion
+  t9_z = t9_first2();
+  t9_ze = t9_z.0;
+  assert(t9_ze != null && t9_ze.t9_a == 4, "an inferred local was always correct");
+
+  // ---- absence survives both routes ----
+  t9_va: vector<(T9?, integer)> = [];
+  t9_va += [t9_absent()];
+  for t in t9_va {
+    assert(t.0 == null, "an absent member appended stays absent");
+    assert(t.1 == 3, "and its neighbour survives");
+  }
+  t9_xa: (T9?, integer) = t9_absent();
+  assert(t9_xa.0 == null && t9_xa.1 == 3, "and the same into a declared local");
+
+  // ---- a PRESENT payload of zeroes, which no value cell above can distinguish ----
+  t9_vz: vector<(T9?, integer)> = [];
+  t9_vz += [(T9 { t9_a: 0, t9_b: 0 }, 3)];
+  for t in t9_vz {
+    t9_ze2 = t.0;
+    assert(t9_ze2 != null, "a payload of zeroes is PRESENT, not absent");
+    assert(t9_ze2.t9_a == 0 && t.1 == 3, "and reads as zero with its neighbour intact");
+  }
+
+  // ---- the DENSE twin, which was accepted all along ----
+  t9_vd: vector<(integer, T9)> = [];
+  t9_vd += [t9_dense()];
+  for t in t9_vd {
+    assert(t.1.t9_a == 4 && t.0 == 3, "the dense twin still round-trips");
+  }
+}
+
+struct NswPair { nsw_a: integer, nsw_b: integer }
+struct NswWide { nsw_p: integer, nsw_q: integer, nsw_r: integer }
+struct NswHold { nsw_s: NswPair? }
+struct NswInner { nsw_s: NswPair? }
+struct NswOuter { nsw_i: NswInner }
+
+fn nsw_opt(v: integer) -> NswPair? {
+  if v > 0 { NswPair { nsw_a: v, nsw_b: 22 } } else { null }
+}
+
+fn nsw_dense(v: integer) -> NswPair { NswPair { nsw_a: v, nsw_b: 22 } }
+
+fn nsw_wide() -> NswWide? { NswWide { nsw_p: 11, nsw_q: 22, nsw_r: 33 } }
+
+fn test_a_nullable_source_is_tagged_into_its_slot() {
+  // ---- the shallowest shape: a field filled at CONSTRUCTION from a `-> S?` call ----
+  nsw_h = NswHold { nsw_s: nsw_opt(11) };
+  nsw_c = nsw_h.nsw_s;
+  assert(nsw_c != null, "a present value returned as S? is present in the field");
+  assert(nsw_c.nsw_a == 11, "and its FIRST field is its own, not its successor's");
+  assert(nsw_c.nsw_b == 22, "and its last field is not read off the end of the record");
+
+  // ---- the same field ASSIGNED, and assigned from a LOCAL declared `S?` ----
+  nsw_h2 = NswHold { nsw_s: null };
+  nsw_h2.nsw_s = nsw_opt(11);
+  nsw_c2 = nsw_h2.nsw_s;
+  assert(nsw_c2 != null && nsw_c2.nsw_a == 11 && nsw_c2.nsw_b == 22, "assigned from a call");
+  nsw_local: NswPair? = nsw_opt(11);
+  nsw_h2.nsw_s = nsw_local;
+  nsw_c3 = nsw_h2.nsw_s;
+  assert(nsw_c3 != null && nsw_c3.nsw_a == 11 && nsw_c3.nsw_b == 22, "assigned from an S? local");
+
+  // ---- a field one level in: the slot is reached through another record ----
+  nsw_o = NswOuter { nsw_i: NswInner { nsw_s: nsw_opt(11) } };
+  nsw_c4 = nsw_o.nsw_i.nsw_s;
+  assert(nsw_c4 != null && nsw_c4.nsw_a == 11 && nsw_c4.nsw_b == 22, "a nested field");
+
+  // ---- a vector ELEMENT, appended and assigned by index ----
+  nsw_v: vector<NswPair?> = [];
+  nsw_v += [nsw_opt(11)];
+  nsw_e = nsw_v[0];
+  assert(nsw_e != null && nsw_e.nsw_a == 11 && nsw_e.nsw_b == 22, "an appended element");
+  nsw_v[0] = nsw_opt(7);
+  nsw_e2 = nsw_v[0];
+  assert(nsw_e2 != null && nsw_e2.nsw_a == 7 && nsw_e2.nsw_b == 22, "an element assigned by index");
+  assert(len(nsw_v) == 1, "one element was stored, not more");
+
+  // ---- a field of an element: the slot is inside a record inside a collection ----
+  nsw_hs: vector<NswHold> = [NswHold { nsw_s: null }];
+  nsw_hs[0].nsw_s = nsw_opt(11);
+  nsw_e3 = nsw_hs[0].nsw_s;
+  assert(nsw_e3 != null && nsw_e3.nsw_a == 11 && nsw_e3.nsw_b == 22, "an element's own field");
+
+  // ---- CONTROL: the tuple member, which already routed through the shared home ----
+  nsw_t: (integer, NswPair?) = (5, nsw_opt(11));
+  nsw_tm = nsw_t.1;
+  assert(nsw_tm != null && nsw_tm.nsw_a == 11 && nsw_tm.nsw_b == 22, "the tuple member");
+  assert(nsw_t.0 == 5, "and its non-nullable neighbour is undisturbed");
+
+  // ---- CONTROL: a DENSE source, the half that was always right ----
+  nsw_d1 = NswHold { nsw_s: NswPair { nsw_a: 11, nsw_b: 22 } };
+  nsw_cd1 = nsw_d1.nsw_s;
+  assert(nsw_cd1 != null && nsw_cd1.nsw_a == 11 && nsw_cd1.nsw_b == 22, "a literal source");
+  nsw_d2 = NswHold { nsw_s: nsw_dense(11) };
+  nsw_cd2 = nsw_d2.nsw_s;
+  assert(nsw_cd2 != null && nsw_cd2.nsw_a == 11 && nsw_cd2.nsw_b == 22, "a `-> S` call source");
+
+  // ---- presence is a fact, not a data byte: a PRESENT value whose first field is zero ----
+  nsw_z = NswHold { nsw_s: nsw_opt(0 - 0) };
+  assert(nsw_z.nsw_s == null, "nsw_opt(0) really does withhold a value");
+  nsw_zero: NswPair? = NswPair { nsw_a: 0, nsw_b: 22 };
+  nsw_z2 = NswHold { nsw_s: nsw_zero };
+  nsw_cz = nsw_z2.nsw_s;
+  assert(nsw_cz != null, "a present value whose first field is 0 is still PRESENT");
+  assert(nsw_cz.nsw_a == 0 && nsw_cz.nsw_b == 22, "and carries both its fields");
+
+  // ---- a runtime null CLEARS the slot it lands in, rather than leaving what was there ----
+  nsw_occ = NswHold { nsw_s: NswPair { nsw_a: 11, nsw_b: 22 } };
+  nsw_occ.nsw_s = nsw_opt(0 - 0);
+  assert(nsw_occ.nsw_s == null, "a runtime null overwrites the value the field held");
+  nsw_ov: vector<NswPair?> = [NswPair { nsw_a: 11, nsw_b: 22 }];
+  nsw_ov[0] = nsw_opt(0 - 0);
+  assert(nsw_ov[0] == null, "and the same for an element");
+
+  // ---- the displacement was one FIELD wide, so a three-field payload pins all three ----
+  nsw_w = nsw_wide();
+  nsw_wh: vector<NswWide?> = [];
+  nsw_wh += [nsw_w];
+  nsw_we = nsw_wh[0];
+  assert(nsw_we != null, "a three-field payload is present");
+  assert(nsw_we.nsw_p == 11, "p is its own");
+  assert(nsw_we.nsw_q == 22, "q is its own");
+  assert(nsw_we.nsw_r == 33, "r is its own, not read off the end");
+}
