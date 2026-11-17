@@ -1,0 +1,337 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WHOLE-VALUE WRITE THROUGH A LINK REACHES WHAT THE LINK NAMES (`@FR-B-Ref-Write`: writing a `&τ`
+// variable writes the SOURCE, and at a heap τ the write replaces the source's contents;
+// `@FR-B-Ref-Uniform`: read and write alike, for a scalar or a heap value).  The link may name a
+// local (a text, a vector, a struct), a place — a field `&o.i`, an element `&v[0]` — or an
+// out-of-line field (`cur = &t.left`, the cursor walk of a search tree); a whole write through it
+// lands there, and the link then reads what the place holds.  Each spelling once rebound the link
+// instead, on both backends and in silence.  Three sections, each with its cells and receipt: a
+// link to a local (loft#1371), to a place (loft#1376) and to an out-of-line field (loft#2433).
+//
+// ── 1371-a-whole-value-write-through-an-amp-link-reaches-the-source ──
+//
+// binding.md `@FR-B-Ref-Write` — writing a `&τ` variable writes the SOURCE — and
+// `@FR-B-Ref-Uniform` — a `&τ` variable is used exactly like a τ variable, read and write
+// alike, for a scalar OR a heap value.  Nothing in either rule narrows τ, and the `&`
+// PARAMETER channel (calls.md F-ParamRef) already keeps both promises for every heap kind;
+// the LOCAL bind kept them for a scalar, a record and a tuple only.
+//
+// The three kinds that did not, all silently: a TEXT source reached no lowering at all and
+// the bind COPIED (in both directions — a source-side write was not visible through the
+// link either); a VECTOR source got a `DbRef` share that aliased element writes and appends
+// but left the variable plain-typed, so a whole-value write minted a fresh store and
+// re-pointed the local at it; and a STRUCT source linked and then orphaned the store it
+// displaced.  The annotated spellings of the first two additionally typed the variable as a
+// link over a value, which the interpreter read as a stack ref.
+//
+// The `&` PARAMETER cells are the controls: they are what the answer should be, and they
+// passed throughout.
+//
+// @falsified-at: 964bab93 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0,
+//   native exit 1 -> 0
+//   HOLDS: on --interpret, leak, panic, free-refusal, expectations are equal on both trees,
+//   measured by `scripts/falsify.sh --bulk` against 964bab93; falsify prints only the
+//   channels that MOVE, and requires HERE to be clean, so each of those is clean on both. The
+//   assertions/exit channel carries this one on that backend. The native side was not scored
+//   in that run.
+//
+// ── 1376-a-whole-value-write-through-a-link-to-a-place-reaches-the-place ──
+//
+// binding.md `@FR-B-Ref-Write` — writing a `&τ` variable writes the SOURCE, and at a heap τ
+// the write REPLACES the source's contents.  loft#1371 gave that to a `&` link to a LOCAL;
+// this is its sibling, a `&` link to a PLACE.
+//
+// `pi = &o.i` and `pe = &v[0]` reach no `&` lowering at all: a struct projection is already
+// a VIEW under `@FR-B-View`, so both spellings emit the same ops and only `is_amp_link`
+// records that the `&` was written.  The variable holds the field's or element's own
+// `DbRef`, so an INTERIOR write through it landed — which is exactly what made the shape
+// look like it worked — while a WHOLE-VALUE write emitted a plain `Set` that re-pointed the
+// variable and left the place holding its old value, on both backends and in silence.
+//
+// `@FR-B-Disturb` is why the answer is a copy INTO the place rather than a refusal:
+// overwriting a place is not disturbing it, so a view of it survives, and writing `o.i`
+// directly has always been that copy.  The link now reaches the same lowering.
+//
+// The plain-view cell is the boundary from the other side: only an `&` link is marked, so
+// `c = o.i; c = S{…}` keeps the meaning `@FR-B-Copy` gives it and is unchanged.
+//
+// @falsified-at: 964bab93 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0,
+//   native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: on --interpret, leak, panic, free-refusal, expectations are equal on both trees,
+//   measured by `scripts/falsify.sh --bulk` against 964bab93; falsify prints only the
+//   channels that MOVE, and requires HERE to be clean, so each of those is clean on both. The
+//   assertions/exit channel carries this one on that backend. The native side was not scored
+//   in that run.
+//
+// ── 2433-a-whole-write-through-a-link-to-an-out-of-line-field-reaches-the-field ──
+//
+// A `&` link to an out-of-line field (`cur = &t.left`, `@FR-L-OutOfLine`) names the FIELD, so a
+// whole write through it — `cur = cur.right`, `cur = null`, `cur = Tree {…}` — lands in that
+// field (`@FR-B-Ref-Write`), and the link then reads what the field holds.  This is the cursor
+// walk of a search tree: find the slot, then unlink, clear or fill it.
+//
+// Before loft#2433 the link held the child RECORD, so a whole write rebound the local and the
+// tree kept its node: an unlink answered `5 60` where `4 65` is right, a clear left the subtree
+// standing, and only `dead-assignment` hinted at it — on both backends.
+//
+// The cells, each hand-computed on `sample()` = 50(30(20, 40), 70(60(·, 65), 80)):
+//   c1  unlink the leftmost node under the right child           → 7, 20 30 40 50 65 70 80
+//   c2  clear the left subtree                                    → 5
+//   c3  delete through two links (leaf, one child, two children)  → 5, 40 50 60 65 80
+//   c4  insert into the empty slot a walk ends at                 → 8 nodes, in order
+//   c5  a call's result written through the link                  → 50 30 20 40 5
+//   c6  a write after a clear                                      → 9 50 60 65 70 80
+//   c7  a link bound inside a loop body                            → 20 30 40 50 70 80
+//   c8  19 999 inserts and 6 667 deletes through links — none copies a subtree
+//
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1
+//   -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the assertions and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: every assertion, the leak gate and the refusals are clean on this tree, both backends.
+
+struct S1371 { n: integer }
+struct O1371 { v: vector<integer>, i: S1371 }
+
+fn set_text(p: &text) { p = "param"; }
+fn set_struct(p: &S1371) { p = S1371 { n: 42 }; }
+fn set_vector(p: &vector<integer>) { p = [7, 7, 7]; }
+
+fn test_a_whole_value_write_through_an_amp_link_reaches_the_source() {
+  // ── TEXT: the link carries a whole-value write, an append, and a read in both
+  //    directions.  Every one of these was a copy.
+  c: text = "a";
+  pc = &c;
+  pc = "z";
+  assert(c == "z", "text local &: whole write, c={c}");
+  pc += "b";
+  assert(c == "zb", "text local &: append, c={c}");
+  c = "src";
+  assert(pc == "src", "text local &: a source write is visible through the link, pc={pc}");
+
+  // The annotated spelling is the same link (@PLN87 #2); it used to read the text
+  // buffer as a stack ref and panic.
+  c2: text = "a";
+  pc2: &text = c2;
+  pc2 = "z";
+  assert(c2 == "z", "text local &, annotated: c2={c2}");
+
+  // ── STRUCT: the whole-value write reaches the source, and the record it displaces
+  //    is released (the leak is what `LOFT_STRICT_STORES=1` sees; the value is here).
+  d: S1371 = S1371 { n: 1 };
+  pd = &d;
+  pd = S1371 { n: 2 };
+  assert(d.n == 2, "struct local &: whole write, d.n={d.n}");
+  pd.n = 5;
+  assert(d.n == 5, "struct local &: interior write still writes through, d.n={d.n}");
+
+  d2: S1371 = S1371 { n: 1 };
+  pd2: &S1371 = d2;
+  pd2 = S1371 { n: 2 };
+  assert(d2.n == 2, "struct local &, annotated: d2.n={d2.n}");
+
+  // ── VECTOR: the whole-value write REPLACES the source's contents rather than
+  //    re-pointing the link, and the element write and the append still alias.
+  e: vector<integer> = [1];
+  pe = &e;
+  pe = [2, 2];
+  assert(len(e) == 2, "vector local &: whole write length, len(e)={len(e)}");
+  assert(e[0] == 2, "vector local &: whole write value, e[0]={e[0]}");
+  pe[0] = 9;
+  assert(e[0] == 9, "vector local &: element write still writes through, e[0]={e[0]}");
+  pe += [3];
+  assert(len(e) == 3, "vector local &: append still writes through, len(e)={len(e)}");
+  e += [4];
+  assert(len(pe) == 4, "vector local &: a source append is visible through the link, len(pe)={len(pe)}");
+
+  e2: vector<integer> = [1];
+  pe2: &vector<integer> = e2;
+  pe2 = [2, 2];
+  assert(len(e2) == 2, "vector local &, annotated: len(e2)={len(e2)}");
+
+  // A `&` of a vector FIELD is the same question one step out — the `d = &self.data`
+  // idiom, whose element writes were already pinned by 503 but whose whole-value
+  // write was not.
+  o = O1371 { v: [1], i: S1371 { n: 1 } };
+  pv = &o.v;
+  pv = [5, 5];
+  assert(len(o.v) == 2, "vector field &: whole write, len(o.v)={len(o.v)}");
+
+  // ── The `&` PARAMETER controls: the answer the local bind now agrees with.
+  pt: text = "a";
+  set_text(pt);
+  assert(pt == "param", "text param &: pt={pt}");
+  ps = S1371 { n: 1 };
+  set_struct(ps);
+  assert(ps.n == 42, "struct param &: ps.n={ps.n}");
+  pw: vector<integer> = [1];
+  set_vector(pw);
+  assert(len(pw) == 3, "vector param &: len(pw)={len(pw)}");
+
+  println("1371 OK");
+}
+
+struct S1376 { n: integer }
+struct M1376 { s: S1376 }
+struct O1376 { i: S1376, m: M1376 }
+
+fn test_a_whole_value_write_through_a_link_to_a_place_reaches_the_place() {
+  // A struct FIELD place: the interior write lands, and so must the whole-value write.
+  o = O1376 { i: S1376 { n: 1 }, m: M1376 { s: S1376 { n: 1 } } };
+  pi = &o.i;
+  pi.n = 7;
+  assert(o.i.n == 7, "field link: interior write, o.i.n={o.i.n}");
+  pi = S1376 { n: 2 };
+  assert(o.i.n == 2, "field link: whole-value write, o.i.n={o.i.n}");
+
+  // A NESTED field place.
+  ps = &o.m.s;
+  ps = S1376 { n: 3 };
+  assert(o.m.s.n == 3, "nested field link: whole-value write, o.m.s.n={o.m.s.n}");
+
+  // A vector ELEMENT place.
+  v: vector<S1376> = [S1376 { n: 1 }, S1376 { n: 5 }];
+  pe = &v[0];
+  pe.n = 7;
+  assert(v[0].n == 7, "element link: interior write, v[0].n={v[0].n}");
+  pe = S1376 { n: 2 };
+  assert(v[0].n == 2, "element link: whole-value write, v[0].n={v[0].n}");
+  assert(v[1].n == 5, "element link: the neighbouring element is untouched, v[1].n={v[1].n}");
+
+  // Reading the SOURCE's write back through the link still works.
+  o.i.n = 9;
+  assert(pi.n == 9, "field link: a source write is visible through the link, pi.n={pi.n}");
+
+  // The place overwrite the link now reproduces — the answer, written directly.
+  o.i = S1376 { n: 4 };
+  assert(o.i.n == 4, "place overwrite direct, o.i.n={o.i.n}");
+
+  // A PLAIN view is not an `&` link and keeps `@FR-B-Copy`'s meaning: the whole-value
+  // write rebinds the local and the place is untouched.
+  p2 = O1376 { i: S1376 { n: 1 }, m: M1376 { s: S1376 { n: 1 } } };
+  c = p2.i;
+  c = S1376 { n: 8 };
+  assert(p2.i.n == 1, "a plain view is unchanged by this rule, p2.i.n={p2.i.n}");
+
+  // The loft#1371 local control, so the two halves are pinned together.
+  d: S1376 = S1376 { n: 1 };
+  pd = &d;
+  pd = S1376 { n: 2 };
+  assert(d.n == 2, "local link still writes through, d.n={d.n}");
+
+  println("1376 OK");
+}
+
+struct Tree { k: integer, left: Tree?, right: Tree? }
+
+fn size(t: Tree?) -> integer {
+  if t == null { return 0; }
+  1 + size(t.left) + size(t.right)
+}
+fn walk(t: Tree?) -> text {
+  if t == null { return ""; }
+  "{walk(t.left)}{t.k} {walk(t.right)}"
+}
+fn sample() -> Tree {
+  Tree { k: 50,
+    left: Tree { k: 30, left: Tree { k: 20 }, right: Tree { k: 40 } },
+    right: Tree { k: 70, left: Tree { k: 60, right: Tree { k: 65 } }, right: Tree { k: 80 } } }
+}
+fn leaf(k: integer) -> Tree { Tree { k: k } }
+
+fn drop_min(t: Tree) {
+  cur = &t.right;
+  while cur.left != null { cur = &cur.left; }
+  cur = cur.right;
+}
+
+fn clear_left(t: Tree) {
+  cur = &t.left;
+  cur = null;
+}
+
+fn remove(t: Tree, k: integer) -> boolean {
+  cur = &t.left;
+  if k > t.k { cur = &t.right; }
+  while cur != null && cur.k != k {
+    if k < cur.k { cur = &cur.left; } else { cur = &cur.right; }
+  }
+  if cur == null { return false; }
+  if cur.left == null {
+    cur = cur.right;
+  } else if cur.right == null {
+    cur = cur.left;
+  } else {
+    m = &cur.right;
+    while m.left != null { m = &m.left; }
+    cur.k = m.k ?? 0;
+    m = m.right;
+  }
+  true
+}
+
+fn insert(t: Tree, k: integer) {
+  cur = &t.left;
+  if k > t.k { cur = &t.right; }
+  while cur != null {
+    if k < cur.k { cur = &cur.left; } else { cur = &cur.right; }
+  }
+  cur = leaf(k);
+}
+
+fn key(i: integer) -> integer { ((i * 1103515245 + 12345) % 2147483648) % 100000 }
+
+fn test_a_whole_write_through_a_link_to_an_out_of_line_field_reaches_the_field() {
+  t1 = sample();
+  drop_min(t1);
+  assert(size(t1) == 7 && walk(t1) == "20 30 40 50 65 70 80 ", "c1 {walk(t1)}");
+
+  t2 = sample();
+  clear_left(t2);
+  assert(size(t2) == 5 && walk(t2) == "50 60 65 70 80 ", "c2 {walk(t2)}");
+
+  t3 = sample();
+  r = "{remove(t3, 70)} {remove(t3, 20)} {remove(t3, 99)} {remove(t3, 30)}";
+  assert(r == "true true false true", "c3 answers {r}");
+  assert(size(t3) == 5 && walk(t3) == "40 50 60 65 80 ", "c3 {walk(t3)}");
+
+  t4 = Tree { k: 50 };
+  for k in [30, 70, 20, 40, 60, 80, 65] { insert(t4, k); }
+  assert(size(t4) == 8 && walk(t4) == "20 30 40 50 60 65 70 80 ", "c4 {walk(t4)}");
+
+  t5 = sample();
+  c5 = &t5.right;
+  c5 = leaf(5);
+  assert(walk(t5) == "20 30 40 50 5 ", "c5 {walk(t5)}");
+
+  t6 = sample();
+  c6 = &t6.left;
+  c6 = null;
+  c6 = Tree { k: 9 };
+  assert(size(t6) == 6 && walk(t6) == "9 50 60 65 70 80 ", "c6 {walk(t6)}");
+
+  t7 = sample();
+  for _round in 0..2 {
+    c7 = &t7.right;
+    while c7.left != null { c7 = &c7.left; }
+    c7 = c7.right;
+  }
+  assert(walk(t7) == "20 30 40 50 70 80 ", "c7 {walk(t7)}");
+
+  t8 = Tree { k: 50000 };
+  n = 1;
+  for i in 0..20000 {
+    k = key(i);
+    if k != 50000 { insert(t8, k); n += 1; }
+  }
+  gone = 0;
+  for i in 0..20000 {
+    if i % 3 == 0 && key(i) != 50000 && remove(t8, key(i)) { gone += 1; }
+  }
+  // From an independent Python run of the same keys over a multiset.
+  assert(n == 20000 && gone == 6667 && size(t8) == 13333, "c8 {n} {gone} {size(t8)}");
+  println("2433 ok");
+}
