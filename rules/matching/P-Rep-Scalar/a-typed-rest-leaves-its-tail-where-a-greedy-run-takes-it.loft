@@ -22,7 +22,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the answers.
-// HOLDS: `a-scalar-repetition-is-a-typed-rest` beside it, `P-Rep/35m-mid-slice-repetition`.
+// HOLDS: `a-scalar-repetition-is-a-typed-rest` beside it, `P-Rep/a-repetition-runs-mid-slice-and-over-a-cursor`.
 
 enum PrW { PrV { n: integer }, PrZ }
 
