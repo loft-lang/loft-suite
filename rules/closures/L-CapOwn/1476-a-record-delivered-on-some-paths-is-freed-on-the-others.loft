@@ -33,7 +33,8 @@
 // Axes it HOLDS FIXED:   one capture per record, and the RETURN as the only route out.  A record
 //                        handed over through a `&fn(…)` LINK never appears in the tail, so no arm
 //                        can witness that it was delivered and the release must not reach it —
-//                        `1443-a-closure-written-through-a-fn-parameter-link.loft` is that cell
+//                        `a-link-to-a-fn-value-is-a-link-like-any-other.loft` (its loft#1443
+//                        section) is that cell
 //                        and it is where this file's bound is measured.  A build sitting inside
 //                        a branch ARM is loft#1464's question, answered by the conditional
 //                        release rather than by this one.
