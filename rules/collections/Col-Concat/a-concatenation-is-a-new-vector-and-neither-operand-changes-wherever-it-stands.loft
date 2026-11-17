@@ -1,0 +1,584 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONCATENATION IS A NEW VECTOR AND NEITHER OPERAND CHANGES, WHEREVER IT STANDS (`@FR-Col-Concat`).
+// `a + b` over two vectors is a new vector, `a`'s elements then `b`'s, in every expression position;
+// and neither operand changes, however the operands relate to where the result goes: assigned
+// back into an operand it reads (loft#2387), its first operand a view of another vector
+// (loft#2399), a slice of its own destination (whose scratch store is freed), or a local at the
+// end of the function that answers it.  Five sections, each with its cells and receipt.
+//
+// ── a-concat-is-a-value-in-every-expression-position ──
+//
+// A VECTOR CONCAT IS A VALUE IN EVERY EXPRESSION POSITION (`@FR-Col-Concat`).  `a + b` over two
+// vectors is a new vector — `a`'s elements then `b`'s — wherever an expression stands, and
+// neither operand changes.  It was refused in an expression ("creates a temporary; assign to a
+// variable first"), and the refusal hid two defects behind it: a literal right operand in a
+// struct literal's field took the struct's record as its store and never minted one (an
+// internal compiler error), and a literal FIRST operand there was built into the field while
+// the rest of the chain went into a temporary nothing read.  `(v + [9]).len()` was refused
+// separately (P395) because the concat adopted the assignment's destination as its buffer.
+//
+// Positions: a call argument (also under `+=`, `*=`, an element and a field `+=`, a text
+// `+=`), a loop body (one temporary per turn), a struct and a variant field (variable first,
+// literal first), a field assignment and `+=`, a return, a `for` head, a tuple member, a `??`
+// default, a lambda body, a `match` arm, an `if` arm, a method and an index postfix, a chain of
+// three.  Element kinds: integer, a record with a text, a vector.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0 (main refuses the concat
+//   in an expression, so nothing below runs there).
+// CHANNEL: the asserts.
+// ARMED: the leak check (the suite arms it): each temporary is released once.
+// WITNESS: each message names the position.
+// HOLDS: every cell on both backends.
+//
+// ── 2387-a-concatenation-into-its-own-operand-keeps-every-operands-value ──
+//
+// The rule this cell guards: `@FR-Col-Concat`.
+//
+// A vector concatenation assigned back to a vector it reads keeps every operand's value.
+//
+// `v = v[..-1] + [v[-1] * 10]`: the concatenation is built into `v` itself, so an operand after
+// the first that reads `v` is materialised into a temporary before `v` is cleared.  The
+// temporary was filled with a copy of the whole of `v` rather than with the operand's own
+// value — right for a bare `v = a + v` and nothing else — so the literal was lost and `v`
+// answered its slice followed by its old self, `[1, 1, 2]`, on both backends (loft#2387).
+//
+// Axes this file MOVES:  the operand that reads `v` (a literal of an element, a call over `v`,
+//                        a slice of `v`); its position (second, middle of three); the element
+//                        (an integer, a text, a record enum); the destination (a local, a
+//                        parameter).
+// Axes it HOLDS FIXED:   one concatenation per statement.
+//
+// The controls were already right: a bare `v` as the later operand, and the concatenation
+// bound to another name.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
+//
+// ── 2399-a-concatenation-onto-a-view-leaves-the-viewed-vector-alone ──
+//
+// The rule this cell guards: `@FR-Col-Concat`.
+//
+// A concatenation whose first operand is a view of another vector builds a new vector and
+// leaves the viewed one alone (`(Col-Concat)`: neither operand changes).
+//
+// `r = h[0] + [1]` over `h: vector<vector<integer>> = [[42]]` answered `r = [42,1]` and
+// changed `h` to `[[42,1]]`, on both backends, no diagnostic: the destination ADOPTED its
+// first operand's store whenever that operand was not a named local, so a view (`h[i]`,
+// `g.v`, a borrowing call, an `if` or block answering one) was appended into in place.  The
+// same adopt emptied an element of a literal (`[h[0] + [1]]` answered `[[]]`: the element
+// slot was re-pointed instead of filled, even for a fresh call), and under `+=` it replaced
+// what the destination held (`r += mk() + [1]` dropped `r`'s elements) (loft#2399).
+//
+// Axes this file MOVES:  the first operand's provenance (an element of a local, of a field, of
+//                        a parameter, two levels down; a record field; a borrowing call; an
+//                        `if` and a block answering a view; a fresh call); the element (an
+//                        integer, a `u8`, a text, a record, an enum); the right operand (a
+//                        literal, another view, a call); the position (a bind, a reassignment,
+//                        `+=`, an element of a literal, an append of a literal, a loop body,
+//                        an `if` arm); a chain of three.
+// Axes it HOLDS FIXED:   the destination is a local or a literal's element; the operands are
+//                        non-null (a nullable vector concatenation is refused).
+//
+// The controls were already right: a fresh call, a named local, two literals and a slice of
+// the destination as the first operand; the concatenation as an argument, a field's value
+// and a postfix operand.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
+//
+// ── a-concat-led-by-a-slice-of-its-destination-frees-the-slice ──
+//
+// @catches: LOFT_NO_SELF_SLICE_DEPS — the switch types the destination with the slice's scratch store, which the exit then never frees
+//
+// @FR-Col-Concat: `a + b` is a new vector and neither operand changes.  A concatenation whose
+// first operand is a slice of its own destination (`out = out[0..at] + [g] + out[at..]`, an
+// insertion) copies that slice into a scratch store and appends the copy into the
+// destination's own store.  Typed with the slice's deps, the destination named the scratch
+// store as its own, and no exit freed it: one vector per call (the self-hosted elaborator's
+// `sorted_groups`).
+//
+// Axes this file MOVES:  which operand is the slice (first, first and last, last); the
+//                        destination (a local returned, a local read in a loop).
+// Axes it HOLDS FIXED:   the element is a record with a text field.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   HOLDS: every cell, on every backend.
+//
+// ── a-concat-of-a-local-at-a-functions-end-keeps-the-locals-elements ──
+//
+// The rule this cell guards: `@FR-Col-Concat`.
+//
+// A concatenation that ends a function, its first operand a local vector of that function,
+// answers the local's elements then the other operand's (`(Col-Concat)`: `a + b` is a new
+// vector, `a`'s elements then `b`'s).
+//
+// `fn f() -> vector<integer> { a = [1, 2]; b = [3, 4]; a + b }` answered `[3, 4]`, on both
+// backends, no diagnostic.  The fresh vector of a concatenation in an expression was typed
+// with its first operand's deps.  The second pass re-types it when it mints the backing; the
+// first pass mints none, so there the function's last expression read as a value living in
+// the local `a`.  `a` then became the function's return buffer, and the delivery — clear the
+// buffer, append the result — cleared `a` before the concatenation read it.
+//
+// Axes this file MOVES:  the first operand (a local built from a literal, by appends, from a
+//                        concatenation, from a parameter's copy); the second (a local, a
+//                        parameter, a literal, another concatenation); the element (an
+//                        integer, a float, a text, a record); the chain's length (two, three).
+// Axes it HOLDS FIXED:   the concatenation is the function's last expression, not under
+//                        `return`, an `if` or a `match`; the result is dense.
+//
+// The controls were already right: the same concatenation under `return`, as an `if` arm,
+// with a parameter or a literal as its first operand.
+//
+// @falsified-at: 5e0fc7aa5 — interpret exit 1 -> 0, interpret 7 assertion failures -> 0
+//   Measured by hand, not by `falsify`: the seven fail on the interpreter of the daily build
+//   2026.11.20261108, and the same wrong answers came from the interpreter and the C backend
+//   at 5e0fc7aa5.  With the cure all eight pass on the interpreter, the C backend and rustc.
+//   HOLDS: the four controls pass on both trees.
+
+struct V { s: text, n: integer }
+struct H { k: integer, v: vector<integer>, vs: vector<V> }
+enum E { E1 { v: vector<integer> }, E2 }
+
+fn total(r: vector<integer>) -> integer {
+  t = 0;
+  for x in r { t += x; }
+  t
+}
+
+fn names(r: vector<V>) -> text {
+  t = "";
+  for x in r { t += x.s; }
+  t
+}
+
+fn plus_seven(a: vector<integer>) -> vector<integer> { a + [7] }
+
+fn append_record(a: vector<V>, b: V) -> vector<V> { return a + [b]; }
+
+fn test_an_argument() {
+  a = [4, 5];
+  assert(total(a + [1]) == 10 && len(a) == 2, "argument: 4+5+1, a unchanged");
+  assert(total([1, 2, 3, 4, 5]) + 100 * total([1, 2, 3] + [4, 5]) == 1515, "beside a literal");
+  x = 10;
+  x += total(a + [1]);
+  x *= total([1] + a) - 8;
+  assert(x == 40, "compound: (10 + 10) * 2, got {x}");
+  v = [1, 2];
+  v[0] += total(a + [1]);
+  assert(v[0] == 11 && len(v) == 2, "element +=: 1 + 10");
+  t = "x";
+  t += "{total(a + [9])}";
+  assert(t == "x18", "text +=: {t}");
+}
+
+fn test_a_loop_turn() {
+  a = [1, 2];
+  s = 0;
+  for i in 0..5 { s += total(a + [i]); }
+  assert(s == 25, "five turns of 3 + i: {s}");
+  vs = [V { s: "a", n: 1 }];
+  t = "";
+  for i in 0..4 { t += names(vs + [V { s: "{i}", n: i }]); }
+  assert(t == "a0a1a2a3" && len(vs) == 1, "records: {t}");
+}
+
+fn test_a_field() {
+  a = [4, 5];
+  h = H { k: 0, v: a + [6], vs: [V { s: "p", n: 1 }] + [V { s: "q", n: 2 }] };
+  assert("{h.v}" == "[4,5,6]" && names(h.vs) == "pq" && len(a) == 2, "struct fields: {h.v}");
+  g = H { k: 0, v: [1] + [2], vs: [] };
+  assert("{g.v}" == "[1,2]", "literal first: {g.v}");
+  g.v = [3] + a;
+  assert("{g.v}" == "[3,4,5]", "assigned, literal first: {g.v}");
+  g.v = g.v + [6];
+  assert("{g.v}" == "[3,4,5,6]", "assigned, reading itself: {g.v}");
+  g.v += a + [1];
+  assert("{g.v}" == "[3,4,5,6,4,5,1]", "+=: {g.v}");
+  g.k += total(a + [2, 3]);
+  assert(g.k == 14, "scalar field +=: {g.k}");
+  e = E1 { v: a + [3] };
+  n = match e { E1 { v } => len(v), _ => -1 };
+  assert(n == 3, "variant field: {n}");
+}
+
+fn test_a_return_and_a_head() {
+  r = plus_seven([1]);
+  assert("{r}" == "[1,7]", "return: {r}");
+  q = append_record([V { s: "a", n: 1 }], V { s: "b", n: 2 });
+  assert(names(q) == "ab", "return of records");
+  a = [1, 2];
+  s = 0;
+  for x in a + [3, 4] { s += x; }
+  assert(s == 10 && len(a) == 2, "for head: {s}");
+  nested = [[1], [2, 3]];
+  m = 0;
+  for w in nested + [[4]] { m += total(w); }
+  assert(m == 10, "vectors of vectors: {m}");
+}
+
+fn test_inside_other_expressions() {
+  a = [1, 2];
+  t = (a + [3], 9);
+  assert(len(t.0) == 3 && t.1 == 9, "tuple member");
+  none: vector<integer>? = null;
+  c = none ?? a + [5];
+  assert(len(c) == 3, "?? default: {c}");
+  f = fn(x: integer) -> integer { total(a + [x]) };
+  assert(f(3) == 6 && f(4) == 7, "lambda body");
+  k = 2;
+  s = match k { 1 => total(a), _ => total(a + [10]) };
+  assert(s == 13, "match arm: {s}");
+  on = true;
+  i = total(if on { a + [1] } else { a });
+  assert(i == 4, "if arm: {i}");
+  b = [2, 3];
+  assert(total(a + [10] + b) == 18 && len(a + b + a) == 6, "a chain of three");
+}
+
+fn test_a_postfix() {
+  v = [1, 2, 3];
+  n = (v + [9]).len();
+  x = (v + [9])[3];
+  w = (v + [9]);
+  s = (["a"] + ["b"]).len();
+  r = ([V { s: "q", n: 1 }] + [V { s: "r", n: 2 }])[1].s;
+  assert(n == 4 && x == 9 && "{w}" == "[1,2,3,9]" && s == 2 && r == "r" && len(v) == 3,
+    "postfix: {n} {x} {w} {s} {r}");
+  assert((v + [9]).len() == 4, "method receiver inside a call");
+}
+
+enum N {
+  NA { n: integer },
+  NB { tag: text }
+}
+
+fn wrap(x: N) -> N {
+  match x {
+    NA { n } => NA { n: n * 10 },
+    _ => x
+  }
+}
+
+fn show(l: vector<N>) -> text {
+  t = "";
+  for x in l {
+    t += match x { NA { n } => "{n},", NB { tag } => "{tag}," };
+  }
+  t
+}
+
+fn tail_of(v: vector<integer>) -> vector<integer> {
+  [v[-1] ?? 0, 7]
+}
+
+fn rewrite(l: vector<N>) -> vector<N> {
+  l = l[..-1] + [wrap(l[-1])];
+  l
+}
+
+fn test_a_literal_of_an_element() {
+  m: vector<integer> = [1, 2];
+  m = m[..-1] + [m[-1] * 10];
+  assert("{m}" == "[1,20]", "integers {m}");
+  t: vector<text> = ["a", "b"];
+  t = t[..-1] + ["{t[-1]}!"];
+  assert("{t}" == "[\"a\",\"b!\"]", "texts {t}");
+  r: vector<N> = [NA { n: 1 }, NB { tag: "x" }, NA { n: 2 }];
+  r = r[..-1] + [wrap(r[-1])];
+  assert(show(r) == "1,x,20,", "records {show(r)}");
+}
+
+fn test_a_call_over_the_destination() {
+  m: vector<integer> = [1, 2, 3];
+  m = m[..-1] + tail_of(m);
+  assert("{m}" == "[1,2,3,7]", "call {m}");
+}
+
+fn test_a_slice_after_the_first_operand() {
+  m: vector<integer> = [5, 6, 7];
+  m = [0] + m[1..];
+  assert("{m}" == "[0,6,7]", "slice {m}");
+}
+
+fn test_the_reader_in_the_middle() {
+  m: vector<integer> = [1, 2];
+  m = [9] + [m[0] + 100] + [8];
+  assert("{m}" == "[9,101,8]", "middle {m}");
+}
+
+fn test_a_parameter_destination() {
+  r = rewrite([NA { n: 1 }, NA { n: 2 }]);
+  assert(show(r) == "1,20,", "parameter {show(r)}");
+}
+
+fn test_a_bare_later_operand() {
+  a: vector<integer> = [1];
+  m: vector<integer> = [2, 3];
+  m = a + m;
+  assert("{m}" == "[1,2,3]", "bare {m}");
+}
+
+fn test_bound_to_another_name() {
+  m: vector<integer> = [1, 2];
+  k = m[..-1] + [m[-1] * 10];
+  assert("{k}" == "[1,20]" && "{m}" == "[1,2]", "other name {k} {m}");
+}
+
+
+struct G { tp: vector<vector<integer>> }
+struct W { v: vector<integer> }
+struct P { n: integer, s: text }
+
+fn mk() -> vector<integer> { [5, 6] }
+fn first(h: vector<vector<integer>>) -> vector<integer> { h[0] }
+fn of_param(p: vector<vector<integer>>) -> text {
+  r = p[0] + [1];
+  "{r}#{r.len()} {p}"
+}
+
+fn test_an_element_of_a_local() {
+  h: vector<vector<integer>> = [[42]];
+  r = h[0] + [1];
+  assert("{r}" == "[42,1]" && r.len() == 2 && "{h}" == "[[42]]", "local {r} {h}");
+}
+
+fn test_an_element_of_a_field() {
+  g = G { tp: [[42]] };
+  r = g.tp[0] + [1];
+  assert("{r}" == "[42,1]" && "{g.tp}" == "[[42]]", "field {r} {g.tp}");
+}
+
+fn test_an_element_of_a_parameter() {
+  assert(of_param([[42]]) == "[42,1]#2 [[42]]", "parameter {of_param([[42]])}");
+}
+
+fn test_two_levels_down() {
+  hh: vector<vector<vector<integer>>> = [[[42]]];
+  r = hh[0][0] + [1];
+  assert("{r}" == "[42,1]" && "{hh}" == "[[[42]]]", "nested {r} {hh}");
+}
+
+fn test_a_record_field() {
+  w = W { v: [42] };
+  r = w.v + [1];
+  assert("{r}" == "[42,1]" && "{w.v}" == "[42]", "record field {r} {w.v}");
+  ws: vector<W> = [W { v: [7] }];
+  q = ws[0].v + [1];
+  assert("{q}" == "[7,1]" && "{ws[0].v}" == "[7]", "element field {q} {ws[0].v}");
+}
+
+fn test_a_borrowing_call_an_if_and_a_block() {
+  h: vector<vector<integer>> = [[42], [7]];
+  r = first(h) + [1];
+  assert("{r}" == "[42,1]" && "{h}" == "[[42],[7]]", "call {r} {h}");
+  c = h.len() > 1;
+  i = (if c { h[0] } else { h[1] }) + [2];
+  assert("{i}" == "[42,2]" && "{h}" == "[[42],[7]]", "if {i} {h}");
+  b = { h[1] } + [3];
+  assert("{b}" == "[7,3]" && "{h}" == "[[42],[7]]", "block {b} {h}");
+}
+
+fn test_texts_and_records() {
+  t: vector<vector<text>> = [["a"]];
+  r = t[0] + ["b"];
+  assert("{r}" == "[\"a\",\"b\"]" && "{t}" == "[[\"a\"]]", "texts {r} {t}");
+  p: vector<vector<P>> = [[P { n: 1, s: "x" }]];
+  q = p[0] + [P { n: 2, s: "y" }];
+  assert(q.len() == 2 && p[0].len() == 1 && q[1].s == "y", "records {q} {p}");
+}
+
+fn test_the_right_operand() {
+  h: vector<vector<integer>> = [[42], [7]];
+  r = h[0] + h[1];
+  assert("{r}" == "[42,7]" && "{h}" == "[[42],[7]]", "view right {r} {h}");
+  s = h[0] + mk();
+  assert("{s}" == "[42,5,6]" && "{h}" == "[[42],[7]]", "call right {s} {h}");
+  k = h[0] + [1] + [2];
+  assert("{k}" == "[42,1,2]" && "{h}" == "[[42],[7]]", "chain {k} {h}");
+}
+
+fn test_a_reassignment_and_an_append() {
+  h: vector<vector<integer>> = [[42]];
+  r = [5];
+  assert(r.len() == 1, "seed");
+  r = h[0] + [1];
+  assert("{r}" == "[42,1]" && "{h}" == "[[42]]", "reassign {r} {h}");
+  a = [9];
+  a += h[0] + [1];
+  assert("{a}" == "[9,42,1]" && "{h}" == "[[42]]", "+= view {a} {h}");
+  f = [9];
+  f += mk() + [1];
+  assert("{f}" == "[9,5,6,1]", "+= fresh {f}");
+}
+
+fn test_an_element_of_a_literal() {
+  g = G { tp: [[42], [7]] };
+  r: vector<vector<integer>> = [g.tp[0] + [1], g.tp[1] + [2]];
+  assert("{r}" == "[[42,1],[7,2]]" && "{g.tp}" == "[[42],[7]]", "literal {r} {g.tp}");
+  f: vector<vector<integer>> = [mk() + [1]];
+  assert("{f}" == "[[5,6,1]]", "literal fresh {f}");
+  h: vector<vector<integer>> = [[42]];
+  h += [h[0] + [1]];
+  assert("{h}" == "[[42],[42,1]]", "append literal {h}");
+  h = [h[1] + [2]];
+  assert("{h}" == "[[42,1,2]]", "rebuild from itself {h}");
+}
+
+fn test_in_a_loop_and_an_if_arm() {
+  h: vector<vector<integer>> = [[42], [7]];
+  t = "";
+  for i in 0..2 {
+    r = h[i] + [i];
+    t += "{r}";
+  }
+  assert(t == "[42,0][7,1]" && "{h}" == "[[42],[7]]", "loop {t} {h}");
+  r: vector<integer> = [];
+  if h.len() > 0 {
+    r = h[0] + [1];
+  }
+  assert("{r}" == "[42,1]" && "{h}" == "[[42],[7]]", "if arm {r} {h}");
+}
+
+fn test_enum_and_narrow_elements() {
+  e: vector<vector<N>> = [[NA { n: 1 }]];
+  r = e[0] + [NB { tag: "x" }];
+  assert(r.len() == 2 && e[0].len() == 1, "enum {r.len()} {e[0].len()}");
+  b: vector<vector<u8>> = [[200]];
+  q = b[0] + [3];
+  assert("{q}" == "[200,3]" && "{b}" == "[[200]]", "u8 {q} {b}");
+}
+
+fn test_the_controls() {
+  f = mk() + [1];
+  assert("{f}" == "[5,6,1]", "fresh {f}");
+  a = [3];
+  o = a + [1];
+  assert("{o}" == "[3,1]" && "{a}" == "[3]", "owned {o} {a}");
+  l = [1] + [2];
+  assert("{l}" == "[1,2]", "literals {l}");
+  m = [1, 2];
+  m = m[..-1] + [m[-1] * 10];
+  assert("{m}" == "[1,20]", "self slice {m}");
+  h: vector<vector<integer>> = [[42]];
+  w = W { v: h[0] + [1] };
+  n = (h[0] + [1]).len();
+  assert("{w.v}" == "[42,1]" && n == 2 && "{h}" == "[[42]]", "positions {w.v} {n} {h}");
+}
+
+
+struct S4G { name: text, en: integer }
+
+fn sorted_groups(groups: vector<S4G>) -> vector<S4G> {
+  out: vector<S4G> = [];
+  for g in groups {
+    at = len(out);
+    for o in out {
+      if at == len(out) && (g.name < o.name || (g.name == o.name && g.en < o.en)) {
+        at = o#index;
+      }
+    }
+    out = out[0..at] + [g] + out[at..len(out)];
+  }
+  out
+}
+
+fn first_only(groups: vector<S4G>) -> integer {
+  out: vector<S4G> = [];
+  for g in groups { out = out[0..len(out)] + [g]; }
+  len(out)
+}
+
+fn last_only(groups: vector<S4G>) -> integer {
+  out: vector<S4G> = [];
+  for g in groups { out = [g] + out[0..len(out)]; }
+  len(out)
+}
+
+fn walk(groups: vector<S4G>) -> text {
+  s = "";
+  for x in sorted_groups(groups) { s += "{x.name}{x.en} "; }
+  s
+}
+
+fn test_an_insertion_by_slices() {
+  for r in 0..3 {
+    s = walk([S4G { name: "b", en: 1 }, S4G { name: "a", en: 2 }, S4G { name: "a", en: 0 }]);
+    assert(s == "a0 a2 b1 ", s);
+  }
+}
+
+fn test_the_slice_first_or_last() {
+  gs = [S4G { name: "x", en: 1 }, S4G { name: "y", en: 2 }];
+  assert(first_only(gs) == 2 && last_only(gs) == 2, "{first_only(gs)} {last_only(gs)}");
+}
+
+
+fn two_locals() -> vector<integer> { a = [1, 2]; b = [3, 4]; a + b }
+
+fn local_then_parameter(b: const vector<integer>) -> vector<integer> { a = [1, 2]; a + b }
+
+fn local_then_literal() -> vector<integer> { a = [1, 2]; a + [3, 4] }
+
+fn three() -> vector<integer> { a = [1, 2]; b = [3, 4]; c = [5]; a + b + c }
+
+fn texts() -> vector<text> { a = ["p", "q"]; b = ["r"]; a + b }
+
+fn records() -> vector<P> { a = [P { n: 1, s: "one" }]; b = [P { n: 2, s: "two" }]; a + b }
+
+fn grown_then_bound() -> vector<float> {
+  a: vector<float> = [];
+  for i in 0..3 { a += [i as float]; }
+  c = a + [9.0];
+  a + c
+}
+
+// The controls.
+fn under_return() -> vector<integer> { a = [1, 2]; b = [3, 4]; return a + b; }
+
+fn in_an_arm(f: boolean) -> vector<integer> { a = [1, 2]; b = [3, 4]; if f { a + b } else { b + a } }
+
+fn parameter_first(a: const vector<integer>) -> vector<integer> { b = [3, 4]; a + b }
+
+fn literal_first() -> vector<integer> { b = [3, 4]; [1, 2] + b }
+
+fn test_two_locals() {
+  assert("{two_locals()}" == "[1,2,3,4]", "two locals: {two_locals()}");
+}
+
+fn test_a_local_then_a_parameter() {
+  assert("{local_then_parameter([3, 4])}" == "[1,2,3,4]", "a parameter second: {local_then_parameter([3, 4])}");
+}
+
+fn test_a_local_then_a_literal() {
+  assert("{local_then_literal()}" == "[1,2,3,4]", "a literal second: {local_then_literal()}");
+}
+
+fn test_a_chain_of_three() {
+  assert("{three()}" == "[1,2,3,4,5]", "three: {three()}");
+}
+
+fn test_texts() {
+  r = texts();
+  assert(len(r) == 3 && r[0] == "p" && r[1] == "q" && r[2] == "r", "texts: {r}");
+}
+
+fn test_records() {
+  r = records();
+  assert(len(r) == 2 && r[0].n == 1 && r[0].s == "one" && r[1].n == 2 && r[1].s == "two", "records: {r}");
+}
+
+fn test_a_local_grown_by_appends_then_a_concatenation_of_itself() {
+  assert("{grown_then_bound()}" == "[0,1,2,0,1,2,9]", "grown, then with a concatenation of itself: {grown_then_bound()}");
+}
+
+fn test_s5_the_controls() {
+  assert("{under_return()}" == "[1,2,3,4]", "under return: {under_return()}");
+  assert("{in_an_arm(true)}" == "[1,2,3,4]" && "{in_an_arm(false)}" == "[3,4,1,2]", "an arm: {in_an_arm(true)} {in_an_arm(false)}");
+  assert("{parameter_first([1, 2])}" == "[1,2,3,4]", "a parameter first: {parameter_first([1, 2])}");
+  assert("{literal_first()}" == "[1,2,3,4]", "a literal first: {literal_first()}");
+}
