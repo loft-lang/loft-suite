@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK INTO WHAT AN OVERWRITE RELEASES IS REFUSED (`@FR-B-Ref-Reshape`, loft#2391).  Overwriting
+// a record releases what its old value owned, so a `&` link into that, still used after the write,
+// is refused at the write — directly, and when a call is handed both the container and a reference
+// into the part it overwrites.  Each section is one refusal with its receipt; the view-side twin is
+// `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+//
+// ── 2391-a-link-into-what-an-overwrite-releases-is-refused ──
+//
+// loft#2391 — A `&` LINK INTO WHAT AN OVERWRITE RELEASES IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  Writing a whole record into `o.inner` releases the vector the old value owned, so `l = &o.inner.v[0]` would name a released record and the write through it would reach nothing.  A `&` is the author's request for a live link, so loft declines rather than handing back a copy.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+// @EXPECT_ERROR: cannot overwrite the part of `o` that holds `l` while `l` references a place inside it
+//
+// ── 2391-a-call-handed-a-view-and-a-container-it-overwrites-is-refused ──
+//
+// loft#2391 — A CALL HANDED A VIEW AND A CONTAINER IT OVERWRITES IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A plain parameter aliases the caller's value (`calls.md` F-ParamHeap), so `put(c, y)` with `y` unwrapped out of `c.tp` and `put` writing `c.tp = y` hands the callee a reference into the record its own write releases.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the same write inline materialises the view instead —
+//   `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft` (a2).
+// @EXPECT_ERROR: cannot pass both `c` and a reference into it to `put`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the call is no longer refused, which is what this program checks.
+
+struct S { n: integer }
+struct In { v: vector<S> }
+struct O { inner: In }
+
+fn test_a_link_into_what_an_overwrite_releases_is_refused() {
+  o = O { inner: In { v: [S { n: 5 }] } };
+  b = In { v: [S { n: 6 }] };
+  l = &o.inner.v[0];
+  o.inner = b;
+  l.n = 3;
+  println("{o.inner.v[0].n}");
+}
+
+enum Ty { Opt { inner: Ty }, Int { bits: integer } }
+struct Cell { tp: Ty }
+
+fn put(c: Cell, y: Ty) { c.tp = y; }
+
+fn test_a_call_handed_a_view_and_a_container_it_overwrites_is_refused() {
+  c = Cell { tp: Opt { inner: Int { bits: 32 } } };
+  y = match c.tp { Opt { inner } => inner, _ => c.tp };
+  put(c, y);
+  println("{match c.tp { Int { bits } => bits, _ => -1 }}");
+}
