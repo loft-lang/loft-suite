@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TWIN RUNS ONLY WHERE ITS CALL SITE PROVES ITS ASSUMPTIONS (`@FR-Fact-Twin`).  A twin is a
+// function written again under entry assumptions (here: an interval, so its `%` and `+` are
+// plain), called only from a site that proves them; its own calls are routed by the same proofs,
+// so a chain specialises end to end.  The same chain is called from proving sites (a loop
+// variable, two constants) and from a site that proves nothing (a null read past a vector's
+// end), and each answers what the general body answers.  On the C backend the proving sites call
+// the `__rg` twins of `c1` and `c2` and the null site the general bodies — so the answers below
+// are read through both.  Values by hand (`%` truncates toward zero):
+//   c1(7)  = (7 % 3) * 10 + 8 % 3   = 12;   c1(-4) = (-4 % 3) * 10 + (-3 % 3) = -10;
+//   c1 over 0..4 = 1, 12, 20, 1;   a null argument stays null through the chain.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c, with the non-null twins on and off
+//   (LOFT_NO_NN_TWINS=1).
+//   CHANNEL: the asserts and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the Fact-Direction cell's remainders; tests/twin_base.rs for the base twin.
+
+fn c3(x: integer) -> integer { x % 3 }
+fn c2(x: integer) -> integer { c3(x) * 10 + c3(x + 1) }
+fn c1(x: integer) -> integer { c2(x) }
+
+fn test_a_proving_site_and_a_site_that_proves_nothing_answer_alike() {
+  xs: vector<integer> = [1];
+  n = xs[9];
+  s = "";
+  for i in 0..4 { s += "{c1(i)} "; }
+  r = "{c1(7)} {c1(-4)} {c1(n) ?? -1} {c2(n) ?? -1} | {s}";
+  assert(r == "12 -10 -1 -1 | 1 12 20 1 ", "the chain: {r}");
+}

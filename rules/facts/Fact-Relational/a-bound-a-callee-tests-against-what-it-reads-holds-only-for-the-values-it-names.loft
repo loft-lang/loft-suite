@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BOUND A CALLEE TESTS AGAINST WHAT IT READS HOLDS ONLY FOR THE VALUES IT NAMES
+// (`@FR-Fact-Relational`).  A fact relating a parameter to something the callee reads —
+// `i < self.w`, `i < len(v)` — is not a fact of the routine: no caller is told "this index is in
+// range" from it.  And it could not be: `i < len(v)` says nothing below zero, where a negative
+// index counts from the end (`LOFT_DATA.md` § Vectors) and one past the start reads null.  So an
+// accessor answers by its own test and its own read, from inside and outside the bound, on both
+// sides of zero.  Values by hand, data = [5, 6, 7, 8], w = 3:
+//   at(0..5)  = 5 6 7 -1 -1  (the field bound, 3, below the vector's length);
+//   get(0..5) = 5 6 7 8 -2;  get(-1) = 8 (the last);  get(-9) = null, read as -3;
+//   at(-2)    = data[-2] = 7.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c.
+//   CHANNEL: the asserts and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: tests/leaf_inline.rs for the scalar leaves the inliner takes today.
+
+struct Cv { w: integer, data: vector<integer> }
+fn at(self: const Cv, i: integer) -> integer { if i < self.w { self.data[i] ?? -3 } else { -1 } }
+fn get(v: const vector<integer>, i: integer) -> integer { if i < len(v) { v[i] ?? -3 } else { -2 } }
+
+fn test_an_accessor_answers_by_its_own_bound_inside_and_outside_it() {
+  c = Cv { w: 3, data: [5, 6, 7, 8] };
+  a = "";
+  b = "";
+  for i in 0..5 {
+    a += "{c.at(i)} ";
+    b += "{get(c.data, i)} ";
+  }
+  assert(a == "5 6 7 -1 -1 ", "the field bound: {a}");
+  assert(b == "5 6 7 8 -2 ", "the length bound: {b}");
+}
+
+fn test_a_bound_says_nothing_below_zero() {
+  c = Cv { w: 3, data: [5, 6, 7, 8] };
+  s = "{get(c.data, -1)} {get(c.data, -9)} {c.at(-2)}";
+  assert(s == "8 -3 7", "below zero: {s}");
+}
