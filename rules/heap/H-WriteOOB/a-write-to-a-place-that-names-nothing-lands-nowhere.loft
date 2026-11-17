@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A WRITE TO A PLACE THAT NAMES NOTHING LANDS NOWHERE (`@FR-H-WriteOOB`, `@FR-H-WriteNull`, with
+// `@FR-L-Null`'s destination half).  An index at or past the length or below `-len`, a field under
+// such an element, a null record: a write there changes nothing — a narrow element's included,
+// whose write once took its width from the definition (loft#1378) — and a whole record copied into
+// no place gives its source back unchanged.  Two sections, each with its cells and receipt.
+//
+// ── a-write-to-an-absent-element-lands-nowhere ──
+//
 // A WRITE TO AN ABSENT ELEMENT LANDS NOWHERE.  `@FR-H-WriteOOB` and `@FR-H-WriteNull` are the
 // write half of the null discipline: an index at or past the length, below `-len`, or the
 // integer null names no element, and a write to it is a no-op the program continues past —
@@ -41,6 +49,32 @@
 // ARMED: the leak gate is armed by the script corpus runner (wrap.rs), not by `--tests`.
 // WITNESS: `u8: 9 0 0 0 0 0 0 0 8` — the `u8` cell's own message, on both backends.
 // HOLDS: every other cell answers the same on both trees; only the narrow-width cell moved.
+//
+// ── a-record-copied-into-no-place-gives-its-source-back ──
+//
+// `@FR-H-WriteOOB` with `@FR-L-Null`'s destination half — a whole record written into a place
+// that names no record (`ps[8] = mk(10)` past the end, a field under such an element, a field
+// of a null optional) writes nothing, and a record the copy was handed to GIVE UP — a call's
+// returned store — is still released.  A source the program still holds (a local, an element)
+// is never released by it.
+//
+// The copy drops a write to a null place on both backends; the release of a given-up source
+// sat after that early return, so each such statement left one store behind.  Every cell
+// asserts its values by hand (the vector keeps its two records, the held local keeps every
+// field) and the run must end with no store left: the leak is the channel.
+//
+//   cells: source {call result, held local, element, a nested record from a call}
+//        × place {past the end, a field under past-the-end, a field of a null optional}
+//        × repeated in a loop (one store per iteration when wrong)
+//
+// @falsified-at: 91a49cf8c — interpret leaked kt=98 P×4, kt=97 In×2 -> clean, native leaked kt=98 P×4, kt=97 In×2 -> clean
+// @falsified-by: tests/falsified/a-record-copied-into-no-place-gives-its-source-back.patch — interpret leaked kt=98 P×4, kt=97 In×2 -> clean, native leaked kt=98 P×4, kt=97 In×2 -> clean
+//   CHANNEL: the LEAK on a plain run (`main`) — `P×4` is `mk(10)` and the loop's three, `In×2`
+//   is `mi(4)` and `mi(5)`, exactly the given-up sources; every assertion holds either way.
+//   The patch removes only the two null-place releases, one per backend.
+//   ARMED: none — the exit-time store count every plain run prints is the instrument; no
+//   switch was set when it moved.
+//   HOLDS: exit, assertions, panic and free-refusal are equal on both trees.
 
 struct P { x: integer, y: integer }
 struct Q { pos: P, n: integer }
@@ -266,7 +300,7 @@ fn index_boolean_and_branches() {
 
 // One function per section: one C function this size (417 locals) took `cl /O1` past the
 // sweep's compile limit, where gcc takes seconds.
-fn main() {
+fn test_a_write_to_an_absent_element_lands_nowhere() {
   scalar_and_compound();
   element_types();
   records();
@@ -275,3 +309,41 @@ fn main() {
   index_boolean_and_branches();
   println("a write to an absent element lands nowhere: every cell holds");
 }
+
+struct In { m: integer, s: text }
+struct S2P { x: integer, t: text, inner: In }
+struct Box { p: S2P? }
+
+fn s2_mk(x: integer) -> S2P { S2P { x: x, t: "p{x}", inner: In { m: x, s: "i{x}" } } }
+fn mi(x: integer) -> In { In { m: x, s: "j{x}" } }
+
+fn test_a_call_result_written_past_the_end() {
+  ps = [s2_mk(1), s2_mk(2)];
+  ps[8] = s2_mk(10);
+  for k in 0..3 { ps[20 + k] = s2_mk(k); }
+  assert(len(ps) == 2, "len {len(ps)}");
+  assert("{ps[0].x}{ps[0].t}{ps[0].inner.s}" == "1p1i1", "ps[0] {ps[0].x}{ps[0].t}");
+  assert("{ps[1].x}{ps[1].t}{ps[1].inner.s}" == "2p2i2", "ps[1] {ps[1].x}{ps[1].t}");
+}
+
+fn test_a_nested_record_written_under_no_element() {
+  ps = [s2_mk(1)];
+  ps[7].inner = mi(4);
+  b = Box { p: null };
+  b.p.inner = mi(5);
+  assert(len(ps) == 1, "len {len(ps)}");
+  assert("{ps[0].inner.m}{ps[0].inner.s}" == "1i1", "inner {ps[0].inner.s}");
+  assert(!b.p, "the optional stays null");
+}
+
+fn test_a_held_source_is_never_given_up() {
+  ps = [s2_mk(1), s2_mk(2)];
+  r = s2_mk(3);
+  ps[8] = r;
+  ps[9] = ps[0];
+  ps[7].inner = r.inner;
+  assert("{r.x}{r.t}{r.inner.m}{r.inner.s}" == "3p33i3", "r {r.x}{r.t}{r.inner.s}");
+  assert("{ps[0].x}{ps[0].t}{ps[0].inner.s}" == "1p1i1", "ps[0] {ps[0].t}");
+}
+
+// A test run does not count leftover stores; a plain run does, and the leak is the channel.
