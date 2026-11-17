@@ -46,8 +46,10 @@ fn appended_after_a_copy(p: text) -> integer {
 }
 
 fn main() {
-  // A name of this run's own: the wrap, native and other suites run this file at once.
-  p = "loft_1906_{now()}_{ticks()}_mapped.tmp";
+  // A name of this run's own: the wrap, native and other suites run this file at once.  In the
+  // temp dir, so a run that dies before the cleanup (a falsify run does) leaves nothing in the
+  // suite's tree.
+  p = "{temp_dir() ?? "/tmp"}/loft_1906_{now()}_{ticks()}_mapped.tmp";
   assert(write_bytes(p, [104, 101, 108, 108, 111]), "write");
   assert(appended(p) == 1601, "a mapped vector appended as an element: {appended(p)}");
   assert(appended_from_a_binding(p) == 2111, "appended from a binding: {appended_from_a_binding(p)}");

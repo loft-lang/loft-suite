@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FIELD CONST ON BOTH AXES REFUSES ITS REBIND AND EVERY WRITE BENEATH IT (`@FR-Const-Compose`).
+// `const v: const T` composes the two axes: `@FR-Const-Bind` refuses re-pointing the slot and
+// `@FR-Const-Value` refuses every write through it, so the field is fully immutable after
+// construction.  Each function is one write, on a field of its own name, so each expectation
+// can only be met by its own refusal: a rebind, an append, an element write, a field write in a
+// record beneath, and a text append.  Const-Bind alone allows the append and the element write
+// (`rules/binding/Const-Value/a-value-const-scalar-local-can-be-declared.loft`); the Rust twins
+// are `tests/issues.rs` `a_composed_const_field_refuses_*`.
+//
+// @falsified-at: none — a conformance guard: every refusal reads as written on the tree of the
+//   suite pin that adds this cell, interpret and native-c; corrupting any one expectation fails
+//   the file.
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   HOLDS: the Rust twins in tests/issues.rs.
+//
+// @EXPECT_ERROR: cannot reassign const field 'rv' of struct 'Hr'
+// @EXPECT_ERROR: cannot mutate value-const field 'av' of struct 'Ha'
+// @EXPECT_ERROR: Cannot modify value-const field 'He.ev'; its value is read-only
+// @EXPECT_ERROR: Cannot modify value-const field 'Hn.nr'; its value is read-only
+// @EXPECT_ERROR: cannot mutate value-const field 'tt' of struct 'Ht'
+
+struct In { x: integer }
+struct Hr { const rv: const vector<integer> }
+struct Ha { const av: const vector<integer> }
+struct He { const ev: const vector<integer> }
+struct Hn { const nr: const In }
+struct Ht { const tt: const text }
+
+fn rebind() {
+  h = Hr { rv: [1] };
+  h.rv = [2];
+}
+
+fn append() {
+  h = Ha { av: [1] };
+  h.av += [2];
+}
+
+fn element_write() {
+  h = He { ev: [1] };
+  h.ev[0] = 5;
+}
+
+fn nested_field_write() {
+  h = Hn { nr: In { x: 1 } };
+  h.nr.x = 2;
+}
+
+fn text_append() {
+  h = Ht { tt: "a" };
+  h.tt += "z";
+}
