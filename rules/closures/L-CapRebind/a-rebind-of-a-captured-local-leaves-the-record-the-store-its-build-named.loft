@@ -1,0 +1,443 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REBIND OF A CAPTURED LOCAL LEAVES THE CLOSURE RECORD THE STORE ITS BUILD NAMED, RELEASED ONCE
+// (`@FR-L-CapRebind`, with `@FR-O-Detach` and `@FR-H-FreeTwice`).  A whole-value rebind is not a
+// mutation through the capture, so a closure keeps the store it was built with — a keyed local
+// (loft#1862), a vector local (loft#2459), a vector rebound from a call each loop pass — and that
+// store is released once, by whoever keeps it: the record, the frame, or the call buffers a
+// capture rotates through.  Five sections, each with its cells and receipt.
+//
+// ── a-captured-keyed-local-keeps-its-store-through-every-rebind ──
+//
+// loft#1862 — @FR-L-CapRebind (`formal/closures.md`): a whole-value rebind of a captured keyed
+// local leaves the record with the store it was built with, whatever spells the rebind.
+//
+// Only the non-empty literal minted a fresh store (loft#1447).  A call, a variable, a branch,
+// a field, `[]` and a right-hand side that reads the local all cleared and refilled the store
+// the record held, so the closure answered the new contents on all five keyed kinds and both
+// backends — and a record that left the frame read a store the frame had released.  The
+// literal mint leaked: a second rebind minted over the first fresh store, and a loop pass
+// left the build-time store to a pass-confined record that releases nothing.
+//
+// Each cell answers `f() * 100 + tot(c)`: the build-time total (5) beside what `c` holds after
+// the rebind.  Values by hand: mk(n) holds one record of value n; add(h, d) adds d to each.
+//
+// Axes this file MOVES: the rebind's spelling (literal, call, variable, branch, field, `[]`,
+// self-reading call); its position (once, twice, inside a loop pass, on a branch not taken,
+// in a function whose closure leaves the frame); the keyed kind for the call spelling.
+// Axes it HOLDS FIXED: one capturing closure per local; the element is a two-field record.
+//
+// @falsified-at: 689786603 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0,
+//   native exit 1 -> 0, native 1 assertion failures -> 0.  CHANNEL: exit and assertions (the
+//   first failing assertion stops the run).
+//   ARMED: nothing.
+//   HOLDS: leak and panic are equal on both trees.
+// @falsified-by: tests/falsified/a-captured-keyed-local-keeps-its-store-through-every-rebind.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//
+// ── a-captured-vector-local-keeps-its-store-through-every-rebind ──
+//
+// loft#2459 — `@FR-L-CapRebind` × `@FR-O-Detach` for a VECTOR local: a whole-value rebind is
+// not a mutation-through, so a closure record keeps the store it was built with.  The local
+// moves to a fresh store; the record's store is neither appended to (`a = a + [3]`) nor
+// released while the record still reads it (`a = [5, 5, 5]`, the next allocation reusing it).
+//
+// Values by hand: every closure is built over a = [1, 2] and answers len(a) (or len*10 + a[0]).
+//   a = a + [3]                     -> closure 21, a has 3
+//   a = a + [3]; a = a + [4]        -> closure 21, a has 4
+//   a = [7, 7, 7]; x = [5, 5, 5, 5] -> closure 2, a has 3, x has 4
+//   escaping, after a concat / a literal rebind -> 2
+//   a = a + [i] for i in 0..3       -> closure 2, a has 5
+//   a = [] / a = o / a = f()        -> closure 2; a has 0 / 1 / 4
+//   s = ["x"]; s = s + ["y"]        -> closure "x", s has 2
+//   called before and after         -> 2 2, a has 3
+//   no closure / built after        -> in place: 3; the closure sees 3
+//   a = a[0..1] (scalar), t = t[1..] (text)       -> closure 3 / "x3", the local has 1 / 2
+//   a closure rebuilt each pass over a frame local, then a = a + [i] / a = [i, i, i] /
+//   a = a[1..]: each pass's closure reads the value of its own build ("19 20 31", "19 30 31",
+//   "61 52 43"); one kept past the loop reads its last build again (31)
+//
+// @falsified-at: main dbf8b05ae — interpret and native-c: the concat reads 31 (the append
+//   reached the record), the literal rebind reads 4 (the freed store reused by `x`), the
+//   self-slice 1, and every loop pass after the first reads its local's later rebind.
+//   On the fix: LOFT_NO_CAPREBIND_MINT=1 brings back the concat, slice and loop values, and
+//   LOFT_NO_CAPREBIND_KEEP=1 the literal rebind's reuse.
+// CHANNEL: the asserts, then the leak gate.
+// HOLDS: every assert and the leak gate on both backends.
+//
+// ── a-call-rebind-in-a-loop-leaves-the-record-its-build-time-vector ──
+//
+// `@FR-L-CapRebind` — A CALL REBIND IN A LOOP LEAVES THE RECORD ITS BUILD-TIME VECTOR.  A closure
+// is rebuilt each pass over a vector local, and the local is then rebound from a CALL
+// (`a = mkv(i)`), which delivers into the hidden buffer `__ref_N` the frame reuses every pass.
+// From the second pass on, the record captured the buffer's store, and the next call refilled
+// that store in place: the closure answered the value assigned AFTER its build, a silent wrong
+// answer on both backends.  A literal, a concat and a slice rebind already moved the local to a
+// fresh store first; the call spelling now does too.
+//
+// Expected values by hand (`g` reads `a[0]` of its own build):
+//   loop(3): built over [9] -> "9", a = [0, 0]; over [0, 0] -> "0", a = [1, 1]; over [1, 1] -> "1";
+//     then g() after the loop -> "1".  So "9 0 1 1".
+//   straight(): two builds in a line, rebound by mkv(5) and mkv(6) -> "9 5" (the control: no
+//     loop, no reused buffer).
+//   loop(1): "9 9";  loop(0): "" (g is the `{ "" }` lambda).
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_CALL_BUFFER_REBIND_DETACH=1` — `loop(3)` answers "9 1 2 2" on both
+//   backends, no diagnostic.
+// CHANNEL: the values, by assertion.
+// HOLDS: `test_a_straight_line_rebind` and `test_one_pass_and_none` under the switch.
+//
+// ── a-capture-rotated-through-call-buffers-is-the-buffers-to-release ──
+//
+// `@FR-L-CapRebind` with `@FR-H-FreeTwice` — A CAPTURE ROTATED THROUGH CALL BUFFERS IS THE
+// BUFFERS' TO RELEASE.  `v = bump(v)` in a loop reads `v` while the call fills its hidden
+// buffer, so the frame ROTATES two buffers (`OpPutRef(__ref_1, __ref_2); OpPutRef(__ref_2, v)`)
+// and a closure rebuilt over `v` each pass only BORROWS what it captured.  The rebound-capture
+// let-go points still released the previous record's capture at a rebuild as if the record
+// owned it: on the third pass that freed a store a buffer still held, and the next call read it
+// — a use after free on the C backend (the interpreter's store identities happened to differ).
+//
+// Expected values by hand (`g` reads `v[0]` of its own build; `bump` answers `[v[0] + 1]`):
+//   rot(3): built over [9] -> "9", v = [10]; "10", v = [11]; "11", v = [12]; g() after -> "11".
+//     So "9 10 11 11".   rot(2): "9 10 10".   rot(1): "9 9".   rot(0): "".
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_ROTATED_CAPTURE_LEFT_TO_BUFFERS=1` — the C backend reports
+//   "USE AFTER FREE (access)" in `bump`, the store freed in `rot` (`test_three_passes`).
+// CHANNEL: the strict-store gate on the C backend, and the values by assertion.
+// HOLDS: `test_fewer_passes` under the switch, and the interpreter throughout.
+//
+// ── a-rebound-capture-is-released-once-by-whoever-keeps-it ──
+//
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, which loses the release of the store a second rebind replaces in place (`D2` goes missing from the trace).
+//
+// A REBOUND CAPTURE IS RELEASED ONCE, BY WHOEVER KEEPS IT (`@FR-L-CapRebind` crossed with
+// `@FR-L-CapOwn` and `@FR-H-Drop`).  L-CapRebind: a whole-value rebind of a captured heap local
+// leaves the closure record on the store it was built with (answering the build-time value) and
+// moves the local to a fresh store; "the store the record keeps is released ONCE (L-CapOwn): by
+// the record's cascade where it adopted it, else at the local's scope end", and a second rebind
+// before the next build replaces the local's own store in place.  L-CapOwn: a record that
+// LEAVES its frame takes the release over.  A hook (`OpDrop`) makes each release visible, so a
+// release that is lost or doubled shows in the trace.
+//
+// The cell beside this rule (`a-captured-keyed-local-keeps-its-store-through-every-rebind`)
+// holds the closure INSIDE its frame and the capture hook-free; this one moves the closure out
+// of the frame (returned) and gives the captured value a hook.
+//
+// Axes it MOVES: the closure's fate (returned, left behind), rebinds before the return (one,
+// two), the captured kind (a record, a vector of records rebound to `[]`).
+// Traces hand-computed: M<n> is a mint, D<n> a drop, F<n> the closure's answer, X the caller's
+// last statement before its scope end.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts (each compares the whole trace).
+// ARMED: no instrument — each hook writes this cell's trace file.
+// WITNESS: each message prints the trace.
+// HOLDS: leak clean on both backends.
+
+struct E { k: integer, v: integer }
+struct W { c: hash<E[k]> }
+fn mk(v: integer) -> hash<E[k]> { r: hash<E[k]> = []; r += [E { k: 1, v: v }]; r }
+fn add(h: hash<E[k]>, d: integer) -> hash<E[k]> {
+  r: hash<E[k]> = [];
+  for e in h { r += [E { k: e.k, v: e.v + d }]; }
+  r
+}
+fn tot(c: hash<E[k]>) -> integer { t = 0; for e in c { t += e.v; } t }
+
+fn once_lit() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = [E { k: 1, v: 9 }]; f() * 100 + tot(c) }
+fn once_call() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = mk(9); f() * 100 + tot(c) }
+fn once_var() -> integer { o = mk(9); c = mk(5); f = fn() -> integer { tot(c) }; c = o; f() * 100 + tot(c) }
+fn once_join(p: boolean) -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = if p { mk(9) } else { mk(8) }; f() * 100 + tot(c) }
+fn once_field() -> integer { w = W { c: mk(9) }; c = mk(5); f = fn() -> integer { tot(c) }; c = w.c; f() * 100 + tot(c) }
+fn once_empty() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = []; f() * 100 + tot(c) }
+fn once_self() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = add(c, 4); f() * 100 + tot(c) }
+
+fn twice() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = mk(9); c = mk(7); f() * 100 + tot(c) }
+fn twice_self() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = add(c, 4); c = add(c, 2); f() * 100 + tot(c) }
+
+fn loop_pass() -> integer {
+  s = 0;
+  for _i in 0..3 { c = mk(5); f = fn() -> integer { tot(c) }; c = add(c, 4); s += f() * 100 + tot(c); }
+  s
+}
+fn loop_some_passes() -> integer {
+  s = 0;
+  for i in 0..4 { c = mk(5); f = fn() -> integer { tot(c) }; if i % 2 == 1 { c = mk(9); } s += f(); }
+  s
+}
+fn not_taken(p: boolean) -> integer { c = mk(5); f = fn() -> integer { tot(c) }; if p { c = mk(9); } f() * 100 + tot(c) }
+
+fn escaping() -> fn() -> integer { c = mk(5); f = fn() -> integer { tot(c) }; c = mk(9); f }
+
+fn sorted_call() -> integer {
+  c: sorted<E[k]> = [E { k: 1, v: 5 }];
+  f = fn() -> integer { t = 0; for e in c { t += e.v; } t };
+  c = [E { k: 1, v: 9 }, E { k: 2, v: 0 }];
+  c = if true { c } else { c };
+  f()
+}
+fn mk_index(v: integer) -> index<E[k]> { r: index<E[k]> = []; r += [E { k: 1, v: v }]; r }
+fn index_call() -> integer { c = mk_index(5); f = fn() -> integer { t = 0; for e in c { t += e.v; } t }; c = mk_index(9); f() }
+
+fn test_a_captured_keyed_local_keeps_its_store_through_every_rebind() {
+  assert(once_lit() == 509, "literal: {once_lit()}");
+  assert(once_call() == 509, "call: {once_call()}");
+  assert(once_var() == 509, "variable: {once_var()}");
+  assert(once_join(true) == 509, "branch: {once_join(true)}");
+  assert(once_field() == 509, "field: {once_field()}");
+  assert(once_empty() == 500, "empty: {once_empty()}");
+  assert(once_self() == 509, "self-reading: {once_self()}");
+  assert(twice() == 507, "two rebinds: {twice()}");
+  assert(twice_self() == 511, "two self-reading rebinds: {twice_self()}");
+  assert(loop_pass() == 1527, "a rebind every pass: {loop_pass()}");
+  assert(loop_some_passes() == 20, "a rebind on odd passes: {loop_some_passes()}");
+  assert(not_taken(false) == 505, "a rebind not taken: {not_taken(false)}");
+  g = escaping();
+  assert(g() == 5, "the closure leaves the frame: {g()}");
+  assert(sorted_call() == 5, "sorted: {sorted_call()}");
+  assert(index_call() == 5, "index: {index_call()}");
+}
+
+fn mkv() -> vector<integer> { [7, 8, 9, 10] }
+fn escape() -> fn() -> integer { a = [1, 2]; g = fn() -> integer { len(a) }; a = a + [3]; g }
+fn escape_lit() -> fn() -> integer { a = [1, 2]; g = fn() -> integer { len(a) }; a = [5, 5, 5]; g }
+
+fn test_a_concat_rebind_leaves_the_record_its_store() {
+  a = [1, 2];
+  g = fn() -> integer { len(a) * 10 + a[0] };
+  a = a + [3];
+  assert(g() == 21 && len(a) == 3, "once: {g()} {len(a)}");
+  a = a + [4];
+  assert(g() == 21 && len(a) == 4, "twice: {g()} {len(a)}");
+}
+
+fn test_a_literal_rebind_does_not_release_the_records_store() {
+  b = [1, 2];
+  g = fn() -> integer { len(b) };
+  b = [7, 7, 7];
+  x = [5, 5, 5, 5];
+  assert(g() == 2 && len(b) == 3 && len(x) == 4, "{g()} {len(b)} {len(x)}");
+}
+
+fn test_an_escaping_closure_keeps_its_store() {
+  e = escape();
+  el = escape_lit();
+  assert(e() == 2 && el() == 2, "{e()} {el()}");
+}
+
+fn test_a_rebind_in_a_loop() {
+  a = [1, 2];
+  g = fn() -> integer { len(a) };
+  for i in 0..3 { a = a + [i]; }
+  assert(g() == 2 && len(a) == 5, "{g()} {len(a)}");
+}
+
+fn test_every_rebind_spelling() {
+  a = [1, 2]; ga = fn() -> integer { len(a) }; a = [];
+  assert(ga() == 2 && len(a) == 0, "empty: {ga()} {len(a)}");
+  o = [9];
+  b = [1, 2]; gb = fn() -> integer { len(b) }; b = o;
+  assert(gb() == 2 && len(b) == 1 && len(o) == 1, "copy: {gb()} {len(b)}");
+  c = [1, 2]; gc = fn() -> integer { len(c) }; c = mkv();
+  assert(gc() == 2 && len(c) == 4, "call: {gc()} {len(c)}");
+}
+
+fn test_text_elements_and_a_call_before() {
+  s = ["x"];
+  gs = fn() -> text { s[0] };
+  s = s + ["y"];
+  assert(gs() == "x" && len(s) == 2 && s[1] == "y", "{gs()} {len(s)}");
+  a = [1, 2];
+  g = fn() -> integer { len(a) };
+  b0 = g();
+  a = a + [3];
+  assert(b0 == 2 && g() == 2 && len(a) == 3, "{b0} {g()} {len(a)}");
+}
+
+fn test_without_a_record_the_concat_is_in_place() {
+  a = [1, 2];
+  a = a + [3];
+  assert(len(a) == 3 && a[2] == 3, "control: {len(a)}");
+  g = fn() -> integer { len(a) };
+  assert(g() == 3, "built after: {g()}");
+}
+
+fn test_a_self_slice_takes_a_fresh_store() {
+  a = [1, 2, 3];
+  g = fn() -> integer { len(a) };
+  a = a[0..1];
+  assert(g() == 3 && len(a) == 1 && a[0] == 1, "scalar: {g()} {len(a)}");
+  t = ["x", "y", "z"];
+  h = fn() -> text { "{t[0]}{len(t)}" };
+  t = t[1..];
+  assert(h() == "x3" && len(t) == 2 && t[0] == "y", "text: {h()} {len(t)}");
+}
+
+fn test_a_closure_rebuilt_each_pass_reads_its_own_build() {
+  a = [9]; t = "";
+  for i in 0..3 { g = fn() -> text { "{len(a)}{a[len(a) - 1]}" }; a = a + [i]; t += g() + " "; }
+  assert(t == "19 20 31 " && len(a) == 4, "concat: {t}");
+  b = [9]; u = "";
+  for i in 0..3 { g = fn() -> text { "{len(b)}{b[0]}" }; b = [i, i, i]; u += g() + " "; }
+  assert(u == "19 30 31 " && len(b) == 3, "literal: {u}");
+  c = [1, 2, 3, 4, 5, 6]; w = "";
+  for _i in 0..3 { g = fn() -> text { "{len(c)}{c[0]}" }; c = c[1..]; w += g() + " "; }
+  assert(w == "61 52 43 " && len(c) == 3, "slice: {w}");
+}
+
+fn test_a_closure_kept_past_the_loop() {
+  a = [9];
+  g = fn() -> integer { 0 };
+  t = 0;
+  for i in 0..3 { g = fn() -> integer { len(a) * 10 + a[len(a) - 1] }; a = a + [i]; t = t * 100 + g(); }
+  t = t * 100 + g();
+  assert(t == 19203131 && len(a) == 4, "concat: {t}");
+  b = [9];
+  h = fn() -> integer { 0 };
+  u = 0;
+  for i in 0..3 { h = fn() -> integer { len(b) * 10 + b[0] }; b = [i, i, i]; u = u * 100 + h(); }
+  u = u * 100 + h();
+  assert(u == 19303131 && len(b) == 3, "literal: {u}");
+}
+
+fn s3_mkv(i: integer) -> vector<integer> { [i, i] }
+
+fn looped(n: integer) -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for i in 0..n { g = fn() -> text { "{a[0]}" }; a = s3_mkv(i); t += g() + " "; }
+  t + g()
+}
+fn straight() -> text {
+  a = [9]; t = "";
+  g = fn() -> text { "{a[0]}" }; a = s3_mkv(5); t += g() + " ";
+  g = fn() -> text { "{a[0]}" }; a = s3_mkv(6); t += g();
+  t
+}
+
+fn test_a_call_rebind_in_a_loop() { r = looped(3); assert(r == "9 0 1 1", "looped(3): {r}"); }
+fn test_a_straight_line_rebind() { r = straight(); assert(r == "9 5", "straight(): {r}"); }
+fn test_one_pass_and_none() {
+  r1 = looped(1);
+  assert(r1 == "9 9", "looped(1): {r1}");
+  r0 = looped(0);
+  assert(r0 == "", "looped(0): {r0}");
+}
+
+fn bump(w: vector<integer>) -> vector<integer> { [w[0]! + 1] }
+
+fn rot(n: integer) -> text {
+  v = [9]; g = fn() -> text { "" }; t = "";
+  for _i in 0..n { g = fn() -> text { "{v[0]}" }; v = bump(v); t += g() + " "; }
+  t + g()
+}
+
+fn test_three_passes() { r = rot(3); assert(r == "9 10 11 11", "rot(3): {r}"); }
+fn test_fewer_passes() {
+  r2 = rot(2);
+  assert(r2 == "9 10 10", "rot(2): {r2}");
+  r1 = rot(1);
+  assert(r1 == "9 9", "rot(1): {r1}");
+  r0 = rot(0);
+  assert(r0 == "", "rot(0): {r0}");
+}
+
+struct RbH { id: integer }
+fn OpDrop(self: RbH) { note("D{self.id}"); }
+fn s5_mk(i: integer) -> RbH { note("M{i}"); RbH { id: i } }
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_caprebind_own.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+fn count(t: text, part: text) -> integer {
+  n = 0;
+  for p in t.split(',') { if p == part { n += 1; } }
+  n
+}
+
+// returned after one rebind: the record adopts the build-time store, the frame frees the new one
+fn rb_once(i: integer) -> fn() -> integer {
+  h = s5_mk(i);
+  f = fn() -> integer { h.id };
+  h = s5_mk(i + 1);
+  f
+}
+
+// returned after two rebinds: the second replaces the local's own store in place
+fn rb_twice(i: integer) -> fn() -> integer {
+  h = s5_mk(i);
+  f = fn() -> integer { h.id };
+  h = s5_mk(i + 1);
+  h = s5_mk(i + 2);
+  f
+}
+
+// returned over a vector rebound to `[]`
+fn rb_vector(i: integer) -> fn() -> integer {
+  w = [s5_mk(i)];
+  f = fn() -> integer { len(w) };
+  w = [];
+  f
+}
+
+// left behind: both stores are released at the local's scope end
+fn rb_stay(i: integer) -> integer {
+  h = s5_mk(i);
+  f = fn() -> integer { h.id };
+  h = s5_mk(i + 1);
+  r = f();
+  r * 100 + h.id
+}
+
+fn c_once() { g = rb_once(10); note("F{g()}"); note("X"); }
+fn c_twice() { g = rb_twice(1); note("F{g()}"); note("X"); }
+fn c_vector() { g = rb_vector(5); note("F{g()}"); note("X"); }
+
+fn test_a_returned_closure_releases_its_build_time_store() {
+  drain();
+  c_once();
+  t = drain();
+  assert(t == "M10,M11,D11,F10,X,D10", "one rebind, returned: {t}");
+}
+
+fn test_a_second_rebind_replaces_the_locals_own_store() {
+  drain();
+  c_twice();
+  t = drain();
+  assert(t == "M1,M2,M3,D2,D3,F1,X,D1", "two rebinds, returned: {t}");
+}
+
+fn test_a_vector_rebound_to_empty_keeps_the_records_store() {
+  drain();
+  c_vector();
+  t = drain();
+  assert(t == "M5,F1,X,D5", "vector rebound to []: {t}");
+}
+
+fn test_a_closure_left_behind_leaves_both_releases_to_the_frame() {
+  drain();
+  r = rb_stay(20);
+  t = drain();
+  assert(r == 2021, "the closure answered the build-time value: {r}");
+  assert(count(t, "M20") == 1 && count(t, "M21") == 1 && count(t, "D20") == 1 && count(t, "D21") == 1 && len(t.split(',')) == 4,
+    "left behind: {t}");
+}
+
