@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NON-PUB METHOD IS REFUSED FROM OUTSIDE ITS LIBRARY, HOWEVER IT IS REACHED (`@FR-F-Surface`).
+// A library's surface is its `pub` items: a method without `pub` is refused to a consumer through
+// the library's qualifier and on the library's own record type alike — the receiver's type being
+// the library's grants nothing.  Each section is one refused call with its expectation and
+// receipt.  A non-pub FUNCTION is refused one compile pass earlier, which a file with these never
+// reaches: it is `a-non-pub-function-is-refused-through-the-qualifier.loft`.
+//
+// ── a-non-pub-method-is-refused-through-the-qualifier ──
+//
+// A NON-PUB METHOD IS REFUSED THROUGH THE QUALIFIER (`@FR-F-Surface`; found walking its pair with
+// `@FR-Disp-Trigger`, whose triggers derive only from the pub surface).  `fn fs_tm(self: text)`
+// is declared without `pub`, so `f_surface_fixture_lib::fs_tm("hi")` is an outside reach of a
+// non-pub item and must be refused exactly as the non-pub plain function is.
+//
+// Guards loft#2115: the call was accepted and printed "hi." on both backends — a qualified call
+// asked the library for the item by NAME, and a method is keyed by its receiver.  The method
+// spelling on the library's own record is the cell beside this one.
+//
+// @falsified-at: e71f24b34 — accepted there (prints "hi."), interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the item and the library.
+// HOLDS: `a-non-pub-function-is-refused-through-the-qualifier` beside it.
+// @EXPECT_ERROR: `fs_tm` is not `pub` in `f_surface_fixture_lib`
+//
+// ── a-non-pub-method-is-refused-on-the-librarys-own-record ──
+//
+// A NON-PUB METHOD IS REFUSED ON THE LIBRARY'S OWN RECORD (`@FR-F-Surface`).  `fn fs_rm(self: FsP)`
+// is declared without `pub`; a program holding a pub `FsP` reaches only the surface, so
+// `p.fs_rm()` must be refused — the method spelling is a reach of the item like the qualifier.
+//
+// Guards loft#2115: accepted there and printed 7 on both backends (FsP{4}.x + 3) — the method
+// spelling finds every method of the receiver type, and nothing asked its `pub`.
+//
+// @falsified-at: e71f24b34 — accepted there (prints 7), interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the item and the library.
+// HOLDS: `a-non-pub-function-is-refused-through-the-qualifier` beside it.
+// @EXPECT_ERROR: fs_rm
+
+use f_surface_fixture_lib::*;
+
+fn test_a_non_pub_method_is_refused_through_the_qualifier() {
+  println(f_surface_fixture_lib::fs_tm("hi"));
+}
+
+
+fn test_a_non_pub_method_is_refused_on_the_librarys_own_record() {
+  p = FsP { x: 4 };
+  println("{p.fs_rm()}");
+}
