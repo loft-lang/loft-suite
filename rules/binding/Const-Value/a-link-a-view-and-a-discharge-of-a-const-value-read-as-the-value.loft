@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // `@FR-Const-Value` crossed with `@FR-B-Ref-Alias`, `@FR-B-View` and `@FR-E-Asgn-Discharge` — the
-// legal half of `a-link-a-view-and-a-discharge-of-a-const-value-are-read-only-refused.loft`.
+// legal half of `a-value-const-binding-refuses-a-write-whatever-name-or-route-reaches-it-refused.loft`.
 // A link, a member view, an element view and a loop variable over a value-const parameter
 // READ the value; a scalar read out of one is the reader's own copy.  A discharge target
 // (`place? op= e`) on a writable binding writes `place`: a null place starts from the type's
