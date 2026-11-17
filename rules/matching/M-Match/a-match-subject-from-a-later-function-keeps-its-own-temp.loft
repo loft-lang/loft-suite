@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_JOIN_BUFFER_WITNESS — without the join buffer's witness the subject's temp and the buffer the match joins into are both released (`store #2 freed twice` in `nested_late`); this program checks the temp is released once.
 //
 // A MATCH SUBJECT FROM A LATER FUNCTION KEEPS ITS OWN TEMP (`@FR-M-Match`: the subject is
 // evaluated once, into a temp of its own type).  A subject that comes from a function declared
