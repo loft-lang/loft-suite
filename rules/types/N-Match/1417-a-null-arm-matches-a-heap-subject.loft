@@ -22,7 +22,7 @@
 // refused misspelling on a struct or enum subject (`@FR-M-Unit`, matching-history D-match-22),
 // and `x: _ => x.a` is the spelling that binds (`@FR-P-Cap`).  The struct cells below use a
 // wildcard; the binding spelling is pinned in
-// `rules/collections/Col-Lookup/a-missed-lookup-discharges-and-propagates-at-every-kind.loft`.
+// `rules/collections/Col-Lookup/a-keyed-lookup-is-nullable-and-a-miss-discharges-and-propagates-at-every-kind.loft`.
 //
 // @falsified-at: 4ac66f6c — interpret exit 1 -> 0 and native exit 1 -> 0.  The control build
 //   does not compile the file at all (the arm loop breaks and the parse cascades), so no cell
