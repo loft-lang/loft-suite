@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ABSENT OPERAND IS REFUSED ONCE, NAMING THE TOKEN BEFORE IT (`@FR-G-Prec`, loft#2543).
+// Parsing reads each operator's right operand and an assignment's value; where the next token
+// cannot open one — a binary-only operator, a postfix `?` — the line is refused, naming the
+// token before the gap, and nothing else on the line is reported.  Of the binary operators only
+// `-`, `&` and `|` open an operand (a negation, a link, a lambda).  Each function below is one
+// such line; each expectation can be met only by its own line.
+//
+// @falsified-by: tests/falsified/an-absent-operand-is-refused-once-naming-the-token-before-it-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/4 -> 0/4 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/4 -> 0/4 (the suite's verdict, not a count of matches)
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   WITNESS: the control compiles `k = or true` and prints `true`, refuses `n * * 4` as a
+//   missing argument of `OpMulInt`, and says `Expect token ;` for `n + ? 4` and `n ??? 4`.
+//   HOLDS: a closer after an operator (`n + ;`) is refused by name on both trees.
+//
+// @EXPECT_ERROR: Expected a value after `=`
+// @EXPECT_ERROR: Expected a value after `*`
+// @EXPECT_ERROR: Expected a value after `+`
+// @EXPECT_ERROR: Expected a value after `??`
+
+fn an_assignment_whose_value_starts_with_or() -> boolean {
+  k = or true;
+  k
+}
+
+fn a_product_with_two_operators() -> integer {
+  n = 4;
+  n * * 4
+}
+
+fn a_sum_whose_right_side_starts_with_a_question_mark() -> integer {
+  n = 4;
+  n + ? 4
+}
+
+fn a_coalesce_followed_by_a_third_question_mark() -> integer {
+  xs: vector<integer> = [4];
+  n = xs[9];
+  n ??? 4
+}

@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COALESCE IS ONE TOKEN, WHATEVER THE SPACING (`@FR-G-Lex-Coal`, with `@FR-G-Post-Default`).
+// `??` is lexed by maximal munch, so it is never two `?` tokens: `a ?? b?` is `a ?? (b?)`, the
+// default-fallback with a postfix default on its right, spaced or not.  The postfix `?` answers
+// the type's default for a null (0 for an integer and a float).  A third `?` is no operand
+// (`a ??? b` is refused: the `G-Prec` cell beside it).  Values by hand, n null and m = 4:
+//   n ?? m? = 4;  n ?? n? = 0;  m ?? n? = 4;  n??m = 4;  n??n? = 0;  n ?? n ?? m? = 4;
+//   f null: f ?? 2.5? = 2.5;  f??f? = 0.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c.
+//   CHANNEL: the asserts and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the G-Prec cell's refusal of a third `?`.
+
+fn test_a_coalesce_with_a_postfix_default_on_its_right() {
+  xs: vector<integer> = [4];
+  n = xs[9];
+  m = xs[0];
+  s = "{n ?? m?} {n ?? n?} {m ?? n?} {n ?? n ?? m?}";
+  assert(s == "4 0 4 4", "spaced: {s}");
+}
+
+fn test_an_unspaced_coalesce_is_still_one_token() {
+  xs: vector<integer> = [4];
+  n = xs[9];
+  m = xs[0];
+  fs: vector<float> = [2.5];
+  f = fs[3];
+  s = "{n??m} {n??n?} {f ?? fs[0]?} {f??f?}";
+  assert(s == "4 0 2.5 0", "unspaced: {s}");
+}
