@@ -1,6 +1,12 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A DISCHARGED NULL SOURCE RUNS NO ROUND (`@FR-I-NullSrc`, with `@FR-H-ReadNull`).  A source typed
+// `τ?` is discharged first (`v?`, `v ?? []`); null then, or an absent collection, iterates zero times
+// and the program continues — never a fault.  Two sections, each with its cells and receipt.
+//
+// ── a-discharged-null-source-runs-no-round ──
+//
 // `@FR-I-NullSrc` — a null source iterates ZERO times and falls through, never a fault.  The
 // rule's own gloss draws the line this cell walks: a source whose TYPE is `τ?` is refused
 // until discharged (see `a-nullable-source-is-refused.loft`), and the discharge — `v?`
@@ -16,6 +22,16 @@
 // CHANNEL: assertion values and lengths.
 // ARMED: no instrument.
 // HOLDS: every cell, interpreter and `--native`.
+//
+// ── an-absent-collection-discharged-iterates-zero-times ──
+//
+// `@FR-I-NullSrc` crossed with `@FR-H-ReadNull`: an absent collection iterates zero times and
+// continues.  A source TYPED `τ?` is discharged first — `v?` or `v ?? []`, there being no
+// implicit unwrap — and then a null local, a null vector field and a null hash field each run the
+// body zero times, while a present one runs it once per element.  Every cell held on both
+// backends when written; the ledger row is in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions.
 
 struct S { items: vector<integer> }
 struct W { rows: vector<S> }
@@ -55,4 +71,22 @@ fn test_a_comprehension_and_a_par_over_a_null_source() {
   assert(s == 0 && rounds == 0, "par over a null source: zero rounds, got s={s} rounds={rounds}");
   for x in maybe(5)? par(b = dbl(x), 2) { s += b; rounds += 1; }
   assert(s == 20 && rounds == 2, "control: par over [5,5] sums 10+10: got s={s} rounds={rounds}");
+}
+
+struct K { k: integer }
+struct O { v: vector<integer>?, h: hash<K[k]>? }
+
+fn test_a_discharged_absent_source() {
+  a: vector<integer>? = null;
+  o = O { v: null, h: null };
+  c1 = 0;
+  for x in a? { c1 += 1; }
+  c2 = 0;
+  for x in o.v ?? [] { c2 += 1; }
+  c3 = 0;
+  for x in o.h? { c3 += 1; }
+  b: vector<integer>? = [4, 5];
+  c4 = 0;
+  for x in b? { c4 += 1; }
+  assert("{c1} {c2} {c3} {c4}" == "0 0 0 2", "{c1} {c2} {c3} {c4}");
 }
