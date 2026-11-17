@@ -24,7 +24,10 @@ fn test_a_view_across_writes() {
   g = mk3();
   d = g.next;
   g.next = null;
-  assert((d.v ?? -1) == 2 && count(g) == 1, "null: {d.v ?? -1}");
+  // A fresh list right after the release takes the freed records, so a view left naming the
+  // released child would read the newcomer's 7, not the leftover 2.
+  fresh = Node { v: 7, next: Node { v: 7, next: null } };
+  assert((d.v ?? -1) == 2 && count(g) == 1 && count(fresh) == 2, "null: {d.v ?? -1}");
   k = mk3();
   k.next = k.next.next;
   assert(count(k) == 2 && (k.next.v ?? -1) == 3, "self-referential: {count(k)}");
