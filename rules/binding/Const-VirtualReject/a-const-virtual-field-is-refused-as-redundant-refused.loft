@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `const` VIRTUAL FIELD IS REFUSED AS REDUNDANT (`@FR-Const-VirtualReject`).  A `virtual(…)`
+// field is computed and has no storage to freeze, so it is already read-only: `const` on it is
+// rejected rather than silently accepted — at the binding position (`const v: T virtual(…)`) and
+// at the value position (`v: const T virtual(…)`), and over a text field as over an integer.
+// Each struct names its field apart, so each expectation can only be met by its own refusal.
+// The Rust twin is `tests/issues.rs` `pln40_const_virtual_field_rejected`.
+//
+// @falsified-by: tests/falsified/a-const-virtual-field-is-refused-as-redundant-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/3 -> 0/3 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/3 -> 0/3
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   WITNESS: the control accepts `vv: const integer virtual(…)` in silence (loft#2538), so
+//   the third expectation is unmet.
+//   HOLDS: the two binding-position refusals, on both trees.
+//
+// @EXPECT_ERROR: `const virtual(…)` is redundant — a virtual field is already computed and read-only
+// @EXPECT_ERROR: `const virtual(…)` is redundant — a virtual field is already computed and read-only
+// @EXPECT_ERROR: `const virtual(…)` is redundant — a virtual field is already computed and read-only
+
+struct Bi { x: integer, const vi: integer virtual($.x * 2) }
+struct Bt { s: text, const vt: text virtual("{$.s}!") }
+struct Bv { x: integer, vv: const integer virtual($.x + 1) }
+
+fn main() {
+  a = Bi { x: 1 };
+  b = Bt { s: "a" };
+  c = Bv { x: 1 };
+  assert(a.vi + len(b.vt) + c.vv == 6, "unreachable");
+}

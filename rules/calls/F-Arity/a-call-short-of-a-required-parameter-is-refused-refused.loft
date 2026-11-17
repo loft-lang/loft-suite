@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL SHORT OF A REQUIRED PARAMETER IS REFUSED, AS IS A GENERIC CALLED WITH TOO MANY, AND THE
+// REFUSAL ALONE IS SAID (`@FR-F-Arity`, loft#2537).  A parameter is filled by a positional or a
+// named argument, or by its `= e` default, or — a `τ?` — by null; one with neither is REQUIRED,
+// and a call that leaves it unfilled is a compile error, positionally (`req(1)`) or by name
+// (`req_named(b: 2)`).  A generic called past its parameters is refused under the name the
+// author wrote, never its mangled instance, and the refused call keeps its callee's type: it was
+// followed by a null-store warning about a `null` the program does not contain (loft#2537), which
+// LOFT_DENY_WARNINGS makes an error no expectation names.  Each callee is named apart, so each
+// expectation can only be met by its own refusal.  The refusals a call PAST its parameters meets
+// one compile pass earlier are `a-call-fills-every-parameter-and-no-more-refused.loft`.  The Rust
+// twin is `tests/issues.rs` `a_generic_called_with_too_many_arguments_is_named_as_written`.
+//
+// @ARMED: LOFT_DENY_WARNINGS=1
+// @falsified-by: tests/falsified/a-call-short-of-a-required-parameter-is-refused-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/3 -> 0/3 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/3 -> 0/3
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: LOFT_DENY_WARNINGS=1, which makes the control's null-store warnings errors.
+//   WITNESS: the control adds "`null` is stored into the return value of the non-null scalar
+//   type `integer`" after the `gen` refusal.
+//   HOLDS: the three refusals themselves, on both trees.
+//
+// @EXPECT_ERROR: missing argument for parameter 'b' of `req`
+// @EXPECT_ERROR: missing argument for parameter 'a' of `req_named`
+// @EXPECT_ERROR: Too many parameters for gen
+
+fn req(a: integer, b: integer) -> integer { a + b }
+fn req_named(a: integer, b: integer) -> integer { a * b }
+fn opt(a: integer, b: integer? = null, c: integer = 3) -> integer { a + (b ?? 0) + c }
+fn gen<T>(a: T) -> T { a }
+
+fn too_few() -> integer { req(1) }
+fn too_few_named() -> integer { req_named(b: 2) }
+// Control: a defaulted and a nullable parameter need no argument.
+fn filled_by_defaults() -> integer { opt(1) }
+fn past_a_generic() -> integer { gen(8, 1) }

@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ARGUMENT PAST THE DECLARED PARAMETERS IS REFUSED, AND THE REFUSAL ALONE IS SAID
+// (`@FR-F-Arity`, loft#2537).  A call fills every parameter and no more: an argument past the
+// declared ones is a compile error.  A compiler-inserted slot is no user parameter, so an extra
+// argument never fills a text return's buffer (it once filled `txt`'s and answered `ab` in
+// silence) or a record return's `__retbuf`.  And the refused call keeps its callee's type, so the
+// code after it is checked against what the call would answer: `rec(1, 2).x` is the arity
+// refusal and nothing else — it was followed by "Unknown type null — did you mean 'JNull'?", a
+// `null` the program does not contain (loft#2537).  Each callee is named apart, so each
+// expectation can only be met by its own refusal, and an error no expectation names fails the
+// file.  Too few arguments, and a generic called with too many, are refused one compile pass
+// later, which a file with these refusals never reaches: they are
+// `a-call-short-of-a-required-parameter-is-refused-refused.loft`.  The Rust twins are
+// `tests/issues.rs` `an_argument_past_the_parameters_*`.
+//
+// @falsified-by: tests/falsified/a-call-fills-every-parameter-and-no-more-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/2 -> 0/2 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/2 -> 0/2
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   WITNESS: the control adds `Unknown type null — did you mean 'JNull'?` after the `rec`
+//   refusal.
+//   HOLDS: the two arity refusals themselves, on both trees.
+//
+// @EXPECT_ERROR: Too many parameters for txt
+// @EXPECT_ERROR: Too many parameters for rec
+
+struct P { x: integer }
+
+fn txt(a: text, b: text = "z") -> text { "{a}{b}" }
+fn rec(a: integer) -> P { P { x: a } }
+
+fn past_a_text_buffer() -> text { txt("a", "b", "c") }
+fn past_a_record_buffer() -> integer { rec(1, 2).x }
