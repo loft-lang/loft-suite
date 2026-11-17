@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// `@FR-H-FreeTwice` — a local bound from a call that answers a vector views the hidden result
+// `@FR-H-Free`, `@FR-H-FreeTwice` — a local bound from a call that answers a vector views the hidden result
 // buffer the call answered in (`cap` over `__ref_N`): two names for one store.  A closure that
 // captures the local is built after an early exit, so the build is conditional and each name took
 // the guarded release (`free_unless_record_built`); the exit taken before the build freed the
