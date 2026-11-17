@@ -1,0 +1,137 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FUNCTION ANSWERS THE VALUE ITS RETURN OR ITS TAIL NAMES (`@FR-F-Return`).  `return e` exits
+// the call with e, and a body ending in an expression returns it — whatever spells the function
+// or the value: a lambda declared `-> vector<T>?` or `-> S?` takes a non-null tail as the named
+// function does, the ordinary widening (loft#1347), and a `return` inside a block whose value is a
+// call over a lifted argument answers the call's value, not null, with the frame's frees run after
+// it (loft#2383).  Two sections, each with its cells and receipt.
+//
+// ── 1347-a-lambda-declared-nullable-heap-accepts-a-non-null-tail ──
+//
+// A lambda declared `-> vector<T>?` or `-> S?` accepts a non-null tail, exactly as the named
+// function does.
+//
+// @FR-F-Return returns the tail, and storing a non-null value where `τ?` is declared is the
+// ordinary widening every named function performs.  Two vector-delivery legs re-set the
+// function's returned type as a BARE vector, dropping the declared `?`, so a lambda whose
+// tail took such a delivery published `fn(Bag) -> vector<integer>` on the pass that delivered
+// and `-> vector<integer>?` on the pass that did not — refused as "cannot change type" of the
+// variable holding it, while the named twin compiled (loft#1347).  The delivered type now
+// keeps the declared `?`.
+//
+// Axes this file MOVES:  the return shape (a vector, a record); the tail (a field
+//                        projection, a whole argument); the consumer (a call, a `??`
+//                        discharge, an `if` join with a null-arm twin).
+// Axes it HOLDS FIXED:   the lambda is bound to a local and called directly.
+//
+// The controls are the scalar and text lambdas, which always accepted a non-null tail, and
+// the named twins.  The control build refuses the file outright (exit 1 before any cell
+// runs), so this is a compile-acceptance guard first and a value guard second.
+//
+// @falsified-at: dd46146c — interpret exit 1 -> 0, native exit 1 -> 0 (the control refuses
+// the file at parse time: "Variable 'hv' cannot change type"); assertions 0 -> 0 because
+// nothing ran on the control.
+//   HOLDS: assertions, leak, panic, free-refusal, expectations are equal on both trees.
+//   Falsify prints only the channels that MOVE and requires HERE to be clean, so each of
+//   those is clean on both. The native side was not scored in this sweep.
+//
+// ── 2383-a-return-from-a-block-answers-its-calls-value-not-null ──
+//
+// The rule this cell guards: `@FR-F-Return`.
+//
+// A `return` inside a block whose value is a call over a LIFTED argument answers the call's value.
+//
+// `return same(view(h, 0))`: the scope pass lifts `view(h, 0)` into a `__lift_N`, so the value
+// reaches the return as `Insert([__lift_1 = view(…), same(__lift_1, …)])`, with the frame's
+// frees to run after it.  A return value that frees follow is bound to a `__ret_tail_N` first —
+// for a bare call, a `CallRef` and a branch.  The lifted shape was none of those, so the call ran
+// as a dropped statement and the return fabricated `null`: `0` on the C backend, and a read of
+// a freed store on the interpreter under `LOFT_STRICT_STORES` (loft#2383).
+//
+// Axes this file MOVES:  the jump's block (an `if`, a `for`); the lifted argument (a call
+//                        answering a view, one answering a fresh record); the answer (the
+//                        record, a vector field of it, a text built from it).
+// Axes it HOLDS FIXED:   one lifted argument, a callee of one parameter.
+//
+// The control is the same call as the body's tail, which was right before the fix.
+//
+// @falsified-at: f6ee9b1a9 — native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: the interpreter answered right on the control by accident (its `OpReturn` takes the
+//   eval-stack top the dropped call left), so its channels read the same; its fault shows only
+//   under `LOFT_STRICT_STORES=1` (a read of a freed store), which the falsify sweep does not arm.
+
+struct P { x: integer }
+struct Bag { items: vector<integer>, rec: P }
+fn nv(q: Bag) -> vector<integer>? { q.items }
+fn nr(q: Bag) -> P? { q.rec }
+fn test_a_lambda_declared_nullable_heap_accepts_a_non_null_tail() {
+  b = Bag { items: [1, 2], rec: P { x: 3 } };
+  hv = fn(q: Bag) -> vector<integer>? { q.items };
+  hr = fn(q: Bag) -> P? { q.rec };
+  hw = fn(v: vector<integer>) -> vector<integer>? { v };
+  hn = fn(q: Bag) -> vector<integer>? { if q.rec.x > 5 { q.items } else { null } };
+  hi = fn(q: integer) -> integer? { q };
+  ht = fn(q: Bag) -> text? { "t{q.rec.x}" };
+  assert(len(hv(b) ?? []) == 2, "vector lambda: {hv(b)}");
+  assert((hr(b) ?? P { x: 0 }).x == 3, "record lambda: {hr(b)}");
+  assert(len(hw([7, 8, 9]) ?? []) == 3, "whole-argument lambda: {hw([7, 8, 9])}");
+  assert(hn(b) == null, "the null-arm twin still answers null: {hn(b)}");
+  assert(hi(4) == 4 && (ht(b) ?? "") == "t3", "scalar and text controls: {hi(4)} {ht(b)}");
+  assert(len(nv(b) ?? []) == 2 && (nr(b) ?? P { x: 0 }).x == 3, "named twins: {nv(b)} {nr(b)}");
+  c = 1;
+  dv: vector<integer>? = null;
+  j = if c > 0 { hv(b) } else { dv };
+  assert(len(j ?? []) == 2, "joined with a null local: {j}");
+  print("1347 nullable heap lambda ok\n");
+}
+
+struct D { items: vector<integer>, tag: integer }
+struct H { ds: vector<D> }
+
+fn view(h: H, i: integer) -> D { h.ds[i]! }
+fn fresh(i: integer) -> D { D { items: [i], tag: i } }
+fn same(d: D) -> D { d }
+fn items(d: D) -> vector<integer> { d.items }
+fn label(d: D) -> text { "t{d.tag}" }
+
+fn rec_if(h: H) -> D { if true { return same(view(h, 0)); } D { items: [], tag: 0 } }
+fn rec_loop(h: H) -> D { for _ in 0..2 { return same(view(h, 0)); } D { items: [], tag: 0 } }
+fn rec_fresh(h: H) -> D { if true { return same(fresh(4)); } D { items: [], tag: 0 } }
+fn vec_if(h: H) -> vector<integer> { if true { return items(view(h, 0)); } [] }
+fn text_if(h: H) -> text { if true { return label(view(h, 0)); } "" }
+fn rec_tail(h: H) -> D { same(view(h, 0)) }
+
+fn test_the_returns_from_a_block() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  t = 0;
+  for _ in 0..10 {
+    t += rec_if(h).tag + rec_loop(h).tag + rec_fresh(h).tag + (vec_if(h)[0] ?? 0) + len(text_if(h));
+  }
+  assert(t == 190, "returns from a block {t}");
+}
+
+// The same returns with their values DISCARDED at the call: each still answers its value, which
+// the caller drops — the view's container stays the caller's (tag 3, items [7]) and the fresh
+// record a discarded `rec_fresh` answers is released, which the suite's leak gate counts.
+fn test_the_returns_from_a_block_discarded() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  for _ in 0..10 {
+    rec_if(h);
+    rec_loop(h);
+    rec_fresh(h);
+    vec_if(h);
+  }
+  assert("{h.ds[0].tag} {h.ds[0].items}" == "3 [7]", "the caller's h after discarded returns: {h.ds[0].tag} {h.ds[0].items}");
+}
+
+fn test_the_tail_control() {
+  h = H { ds: [D { items: [7], tag: 3 }] };
+  t = 0;
+  for _ in 0..10 {
+    t += rec_tail(h).tag;
+  }
+  assert(t == 30, "tail {t}");
+}
+
