@@ -1,0 +1,268 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PATTERN CAPTURE IS A VIEW OF THE SUBJECT'S PLACE, ON B-VIEW'S TERMS (`@FR-P-Cap-View` crossed
+// with `@FR-B-View` and `@FR-H-View`).  A structural capture of an interior place — a struct
+// field of a plain-struct or variant pattern, a slice pattern's element, the whole subject at the
+// arm root — allocates no store: a write through it reaches the subject, the subject's own write
+// shows through it, the arm never frees it under its reader (loft#2353), and where the subject is
+// grown, shrunk or reassigned while the capture is live, the capture materialises at its bind
+// (loft#2457).  Four sections, each with its cells and receipt: the plain-struct field capture
+// that was freed under its reader, the slice capture across a disturbance, the view crossed with
+// B-View's disturbances, and the interior capture crossed with H-View's writes.  A capture beside
+// a fresh rest is `a-pattern-capture-is-a-view-and-a-rest-is-fresh.loft`.
+//
+// ── 2353-a-plain-struct-arms-field-capture-is-a-view-and-is-not-freed-under-its-reader ──
+//
+// `@FR-P-Cap-View` — a plain-struct arm's field capture (`N { xs } =>`) names an interior
+// place of the subject.  A HEAP field is a VIEW: it carries the subject's borrow dep and is
+// never freed by the arm.  The plain-struct arm gave it neither mark, and `(O-Proxy)` reads
+// an empty dep list as an owner, so its `OpFreeRef` released the store the subject lives in:
+// `match s.nodes[0] { N { xs } => len(xs) }` freed the CALLER's `s`, and the next record
+// allocated took its place — `s.nodes[0].xs` read `[70,80,90,100]` (loft#2353).  A `text`
+// field is an owned copy, and where the arm body was a bare expression the match's value
+// its free ran BEFORE the body read it: `N { nm } => len(nm)` answered 0.
+//
+// Axes: the subject (an element of a parameter, a nested field, a local view, an owned
+// local, a call result), the field kind (vector, `vector?`, record, struct-enum, text,
+// scalar), the capture spelling (shorthand, renamed, two at once), and what the arm does
+// with it (reads, a value tail, a bound value, a write through it, returns it).  Every
+// function is checked against its hand-computed answer AND against the subject left whole
+// after a fresh allocation (`churn`), which is what tells a freed store from a live one.
+//
+// @ARMED: LOFT_POISON=1
+// @falsified-at: 0e95172cd (loft#2353) — interpret: `o_vec`, `c_vec` and `main` read a poisoned
+//   store; native-c: `o_vec`, `o_struct`, `c_vec` and `c_text` die on signal 11, `main` with them.
+//   CHANNEL: the read of a released store under LOFT_POISON — the interpreter's
+//   poisoned-store panic, the C's signal 11 — reported as the test's exit.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
+//
+// ── 2457-a-slice-pattern-capture-materialises-when-its-subject-is-disturbed ──
+//
+// loft#2457, `@FR-P-Cap-View` / `@FR-B-View` — A SLICE-PATTERN CAPTURE MATERIALISES WHEN ITS
+// SUBJECT IS DISTURBED IN THE ARM.
+//
+// A capture of a record element is a view, and a growth, a removal or a reassignment of the
+// subject while it is live copies it out at its bind: a growth, a removal, the subject
+// reassigned, a field subject, two captures, a tail capture across twenty growths and an integer
+// capture.  An undisturbed capture stays a view, so a write through it reaches the element.
+//
+// @falsified-at: loft main dbf8b05ae — c1 "0 a" for "1 a" (and c2 26 for 15); both backends.
+//   CHANNEL: the assertions and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//
+// ── a-capture-is-a-view-on-b-views-terms ──
+//
+// `@FR-P-Cap-View` crossed with `@FR-B-View`: a structural capture of an interior place, and a
+// capture of the WHOLE subject at the arm root, is a view on B-View's terms — a write through
+// it reaches the subject, and where the subject is disturbed (a growth, a removal) while the
+// capture is live, the capture materialises: it reads the element as it was at the bind and
+// a write through it no longer reaches the subject.
+//
+// CHANNEL: the assertions and the leak gate.
+//
+// ── a-capture-of-an-interior-place-writes-the-subject ──
+//
+// `@FR-P-Cap-View` crossed with `@FR-H-View`: a single structural capture of an interior place —
+// a struct field of a plain struct pattern, a struct field of a variant, a struct element of a
+// slice pattern, the whole subject at the arm root — is H-View's view: no store is allocated, a
+// write through it mutates the subject, and the subject's own write shows through it.  Crossed
+// with a text field and a vector field written through the capture, a nested struct field, a
+// struct-enum payload, and a capture taken every round of a loop.
+//
+// CHANNEL: the assertions and the leak gate.
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+
+struct In { k: integer }
+enum Sh { Sq { side: integer }, Ci { r: integer } }
+struct N { xs: vector<integer>, nm: text, inr: In, sh: Sh, ox: vector<integer>?, c: integer }
+struct W { n: N }
+struct S { nodes: vector<N>, w: W }
+
+fn mk_n() -> N { N { xs: [4, 5, 6], nm: "call", inr: In { k: 8 }, sh: Ci { r: 2 }, ox: [1], c: 3 } }
+fn mk() -> S {
+  S { nodes: [N { xs: [1, 2], nm: "ab", inr: In { k: 7 }, sh: Sq { side: 4 }, ox: [9, 9, 9], c: 5 }],
+      w: W { n: N { xs: [5, 6, 7], nm: "w", inr: In { k: 11 }, sh: Ci { r: 3 }, ox: null, c: 6 } } }
+}
+
+// An element of a parameter, every field kind.
+fn e_vec(s: S) -> integer { match s.nodes[0] { N { xs } => len(xs) } }
+fn e_text(s: S) -> integer { match s.nodes[0] { N { nm } => len(nm) } }
+fn e_struct(s: S) -> integer { match s.nodes[0] { N { inr } => inr.k } }
+fn e_enum(s: S) -> integer { match s.nodes[0] { N { sh } => match sh { Sq { side } => side, Ci { r } => r * 100 } } }
+fn e_opt(s: S) -> integer { match s.nodes[0] { N { ox } => if ox == null { -1 } else { len(ox) } } }
+fn e_scalar(s: S) -> integer { match s.nodes[0] { N { c } => c } }
+fn e_rename(s: S) -> integer { match s.nodes[0] { N { xs: q } => len(q) * 10 } }
+fn e_two(s: S) -> integer { match s.nodes[0] { N { xs, inr } => len(xs) + inr.k } }
+// A nested field of a parameter.
+fn f_vec(s: S) -> integer { match s.w.n { N { xs } => len(xs) } }
+fn f_struct(s: S) -> integer { match s.w.n { N { inr } => inr.k } }
+fn f_text(s: S) -> integer { match s.w.n { N { nm } => len(nm) } }
+// A local view, an owned local, a call result.
+fn l_vec(s: S) -> integer { n = s.nodes[0]; match n { N { xs } => len(xs) } }
+fn o_vec() -> integer { n = mk_n(); match n { N { xs } => len(xs) } }
+fn o_struct() -> integer { n = mk_n(); match n { N { inr } => inr.k } }
+fn c_vec() -> integer { match mk_n() { N { xs } => len(xs) } }
+fn c_text() -> integer { match mk_n() { N { nm } => len(nm) } }
+// The text capture's tail shapes.
+fn t_bound(n: N) -> integer { x = match n { N { nm } => len(nm) }; x }
+fn t_value(n: N) -> text { match n { N { nm } => nm } }
+fn t_value_bound(n: N) -> text { x = match n { N { nm } => nm }; x }
+fn t_fmt(n: N) -> text { match n { N { nm } => "<{nm}>" } }
+fn t_cmp(n: N) -> boolean { match n { N { nm } => nm == "call" } }
+fn t_rename(n: N) -> integer { match n { N { nm: q } => len(q) } }
+// A write through the capture reaches the subject; a returned capture names its element.
+fn w_vec(s: S) { match s.nodes[0] { N { xs } => { xs += [3]; } } }
+fn w_struct(s: S) { match s.w.n { N { inr } => { inr.k = 99; } } }
+fn r_vec(s: S) -> vector<integer> { match s.nodes[0] { N { xs } => xs } }
+
+fn intact(s: S) -> boolean {
+  len(s.nodes) == 1 && "{s.nodes[0].xs}" == "[1,2]" && s.nodes[0].nm == "ab" && s.nodes[0].inr.k == 7
+    && "{s.w.n.xs}" == "[5,6,7]" && s.w.n.nm == "w" && s.w.n.inr.k == 11
+}
+
+// A fresh allocation: it takes a freed store's place, so a subject that was released reads it.
+fn churn() -> integer {
+  t = S { nodes: [N { xs: [70, 80, 90, 100], nm: "zzzz", inr: In { k: 1 }, sh: Sq { side: 1 }, ox: null, c: 0 }], w: W { n: mk_n() } };
+  len(t.nodes[0].xs)
+}
+
+fn check(tag: text, got: integer, want: integer, s: S) {
+  z = churn();
+  assert(got == want && z == 4 && intact(s), "{tag}: got {got} want {want}, subject intact {intact(s)}");
+}
+
+fn test_a_plain_struct_arms_field_capture_is_a_view_and_is_not_freed_under_its() {
+  s = mk(); check("e_vec", e_vec(s), 2, s);
+  s = mk(); check("e_text", e_text(s), 2, s);
+  s = mk(); check("e_struct", e_struct(s), 7, s);
+  s = mk(); check("e_enum", e_enum(s), 4, s);
+  s = mk(); check("e_opt", e_opt(s), 3, s);
+  s = mk(); check("e_scalar", e_scalar(s), 5, s);
+  s = mk(); check("e_rename", e_rename(s), 20, s);
+  s = mk(); check("e_two", e_two(s), 9, s);
+  s = mk(); check("f_vec", f_vec(s), 3, s);
+  s = mk(); check("f_struct", f_struct(s), 11, s);
+  s = mk(); check("f_text", f_text(s), 1, s);
+  s = mk(); check("l_vec", l_vec(s), 2, s);
+  s = mk(); check("o_vec", o_vec(), 3, s);
+  s = mk(); check("o_struct", o_struct(), 8, s);
+  s = mk(); check("c_vec", c_vec(), 3, s);
+  s = mk(); check("c_text", c_text(), 4, s);
+  n = mk_n();
+  r = "{t_bound(n)} {t_value(n)} {t_value_bound(n)} {t_fmt(n)} {t_cmp(n)} {t_rename(n)} {n.nm}";
+  assert(r == "4 call call <call> true 4 call", "text tails: {r}");
+  s = mk(); w_vec(s); z = churn();
+  assert("{s.nodes[0].xs}" == "[1,2,3]" && z == 4, "w_vec {s.nodes[0].xs}");
+  s = mk(); w_struct(s); z = churn();
+  assert(s.w.n.inr.k == 99 && z == 4, "w_struct {s.w.n.inr.k}");
+  s = mk(); rv = r_vec(s); z = churn();
+  assert("{rv}" == "[1,2]" && intact(s) && z == 4, "r_vec {rv}");
+}
+
+struct Pt { x: integer, nm: text }
+struct Q { x: integer, y: integer }
+struct O { items: vector<Q> }
+fn test_a_slice_pattern_capture_materialises_when_its_subject_is_disturbed() {
+  v = [Pt { x: 1, nm: "a" }, Pt { x: 2, nm: "bb" }];
+  a = "";
+  match v { [first, ..] => { v += [Pt { x: 9, nm: "z" }]; a = "{first.x} {first.nm}"; }, _ => {} }
+  assert(a == "1 a" && len(v) == 3, "c1 {a}");
+  u = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  b = 0;
+  match u { [first, ..] => { u.remove(0); b = first.x * 10 + first.y; }, _ => {} }
+  assert(b == 15 && len(u) == 1 && u[0].x == 2, "c2 {b}");
+  w = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  match w { [first, ..] => { first.x = 99; }, _ => {} }
+  assert(w[0].x == 99, "c3 the capture is a view {w[0].x}");
+  r = [Q { x: 1, y: 5 }];
+  c = 0;
+  match r { [first, ..] => { r = [Q { x: 7, y: 7 }]; c = first.x * 10 + first.y; }, _ => {} }
+  assert(c == 15 && r[0].x == 7, "c4 {c}");
+  o = O { items: [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }] };
+  d = 0;
+  match o.items { [first, ..] => { o.items.remove(0); d = first.x * 10 + first.y; }, _ => {} }
+  assert(d == 15, "c5 {d}");
+  t = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }, Q { x: 3, y: 7 }];
+  e = "";
+  match t { [p, q, ..] => { t.remove(0); e = "{p.x * 10 + p.y} {q.x * 10 + q.y}"; }, _ => {} }
+  assert(e == "15 26", "c6 {e}");
+  g = [Q { x: 1, y: 5 }, Q { x: 2, y: 6 }];
+  f = 0;
+  match g { [.., last] => { for k in 0..20 { g += [Q { x: k, y: k }]; } f = last.x * 10 + last.y; }, _ => {} }
+  assert(f == 26 && len(g) == 22, "c7 {f}");
+  n = [1, 2, 3];
+  h = 0;
+  match n { [x, ..] => { n.remove(0); h = x; }, _ => {} }
+  assert(h == 1 && len(n) == 2, "c8 {h}");
+  println("capture ok");
+}
+
+struct S3Pt { x: integer, nm: text }
+struct S3Q { x: integer, y: integer }
+struct Rect { w: integer, h: integer }
+enum S3Sh { S3Sq { side: integer }, Bx { r: Rect } }
+
+fn test_a_whole_subject_capture_writes_through() {
+  r = Rect { w: 3, h: 4 };
+  match r { whole: Rect { w, h } => { whole.w = w * 10 + h; } }
+  assert(r.w == 34, "whole: {r.w}");
+  s = Bx { r: Rect { w: 1, h: 2 } };
+  match s { other: _ => { if other is Bx { r } { r.h = 9; } } }
+  assert(match s { Bx { r } => r.h, _ => -1 } == 9, "other: _");
+}
+
+fn test_a_capture_across_a_growth_materialises() {
+  v = [S3Pt { x: 1, nm: "a" }, S3Pt { x: 2, nm: "bb" }];
+  a = "";
+  match v { [first, ..] => { v += [S3Pt { x: 9, nm: "z" }]; first.x += 100; a = "{first.x} {first.nm}"; }, _ => {} }
+  assert(a == "101 a" && v[0].x == 1 && len(v) == 3, "grow: {a} {v[0].x} {len(v)}");
+}
+
+fn test_a_capture_across_a_removal_materialises() {
+  u = [S3Q { x: 1, y: 5 }, S3Q { x: 2, y: 6 }];
+  b = 0;
+  match u { [first, ..] => { u.remove(0); b = first.x * 10 + first.y; }, _ => {} }
+  assert(b == 15 && len(u) == 1 && u[0].x == 2, "remove: {b}");
+}
+
+struct S4Pt { x: integer, tag: text, xs: vector<integer> }
+struct Box { p: S4Pt, id: integer }
+struct Outer { b: Box, n: integer }
+enum S4Sh { Dot { at: S4Pt }, Line { a: S4Pt, b: S4Pt } }
+
+fn s4_mk(x: integer) -> S4Pt { S4Pt { x: x, tag: "t{x}", xs: [x] } }
+
+fn test_a_struct_field_capture() {
+  bx = Box { p: s4_mk(1), id: 7 };
+  match bx { Box { p, id } => { p.x = 10; p.tag += "!"; p.xs += [id]; } }
+  assert(bx.p.x == 10 && bx.p.tag == "t1!" && len(bx.p.xs) == 2 && bx.p.xs[1] == 7, "{bx.p.x} {bx.p.tag}");
+}
+
+fn test_a_nested_field_and_the_subjects_write() {
+  o = Outer { b: Box { p: s4_mk(2), id: 1 }, n: 0 };
+  seen = 0;
+  match o { Outer { b, n } => { o.b.p.x = 22; seen = b.p.x; b.id = 5 + n; } }
+  assert(seen == 22 && o.b.id == 5, "{seen} {o.b.id}");
+}
+
+fn test_a_variant_payload_and_a_whole_capture() {
+  s: S4Sh = Line { a: s4_mk(3), b: s4_mk(4) };
+  match s { Line { a, b } => { a.x = b.x * 10; }, _ => {} }
+  r = match s { Line { a, b } => "{a.x} {b.x}", _ => "-" };
+  assert(r == "40 4", "payload: {r}");
+  bx = Box { p: s4_mk(5), id: 1 };
+  match bx { whole: Box { p, id } => { whole.id = id + p.x; } }
+  assert(bx.id == 6, "whole: {bx.id}");
+}
+
+fn test_a_slice_element_capture_in_a_loop() {
+  v = [s4_mk(1), s4_mk(2), s4_mk(3)];
+  for r in 0..3 {
+    match v { [_, mid, ..] => { mid.x += r; mid.xs += [r]; }, _ => {} }
+  }
+  assert(v[1].x == 2 + 0 + 1 + 2 && len(v[1].xs) == 4 && v[0].x == 1 && v[2].x == 3, "{v[1].x} {len(v[1].xs)}");
+}
