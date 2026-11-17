@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CONSTANT BUILT WITH TEMPORARIES IS REFUSED, NOT PASTED (`@FR-R-Const`: a constant is a
+// value the constant store holds, or code pasted at each use that names no slot of its own).
+// `NAMES = ["a", "b"][0..0]` slices a literal, which types as an iterator over the literal's
+// temporaries.  Its declaration was refused for needing a temporary, but each use still pasted
+// the code, whose slot numbers belong to the declaration and do not index the reading function's
+// table: the walk after `main`'s parse panicked with an internal compiler error, and the
+// refusal — which names the cure, a zero-argument function — never reached the author
+// (loft#2530).  A use of a refused constant now pastes nothing.
+//
+// @falsified-at: 030f837e6 — the control (the build before it) prints `fatal: internal compiler error` on
+//   both backends; here the declaration's refusal, the one error
+// CHANNEL: the diagnostic — the control prints an internal compiler error instead.
+// @EXPECT_ERROR: has an initialiser that needs a temporary
+NAMES = ["a", "b"][0..0];
+
+fn main() {
+  n = 0;
+  for s in NAMES {
+    n += 1;
+  }
+  println("{n}");
+}
