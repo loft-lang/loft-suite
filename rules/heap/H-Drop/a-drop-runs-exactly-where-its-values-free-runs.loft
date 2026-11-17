@@ -1,7 +1,22 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @PLN125 arc B — a type runs code when the scope that owns it lets it die.
+// A DROP RUNS EXACTLY WHERE ITS VALUE'S FREE RUNS (`@FR-H-Drop`, with `@FR-B-Scope` deciding where
+// a local's scope ends).  A type runs code when the scope that owns it lets it die (@PLN125 arc
+// B), and the cells below are the shapes that decide "where": an abandoned and a committed
+// transaction, an early `return`, a `return` out of a loop, a `break`, two droppables unwinding in
+// reverse order, an `if`-block local dropped at its block's `}`, a returned value, a borrowed
+// argument, one drop per loop pass, a value created on one branch only, and a second, unrelated
+// consumer (a lease).  Its sibling `a-hook-runs-once-on-every-path-out-of-a-scope.loft` crosses
+// the exit kind with `match` arms and `continue`.
+//
+// @falsified-at: none — a conformance guard; every trace answered as hand-computed on 31fdf2b's
+//   pin (loft c9e74b311), interpret and native-c; corrupting the abandoned-transaction, the
+//   `if`-block and the lease-order expectation each fails it.
+//   CHANNEL: the asserts (each compares the whole trace).
+//   ARMED: no instrument — each hook writes this cell's trace file.
+//   WITNESS: each message prints the trace.
+//   HOLDS: the H-Drop cells beside it.
 //
 // The invariant, and the reason the whole arc is small:
 //
@@ -40,7 +55,7 @@
 
 // ── the trace ────────────────────────────────────────────────────────────────
 
-fn trace_path() -> text { return "pln125_b_drop_trace.tmp"; }
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_drop_where_free_runs.trace" }
 
 fn note(s: text) {
   f = file(trace_path());
