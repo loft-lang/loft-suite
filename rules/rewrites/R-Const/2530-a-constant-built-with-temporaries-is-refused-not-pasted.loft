@@ -11,7 +11,8 @@
 // (loft#2530).  A use of a refused constant now pastes nothing.
 //
 // @falsified-at: 030f837e6 — the control (the build before it) prints `fatal: internal compiler error` on
-//   both backends; here the declaration's refusal, the one error
+//   both backends.
+//   HOLDS: the declaration's refusal is the one error, on both backends.
 // CHANNEL: the diagnostic — the control prints an internal compiler error instead.
 // @EXPECT_ERROR: has an initialiser that needs a temporary
 NAMES = ["a", "b"][0..0];
