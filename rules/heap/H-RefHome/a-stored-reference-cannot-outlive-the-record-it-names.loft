@@ -3,10 +3,10 @@
 //
 // `@FR-H-RefHome`, `@C145` — a record a stored `reference<T>` names lives as long as the store
 // of its holder.  The compiler keeps that promise by moving a named local's store out to an
-// enclosing holder's block (`a-record-a-stored-reference-names-lives-as-long-as-its-holder.loft`),
+// enclosing holder's block (`a-record-a-stored-reference-names-lives-as-long-as-its-holder-however-it-was-built.loft`),
 // by building a literal, a call result or a refilled local's own record in the holder's store,
 // or by copying a parameter's record out of its home before the home is freed
-// (`a-record-built-for-a-stored-reference-lives-in-its-holders-store.loft`).  What none of
+// (`a-record-a-stored-reference-names-lives-as-long-as-its-holder-however-it-was-built.loft`).  What none of
 // those can keep is refused where the reference is written, copied, or handed to a callee
 // that stores it.  Before, each of these compiled and read a record of whatever value reused
 // the freed store, silently, on both backends (loft#1973).  One function per shape:
