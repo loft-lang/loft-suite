@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DEFAULT IS WELL-FORMED WHEREVER THE SAME EXPRESSION AS AN ARGUMENT IS (`@FR-F-Default`,
+// formal/calls.md D-call-26).  A default the compiler lowers differently from an argument must
+// still compile where the argument would: a `match` over records, lowered into a function of its
+// own whose hidden return buffer was taken for its first local, and a struct enum's unit variant,
+// a plain constant on pass 1 and a record on pass 2 (loft#2410).  Two sections, each with its
+// cells and receipt; the value half is `a-default-reads-the-earlier-arguments-of-its-call.loft`.
+//
+// ── a-match-default-over-records-compiles ──
+//
+// `@FR-F-Default` — a default is well-formed exactly where the same expression written as the
+// argument is (formal/calls.md D-call-26).  A `match` over records needs a temporary, so the
+// default is lowered into a function of its own, and pass 2 re-typed that function's parameters
+// from its ATTRIBUTES — including the hidden return buffer a record result adds.  "Parameter" 1
+// was the body's first local: `p: P = match k { 1 => P {…}, _ => P {…} }`, over a struct or an
+// enum, was refused "Variable '_match_subj_1' cannot change type from integer to P".  An `if`
+// default has no local at that slot and always compiled.  The value half is
+// `a-default-reads-the-earlier-arguments-of-its-call.loft`.
+//
+// @falsified-at: 79e926b32 — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-by: tests/falsified/a-match-default-over-records-compiles.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: exit — the control refused the `match` defaults, so it does not compile this file.
+// HOLDS: leak and panic are clean on both trees and both backends.
+//
+// ── 2410-a-unit-variant-of-a-struct-enum-is-a-parameter-default ──
+//
+// `@FR-F-Default` — a default is well-formed exactly where the same expression written as the
+// argument is (formal/calls.md D-call-26).  A struct enum's unit variant is a plain enum
+// constant on pass 1 and a record built into a work-ref on pass 2, which a call site cannot
+// replay; pass 2 hoisted it into a function pass 1 never minted, and `t: N = Void` was
+// refused "Expect token )" — bare or qualified, first parameter or not (loft#2410).  A variant
+// with fields, a plain enum's default and the same value as an argument always compiled.
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// HOLDS: leak and panic are clean on both backends.
+
+enum Shape { Circle { r: float }, Sq { s: float } }
+struct P { x: integer, n: text }
+struct H { n: integer }
+
+fn m_struct(k: integer, p: P = match k { 1 => P { x: 11, n: "a" }, _ => P { x: 22, n: "b{k}" } }) -> text { "{p.x}{p.n}" }
+fn m_enum(k: integer, s: Shape = match k { 1 => Circle { r: 1.5 }, _ => Sq { s: 2.5 } }) -> text { "{s}" }
+fn m(self: H, k: integer, p: P = match k { 1 => P { x: self.n, n: "s" }, _ => P { x: 22, n: "t" } }) -> text { "{p.x}{p.n}" }
+
+fn test_a_match_default_over_records_compiles_and_answers() {
+  got = "{m_struct(1)} {m_struct(2)} {m_enum(1)} {m_enum(2)} {H { n: 9 }.m(1)} {H { n: 9 }.m(2)}";
+  assert(got == "11a 22b2 Circle {{r:1.5}} Sq {{s:2.5}} 9s 22t", "match defaults: {got}");
+}
+
+enum N { Int { n: integer }, Void }
+enum M { Nil, Num { v: integer } }
+struct S { k: integer }
+
+fn bare(x: integer, t: N = Void) -> integer { if t is Void { x } else { 0 } }
+fn qualified(t: N = N::Void) -> integer { if t is Void { 7 } else { 0 } }
+fn then_more(t: M = Nil, x: integer = 2) -> integer { match t { Nil => x, Num { v } => v } }
+fn returned(t: N = Void) -> N { t }
+fn method(self: S, t: N = Void) -> integer { if t is Void { self.k } else { -1 } }
+
+fn test_a_unit_variant_default_answers_the_variant() {
+  got = "{bare(3)} {bare(4, N::Int { n: 1 })} {qualified()} {then_more()} {then_more(M::Num { v: 9 })} {then_more(x: 5)}";
+  assert(got == "3 0 7 2 9 5", "unit-variant defaults: {got}");
+  r = returned();
+  assert(r is Void, "the default is the value returned");
+  s = S { k: 11 };
+  for _ in 0..3 { s.k += s.method(); }
+  assert(s.k == 88, "replayed at every call: {s.k}");
+}

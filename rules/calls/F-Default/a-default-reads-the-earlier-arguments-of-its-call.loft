@@ -10,7 +10,7 @@
 //     not compile.
 //
 // The refusal half — a `match` default over records, D-call-26 — is
-// `a-match-default-over-records-compiles.loft`, apart, so that its refusal on the control does not
+// `a-default-is-well-formed-wherever-the-same-argument-is.loft`, apart, so that its refusal on the control does not
 // stop this file before its values are scored.
 //
 // Every cell is called at least twice with DIFFERENT arguments, because the defect read a value
