@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TYPE VARIABLE IS NO TYPE UNTIL IT IS INSTANTIATED, SO WHAT NEEDS ONE IS REFUSED (`@FR-G-Gen`).
+// A keyed collection over a variable names a key field `T` does not have, a method on the variable
+// itself has no receiver type, and an unbounded variable has no method a body may call.  Each
+// function is one refusal with its expectation.  Together they guard loft#2548: after the
+// refused `fn twice<T>(self: T)`, the unbounded `x.size()` once read "Unknown field T#4.size",
+// the shared placeholder's key, instead of naming the type variable.
+//
+// @falsified-by: tests/falsified/a-type-variable-is-no-type-until-it-is-instantiated-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/3 -> 3/3 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/3 -> 3/3 (the suite's verdict, not a count of matches)
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   WITNESS: the control reports "Unknown field T#4.size", so the third expectation is unmet.
+//   HOLDS: the first two refusals, on both trees.
+//
+// ── a-keyed-collection-over-a-variable-is-refused ──
+//
+// A KEYED COLLECTION OVER A VARIABLE IS REFUSED (`@FR-G-Gen`).  `fn f<T>(h: hash<T[k]>)` names
+// a key FIELD that `T` does not have until it is instantiated, so it is refused at the
+// declaration, for a parameter as for the return.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting the shape compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+//
+// ── a-method-on-the-variable-itself-is-refused ──
+//
+// A METHOD ON THE VARIABLE ITSELF IS REFUSED (`@FR-G-Gen`).  A method is found on its
+// receiver's type, and `T` is not a type until it is instantiated, so `fn m<T>(self: T)` is
+// refused at the declaration, naming the free-function spelling as the cure.  A receiver
+// BUILT over `T` (`self: vector<T>`) is accepted — the sibling
+// `an-unbounded-variable-moves-values-and-a-bound-adds-methods.loft`.
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting the shape compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+//
+// ── an-unbounded-variable-calls-no-method ──
+//
+// AN UNBOUNDED VARIABLE CALLS NO METHOD (`@FR-G-Gen`, crossed with `@FR-G-Check`).  With no
+// bound there is no method a body may call on a `T`, even one every type the program passes
+// would have; the refusal is at the DECLARATION.  The wording names a field access where the
+// body calls a method; the claim pins the part every wording keeps.  (In a file that ALSO
+// declares a refused `self: T` method, the same body is reported as "Unknown field T#4.size",
+// an internal placeholder spelling — reported by the rule walk, 2026-10-18.)
+//
+// @falsified-at: none — pins a refusal the compiler already makes; the negation cell of a
+//   rule that holds, not a fix, so no earlier build is a control for it.
+// CHANNEL: expect — the diagnostic.
+// ARMED: no instrument.
+// WITNESS: a build accepting the shape compiles the file and leaves the claim unanswered.
+// HOLDS: the diagnostic is the same on both backends.
+
+struct Box { w: integer }
+
+fn size(self: Box) -> integer { self.w }
+
+struct E { k: text }
+
+// @EXPECT_ERROR: parameter `h` is a keyed collection over the type variable T
+fn count<T>(h: hash<T[k]>) -> integer { len(h) }
+
+fn test_a_keyed_collection_over_a_variable_is_refused() {
+  b = Box { w: 2 };
+  assert(b.size() == 2, "the program around it");
+}
+
+
+
+// @EXPECT_ERROR: a method's receiver cannot be the type variable T itself
+fn twice<T>(self: T) -> T { self }
+
+fn test_a_method_on_the_variable_itself_is_refused() {
+  b = Box { w: 2 };
+  assert(b.size() == 2, "the program around it");
+}
+
+
+
+// @EXPECT_ERROR: generic type T
+fn unbounded<T>(x: T) -> integer { x.size() }
+
+fn test_an_unbounded_variable_calls_no_method() {
+  b = Box { w: 2 };
+  assert(b.size() == 2, "the program around it");
+}
