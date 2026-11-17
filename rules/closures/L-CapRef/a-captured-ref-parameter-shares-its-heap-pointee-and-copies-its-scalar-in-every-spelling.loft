@@ -1,0 +1,178 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CAPTURED `&` PARAMETER SHARES ITS HEAP POINTEE AND COPIES ITS SCALAR (`@FR-L-CapRef`, with
+// `@FR-F-ParamRef`, `@FR-L-CapHeap` and `@FR-L-CapScalar`).  A `&` parameter is the caller's place,
+// and capturing it captures its pointee: a `&S` or `&vector` is shared — a field write, an append
+// and a whole replacement inside the closure reach the caller — while a `&` scalar is copied at the
+// capture, as any scalar capture is.  Three sections, each with its cells and receipt.
+//
+// ── a-captured-ref-parameter-shares-a-record-and-copies-a-scalar ──
+//
+// `@FR-L-CapRef` crossed with `@FR-F-ParamRef`: a `&` parameter is the caller's place, and
+// capturing it captures its POINTEE — a `&S` is SHARED, so a field write, an append and a
+// whole replacement from inside the closure reach the caller (F-ParamRef's write-back), also
+// when the `&` parameter is forwarded from an outer `&` parameter; a `&integer` is COPIED when
+// the closure is built, so the closure answers the value at its build while the parameter's
+// own later write still reaches the caller.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+//
+// ── a-captured-ref-parameter-shares-its-heap-pointee-and-copies-its-scalar ──
+//
+// A CAPTURED `&` PARAMETER SHARES ITS HEAP POINTEE AND COPIES ITS SCALAR (`@FR-L-CapRef` crossed
+// with `@FR-L-CapHeap` and `@FR-L-CapScalar`).  L-CapRef asks the share-or-copy question of
+// what a `&T` parameter points AT: a `&S` / `&vector<τ>` is SHARED by L-CapHeap — a field
+// write, an element write and an append from inside the closure reach the caller, and a
+// mutation of the source AFTER the capture is visible inside the closure — while a
+// `&integer` / `&text` is COPIED at creation by L-CapScalar: the closure answers the value the
+// parameter had when the closure was formed, and the function's own write after that still
+// reaches the caller through the `&`.
+//
+// Axes it MOVES: the pointee kind (struct, vector, integer, text), the write's direction
+// (inside the closure → the caller, the enclosing body after capture → the closure), the write
+// kind (field, element, append, compound).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the closure's answer and the caller's value.
+// HOLDS: `a-closure-write-to-a-captured-ref-scalar-is-refused` beside it.
+//
+// ── a-closure-replacing-a-captured-ref-record-reaches-the-caller ──
+//
+// A CLOSURE REPLACING A CAPTURED `&` RECORD REACHES THE CALLER (`@FR-L-CapRef`, with
+// `@FR-L-CapHeap` sharing the pointee): a `&S` / `&vector` parameter is captured as its
+// pointee, which is SHARED, so a whole-value replace from inside the closure (`p = S { … }`)
+// lands in the caller's record exactly as a field write does.  Only a COPIED pointee (`&` scalar
+// or text, `@FR-L-CapScalar`) refuses the replace (the sibling refusal cell).
+//
+// Axes it MOVES: the pointee kind (a struct, a vector), a field write after the replace inside
+// the same closure, the closure called twice, the leak gate over the replaced records.  Values
+// hand-computed: the caller reads what the closure wrote last.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native (the owner's 2026-10-20 reading of L-CapRef narrowed the refusal).
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument.
+// WITNESS: each message prints the caller's values.
+// HOLDS: `a-closure-write-to-a-captured-ref-scalar-is-refused.loft` (the copied kind refuses).
+
+struct S { n: integer, v: vector<integer> }
+
+fn writes(p: &S) { g = fn() { p.n += 1; p.v += [7]; }; g(); g(); }
+fn replaces(p: &S) { g = fn() { p = S { n: 42, v: [4, 2] }; }; g(); }
+fn forwards(p: &S) { writes(p); replaces(p); p.n += 1; }
+fn scalar(x: &integer) -> integer { g = fn() -> integer { x * 2 }; x = 10; g() + x }
+
+fn test_a_shared_record_pointee() {
+  t = S { n: 1, v: [] };
+  writes(t);
+  assert(t.n == 3 && len(t.v) == 2, "writes: {t.n} {len(t.v)}");
+  replaces(t);
+  assert(t.n == 42 && len(t.v) == 2 && t.v[0] == 4, "a whole replacement: {t.n}");
+  u = S { n: 0, v: [1] };
+  forwards(u);
+  assert(u.n == 43 && len(u.v) == 2 && u.v[1] == 2, "forwarded: {u.n} {len(u.v)}");
+  w = [S { n: 5, v: [] }];
+  writes(w[0]);
+  assert(w[0].n == 7 && len(w[0].v) == 2, "an element: {w[0].n}");
+}
+
+fn test_a_copied_scalar_pointee() {
+  x = 3;
+  assert(scalar(x) == 16 && x == 10, "a scalar: {x}");
+}
+
+struct CrS { k: integer, v: vector<integer> }
+
+fn cr_struct(p: &CrS) -> integer {
+  g = fn(d: integer) { p.k += d; p.v += [d]; p.v[0] = 40; };
+  g(2);
+  p.k += 100;
+  h = fn() -> integer { p.k };
+  p.k += 1000;
+  h()
+}
+
+fn cr_vector(v: &vector<integer>) -> integer {
+  g = fn(d: integer) { v += [d]; v[0] = 70; };
+  g(5);
+  h = fn() -> integer { len(v) };
+  v += [6];
+  h()
+}
+
+fn cr_integer(n: &integer) -> integer {
+  g = fn() -> integer { n * 10 };
+  n = 7;
+  g()
+}
+
+fn cr_text(s: &text) -> text {
+  g = fn() -> text { s + "!" };
+  s += "z";
+  g()
+}
+
+fn test_a_ref_struct_is_shared_both_ways() {
+  s = CrS { k: 1, v: [1] };
+  r = cr_struct(s);
+  // k: 1 +2 (closure) +100 +1000 = 1103, read by `h` after the last write
+  assert(r == 1103 && s.k == 1103, "struct: {r} {s.k}");
+  assert(len(s.v) == 2 && s.v[0] == 40 && s.v[1] == 2, "struct vector: {len(s.v)} {s.v[0]} {s.v[1]}");
+}
+
+fn test_a_ref_vector_is_shared_both_ways() {
+  v = [1, 2];
+  r = cr_vector(v);
+  // [1,2] +[5] -> [70,2,5] +[6] -> four elements
+  assert(r == 4 && len(v) == 4 && v[0] == 70 && v[3] == 6, "vector: {r} {len(v)} {v[0]}");
+}
+
+fn test_a_ref_scalar_is_copied_at_creation() {
+  n = 3;
+  r = cr_integer(n);
+  assert(r == 30 && n == 7, "integer: {r} {n}");
+  t = "ab";
+  q = cr_text(t);
+  assert(q == "ab!" && t == "abz", "text: {q} {t}");
+}
+
+
+struct S3CrS { k: integer, t: text }
+
+fn cr_replace(p: &S3CrS) {
+  g = fn() {
+    p = S3CrS { k: 9, t: "nine" };
+    p.k += 1;
+  };
+  g();
+  g();
+}
+
+fn cr_replace_vector(v: &vector<integer>) {
+  g = fn() { v = [9, 8, 7]; };
+  g();
+}
+
+fn test_a_replaced_record_reaches_the_caller() {
+  s = S3CrS { k: 1, t: "one" };
+  cr_replace(s);
+  assert(s.k == 10 && s.t == "nine", "the caller's record: {s.k} {s.t}");
+}
+
+fn test_a_replaced_vector_reaches_the_caller() {
+  v = [1, 2];
+  cr_replace_vector(v);
+  assert(len(v) == 3 && v[0] == 9 && v[2] == 7, "the caller's vector: {v}");
+}
+
