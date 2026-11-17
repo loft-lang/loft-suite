@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK INTO AN INLINE RECORD FIELD IS REFUSED, BY ASSIGNMENT AS IN A LITERAL (`@FR-B-Ref-StoredRef`,
+// loft#2166).  A `reference<T>` field stores a pointer to a record of its own; an inline record
+// field holds the record itself, so a `&` link into it has nothing to point at and is refused, in
+// either spelling — a field assignment and a struct literal answer alike.  Each spelling is a
+// section with its expectation and receipt; the positive half, a reference field taking the link,
+// is `2166-a-reference-field-takes-a-link-by-assignment-as-in-a-literal.loft`.
+//
+// ── 2166-a-link-into-an-inline-record-field-is-refused-by-assignment ──
+//
+// A LINK INTO AN INLINE RECORD FIELD IS REFUSED BY ASSIGNMENT (`@FR-B-Ref-StoredRef` crossed
+// with `@FR-B-Ref-Reshape`).  B-Ref-StoredRef: the field's type admits the `&`, and a plain
+// record field holds the record itself, not a pointer — so `d.o = &p` has nothing to bind.
+// B-Ref-Reshape: loft declines a link it cannot honour, it never downgrades it to a copy.
+// loft#2166: the `&` reached the stack-link lowering and the interpreter wrote a stack address
+// into the record's bytes (`d.o.k` read `34359738369`), `--native` a rustc syntax error.
+//
+// @EXPECT_ERROR: holds the record itself
+//
+// @falsified-at: b36d0449f — accepted there, with the garbage read and the native syntax error.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the two cures.
+// HOLDS: `2166-a-reference-field-takes-a-link-by-assignment-as-in-a-literal` beside it.
+//
+// ── 2166-a-link-into-an-inline-record-field-is-refused-in-a-literal ──
+//
+// A LINK INTO AN INLINE RECORD FIELD IS REFUSED IN A LITERAL (`@FR-B-Ref-StoredRef` crossed
+// with `@FR-B-Ref-Reshape`).  B-Ref-StoredRef admits a prefix `&` on a literal field on the
+// strength of the field's type, `reference<τ>`; a field declared with the record type itself
+// holds the record inline, so `Rec { o: &p }` has nothing to bind.  B-Ref-Reshape: loft
+// declines a link it cannot honour, it never downgrades it to a copy.  loft#2166: the literal
+// accepted the `&` and silently copied `p` (an `avoidable-copy` advice was all it said).
+//
+// @EXPECT_ERROR: holds the record itself
+//
+// @falsified-at: b36d0449f — accepted there, a silent copy on both backends.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the two cures.
+// HOLDS: `2166-a-reference-field-takes-a-link-by-assignment-as-in-a-literal` beside it.
+
+struct Other { k: integer }
+struct Rec { i: integer, o: Other }
+
+fn test_a_link_into_an_inline_record_field_is_refused_by_assignment() {
+  p = Other { k: 4 };
+  d = Rec { i: 1, o: Other { k: 7 } };
+  d.o = &p;
+  assert(d.o.k == 4, "unreachable: {d.o.k}");
+}
+
+struct S2Other { k: integer }
+struct S2Rec { i: integer, o: S2Other }
+
+fn test_a_link_into_an_inline_record_field_is_refused_in_a_literal() {
+  p = S2Other { k: 4 };
+  a = S2Rec { i: 1, o: &p };
+  assert(a.o.k == 4, "unreachable: {a.o.k}");
+}
