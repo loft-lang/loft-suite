@@ -4,7 +4,8 @@
 // A GROUP'S MEMBERS ARE FOUND BY THEIR ELEMENT TYPE, WHATEVER THE ORDER OR THE `?` (`@FR-Col-Group`).
 // Membership is a fact about the pair of collections: the group forms whichever member is declared
 // first (loft#1158), whichever is written first, and whether a member's element is dense or carries
-// a `?`, as a nullable keyed member does.  Two sections, each with its cells and receipt.
+// a `?`, as a nullable keyed member does; the bulk fill routes that keep the members agreeing are
+// loft#1152's and loft#1159's.  Two sections, each with its cells and receipt.
 //
 // ── 1158-a-group-forms-whichever-member-is-declared-first ──
 //

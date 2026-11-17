@@ -45,7 +45,7 @@
 // `cf_vector_second` is the same whole-value route spelled through a group whose vector is
 // declared SECOND; it read `0` while group FORMATION still depended on declaration order,
 // which was a separate defect in a separate place (@FR-Col-Group, loft#1158, guarded by
-// `1158-a-group-forms-whichever-member-is-declared-first.loft`).
+// `a-groups-members-are-found-by-their-element-type-whatever-the-order-or-the-nullability.loft`).
 //
 // @falsified-at: f26b708a — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 //   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
@@ -259,7 +259,7 @@ fn test_a_vector_value_into_a_group_reaches_every_member() {
   // to be blind to: membership is a fact about the PAIR, not about declaration order
   // (@FR-Col-Group, loft#1158).  This cell read `1/0` and was pinned here as the
   // boundary; the order-independence guard is
-  // `1158-a-group-forms-whichever-member-is-declared-first.loft`.
+  // `a-groups-members-are-found-by-their-element-type-whatever-the-order-or-the-nullability.loft`.
   cg_f2 = CgVSec { }; cg_f2.cg_d = cg_rowse();
   assert(len(cg_f2.cg_d) == 1 && len(cg_f2.cg_look) == 1,
     "cf_vector_second: d={len(cg_f2.cg_d)} view={len(cg_f2.cg_look)} — the vector is a member in either order");
