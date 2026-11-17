@@ -1,0 +1,116 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERATOR DEFINITION IS CHECKED WHERE IT IS WRITTEN (`@FR-Op-Def`, `@FR-Op-Shape`).  A name that is
+// no form, a definition of the wrong shape (`compare` and the arithmetic forms take `self` and one
+// more, `negate` and `next` `self` alone), a first parameter that is not `self`, and an operator on a
+// vector or a tuple of this source's records are each refused at the definition.  Each function is
+// one refusal with its expectation.
+//
+// ── an-operator-name-that-is-no-form-is-refused ──
+//
+// AN OPERATOR NAME THAT IS NO FORM IS REFUSED (`@FR-Op-Def` crossed with `@FR-Op-Back`).
+// Op-Def: an `operator` definition is refused where it is written "unless its name is a form in
+// (Op-Back)".  `frobnicate` is no row of that table, so the definition is refused at once —
+// before any use of it — and the diagnostic names the forms and the cure (an ordinary `fn`).
+//
+// @EXPECT_ERROR: `frobnicate` is not an operator
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the definition.
+// HOLDS: `operators/Op-Back/every-operator-form-reaches-the-definition-that-compiles`.
+//
+// ── an-operator-of-the-wrong-shape-is-refused-where-it-is-written ──
+//
+// AN OPERATOR OF THE WRONG SHAPE IS REFUSED WHERE IT IS WRITTEN (`@FR-Op-Def` crossed with
+// `@FR-Op-Back`).  Op-Def: a definition whose name IS a form is still refused unless "its shape
+// is the form's (Op-Shape)" — the row of Op-Back it names says `compare(self: τ, other: U) ->
+// Ordering`, and this one answers an `integer`.  The refusal is at the definition, with no use
+// of `<` anywhere, because a definition that compiles must back its form.
+//
+// @EXPECT_ERROR: answers an `Ordering`
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the shape the form needs.
+// HOLDS: `an-operator-name-that-is-no-form-is-refused` beside it.
+//
+// ── an-operator-whose-first-parameter-is-not-self-is-refused ──
+//
+// AN OPERATOR WHOSE FIRST PARAMETER IS NOT `self` IS REFUSED (`@FR-Op-Def` crossed with
+// `@FR-Op-Back`).  Op-Def: refused unless "its first parameter is `self` of a user type
+// (Op-Home)"; Op-Back's table reads every row as a call on the LEFT operand (`a + b` is
+// `a.plus(b)`), which is what `self` names.  A `plus` of the right arity whose first
+// parameter is named otherwise is refused at the definition.
+//
+// @EXPECT_ERROR: its first parameter is `self`
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the method form.
+// HOLDS: `an-operator-name-that-is-no-form-is-refused` beside it.
+//
+// ── an-operator-on-a-vector-of-this-sources-records-is-refused ──
+//
+// AN OPERATOR ON A VECTOR OF THIS SOURCE'S RECORDS IS REFUSED (`@FR-Op-Def` crossed with
+// `@FR-Op-Home`).  `vector<V>` is the built-in collection over this source's `V`; the collection is
+// not declared here, so `self: vector<V>` is refused at the definition, though nothing uses it.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the vector type.
+// HOLDS: `every-user-type-of-this-source-may-be-an-operators-self` beside it.
+// @EXPECT_ERROR: `operator plus` defines `+` for a type of its own package, and `vector<V>` is not one
+//
+// ── an-operator-on-a-tuple-of-this-sources-records-is-refused ──
+//
+// AN OPERATOR ON A TUPLE OF THIS SOURCE'S RECORDS IS REFUSED (`@FR-Op-Def` crossed with
+// `@FR-Op-Home`).  `(V, V)` is built from this source's `V`, but the tuple type itself is not
+// declared here — it is built in — so `self: (V, V)` is not "of a user type" and the definition is
+// refused where it is written, though nothing uses it.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the tuple type.
+// HOLDS: `every-user-type-of-this-source-may-be-an-operators-self` beside it.
+// @EXPECT_ERROR: `operator plus` defines `+` for a type of its own package, and `(V, V)` is not one
+
+struct OdM { c: integer }
+
+operator frobnicate(self: OdM) -> OdM { self }
+
+fn test_an_operator_name_that_is_no_form_is_refused() {
+  m = OdM { c: 1 };
+  assert(m.c == 1, "unreachable");
+}
+
+
+operator compare(self: OdM, other: OdM) -> integer { self.c - other.c }
+
+fn test_an_operator_of_the_wrong_shape_is_refused_where_it_is_written() {
+  m = OdM { c: 1 };
+  assert(m.c == 1, "unreachable");
+}
+
+
+operator plus(a: OdM, o: OdM) -> OdM { OdM { c: a.c + o.c } }
+
+fn test_an_operator_whose_first_parameter_is_not_self_is_refused() {
+  m = OdM { c: 1 };
+  assert(m.c == 1, "unreachable");
+}
+
+struct V { x: integer }
+
+operator plus(self: vector<V>, o: V) -> V { o }
+
+
+
+operator plus(self: (V, V), o: V) -> V { o }
+

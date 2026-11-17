@@ -23,7 +23,7 @@
 // CHANNEL: the asserts (and the compile: a refused definition fails the file).
 // ARMED: no instrument.
 // WITNESS: each message prints the answers.
-// HOLDS: `an-operator-on-a-tuple-of-this-sources-records-is-refused` beside it.
+// HOLDS: `an-operator-definition-is-checked-where-it-is-written-refused` beside it.
 
 struct V { x: integer }
 enum Sh { Ci { r: integer }, Sq { s: integer } }
