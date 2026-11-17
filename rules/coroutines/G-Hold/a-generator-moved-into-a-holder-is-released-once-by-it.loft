@@ -18,7 +18,7 @@
 // CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
 // ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run); `LOFT_STRICT_STORES=1` agrees.
 // HOLDS: panic is clean on both backends.  Reading the moved name is refused (loft#2043):
-//   `2043-a-moved-generator-is-not-read.loft`.
+//   `a-moved-generator-is-not-read-again-however-it-was-moved-refused.loft`.
 
 fn patrol(id: integer, n: integer) -> iterator<integer> {
   steps = [0, 1, 2, 3, 4, 5, 6, 7];
