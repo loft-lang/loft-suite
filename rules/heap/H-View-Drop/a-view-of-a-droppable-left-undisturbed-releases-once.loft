@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// `@FR-H-View-Drop` — the legal half of `a-disturbed-view-of-a-droppable-is-refused.loft`.  A
+// `@FR-H-View-Drop` — the legal half of `a-view-of-a-member-that-owns-a-droppable-is-never-materialised-refused.loft`.  A
 // view of a member that owns a droppable STAYS a view: it is never turned into a copy, so the
 // hook runs once per record, at its container's death, and a write through the view reaches
 // the container.  Each cell views a droppable and leaves the container undisturbed while the

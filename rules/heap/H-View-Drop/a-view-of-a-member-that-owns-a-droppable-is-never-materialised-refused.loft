@@ -1,5 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW OF A MEMBER THAT OWNS A DROPPABLE IS NEVER MATERIALISED: A DISTURBANCE IS REFUSED
+// (`@FR-H-View-Drop`, with `@FR-B-View`).  Such a view stays a view, so growing, removing from or
+// rebinding its container — here, or one call down — is refused where it would be copied out for a
+// member without a droppable.  Each function is one refusal with its expectation.
+//
+// ── a-disturbed-view-of-a-droppable-is-refused ──
+//
 // @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance summary the growth one frame down (`r8_grown_one_frame_down`) is no longer refused.
 //
 // `@FR-H-View-Drop` — a VIEW of a member that owns a droppable without `OpCopy` stays a view,
@@ -19,6 +27,25 @@
 // CHANNEL: the expectations and the exit code, identically on both backends.
 // ARMED: no instrument — the refusal is on by default.
 // HOLDS: nothing runs on either backend.
+//
+// ── a-view-that-would-materialise-is-refused-where-its-member-owns-a-droppable-refused ──
+//
+// @catches: LOFT_NO_CALLEE_DISTURB — the switch hides the callees' growth and removal, so the `grow` and `drop_first` calls are no longer refused
+//
+// `@FR-H-View-Drop` crossed with `@FR-B-View`: every shape where B-View MATERIALISES a view —
+// its container disturbed while the view is live — is refused at the disturbance when the
+// viewed member owns a droppable without `OpCopy`, because the materialised copy would be a
+// second structure.  The shapes are B-View's own: a `?`-discharged element view, a struct
+// member view whose container is given a new value, and a disturbance one call down (a
+// callee that grows or removes from the container it is handed).  The same four shapes over a
+// type with no droppable compile and materialise:
+// `a-view-of-a-member-without-a-droppable-materialises-where-one-with-is-refused.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code.
 
 struct H { id: integer }
 fn OpDrop(self: H) { print("D{self.id} "); }
@@ -61,7 +88,7 @@ fn bh(base: integer) -> hash<KH[k]> { r: hash<KH[k]> = [KH { k: 1, h: H { id: ba
 // loft#2037: a KEYED local rebound from a CALL while a view of a droppable element lives is
 // refused, as the literal rebind (r3's shape) is; it compiled before and `e.h.id` read `500`,
 // the NEW collection's element.  Plain-view half:
-// `rules/heap/H-SwapKeyed/a-keyed-local-rebound-from-a-call-exchanges-its-store-and-answers-what-the-copy-answers.loft` c1.
+// `rules/heap/H-SwapKeyed/a-keyed-rebind-answers-what-the-copy-answers-beside-every-other-name.loft` c1.
 fn r10_keyed_local_rebound_from_a_call() { h = bh(100); e = h[1]; h = bh(500); print("{e.h.id ?? -1}"); }
 
 fn bv(base: integer) -> vector<H> { [H { id: base }] }
@@ -71,3 +98,43 @@ fn bv(base: integer) -> vector<H> { [H { id: base }] }
 // vector (`D100`) and `e.id` read the freed store (`-2401053088876216593` under `LOFT_POISON=1`),
 // on both backends.
 fn r11_vector_local_rebound_from_a_call() { v = bv(100); e = v[0]; v = bv(500); print("{e.id}"); }
+
+struct S2H { id: integer, n: integer }
+fn OpDrop(self: S2H) { print("D{self.id} "); }
+struct In { h: S2H, k: integer }
+struct O { inner: In, tag: integer }
+struct W { hs: vector<S2H> }
+fn s2_grow(w: W) { w.hs += [S2H { id: 9, n: 0 }]; }
+fn drop_first(w: W) { w.hs.remove(0); }
+
+// @EXPECT_ERROR: cannot grow `v` while `e` references a place inside it
+fn r1_a_discharged_element_view_and_a_growth() -> integer {
+  v = [S2H { id: 1, n: 1 }];
+  e = v[0]?;
+  v += [S2H { id: 2, n: 2 }];
+  e.n
+}
+
+// @EXPECT_ERROR: cannot give `o` a new value while `x` references a place inside it
+fn r2_a_member_view_and_its_container_reassigned() -> integer {
+  o = O { inner: In { h: S2H { id: 1, n: 1 }, k: 1 }, tag: 0 };
+  x = o.inner;
+  o = O { inner: In { h: S2H { id: 2, n: 2 }, k: 2 }, tag: 1 };
+  x.k
+}
+
+// @EXPECT_ERROR: cannot call `s2_grow` while `e` references a place inside `w`
+fn r3_a_growth_one_call_down() -> integer {
+  w = W { hs: [S2H { id: 1, n: 1 }] };
+  e = w.hs[0];
+  s2_grow(w);
+  e.n
+}
+
+// @EXPECT_ERROR: cannot call `drop_first` while `e` references a place inside `w`
+fn r4_a_removal_one_call_down() -> integer {
+  w = W { hs: [S2H { id: 1, n: 1 }, S2H { id: 2, n: 2 }] };
+  e = w.hs[1];
+  drop_first(w);
+  e.n
+}

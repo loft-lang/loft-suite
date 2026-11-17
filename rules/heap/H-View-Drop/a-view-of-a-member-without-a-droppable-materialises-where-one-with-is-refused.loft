@@ -3,7 +3,7 @@
 // @catches: LOFT_NO_CALLEE_DISTURB — the switch hides a callee's disturbance, so the view is neither copied nor refused
 //
 // `@FR-B-View` crossed with `@FR-H-View-Drop` — the legal half of
-// `a-view-that-would-materialise-is-refused-where-its-member-owns-a-droppable-refused.loft`.
+// `a-view-of-a-member-that-owns-a-droppable-is-never-materialised-refused.loft`.
 // The four shapes refused there, over a member type that owns no droppable, compile: the
 // view MATERIALISES (B-View), so it reads the value it had at its bind, and a write through it
 // after the disturbance no longer reaches the container.  And the one shape that is no
