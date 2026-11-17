@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A CAPTURE IN OR OF A GROUP BINDS WHAT THE GROUP MATCHED (`@FR-P-Cap`, @C161, loft#2325).  A capture
+// of a group binds the sub-slice it matched as a fresh vector; one inside an optional group binds
+// `x : A?`, null when the group matched nothing; `f: _` in a field matches anything.  Two sections,
+// each with its cells and receipt.
+//
+// ── a-capture-of-a-group-binds-the-sub-slice-it-matched ──
+//
 // A capture of a GROUP binds the sub-slice the group matched (`@FR-P-Cap`, @C161): a FRESH
 // vector, as `@FR-P-Rest` gives a rest.  An alternation binds the branch taken, an optional
 // group binds null when it matched nothing (`@FR-P-Opt`), and a repetition binds what it
@@ -20,6 +27,22 @@
 //   c8  a fixed tail after an optional group
 //
 // CHANNEL: the compile (a group capture did not parse), the assertions, and the leak gate.
+//
+// ── 2325-a-capture-in-an-optional-group-and-a-wildcard-field ──
+//
+// loft#2325, `@FR-P-Cap` — a whole-element capture inside an optional group, `[(x: A)?, B]`,
+// binds `x : A?` (null when the group matched nothing, `@FR-P-Opt`); and `f: _` in a field of
+// an alternation branch binds nothing (`@FR-P-Point`).  Both were refused: the first by
+// `Expect token )`, the second by a refusal that named `f: _` as allowed, because `_` lexes as
+// a name and the test for it asked for a token.
+//
+// Axes it MOVES: the group taken or skipped, the capture read (null test, a field through it),
+// the wildcard field's branch (with fields, a unit variant), and a `_` in a fixed tail after
+// `..`.  Every value is hand-computed.
+//
+// CHANNEL: the COMPILE (a refusal before the fix) and the VALUE.
+// ARMED: no instrument.  Ordinary assertions on every backend.
+// HOLDS: every cell, on every backend.
 
 enum Tok { Num { n: integer }, Kw { k: integer }, Op { o: integer }, End }
 
@@ -65,4 +88,28 @@ fn test_the_capture_is_fresh_and_owned() {
   w = [Kw { k: 7 }, Op { o: 8 }, Tok.End];
   g = grab(w);
   assert(len(g) == 2 && kk(g[1]) == 8 && len(w) == 3, "c7");
+}
+
+enum CpT { CpA { f: integer }, CpB, CpC }
+
+fn cp_opt(v: vector<CpT>) -> integer {
+  match v {
+    [(x: CpA)?, CpB] => if x == null { 1 } else { 2 },
+    _ => 0
+  }
+}
+fn cp_opt_field(v: vector<CpT>) -> integer {
+  match v {
+    [(x: CpA)?, CpB] => match x { CpA { f } => f, _ => -1 },
+    _ => 0
+  }
+}
+fn cp_wild(v: vector<CpT>) -> integer { match v { [(CpA { f: _ } | CpB), ..] => 1, _ => 0 } }
+fn cp_tail(v: vector<CpT>) -> integer { match v { [CpA { f }, .., _] => f, _ => 0 } }
+
+fn test_a_capture_in_an_optional_group_and_a_wildcard_field() {
+  assert(cp_opt([CpB]) == 1 && cp_opt([CpA { f: 1 }, CpB]) == 2 && cp_opt([CpC, CpB]) == 0, "optional capture");
+  assert(cp_opt_field([CpA { f: 7 }, CpB]) == 7 && cp_opt_field([CpB]) == -1, "a field through it");
+  assert(cp_wild([CpA { f: 3 }]) == 1 && cp_wild([CpB, CpC]) == 1 && cp_wild([CpC]) == 0 && cp_wild([]) == 0, "wildcard field");
+  assert(cp_tail([CpA { f: 5 }, CpC]) == 5 && cp_tail([CpA { f: 5 }]) == 0, "a wildcard tail");
 }
