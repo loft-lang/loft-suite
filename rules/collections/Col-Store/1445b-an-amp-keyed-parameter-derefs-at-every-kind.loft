@@ -25,7 +25,8 @@
 // `spatial` is the fifth kind and is NOT asserted here: it has no `c[(x,y)] = v` spelling — that
 // is refused at a plain local too, so it is not the `&`'s business — and the only write it has
 // is the append, which needs loft#1445's peel.  Its deref cell lives in
-// `1445-a-keyed-parameter-appends-through-its-link.loft` beside the other four, so the two
+// `rules/binding/B-Ref-Uniform/a-link-to-a-collection-is-used-as-the-collection-is-at-every-kind.loft`
+// (its loft#1445 section) beside the other four, so the two
 // guards together cover all five and neither one depends on the other's fix.
 //
 // @falsified-at: afbca3342 (built in its own worktree): `a_trie_parameter_is_reachable_by_key`
