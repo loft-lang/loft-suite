@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VECTOR OF `&` RESULTS IS A PLAIN INTEGER VECTOR, COMPARED BY VALUE (`@FR-G-Amp-Infix`, crossed
+// with `@FR-N-Arith` and `@FR-E-Eq`).  `a & k` is an `integer`: the range its shape proves is asked
+// only where a narrow slot needs it, never written into the type, so a vector of such results is a
+// `vector<integer>` that compares by length and then element by element with a narrow one holding
+// the same values.  Two sections, each with its cells and receipt.
+//
+// ── a-vector-of-and-results-is-a-plain-integer-vector ──
+//
+// A VECTOR OF `&` RESULTS IS A PLAIN INTEGER VECTOR (`@FR-G-Amp-Infix`, crossed with `@FR-N-Arith`,
+// `@FR-N-Cast` and `@FR-T-Chk-Vec`).  `a & k` is an `integer`: the range its shape proves is asked
+// only where a narrow slot needs it, never written into the type (owner ruling 2026-10-19).  So an
+// unannotated vector literal of such elements is a `vector<integer>` whatever their order, while a
+// literal checked against `vector<u8>` proves each element's fit at that element.  A local bound to
+// a masked value is an `integer`, so storing it into a `u8` is refused — the mask must meet the
+// store.
+//
+// @falsified-at: 3cae84177 — interpret and native: `[a & 1, a & 2]` is refused "cannot implicitly
+//   narrow integer limit(0, 2) to integer limit(0, 1)" (the first element's range was the type).
+// CHANNEL: the asserts, and the refusal in the sibling file's last function.
+// ARMED: no instrument.
+// WITNESS: each message prints the vector built.
+// HOLDS: a mask, a remainder and a `u8 + u8` sum still store into a narrow slot without a cast.
+//
+// ── a-vector-of-and-results-compares-by-value ──
+//
+// A VECTOR OF `&` RESULTS COMPARES BY VALUE (`@FR-G-Amp-Infix`, crossed with `@FR-E-Eq` and
+// `@FR-C-Int`).  `[a & 4, a & 2, a & 1]` is a vector of `integer` (`@FR-N-Arith` writes no range
+// into the type), a `vector<u8>` holds the same values narrow, and `==` compares "a vector or array by length and then element by element in order", each
+// element by its own `==` — and integer `==` is by VALUE, whatever the width.  So the vector
+// equals the `vector<integer>` literal `[4, 2, 0]`.
+//
+// loft#2062: `==` between two vectors whose element WIDTHS differ answered by bytes, not by
+// value, on both backends — `[a & 4, a & 2, a & 1] == [4, 2, 0]` was false while every element
+// compared equal, and `vector<u8> [4, 2, 0] == vector<integer> [4, 0, 0]` was TRUE.
+//
+// @falsified-at: 05d019607 — hand-measured, interpret and native: the different-widths cells
+//   answer false where every element compares equal.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the vectors compared.
+// HOLDS: same-width comparisons (the first function) keep their answers.
+
+fn test_any_order_builds_an_integer_vector() {
+  a = 6;
+  w = [a & 1, a & 2, a & 4];
+  assert(w == [0, 2, 4] && len(w) == 3, "{w}");
+  m = [a % 2, a % 4];
+  assert(m == [0, 2] && len(m) == 2, "{m}");
+  w += [a & 7, 1000];
+  assert(w == [0, 2, 4, 6, 1000], "an integer vector takes any integer: {w}");
+}
+
+fn test_the_store_proves_the_fit() {
+  x = 1000;
+  lo: u8 = x & 255;
+  b: vector<u8> = [x & 255, x & 15];
+  p: u8 = 200;
+  q: u8 = 100;
+  s: u16 = p + q;
+  c = (x & 255) as u8;
+  n: u8 = (x & 15) + (x & 7);
+  assert(lo == 232 && b == [232, 8] && s == 300 && c == 232 && n == 8, "{lo} {b} {s} {c} {n}");
+}
+
+fn test_same_widths_compare_by_value() {
+  a = 6;
+  w = [a & 4, a & 4];
+  x = [a & 4, a & 4];
+  assert(w == x && len(w) == 2, "{w} {x}");
+  u: vector<u8> = [4, 2, 0];
+  v: vector<u8> = [4, 2, 0];
+  assert(u == v && !(u != v), "u8 against u8");
+}
+
+fn test_different_widths_compare_by_value() {
+  a = 6;
+  w = [a & 4, a & 2, a & 1];
+  assert(w == [4, 2, 0], "an & vector against a literal: {w}");
+  u: vector<u8> = [4, 2, 0];
+  i: vector<integer> = [4, 2, 0];
+  k: vector<integer> = [4, 0, 0];
+  n: vector<i32> = [4, 2, 0];
+  assert(u == i && i == u && n == i && n == u, "equal contents across widths");
+  assert(u != k && !(u == k), "different contents across widths");
+}
