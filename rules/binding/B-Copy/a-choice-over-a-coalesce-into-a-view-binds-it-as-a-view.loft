@@ -10,13 +10,14 @@
 // fifty records per program).  The bytecode writer asks whether the local owns
 // (`first_bind_choice_join`); the C writer asks the same.
 //
-// CHANNEL: the VALUES (hand-computed) and the LEAK gate.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  which arm the choice takes (the field, the `??` default, the else);
 //                        a loop around it.
 // Axes it HOLDS FIXED:   the field is the first element of a vector inside a parameter.
 //
-// @falsified-at: pending
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_C_FIRST_CHOICE_JOIN_ANY=1`) — native-c 2 of 2 tests fail under the suite's own `LOFT_LEAK_CHECK=1`, `10 stores not freed at program exit: kt=100 Ty×10`; interpret INERT (expected: the cure is the C writer's).
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   WITNESS: the leaked `Ty` stores on C.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
 
 enum Ty { TyVoid, TyInt { w: integer } }
 struct A { name: text, typedef: vector<Ty> }

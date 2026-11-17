@@ -8,13 +8,14 @@
 // of it where it names it, at its rebind and at its scope end, and frees only what it owns
 // anywhere else.  Both used to release it, on both backends.
 //
-// CHANNEL: the VALUES (hand-computed) and the re-free / leak gate.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  the bound arm (present, absent); the binding read before its rebind;
 //                        the rebind in a loop; an early return before the rebind.
 // Axes it HOLDS FIXED:   the default is a unit variant; one rebind to a unit variant.
 //
-// @falsified-at: pending
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_NO_LIFT_VIEW_GUARD=1`) — interpret 4 of 4 tests fail; native-c 4 of 4 fail.
+//   CHANNEL: the VALUES (hand-computed) and the re-free / leak gate.
+//   WITNESS: every cell fails on both backends.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
 
 enum Own { Owned, Unknown, Borrowed { base: integer } }
 

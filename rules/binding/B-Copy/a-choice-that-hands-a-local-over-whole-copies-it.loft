@@ -9,13 +9,14 @@
 // self-hosted elaborator's `classify_var` and `tag_in`).  The choice is a join on `bound`:
 // copied where the answer is its store, adopted where it is the fresh arm's.
 //
-// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  the choice (`??`, `if` with `!`); the exit (the tail, an early
 //                        return); a loop; the local rebound after the choice.
 // Axes it HOLDS FIXED:   the other arm is a fresh unit variant; one other local.
 //
-// @falsified-at: pending
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_NO_CHOICE_VAR_JOIN=1`) — interpret 3 of 4 tests fail; native-c 3 of 4 fail.
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   WITNESS: the three choice cells fail on both backends; the fourth test holds.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
 
 enum Own { Owned, Borrowed { base: integer }, Join { base: integer } }
 

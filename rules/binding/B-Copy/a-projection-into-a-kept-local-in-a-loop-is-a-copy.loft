@@ -11,14 +11,17 @@
 // call is declined where an early `return` frees `mc` without asking it (the self-hosted
 // elaborator's `tuple_match`, refusing a later member).
 //
-// CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  how many members join (1–4); where the loop leaves (an early return
 //                        before the call, after it, the end); repeated calls.
 // Axes it HOLDS FIXED:   the loop sits in a block; `member_cond` answers a record.
 //
 // @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
-// @falsified-at: pending
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_NO_KEPT_ELEMENT_COPY=1`, armed as above) — interpret
+//   1 of 2 tests fail with 5 re-frees from a DIFFERENT site; native-c 2 of 2 fail, strict stores
+//   reporting `NEVER FREED … kt=100 Node×6, kt=103 NdIf×6`.
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   WITNESS: the re-free count and the never-freed `Node`/`NdIf` stores.
+//   HOLDS: every cell, on every backend — with the cure on, 2 of 2 pass with 0 re-frees.
 
 enum Node { NdNull, NdInt { n: integer }, NdIf { a: Node, b: Node } }
 struct MC { cond: Node?, refused: boolean }

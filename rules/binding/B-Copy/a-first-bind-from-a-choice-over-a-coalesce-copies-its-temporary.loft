@@ -10,13 +10,14 @@
 // `enum_field`).  The first bind is a join on the temporary: copied where the answer is its
 // store, adopted where it is the other arm's.
 //
-// CHANNEL: the VALUES (hand-computed) and the double-free gate.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  which arm the first bind takes (the `??`, the literal); whether the
 //                        `??` answers its subject; how many rebinds follow (none, one, two).
 // Axes it HOLDS FIXED:   the subject is a nullable call answering into its hidden buffer.
 //
-// @falsified-at: pending
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_NO_NCC_CHOICE_JOIN=1`) — interpret 1 of 4 tests fail; native-c 1 of 4 fail.
+//   CHANNEL: the VALUES (hand-computed) and the double-free gate.
+//   WITNESS: one cell fails on both backends; the other three hold.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
 
 enum Node { NdNull, NdInt { n: integer }, NdBoolean { b: boolean }, NdVar { n: integer }, NdCall { def_nr: integer, args: vector<Node> }, NdIf { cond: Node, t: Node, f: Node } }
 
