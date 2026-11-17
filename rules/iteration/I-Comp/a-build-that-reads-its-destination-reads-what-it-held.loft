@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A BUILD THAT READS ITS DESTINATION READS WHAT IT HELD WHEN THE STATEMENT BEGAN (`@FR-I-Comp`,
+// `@FR-E-Asgn-Compound`, `@FR-Col-Concat`).  A collection literal whose item reads the destination
+// through a call (loft#2335) and a concatenation reading its destination in a loop (loft#2446) both
+// read the value from before the write.  Two sections, each with its cells and receipt.
+//
+// ── 2335-a-literal-whose-item-reads-its-destination-through-a-call-reads-what-it-held ──
+//
 // loft#2335 — `@FR-I-Comp` / `@FR-E-Asgn-Compound`: a collection literal reads what its destination
 // held when the statement BEGAN, whichever part reads it.  A part that reads the destination
 // through a CALL lost it: handed a place prefix (`tp(v, 0)` for the destination `v.vars[0].td`),
@@ -24,6 +31,30 @@
 //   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
 //   exit moves.
 // @catches: LOFT_NO_APPEND_STAGING — without staging the literal appends into its destination while an item still reads it, which is what this program checks.
+//
+// ── 2446-a-concatenation-reading-its-destination-in-a-loop-reads-what-it-held ──
+//
+// A CONCATENATION READING ITS DESTINATION IN A LOOP READS WHAT IT HELD (`@FR-I-Comp`,
+// `@FR-Col-Concat`, loft#2446).  A build reads what its destination held when the statement
+// began.  `out = out[0..n] + [g]` let `out` adopt the slice's per-site buffer; the next pass of
+// the same site reset that buffer before the slice read `out`, so every pass read an empty
+// vector and only the last pass's element survived — `[2]` for `[1,2]`, silently, on both
+// backends.  The bounds alone reading the destination broke the same way.
+//
+// Answers hand-computed: appending 1 then 2 to `[]` gives `[1,2]`; inserting "b" then "a" in
+// order gives `["a","b"]`; `src[0..len(out)] + [9]` over `src = [5,6,7]` from `out = [1]` gives
+// `[5,9]`, then `[5,6,9]`.
+//
+// Axes it MOVES: the loop (`for`, `while`); the element (integer, record); who reads the
+//   destination (the slice's source, only its bounds); an insertion in the middle; a first
+//   operand that does not read the destination (still adopted).
+// Held FIXED: a vector local declared before the loop.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0,
+//   native 1 assertion failures -> 0
+// CHANNEL: the asserts.
+// WITNESS: each assert names its cell and prints the vector.
+// HOLDS: straight-line code, a literal and a call as the first operand answer as before.
 
 enum Ty { TU, TV { inner: integer, dep: vector<integer> } }
 struct Var { name: text, td: vector<Ty> }
@@ -75,9 +106,72 @@ fn struct_and_scalar() {
   assert(len(b.ps) == 2 && b.ps[1].x == 7, "struct append {b.ps[1].x}");
 }
 
-fn main() {
+fn test_a_literal_whose_item_reads_its_destination_through_a_call_reads_what_i() {
   through_element_prefix();
   plain_field();
   local();
   struct_and_scalar();
+}
+
+struct G { name: text }
+
+fn appended() {
+  out: vector<integer> = [];
+  for g in [1, 2] {
+    out = out[0..len(out)] + [g];
+  }
+  assert("{out}" == "[1,2]", "appended: {out}");
+}
+
+fn in_a_while() {
+  out: vector<integer> = [];
+  i = 0;
+  while i < 2 {
+    i += 1;
+    out = out[0..len(out)] + [i];
+  }
+  assert("{out}" == "[1,2]", "while: {out}");
+}
+
+fn sorted_insert() {
+  out: vector<G> = [];
+  for g in [G { name: "b" }, G { name: "a" }] {
+    at = len(out);
+    for o in out {
+      if at == len(out) && g.name < o.name {
+        at = o#index;
+      }
+    }
+    out = out[0..at] + [g] + out[at..len(out)];
+  }
+  r = "{[for x in out { x.name }]}";
+  assert(r == "[\"a\",\"b\"]", "sorted insert: {r}");
+}
+
+fn bounds_read() {
+  src: vector<integer> = [5, 6, 7];
+  out: vector<integer> = [1];
+  seen = "";
+  for _g in [1, 2] {
+    out = src[0..len(out)] + [9];
+    seen += "{out};";
+  }
+  assert(seen == "[5,9];[5,6,9];", "bounds: {seen}");
+}
+
+fn other_source() {
+  src: vector<integer> = [5, 6, 7];
+  out: vector<integer> = [];
+  for g in [1, 2] {
+    out = src[0..g] + [9];
+  }
+  assert("{out}" == "[5,6,9]", "other source: {out}");
+}
+
+fn test_a_concatenation_reading_its_destination_in_a_loop_reads_what_it_held() {
+  appended();
+  in_a_while();
+  sorted_insert();
+  bounds_read();
+  other_source();
 }
