@@ -1,0 +1,105 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK ACROSS A VECTOR'S GROWTH OR REMOVAL IS REFUSED, HOWEVER THE EVENT IS SPELLED
+// (`@FR-B-Ref-Reshape`).  A `&` link names the place itself, so a grow, a removal, a `clear` or a
+// method that removes from the vector, with the link still used after it, is refused at the event —
+// where a view would be copied out instead (`@FR-B-Disturb`).  Each section is one refusal with its
+// receipt: a grow, a removal of a droppable element, a clear (loft#2267) and a removing method
+// (loft#2267); the view-side twin is
+// `rules/binding/B-Disturb/growing-or-emptying-a-vector-ends-the-places-inside-it.loft`.
+//
+// ── a-live-reference-across-a-grow-is-refused ──
+//
+// A LIVE REFERENCE ACROSS A GROW IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`): loft will not
+// quietly downgrade a `&` to a copy, so where it cannot honour the write it declines the program.
+//
+// @falsified-at: none — a conformance guard; the refusal held on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the container and the reference.
+// HOLDS: the view spelling in the sibling file compiles on both trees.
+// @EXPECT_ERROR: cannot grow `v` while `c` references a place inside it
+//
+// ── a-live-reference-to-a-droppable-across-a-removal-is-refused ──
+//
+// A LIVE REFERENCE TO A DROPPABLE ACROSS A REMOVAL IS REFUSED (`@FR-B-Ref-Reshape`,
+// `@FR-H-View-Drop`): the removal renumbers the elements, and the element `c` names would be
+// released under it.
+//
+// @falsified-at: none — a conformance guard; the refusal held on the tree it landed on.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the container and the reference.
+// HOLDS: a reference dead before the removal compiles on both trees.
+// @EXPECT_ERROR: cannot remove from `v` while `c` references a place inside it
+//
+// ── 2267-a-reference-across-a-clear-is-refused ──
+//
+// loft#2267 — A REFERENCE INTO A VECTOR ACROSS ITS CLEAR IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A clear removes every element, so the place `c` names is gone; `v.clear()` is a call to the `vector.clear` method, and the disturbance summary read only `n_` functions, so it saw no disturbance and the write landed in the cleared vector.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// WITNESS: main compiled the program and ran the write through the stale reference.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling is copied out instead —
+//   `rules/binding/B-Disturb/growing-or-emptying-a-vector-ends-the-places-inside-it.loft`.
+// @EXPECT_ERROR: cannot call `clear` while `c` references a place inside `v`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the reference across `clear` is no longer refused, which is what this program checks.
+//
+// ── 2267-a-reference-across-a-method-that-removes-is-refused ──
+//
+// loft#2267 — A REFERENCE ACROSS A METHOD THAT REMOVES FROM ITS CONTAINER IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A method is a callee like any free function: `b.drop_first()` removes the element `c` names, and the next element moves into its place.  The disturbance summary read only `n_` functions, so the write through `c` landed on the element that moved in.
+//
+// @falsified-at: 23bc61e47 — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// WITNESS: main compiled the program and ran the write through the stale reference.
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the free-function spelling was refused already; the plain bind is copied out —
+//   `rules/binding/B-Disturb/growing-or-emptying-a-vector-ends-the-places-inside-it.loft`.
+// @EXPECT_ERROR: cannot call `drop_first` while `c` references a place inside `b`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the reference across the removing method is no longer refused, which is what this program checks.
+
+struct P { n: integer }
+
+fn test_a_live_reference_across_a_grow_is_refused() {
+  v = [P { n: 1 }, P { n: 2 }];
+  c = &v[0];
+  v += [P { n: 3 }];
+  c.n = 9;
+  println("{v[0].n}");
+}
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+
+fn test_a_live_reference_to_a_droppable_across_a_removal_is_refused() {
+  v = [H { id: 1 }];
+  c = &v[0];
+  v.remove(0);
+  println("{c.id}");
+}
+
+struct S { n: integer, s: text }
+
+fn test_a_reference_across_a_clear_is_refused() {
+  v = [S { n: 1, s: "one" }];
+  c = &v[0];
+  v.clear();
+  c.s += "-tail";
+  v += [S { n: 2, s: "two" }];
+  println("{v[0].n} {v[0].s}");
+}
+
+struct S4S { n: integer }
+struct Bag { items: vector<S4S> }
+
+fn drop_first(self: Bag) { self.items.remove(0); }
+
+fn test_a_reference_across_a_method_that_removes_is_refused() {
+  b = Bag { items: [S4S { n: 1 }, S4S { n: 2 }] };
+  c = &b.items[0];
+  b.drop_first();
+  c.n = 9;
+  println("{b.items[0].n} {len(b.items)}");
+}
