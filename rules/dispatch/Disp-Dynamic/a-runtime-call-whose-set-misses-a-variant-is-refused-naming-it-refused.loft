@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RUNTIME CALL WHOSE SET MISSES A VARIANT IS REFUSED AT THE CALL, NAMING IT (`@FR-Disp-Dynamic`).
+// Dispatch on an enum argument's variant is the exhaustive match it stands for: a set that misses a
+// variant — with or without a member for the enum itself — is refused, naming the missing variant
+// and the declared members.  Each function is one refused call with its expectation.
+//
+// ── a-set-missing-a-variant-without-an-enum-member-is-refused ──
+//
+// A SET MISSING A VARIANT, WITHOUT AN ENUM-LEVEL MEMBER, IS REFUSED AT THE CALL
+// (`@FR-Disp-Dynamic`'s last sentence, in `M-Exhaust`'s shape; `@FR-Disp-Exhaustive` says no
+// "no applicable method" path exists at run time).  `dm(DFire)` and `dm(DIce)` cover two of
+// three variants and no member is declared at `DEnt`, so a call with a `DEnt`-held argument
+// would have no leaf for `DRock`: refused naming the missing tuple and the members declared.
+// One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the uncovered variant and the declared members.
+// HOLDS: a static call at `DFire` is not refused — the refusal is the enum-held call's.
+// @EXPECT_ERROR: `dm(DEnt)` has no definition for the variant (DRock) — declared: dm(DFire), dm(DIce)
+//
+// ── a-set-missing-two-variants-is-refused-at-the-call ──
+//
+// `@FR-Disp-Dynamic` crossed with `@FR-M-Exhaust`: a set that misses a variant and has no
+// enum-level member would be a non-exhaustive canonical `match`, so the enum-held call is a
+// static refusal at the call — never a run-time "no applicable method" — exactly where the
+// written-out match with the same arms is refused.  This file holds one refusal: the call
+// misses `C` and `D`.  (The message names the first uncovered variant; M-Exhaust's names both.)
+//
+// CHANNEL: the compile (the expected diagnostic).
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+// @EXPECT_ERROR: `s2_dm(K)` has no definition for the variant (C) — declared: s2_dm(A), s2_dm(B)
+
+enum DEnt { DFire { n: integer }, DIce { n: integer }, DRock { n: integer } }
+
+fn dm(a: DFire) -> text { "fire {a.n}" }
+fn dm(a: DIce) -> text { "ice {a.n}" }
+
+fn test_a_set_missing_a_variant_without_an_enum_member_is_refused() {
+  println(dm(DFire { n: 0 }));
+  x: DEnt = DFire { n: 1 };
+  println(dm(x));
+}
+
+enum K { A { n: integer }, B { n: integer }, C { n: integer }, D { n: integer } }
+
+fn s2_dm(a: A) -> text { "a{a.n}" }
+fn s2_dm(a: B) -> text { "b{a.n}" }
+
+fn test_a_set_missing_two_variants_is_refused_at_the_call() {
+  println(s2_dm(A { n: 0 }));
+  x: K = B { n: 1 };
+  println(s2_dm(x));
+}

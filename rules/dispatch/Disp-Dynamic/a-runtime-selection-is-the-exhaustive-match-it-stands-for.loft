@@ -8,7 +8,7 @@
 // answers.  Crossed with a set covering each variant one by one (no enum member), a set whose
 // enum member covers the rest, values coming from a vector walk, and a second argument.
 // The refusal half (a set missing a variant) is the sibling cell
-// `a-set-missing-two-variants-is-refused-at-the-call.loft`.
+// `a-runtime-call-whose-set-misses-a-variant-is-refused-naming-it-refused.loft`.
 //
 // CHANNEL: the assertions and the leak gate.
 // Every cell held on both backends when written; the ledger rows are in
