@@ -14,7 +14,7 @@
 // CHANNEL: the compile diagnostic.
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the receiver slot and the method.
-// HOLDS: `a-nullable-narrow-receiver-reaches-its-nullable-twin` beside it.
+// HOLDS: `a-call-reaches-the-method-spelled-for-its-receivers-nullability` beside it.
 
 fn fu(self: u8) -> integer { self + 1 }
 

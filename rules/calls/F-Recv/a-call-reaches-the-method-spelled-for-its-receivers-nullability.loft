@@ -1,0 +1,342 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL REACHES THE METHOD SPELLED FOR ITS RECEIVER'S NULLABILITY (`@FR-F-Recv`, with
+// `@FR-N-Store` and `@FR-N-Intro`).  `m(τ)` and `m(τ?)` are two definitions of one method, and the
+// methods of `τ` and of `τ?` are one set: a call reaches the one spelled for its receiver —
+// whichever order the pair is declared in and whichever way the call is written (loft#1432), the
+// synthesised variant dispatcher counts a `fn area(self: Square?)` as implementing its variant
+// (loft#1427), a dense receiver reaches `m(τ?)` freely, and a nullable receiver reaching `m(τ)`
+// is N-Store's case.  Three sections, each with its cells and receipt; the first keeps both of a
+// pair's text bodies branching, around a different abandoned-dispatcher shape (loft#1430).
+//
+// ── 1427-a-nullable-receiver-implements-its-variant ──
+//
+// loft#1427 — which variant a method's RECEIVER names.
+//
+// `fn_key` keys `t_<τ>_m` and `t_<τ?>_m` apart so the two are distinct overloads (@PLN25), and
+// `find_fn` reaches the `τ?` one from a DENSE receiver when no dense one is declared — so the
+// methods of `τ` and the methods of `τ?` are ONE set (`@FR-F-Recv`).  The synthesised variant
+// dispatcher enumerates that set, and asked bare (`Type::Reference(v)` of an
+// `Optional(Reference(v))` is no match) a `fn area(self: Square?)` implemented no variant at
+// all: the arm was never emitted and the dispatch fell to the no-variant-matched tail, which
+// answers another variant's bytes on `--interpret` and `0` on `--native`.
+//
+// Every cell is a DISPATCH through the enum beside the DIRECT call on the variant, because the
+// defect is precisely the two answering differently: the direct call was right throughout.
+//
+// Axes this file MOVES:  how many implementations are nullable (one · all · one of three ·
+//                        both spellings for one variant), the return kind (`integer`, `text` —
+//                        the dispatcher forwards a text accumulator), the arity (a second
+//                        parameter), the payload kind behind the receiver (`integer` · `text` ·
+//                        `vector<integer>`), the evaluation count (once · in a loop), and the
+//                        receiver at the direct call (dense · nullable · ABSENT, the
+//                        null-tolerant idiom the `self: τ?` spelling exists for).
+// Axes it HOLDS FIXED:   two-variant enums with one integer payload field, except the
+//                        three-variant cell, whose third variant has no implementation at all
+//                        and is what keeps the warning half honest (loft#1427's parse_errors
+//                        twin `nullable_receiver_implements_its_variant` counts the reports;
+//                        a `.loft` guard cannot assert a warning's ABSENCE — unexpected
+//                        warnings are tolerated by the runner).
+//
+// The text cells give BOTH implementations a branching body on purpose: an implementation that
+// builds its text in a branch carries a hidden `___acc_1` accumulator its literal-returning
+// twin does not, and the dispatcher is abandoned silently when only one of them has it
+// (loft#1430, pre-existing and a different mechanism).
+//
+// The ALL-nullable enum is in `1427b`, not here: with no dense implementation there is no
+// dispatcher at all on the pre-fix build, so `t.side()` is read as a field access and the file
+// would prove itself through the exit channel rather than through the values it is about.
+//
+// @falsified-at: e9f45817 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native
+//   exit 1 -> 0, native 1 assertion failures -> 0.  The failing assertion is e1: `b.area()`
+//   answers a garbage number there that varies run to run (8858, 9303) on `--interpret` and `0`
+//   on `--native`, where this file asserts 16.  e3 answers the empty text on the same build and
+//   e4 the same garbage; they are behind e1 in the same run.
+//   HOLDS: on --interpret, leak, panic, free-refusal, expectations are equal on both trees,
+//   measured by `scripts/falsify.sh --bulk` against e9f45817; falsify prints only the
+//   channels that MOVE, and requires HERE to be clean, so each of those is clean on both. The
+//   assertions/exit channel carries this one on that backend. The native side was not scored
+//   in that run.
+
+// e1 — one dense implementation, one on a nullable receiver.
+//
+// ── 1432-a-nullable-receiver-overload-resolves-in-either-order ──
+//
+// `m(t)` and `m(t?)` are TWO definitions of one method, and a call reaches the one spelled
+// for its receiver — whichever order the pair is declared in, and whichever way the call is
+// written.
+//
+// `@FR-F-Recv` gives both halves. The def key carries the `?` (@PLN25), so the two overloads
+// are two definitions; and a call on an absent receiver "reaches it with `self == null`,
+// which is the whole point of the spelling". What the rule lacked was the RESOLUTION ORDER,
+// and this file is that sentence made executable: the receiver's own nullability first, the
+// other second. A `t?` receiver reaching `m(t)` is `(N-Store)`'s case and warns; a `t`
+// receiver reaching `m(t?)` is `(N-Intro)` and is free.
+//
+// Two spellings of ONE call disagreed, in BOTH directions, and each direction hid the other:
+//
+//   * with both overloads declared, `z.area()` on an absent receiver answered the DENSE
+//     overload's value while `area(z)` beside it answered the nullable one. `find_fn` already
+//     implemented the rule; the method spelling never asked it, resolving through the type's
+//     ATTRIBUTE TABLE instead, which holds one routine per name. So the nullable overload was
+//     not merely unreachable but inert — deleting it changed nothing — and the author was
+//     told their receiver was undischarged in a program declaring the overload written for
+//     exactly that (loft#1432).
+//
+//   * with ONLY the nullable overload declared, the disagreement ran the other way:
+//     `d.area()` on a dense receiver answered 200 through that same attribute table, while
+//     `area(d)` was refused as an unknown function, because `find_fn`'s fallback list named
+//     the nullable receiver's direction and not the dense one's. Routing method calls through
+//     `find_fn` without making that list symmetric would have turned a working cell into a
+//     refusal, which is why `only_nullable_is_reached_from_a_dense_receiver` is here.
+//
+// And the declaration ORDER decided which of two things the same two lines meant: dense-first
+// was accepted with a dead overload, nullable-first was refused as a redefinition. No reading
+// of the rule defends that, so `nullable_declared_first_resolves_the_same` is the cell that
+// holds the two orders to one answer. The attribute slot now carries the method's NAME —
+// membership, and what every enumeration site reads — never the choice between its overloads;
+// the DENSE definition owns the slot in either order, which is the one
+// `one_implementation_per_variant` (loft#1427) prefers.
+//
+// Controls, each load-bearing:
+//   * `Dense1432` declares ONLY the dense overload, so a nullable receiver must still reach it
+//     and still warn `(N-Store)`. That is the case the warning is TRUE for, and a cell where it
+//     goes quiet means the fix suppressed the diagnostic rather than resolving the overload.
+//   * `Only1432` declares ONLY the nullable one, reached from all three receivers including a
+//     dense one — the direction above that a one-sided fallback list breaks.
+//   * every cell is written BOTH ways, `x.area()` and `area(x)`, because one spelling agreeing
+//     with the expected value proves nothing about the other; the defect was that they differed.
+//   * the TAGGED spelling of `t?`. A nullable LOCAL is `Type::Optional`, but an inline slot holds
+//     an absent `Duo` as the synthetic `__nullable<Duo>` enum (`@FR-L-Null-Tag`) — one notion,
+//     two spellings, and dispatch reads the receiver's nullability. Every other cell here uses a
+//     local, so without `Tagged1432` the whole file could pass while a `vector<Duo?>` element and
+//     a `Duo?` field went to the DENSE overload. Reading only the marker is the shape this fix is
+//     about, one level down.
+//
+// The warning COUNT is an assertion in its own right: only the four `Dense1432` cells may warn,
+// which is why those four are the only asserts here whose MESSAGE does not interpolate the call
+// it is about — an interpolated call is a second call and a second warning, and the count stops
+// meaning "one per cell". An extra warning fails this file exactly as a missing one does, and an
+// extra one is what a fix that widened past nullability would produce.
+//
+// @falsified-at: 3260ec804 — interpret and native both exit non-zero and the file does not run
+//   at all, because `Rev1432` (the nullable-first pair) is refused as a redefinition and
+//   `Only1432`'s `area(o_dense)` is refused as an unknown function. Two compile refusals, so
+//   for this guard the channel is the process exit rather than an assert; the resolution cells
+//   below it cannot be reached on that build to fail on their values.
+//
+//   CHANNEL: the exit channel, measured on --interpret against 3260ec804 by
+//   `scripts/falsify.sh --bulk`.
+//   HOLDS: assertions, leak, panic, free-refusal, expectations are equal on both trees.
+//   Falsify prints only the channels that MOVE and requires HERE to be clean, so each of
+//   those is clean on both. The native side was not scored in this sweep.
+// @EXPECT_WARNING: a nullable `Dense1432?` is stored into parameter 1 of `s2_area` of the non-null type `Dense1432`
+// @EXPECT_WARNING: a nullable `Dense1432?` is stored into parameter 1 of `s2_area` of the non-null type `Dense1432`
+// @EXPECT_WARNING: a nullable `Dense1432?` is stored into parameter 1 of `s2_area` of the non-null type `Dense1432`
+// @EXPECT_WARNING: a nullable `Dense1432?` is stored into parameter 1 of `s2_area` of the non-null type `Dense1432`
+//   ⚠ That control is on no public ref, so this receipt records a falsification that
+//   cannot be re-run — see GUARDS.md § The patch receipt for the form that can be.
+//
+// ── a-nullable-narrow-receiver-reaches-its-nullable-twin ──
+//
+// A NULLABLE NARROW RECEIVER REACHES ITS NULLABLE TWIN, AND A NULLABLE WIDE ONE WARNS INTO THE
+// DENSE BODY (`@FR-F-Recv` crossed with `@FR-N-Store` and `@FR-N-Intro`).  F-Recv: `m(τ)` and
+// `m(τ?)` are two definitions and a call reaches the one spelled for its receiver's own
+// nullability; a `τ` receiver reaching `m(τ?)` is N-Intro and free; a `τ?` receiver reaching
+// `m(τ)` is N-Store's case — a warning for a wide τ (the null arrives in the body), the error
+// of the refusal cell beside this one for a narrow τ.  The existing cells hold the receiver to
+// a struct; this one moves it to a narrow scalar (`u8`) and a wide one (`integer`), in both
+// call spellings, present and absent.
+//
+// Values hand-computed: `fu(u8)` answers self + 1, `fu(u8?)` 1000 + self or 500 when absent;
+// `fw(integer)` answers self * 2, which is null for an absent receiver (N-Prop).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 1 of `fw`
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 1 of `fw`
+// @EXPECT_WARNING: a nullable `integer?` is stored into parameter 1 of `fw`
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts and the warnings.
+// ARMED: no instrument.
+// WITNESS: each message prints the answers.
+// HOLDS: the refusal cell beside it.
+
+enum Shape { Circle { r: integer }, Square { s: integer } }
+fn area(self: Circle) -> integer { self.r * 3 }
+fn area(self: Square?) -> integer { if self == null { -1 } else { self.s * self.s } }
+
+// e3 — a `text` return, which the dispatcher delivers through a forwarded buffer.
+enum Word { Wa { a: integer }, Wb { b: integer } }
+fn label(self: Wa) -> text { if self.a == 1 { "wa1" } else { "wa2" } }
+fn label(self: Wb?) -> text { if self == null { "none" } else { "wb" } }
+
+// e4 — a second parameter, which the dispatcher forwards to every arm.
+enum Arg { Ax { x: integer }, Ay { y: integer } }
+fn scale(self: Ax, k: integer) -> integer { self.x * k }
+fn scale(self: Ay?, k: integer) -> integer { if self == null { -1 } else { self.y * k } }
+
+// e5 — the dense control: both implementations dense, which was right throughout.
+enum Sh3 { Ci3 { r: integer }, Sq3 { s: integer } }
+fn ar3(self: Ci3) -> integer { self.r * 3 }
+fn ar3(self: Sq3) -> integer { self.s * self.s }
+
+// e6 — BOTH spellings for one variant.  A direct call takes the dense one, so the arm must
+// too: the dispatcher keeps one implementation per variant and prefers the dense spelling.
+// (The reverse declaration order is refused as a redefinition — loft#1432.)
+enum Sh11 { C11 { r: integer }, S11 { s: integer } }
+fn ar11(self: C11) -> integer { self.r }
+fn ar11(self: S11) -> integer { self.s * 25 }
+fn ar11(self: S11?) -> integer { if self == null { -1 } else { self.s * 50 } }
+
+// e7 — a HEAP payload (a `text` field) read through a nullable receiver, and a vector one
+// beside it: the arm has to project the payload before the body reads it, whichever the field
+// holds.
+enum Note { Tag { t: text }, Nums { ns: vector<integer> } }
+fn plen(self: Tag?) -> integer { if self == null { -1 } else { self.t.len() } }
+fn plen(self: Nums) -> integer { self.ns.len() }
+
+fn test_a_nullable_receiver_implements_its_variant() {
+  // e1 — the dispatch answers what the direct call answers.
+  b: Shape = Square { s: 4 };
+  c: Shape = Circle { r: 2 };
+  assert(b.area() == 16, "e1 a nullable-receiver implementation is dispatched to: {b.area()}");
+  assert(c.area() == 6, "e1d its dense sibling still is: {c.area()}");
+  d: Square = Square { s: 4 };
+  assert(d.area() == 16, "e1n the direct call on a dense receiver: {d.area()}");
+  z: Square? = null;
+  assert(z.area() == -1, "e1z the absent receiver the `self: τ?` spelling is written for");
+
+  // e3 — a text return.
+  wa: Word = Wa { a: 1 };
+  wb: Word = Wb { b: 1 };
+  assert(wa.label() == "wa1", "e3 dense text arm: {wa.label()}");
+  assert(wb.label() == "wb", "e3b nullable text arm: {wb.label()}");
+
+  // e4 — a forwarded second parameter.
+  ax: Arg = Ax { x: 3 };
+  ay: Arg = Ay { y: 3 };
+  assert(ax.scale(2) == 6, "e4 dense arm with an argument: {ax.scale(2)}");
+  assert(ay.scale(2) == 6, "e4b nullable arm with an argument: {ay.scale(2)}");
+
+  // e7 — heap payloads, and the dispatch repeated in a LOOP: an arm that projects a payload
+  // must do it per call, not once.
+  n1: Note = Tag { t: "hi" };
+  n2: Note = Nums { ns: [1, 2, 3] };
+  assert(n1.plen() == 2, "e7 a text payload read through a nullable receiver: {n1.plen()}");
+  assert(n2.plen() == 3, "e7b and its dense sibling over a vector payload: {n2.plen()}");
+  acc = 0;
+  for i in 0..3 { acc = acc + b.area(); }
+  assert(acc == 48, "e7c the same dispatch repeated answers the same each time: {acc}");
+
+  // e5 — the control.
+  e5a: Sh3 = Sq3 { s: 4 };
+  e5b: Sh3 = Ci3 { r: 2 };
+  assert(e5a.ar3() == 16 && e5b.ar3() == 6, "e5 the all-dense enum is unchanged");
+
+  // e6 — both spellings for one variant: dispatch agrees with the direct call.
+  e6: Sh11 = S11 { s: 4 };
+  e6d: S11 = S11 { s: 4 };
+  assert(e6.ar11() == e6d.ar11(), "e6 dispatch and direct call pick the same overload: {e6.ar11()} {e6d.ar11()}");
+  assert(e6.ar11() == 100, "e6b and it is the dense one: {e6.ar11()}");
+}
+
+struct Duo1432 { s: integer }
+fn s2_area(self: Duo1432) -> integer { self.s * 10 }
+fn s2_area(self: Duo1432?) -> integer { if self == null { -1 } else { 200 } }
+
+struct Rev1432 { s: integer }
+fn s2_area(self: Rev1432?) -> integer { if self == null { -1 } else { 200 } }
+fn s2_area(self: Rev1432) -> integer { self.s * 10 }
+
+struct Dense1432 { s: integer }
+fn s2_area(self: Dense1432) -> integer { self.s * 10 }
+
+struct Only1432 { s: integer }
+fn s2_area(self: Only1432?) -> integer { if self == null { -1 } else { 200 } }
+
+struct Tagged1432 { one: Duo1432? }
+
+fn test_a_nullable_receiver_overload_resolves_in_either_order() {
+  // ---- dense declared first, then the nullable overload ----
+  d_dense = Duo1432 { s: 3 };
+  d_present: Duo1432? = Duo1432 { s: 4 };
+  d_absent: Duo1432? = null;
+  assert(d_dense.s2_area() == 30, "a dense receiver takes the dense overload: {d_dense.s2_area()}");
+  assert(s2_area(d_dense) == 30, "and the free spelling agrees: {s2_area(d_dense)}");
+  assert(d_present.s2_area() == 200, "a present nullable takes the NULLABLE overload: {d_present.s2_area()}");
+  assert(s2_area(d_present) == 200, "and the free spelling agrees: {s2_area(d_present)}");
+  assert(d_absent.s2_area() == -1, "an absent receiver reaches it with self == null: {d_absent.s2_area()}");
+  assert(s2_area(d_absent) == -1, "and the free spelling agrees: {s2_area(d_absent)}");
+
+  // ---- the SAME pair declared in the other order: one answer, not two ----
+  r_dense = Rev1432 { s: 3 };
+  r_present: Rev1432? = Rev1432 { s: 4 };
+  r_absent: Rev1432? = null;
+  assert(r_dense.s2_area() == 30, "nullable-first still gives the dense receiver the dense overload: {r_dense.s2_area()}");
+  assert(s2_area(r_dense) == 30, "and the free spelling agrees: {s2_area(r_dense)}");
+  assert(r_present.s2_area() == 200, "a present nullable takes the nullable overload: {r_present.s2_area()}");
+  assert(s2_area(r_present) == 200, "and the free spelling agrees: {s2_area(r_present)}");
+  assert(r_absent.s2_area() == -1, "an absent receiver reaches it with self == null: {r_absent.s2_area()}");
+  assert(s2_area(r_absent) == -1, "and the free spelling agrees: {s2_area(r_absent)}");
+
+  // ---- control: ONLY the dense overload, so a nullable receiver reaches it AND warns ----
+  s_dense = Dense1432 { s: 3 };
+  s_present: Dense1432? = Dense1432 { s: 4 };
+  s_absent: Dense1432? = null;
+  assert(s_dense.s2_area() == 30, "the only overload there is: {s_dense.s2_area()}");
+  assert(s2_area(s_dense) == 30, "and the free spelling agrees: {s2_area(s_dense)}");
+  assert(s_present.s2_area() == 40, "a present nullable falls back to the dense one");
+  assert(s2_area(s_present) == 40, "and the free spelling agrees");
+  assert((s_absent.s2_area() ?? -99) == -99, "an absent receiver in a dense overload answers null");
+  assert((s2_area(s_absent) ?? -99) == -99, "and the free spelling agrees");
+
+  // ---- control: ONLY the nullable overload, reached from a DENSE receiver too ----
+  o_dense = Only1432 { s: 3 };
+  o_present: Only1432? = Only1432 { s: 4 };
+  o_absent: Only1432? = null;
+  assert(o_dense.s2_area() == 200, "a dense receiver widens into the nullable overload: {o_dense.s2_area()}");
+  assert(s2_area(o_dense) == 200, "and the free spelling agrees — this one used to be refused: {s2_area(o_dense)}");
+  assert(o_present.s2_area() == 200, "a present nullable takes it directly: {o_present.s2_area()}");
+  assert(s2_area(o_present) == 200, "and the free spelling agrees: {s2_area(o_present)}");
+  assert(o_absent.s2_area() == -1, "an absent receiver reaches it with self == null: {o_absent.s2_area()}");
+  assert(s2_area(o_absent) == -1, "and the free spelling agrees: {s2_area(o_absent)}");
+
+  // ---- the TAGGED spelling of `Duo1432?`: an inline slot, not an Optional local ----
+  elems: vector<Duo1432?> = [Duo1432 { s: 4 }, null];
+  assert(elems[0].s2_area() == 200, "a present ELEMENT reaches the nullable overload: {elems[0].s2_area()}");
+  assert(elems[1].s2_area() == -1, "and an absent one reaches it with self == null: {elems[1].s2_area()}");
+
+  held = Tagged1432 { one: Duo1432 { s: 5 } };
+  gone = Tagged1432 { one: null };
+  assert(held.one.s2_area() == 200, "a present FIELD reaches the nullable overload: {held.one.s2_area()}");
+  assert(gone.one.s2_area() == -1, "and an absent one reaches it with self == null: {gone.one.s2_area()}");
+}
+
+fn fu(self: u8) -> integer { self + 1 }
+fn fu(self: u8?) -> integer { if self == null { 500 } else { 1000 + self } }
+
+fn fw(self: integer) -> integer { self * 2 }
+
+fn test_a_narrow_receiver_reaches_the_definition_of_its_own_nullability() {
+  b: u8? = 7;
+  z: u8? = null;
+  c: u8 = 9;
+  d = b?;
+  assert(b.fu() == 1007 && fu(b) == 1007, "present u8?: {b.fu()} {fu(b)}");
+  assert(z.fu() == 500 && fu(z) == 500, "absent u8?: {z.fu()} {fu(z)}");
+  assert(c.fu() == 10 && fu(c) == 10, "dense u8: {c.fu()} {fu(c)}");
+  assert(d.fu() == 8, "a discharged receiver reaches the dense body: {d.fu()}");
+}
+
+fn test_a_wide_nullable_receiver_warns_into_the_dense_body() {
+  n: integer? = 21;
+  z: integer? = null;
+  a = n.fw();
+  b = fw(n);
+  c = z.fw() ?? -1;
+  assert(a == 42 && b == 42 && c == -1, "integer? into fw(integer): {a} {b} {c}");
+}
+
