@@ -8,7 +8,14 @@
 // a callee.  Every cell held on both backends when written; the ledger row is in
 // doc/claude/RULE_CROSSINGS-history.md.
 //
-// CHANNEL: the assertions and the leak gate.
+// @falsified-at: e99d3a1cb (switch A/B, `LOFT_NO_CALLEE_DISTURB=1`) — interpret and native-c 1 of 3 tests fail each: the
+//   middle element viewed across a removal ONE FRAME DOWN reads the neighbour that shifted in.
+//   The last-element cells cannot fail this way (the old last slot keeps the element's bytes);
+//   the middle-element cell is the one a stale view fails.
+//   CHANNEL: the assertions and the leak gate.
+//   WITNESS: `in a callee:` reads 3 for the viewed element where the copy keeps 2.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the earlier-element cell (untouched by the removal).
 
 struct S { n: integer }
 
@@ -23,6 +30,20 @@ fn test_a_view_of_a_later_element() {
   f = w[2];
   drop_first(w);
   assert(f.n == 3 && len(w) == 2, "in a callee: {f.n} {len(w)}");
+}
+
+// A MIDDLE element: after the removal its slot holds the neighbour that shifted in (`3`), so a
+// view left naming the slot reads 3 where the copy keeps 2.  The last-element cells above cannot
+// tell the two apart — the old last slot still holds the element's bytes — and this one can.
+fn test_a_view_of_a_middle_element() {
+  v = [S { n: 1 }, S { n: 2 }, S { n: 3 }];
+  e = v[1];
+  v.remove(0);
+  assert(e.n == 2 && v[0].n == 2 && v[1].n == 3, "here: {e.n} {v[0].n} {v[1].n}");
+  w = [S { n: 1 }, S { n: 2 }, S { n: 3 }];
+  f = w[1];
+  drop_first(w);
+  assert(f.n == 2 && w[1].n == 3, "in a callee: {f.n} {w[1].n}");
 }
 
 fn test_a_view_of_an_earlier_element() {
