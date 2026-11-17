@@ -1,0 +1,140 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WHOLE WRITE THROUGH A LINK TO A PLAIN PARAMETER REBINDS THE CALLEE'S NAME ONLY
+// (`@FR-F-ParamRebind`, `@FR-O-Complete`).  `cur = &n` then `cur = &cur.next` or `cur = N { … }`
+// does what `n = …` does: the store the parameter held is the caller's, and the caller keeps it —
+// releasing it was a use after free — while a record the callee writes is the callee's to
+// release (it was released by nobody: one record per call).  A link to a `&` parameter
+// (`@FR-F-ParamRef`) and to an owned local still release what they displace.  Two sections, each
+// with its cells and receipt: the re-pointing walk, read by the caller under the store checks,
+// and the written record, once, twice and over a null.
+//
+// ── a-link-to-a-plain-parameter-walks-without-releasing-the-callers-list ──
+//
+// `@FR-F-ParamRebind` — a whole write through a link to a PLAIN parameter (`cur = &n; cur =
+// &cur.next`) rebinds the callee's name only: the store the parameter held is the caller's, and
+// the caller keeps its list.  A link to a `&` parameter (`@FR-F-ParamRef`) and to an owned local
+// still release what they displace.  Every answer is hand-computed; the caller reads its list
+// after each call, under the store checks, where a release of the caller's store shows as a use
+// after free even while its bytes still read right.
+//
+// @ARMED: LOFT_STRICT_STORES=1
+// @falsified-at: the write-back of a slot move releasing whatever the link displaced
+//   (`slot_move`, `free_displaced`): interpret and native-c reported USE AFTER FREE in `main`
+//   after `walk_param` freed `h`'s store -> ok.
+// CHANNEL: the asserts, the strict store checks and the leak gate.
+//
+// ── a-write-through-a-link-to-a-plain-parameter-is-released ──
+//
+// `@FR-F-ParamRebind`, `@FR-O-Complete` — A WRITE THROUGH A LINK TO A PLAIN PARAMETER IS
+// RELEASED.  `cur = &n; cur = N { … }` rebinds the by-value parameter `n` as `n = N { … }` does:
+// the caller's record stays the caller's (freeing it was a use-after-free), and the record the
+// callee wrote is the callee's to release.  It was released by nobody: one record per call.  The
+// write now takes the direct rebind's entry witness (`Parser::rebind_param_through_link`).
+//
+// Axes it MOVES: how often the link writes (once, twice — the first written record displaced),
+// the caller's value (a record, null), and a re-point (`cur = &cur.next`, which writes nothing).
+// Each cell checks the callee's answer AND that the caller's record is unchanged; `main` runs
+// every cell so the leak gate reads the file.  Values are hand-computed.
+//
+// Found by the store records (loft2-83).  Falsified by its switch: `LOFT_NO_LINK_PARAM_REBIND=1`
+// leaks one `N` per call under the leak gate, on the interpreter and the C backend.
+
+struct N { v: integer, name: text, next: N? }
+
+fn chain(k: integer) -> N {
+  h = N { v: 1, name: "a" };
+  for i in 2..k + 1 { h = N { v: i, name: "n{i}", next: h }; }
+  h
+}
+
+fn total_of(n: N?) -> integer {
+  s = 0;
+  c = &n;
+  while c != null { s += c.v; c = &c.next; }
+  s
+}
+
+// a link to a plain parameter: the walk drains only the callee's name
+fn walk_param(n: N?) -> integer {
+  cur = &n;
+  k = 0;
+  while cur != null { k += cur.v * 10 + len(cur.name); cur = &cur.next; }
+  k
+}
+
+// a link to a plain parameter, null written through it
+fn null_param(n: N?) -> boolean {
+  cur = &n;
+  cur = null;
+  n == null
+}
+
+// a `&` parameter: the walk's write reaches the caller
+fn drop_head(n: &N?) {
+  cur = &n;
+  cur = &cur.next;
+}
+
+fn test_a_link_to_a_plain_parameter_walks_without_releasing_the_callers_list() {
+  h = chain(4);
+  // 4*10+2 + 3*10+2 + 2*10+2 + 1*10+1
+  assert(walk_param(h) == 107, "walk: {walk_param(h)}");
+  assert(total_of(h) == 10 && h.v == 4, "the caller keeps its list after a walk: {total_of(h)}");
+  assert(null_param(h), "null through the link");
+  assert(total_of(h) == 10, "the caller keeps its list after a null: {total_of(h)}");
+  // an owned local drained through a link: its store is released at the end
+  l = chain(3);
+  c = &l;
+  t = 0;
+  while c != null { t += c.v; c = &c.next; }
+  assert(t == 6 && l == null, "an owned local drained: {t}");
+  // a `&` parameter: the caller's head is dropped
+  g = chain(3);
+  drop_head(g);
+  assert(g.v == 2 && total_of(g) == 3, "a & parameter's head dropped: {total_of(g)}");
+  println("link walks ok");
+}
+
+struct S2N { v: integer, name: text, next: S2N? }
+
+fn once(n: S2N?) -> integer { cur = &n; cur = S2N { v: 77, name: "zz" }; n.v ?? -1 }
+fn twice(n: S2N?) -> integer {
+  cur = &n;
+  cur = S2N { v: 5, name: "a" };
+  cur = S2N { v: 6, name: "b" };
+  n.v ?? -1
+}
+fn repoint(n: S2N?) -> integer {
+  cur = &n;
+  k = 0;
+  while cur != null { k += cur.v; cur = &cur.next; }
+  k
+}
+
+fn test_written_once() {
+  h = S2N { v: 4, name: "n4", next: S2N { v: 3, name: "n3" } };
+  r = 0;
+  for i in 0..3 { r += once(h); }
+  assert(r == 231 && h.v == 4 && h.next.v == 3, "once: {r} {h.v}");
+}
+
+fn test_written_twice() {
+  h = S2N { v: 4, name: "n4" };
+  r = 0;
+  for i in 0..3 { r += twice(h); }
+  assert(r == 18 && h.v == 4 && h.name == "n4", "twice: {r} {h.v} {h.name}");
+}
+
+fn test_a_null_argument() {
+  r = once(null);
+  assert(r == 77, "null: {r}");
+}
+
+fn test_a_repoint_writes_nothing() {
+  h = S2N { v: 4, name: "n4", next: S2N { v: 3, name: "n3" } };
+  r = repoint(h) + repoint(h);
+  assert(r == 14 && h.v == 4 && h.next.v == 3, "repoint: {r}");
+}
+
