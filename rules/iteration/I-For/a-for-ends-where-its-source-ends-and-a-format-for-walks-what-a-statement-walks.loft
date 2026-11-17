@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A `for` ENDS WHERE ITS SOURCE ENDS, AND A FORMAT STRING'S `for` WALKS WHAT A STATEMENT WALKS
+// (`@FR-I-For`, `(I-Done)`, loft#2415).  A vector at its length, a text at its last character, a custom
+// iterator when `next` answers null — never at a falsy item — and a format `for` walks vectors and
+// struct-enum items alike.  Two sections, each with its cells and receipt.
+//
+// ── 2415-every-for-ends-where-its-source-ends-not-at-a-falsy-item ──
+//
 // A `for` ends where its source does — a vector at its length, a text at its last character,
 // a custom iterator when `next` answers null — `@FR-I-For`, `(I-Done)`.  A format string's
 // `for` and a comprehension are the same loop (`(I-Comp)`), and both ended on the ITEM
@@ -14,6 +21,15 @@
 // and asks the three agree with the value worked out by hand.  The items a format `for` refused
 // outright are 2415b's, so a refusal there cannot hide a wrong answer here.
 // @falsified-at: 369b941cf — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 2 -> 0
+// HOLDS: leak and panic are clean on both backends.
+//
+// ── 2415b-a-format-for-walks-vector-and-struct-enum-items ──
+//
+// A format string's `for` walks any item a `for` statement walks (`@FR-I-For`, `(I-Comp)`).  It
+// ended its loop on `!item`, which a vector and a struct enum do not have, so
+// `"{for v in vs { len(v) }}"` was refused with "No matching operator '!' on 'vector<integer>'"
+// — an operator the program never wrote (loft#2415).  The runtime half is 2415's.
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
 // HOLDS: leak and panic are clean on both backends.
 
 struct Flip2415 { n: integer, max: integer }
@@ -73,9 +89,16 @@ fn test_a_custom_iterator() {
   assert("{pv}" == "[2,2,2]", "vector comprehension {pv}");
 }
 
-fn main() {
-  test_a_boolean_vector();
-  test_a_null_element_is_an_element();
-  test_a_text_source();
-  test_a_custom_iterator();
+
+enum Nd2415 { NdNull, NdInt { n: integer } }
+
+
+fn test_vector_and_struct_enum_items() {
+  vs = [[1, 2], [3]];
+  ops = [Nd2415::NdInt { n: 1 }, Nd2415::NdNull];
+  assert("{for v in vs { len(v) }}" == "[2,1]", "vector items");
+  assert("{for o in ops { o }}" == "[NdInt {{n:1}},NdNull {{}}]", "struct-enum items");
+  assert("{[for o in ops { o }]}" == "[NdInt {{n:1}},NdNull {{}}]", "struct-enum comprehension");
+  assert("{for p in Pairs2415 { n: 0, max: 3 } { len(p) }}" == "[2,2,2]", "vector format");
 }
+
