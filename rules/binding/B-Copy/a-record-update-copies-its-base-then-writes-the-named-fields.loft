@@ -1,0 +1,363 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD UPDATE COPIES ITS BASE, THEN WRITES THE NAMED FIELDS (`@FR-B-Copy`).  `d = S { f: e,
+// ..b }` is the bind `d = b` followed by the writes `d.f = e`, in one expression: the copy is
+// independent of `b` whatever shape `b` has, each field value reads what its names held when the
+// statement began (`(E-Asgn)`), every temporary the construction makes is released once, and a
+// variant literal `V { …, ..b }` takes a `b` whose static type is `V`, so the copy carries the
+// tag with no runtime check.  What an update refuses is the sibling
+// `an-update-refuses-what-a-copy-cannot-carry`.  One test per axis family; values hand-computed
+// in every assertion.
+//
+//   test_the_destinations_and_the_field_kinds — the destination (a fresh local, the base's own
+//     variable, a temporary handed to a call, a returned value, a postfix), a local or parameter
+//     base, the fields written (integer, text, vector, stored reference), two in the opposite
+//     order of the declaration.  The OCaml bar's H1 (loft-lang/plans#202 P2).
+//   test_a_base_that_views_a_place — a value branch of fields, of elements, of a field and a
+//     local, and a field and an element read directly; every place re-read (loft#2184).
+//   test_a_view_base_built_as_a_temporary — a field- or element-read base built as an argument,
+//     an appended element, a postfix, a field assignment, a named local in a loop (loft#2370).
+//   test_the_fields_read_what_the_destination_held — an update bound to its own variable: a swap,
+//     a rotation of three, either field order, a `value struct`, text fields, a field read
+//     twice, the destination through a call; controls on another destination (loft#2368).
+//   test_one_nested_update_releases_the_first_literal, test_passed_straight_to_a_call,
+//     test_two_levels, test_in_a_loop — an update nested in an update's field (loft#2371).
+//   test_a_variant_base_typed_as_that_variant — the variant spelling over every base (local,
+//     parameter, call, value branch, variant field, the checked cast of a local, an element and
+//     an enum field) and destination (enum-typed, nullable, re-bound, in a loop, temporary,
+//     postfix, appended), with text, vector and stored-reference fields (plans#202 P2b).
+//
+// @ARMED: LOFT_STRICT_STORES=1
+//
+// The receipts, one per test family (merged from the cells that held them; none had a patch):
+// @falsified-at: b36d0449f — test_the_destinations_and_the_field_kinds: refused there on both
+//   backends, "Expect token ;" at the `..`.
+//   CHANNEL: the compile, then the asserts.
+//   WITNESS: each message prints the fields read.
+//   HOLDS: the refusals of `an-update-refuses-what-a-copy-cannot-carry` beside it.
+// @falsified-at: fdd915061 — test_a_base_that_views_a_place: interpret and native, "a value
+//   branch of fields: copy=9 base=9" (the write reached `h.u`).
+//   CHANNEL: the asserts.
+//   WITNESS: each message prints the copy and the place it was taken from.
+//   HOLDS: a field and an element read directly copy on both builds.
+// @falsified-at: 0e95172cd — test_a_view_base_built_as_a_temporary: interpret and native exit
+//   1 -> 0, one assertion failure each -> 0.
+//   CHANNEL: the asserts.
+//   WITNESS: each message prints the value read back and the base after it.
+//   HOLDS: the named-local control passes on both builds.
+// @falsified-at: 0e95172cd — test_the_fields_read_what_the_destination_held: interpret and
+//   native exit 1 -> 0, one assertion failure each -> 0 (the swap answered `2 2`).
+//   CHANNEL: the asserts.
+//   WITNESS: each message prints the fields read back.
+//   HOLDS: the one-field, other-destination and plain-literal controls pass on both builds.
+// @falsified-at: 0e95172cd — the four nested-update tests: interpret 3 of 4 fail (main also
+//   wrote the nested update through to its base, loft#2370); native-c the asserts hold and
+//   strict stores report NEVER FREED `kt=100 Inner×2`.  Scored by hand against the installed
+//   main build.
+//   CHANNEL: the strict-store exit status, and on main's interpreter the asserts.
+//   ARMED: LOFT_STRICT_STORES=1 (the file's header arms every test with it).
+//   WITNESS: main's C run reports `not freed at program exit: kt=100 Inner×2`.
+//   HOLDS: every assert, on both builds; a single literal and a plain nested literal leak nothing.
+// @falsified-at: fdd915061 — test_a_variant_base_typed_as_that_variant: refused there on both
+//   backends, "`..base` completes a struct literal, and `Bin` is a variant".
+//   CHANNEL: the compile, then the asserts.
+//   WITNESS: each message prints the fields read.
+//   HOLDS: the enum-typed-base refusals of `an-update-refuses-what-a-copy-cannot-carry`.
+
+struct Unit { hp: integer, x: integer, y: integer }
+struct Other { k: integer }
+struct Rec { i: integer, t: text, v: vector<integer>, r: reference<Other> }
+
+fn show(u: Unit) -> text { "{u.hp}/{u.x}/{u.y}" }
+fn hurt(u: Unit) -> Unit { Unit { hp: u.hp - 1, ..u } }
+
+fn test_the_destinations_and_the_field_kinds() {
+  u = Unit { hp: 10, x: 3, y: 4 };
+  // A fresh local.
+  d = Unit { hp: 0, ..u };
+  assert(d.hp == 0 && d.x == 3 && d.y == 4, "the copy with hp written: {d.hp}/{d.x}/{d.y}");
+  assert(u.hp == 10, "the base keeps its value: {u.hp}");
+  // The base's own variable: the fields are written over the record it holds.
+  d = Unit { hp: 7, ..d };
+  assert(d.hp == 7 && d.x == 3, "over itself: {d.hp}/{d.x}");
+  // A temporary handed to a call.
+  s = show(Unit { hp: 0, ..u });
+  assert(s == "0/3/4" && u.hp == 10, "a temporary: {s}, the base untouched: {u.hp}");
+  // Returned, from a parameter base, twice over.
+  e = hurt(u);
+  f = hurt(e);
+  assert(e.hp == 9 && f.hp == 8 && f.y == 4 && u.hp == 10, "returned: {e.hp} {f.hp} {f.y} {u.hp}");
+  // A postfix on the literal.
+  n = Unit { hp: 5, ..u }.hp;
+  assert(n == 5 && u.hp == 10, "a postfix: {n}");
+  // Two fields, each reading the base, in the opposite order of the declaration.
+  g = Unit { y: u.hp, hp: u.y, ..u };
+  assert(g.hp == 4 && g.y == 10 && g.x == 3, "the fields read the base: {g.hp}/{g.x}/{g.y}");
+  // A text, a vector and a stored-reference field: the copy's are replaced, the base's kept.
+  o = Other { k: 9 };
+  p = Other { k: 4 };
+  a = Rec { i: 1, t: "aa", v: [1, 2], r: &o };
+  b = Rec { t: "tt", v: [7], r: &p, ..a };
+  p.k = 5;
+  assert(b.i == 1 && b.t == "tt" && len(b.v) == 1 && b.v[0] == 7 && b.r.k == 5, "b: {b.i} {b.t} {b.v} {b.r.k}");
+  assert(a.t == "aa" && len(a.v) == 2 && a.r.k == 9, "a untouched: {a.t} {a.v} {a.r.k}");
+}
+
+struct VpUnit { hp: integer, x: integer }
+struct VpHold { u: VpUnit, w: VpUnit }
+
+fn test_a_base_that_views_a_place() {
+  h = VpHold { u: VpUnit { hp: 1, x: 2 }, w: VpUnit { hp: 3, x: 4 } };
+  pick = h.u.x == 2;
+  // A value branch of two fields.
+  d = VpUnit { hp: 9, ..(if pick { h.u } else { h.w }) };
+  assert(d.hp == 9 && d.x == 2, "a value branch of fields: the copy {d.hp}/{d.x}");
+  assert(h.u.hp == 1 && h.w.hp == 3, "a value branch of fields: copy={d.hp} base={h.u.hp}");
+  // A value branch of two elements, the other arm taken.
+  us: vector<VpUnit> = [VpUnit { hp: 10, x: 20 }, VpUnit { hp: 30, x: 40 }];
+  e = VpUnit { x: 0, ..(if !pick { us[0] } else { us[1] }) };
+  assert(e.hp == 30 && e.x == 0, "a value branch of elements: the copy {e.hp}/{e.x}");
+  assert(us[1].x == 40 && us[0].x == 20, "a value branch of elements: {us[0].x} {us[1].x}");
+  // A value branch of a field and a local.
+  loc = VpUnit { hp: 50, x: 60 };
+  f = VpUnit { hp: 0, ..(if pick { loc } else { h.u }) };
+  assert(f.hp == 0 && f.x == 60 && loc.hp == 50, "a field or a local: {f.hp}/{f.x} {loc.hp}");
+  // A field and an element read directly: these copied before, and still do.
+  m = VpUnit { hp: 99, ..h.w };
+  p = VpUnit { hp: 98, ..us[0] };
+  assert(m.hp == 99 && m.x == 4 && h.w.hp == 3, "a field: {m.hp} {h.w.hp}");
+  assert(p.hp == 98 && p.x == 20 && us[0].hp == 10, "an element: {p.hp} {us[0].hp}");
+  // Every place, once more, at the end.
+  assert(h.u.hp == 1 && h.u.x == 2 && h.w.x == 4 && us[1].hp == 30, "the places at the end");
+}
+
+struct Inner { a: integer, b: integer }
+struct Outer { inner: Inner, k: integer }
+struct Bag { name: text, items: vector<integer> }
+struct Box { bag: Bag, n: integer }
+
+fn first_a(i: Inner) -> integer { i.a }
+fn count(b: Bag) -> integer { len(b.items) }
+
+fn test_a_view_base_built_as_a_temporary() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+
+  n = first_a(Inner { a: 7, ..h.inner });
+  assert(n == 7 && h.inner.a == 1, "an argument: {n}, base {h.inner.a}");
+
+  v: vector<Inner> = [];
+  v += [Inner { a: 8, ..h.inner }];
+  assert(v[0].a == 8 && v[0].b == 2 && h.inner.a == 1, "an appended element: {v[0].a} {v[0].b}, base {h.inner.a}");
+
+  m = Inner { a: 9, ..h.inner }.b;
+  assert(m == 2 && h.inner.a == 1, "a postfix: {m}, base {h.inner.a}");
+
+  o = Outer { inner: Inner { a: 0, b: 0 }, k: 0 };
+  o.inner = Inner { a: 6, ..h.inner };
+  assert(o.inner.a == 6 && o.inner.b == 2 && h.inner.a == 1, "a field assignment: {o.inner.a}, base {h.inner.a}");
+
+  xs = [Inner { a: 3, b: 4 }];
+  e = first_a(Inner { b: 0, ..xs[0] });
+  assert(e == 3 && xs[0].b == 4, "an element base: {e}, base {xs[0].b}");
+
+  x = Box { bag: Bag { name: "orig", items: [1, 2, 3] }, n: 1 };
+  k = count(Bag { items: [9], ..x.bag });
+  assert(k == 1 && len(x.bag.items) == 3 && x.bag.name == "orig", "a vector field: {k}, base {len(x.bag.items)} {x.bag.name}");
+
+  total = 0;
+  for i in 0..3 {
+    t = Bag { name: "loop{i}", ..x.bag };
+    total += len(t.items);
+    assert(t.name == "loop{i}", "the loop's copy is its own: {t.name}");
+  }
+  assert(total == 9 && len(x.bag.items) == 3, "a named local in a loop: {total}, base {len(x.bag.items)}");
+
+  // Control: a named local outside a loop.
+  y = Inner { a: 5, ..h.inner };
+  assert(y.a == 5 && y.b == 2 && h.inner.a == 1, "a named local: {y.a} {y.b}, base {h.inner.a}");
+}
+
+struct Pt { x: integer, y: integer }
+struct P3 { a: integer, b: integer, c: integer }
+value struct Vp { x: integer, y: integer }
+struct Tx { s: text, t: text }
+
+fn total_of(q: Pt) -> integer { q.x + q.y }
+
+fn test_the_fields_read_what_the_destination_held() {
+  p = Pt { x: 1, y: 2 };
+  p = Pt { x: p.y, y: p.x, ..p };
+  assert(p.x == 2 && p.y == 1, "a swap reads the base: {p.x} {p.y}");
+
+  r = P3 { a: 1, b: 2, c: 3 };
+  r = P3 { a: r.b, b: r.c, c: r.a, ..r };
+  assert(r.a == 2 && r.b == 3 && r.c == 1, "a rotation of three: {r.a} {r.b} {r.c}");
+
+  c = Pt { x: 1, y: 2 };
+  c = Pt { y: c.x, x: c.y, ..c };
+  assert(c.x == 2 && c.y == 1, "the fields named in the other order: {c.x} {c.y}");
+
+  v = Vp { x: 1, y: 2 };
+  v = Vp { x: v.y, y: v.x, ..v };
+  assert(v.x == 2 && v.y == 1, "a value struct: {v.x} {v.y}");
+
+  t = Tx { s: "a", t: "b" };
+  t = Tx { s: t.t, t: t.s, ..t };
+  assert(t.s == "b" && t.t == "a", "two text fields: {t.s} {t.t}");
+
+  f = Pt { x: 1, y: 2 };
+  f = Pt { x: f.x + f.y, y: f.x * 10, ..f };
+  assert(f.x == 3 && f.y == 10, "a field read twice: {f.x} {f.y}");
+
+  i = Pt { x: 1, y: 2 };
+  i = Pt { x: total_of(i), y: total_of(i), ..i };
+  assert(i.x == 3 && i.y == 3, "the destination handed to a call: {i.x} {i.y}");
+
+  q = Pt { x: 10, y: 20 };
+  o = Pt { x: 1, y: 2 };
+  o = Pt { x: o.y, y: o.x, ..q };
+  assert(o.x == 2 && o.y == 1, "another base, the destination read: {o.x} {o.y}");
+
+  // Controls: one named field, a different destination, a plain literal.
+  g = Pt { x: 1, y: 2 };
+  g = Pt { y: g.x + g.y, ..g };
+  assert(g.x == 1 && g.y == 3, "one field: {g.x} {g.y}");
+  m = Pt { x: 1, y: 2 };
+  d = Pt { x: m.y, y: m.x, ..m };
+  assert(d.x == 2 && d.y == 1 && m.x == 1 && m.y == 2, "another destination: {d.x} {d.y} / {m.x} {m.y}");
+  n = Pt { x: 1, y: 2 };
+  n = Pt { x: n.y, y: n.x };
+  assert(n.x == 2 && n.y == 1, "a plain literal: {n.x} {n.y}");
+}
+
+struct Deep { o: Outer, n: integer }
+
+fn outer_total(o: Outer) -> integer { o.inner.a + o.inner.b + o.k }
+
+fn test_one_nested_update_releases_the_first_literal() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+  e = Outer { inner: Inner { a: 7, ..h.inner }, ..h };
+  assert(e.inner.a == 7 && e.inner.b == 2 && e.k == 5 && h.inner.a == 1, "one: {e.inner.a} {e.inner.b} {e.k} {h.inner.a}");
+}
+
+fn test_passed_straight_to_a_call() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+  assert(outer_total(Outer { inner: Inner { a: 10, ..h.inner }, ..h }) == 17, "call");
+}
+
+fn test_two_levels() {
+  d = Deep { o: Outer { inner: Inner { a: 1, b: 2 }, k: 5 }, n: 9 };
+  e = Deep { o: Outer { inner: Inner { b: 20, ..d.o.inner }, ..d.o }, ..d };
+  assert(e.o.inner.a == 1 && e.o.inner.b == 20 && e.o.k == 5 && e.n == 9 && d.o.inner.b == 2, "two: {e.o.inner.b} {d.o.inner.b}");
+}
+
+fn test_in_a_loop() {
+  h = Outer { inner: Inner { a: 1, b: 2 }, k: 5 };
+  t = 0;
+  for i in 0..4 { e = Outer { inner: Inner { a: i, ..h.inner }, ..h }; t += e.inner.a + e.inner.b; }
+  assert(t == 14, "loop {t}");
+}
+
+struct VuOther { k: integer }
+enum VuNode { VuLit { v: integer }, VuBin { op: integer, l: integer, r: integer } }
+enum VuTok { VuIdent { name: text, tags: vector<integer> }, VuNum { v: integer } }
+enum VuLn { VuLink { to: reference<VuOther>, n: integer }, VuNil { n: integer } }
+struct VuHolder { b: VuBin, e: VuNode }
+
+fn vu_show(n: VuNode) -> text {
+  if n is VuBin {
+    b = n as VuBin;
+    "{b.op}/{b.l}/{b.r}"
+  } else {
+    "lit"
+  }
+}
+
+fn vu_relabel(b: VuBin) -> VuBin { VuBin { op: b.op + 10, ..b } }
+
+fn vu_make(x: integer) -> VuBin { VuBin { op: x, l: x + 1, r: x + 2 } }
+
+fn test_a_variant_base_typed_as_that_variant() {
+  n = VuBin { op: 1, l: 2, r: 3 };
+  // A fresh local; a write to the copy does not reach the base.
+  m = VuBin { l: 9, ..n };
+  assert(m.op == 1 && m.l == 9 && m.r == 3, "a fresh local: {m.op}/{m.l}/{m.r}");
+  m.r = 33;
+  assert(n.l == 2 && n.r == 3, "the base keeps its value: {n.l}/{n.r}");
+  // A destination declared as the enum: the update widens into it.
+  m2: VuNode = VuBin { l: 8, ..n };
+  assert(vu_show(m2) == "1/8/3", "an enum destination: {vu_show(m2)}");
+  // A nullable enum destination, and an enum local re-bound from another variant.
+  m3: VuNode? = VuBin { r: 9, ..n };
+  assert(vu_show(m3 ?? VuLit { v: 0 }) == "1/2/9", "a nullable destination: {vu_show(m3 ?? VuLit { v: 0 })}");
+  m4: VuNode = VuLit { v: 4 };
+  assert(vu_show(m4) == "lit", "before the re-bind");
+  m4 = VuBin { op: 8, ..n };
+  assert(vu_show(m4) == "8/2/3" && n.op == 1, "an enum local re-bound: {vu_show(m4)}");
+  // A parameter base, returned, twice over.
+  e = vu_relabel(n);
+  f = vu_relabel(e);
+  assert(e.op == 11 && f.op == 21 && f.l == 2 && n.op == 1, "returned: {e.op} {f.op} {f.l} {n.op}");
+  // A call as the base.
+  a = VuBin { r: 50, ..vu_make(3) };
+  assert(a.op == 3 && a.l == 4 && a.r == 50, "a call: {a.op}/{a.l}/{a.r}");
+  // A value branch of two locals as the base: neither arm is written.
+  p = VuBin { op: 1, l: 2, r: 3 };
+  q = VuBin { op: 4, l: 5, r: 6 };
+  b = VuBin { l: 77, ..(if p.op == 1 { p } else { q }) };
+  assert(b.op == 1 && b.l == 77 && p.l == 2 && q.l == 5, "a value branch: {b.op}/{b.l} {p.l} {q.l}");
+  // The checked cast of an enum local, inside the check that proves it.
+  n2: VuNode = VuBin { op: 4, l: 5, r: 6 };
+  hit = "";
+  if n2 is VuBin {
+    c = VuBin { r: 7, ..(n2 as VuBin) };
+    hit = "{c.op}/{c.l}/{c.r}";
+  }
+  assert(hit == "4/5/7" && vu_show(n2) == "4/5/6", "a checked cast: {hit}, the base {vu_show(n2)}");
+  // The checked cast of an ELEMENT: the cast alone views it, the update copies.
+  v: vector<VuNode> = [VuBin { op: 7, l: 8, r: 9 }, VuLit { v: 1 }];
+  if v[0] is VuBin {
+    x = VuBin { l: 80, ..(v[0] as VuBin) };
+    assert(x.op == 7 && x.l == 80 && x.r == 9, "an element's cast: {x.op}/{x.l}/{x.r}");
+  }
+  assert(vu_show(v[0] ?? VuLit { v: 0 }) == "7/8/9", "the element keeps its value: {vu_show(v[0] ?? VuLit { v: 0 })}");
+  // A variant field, and the checked cast of an enum field.
+  h = VuHolder { b: VuBin { op: 1, l: 2, r: 3 }, e: VuBin { op: 4, l: 5, r: 6 } };
+  g = VuBin { l: 9, ..h.b };
+  assert(g.l == 9 && h.b.l == 2, "a variant field: {g.l}, the field {h.b.l}");
+  if h.e is VuBin {
+    k = VuBin { l: 9, ..(h.e as VuBin) };
+    assert(k.l == 9 && k.op == 4, "an enum field's cast: {k.op}/{k.l}");
+  }
+  assert(vu_show(h.e) == "4/5/6", "the enum field keeps its value: {vu_show(h.e)}");
+  // The base's own variable, inside a loop.
+  s = VuBin { op: 0, l: 0, r: 0 };
+  for i in 1..4 {
+    s = VuBin { l: s.l + i, ..s };
+  }
+  assert(s.l == 6 && s.op == 0, "over itself in a loop: {s.l}");
+  // Two fields in the opposite order of the declaration, each reading the base.
+  w = VuBin { r: n.l, l: n.r, ..n };
+  assert(w.l == 3 && w.r == 2 && w.op == 1, "the fields read the base: {w.op}/{w.l}/{w.r}");
+  // A temporary handed to a call, a postfix, an appended element.
+  t = vu_show(VuBin { l: 0, ..n });
+  assert(t == "1/0/3" && n.l == 2, "a temporary: {t}");
+  o = VuBin { l: 5, ..n }.l;
+  assert(o == 5 && n.l == 2, "a postfix: {o}");
+  v += [VuBin { op: 0, ..n }];
+  assert(len(v) == 3 && vu_show(v[2] ?? VuLit { v: 0 }) == "0/2/3", "an appended element: {len(v)}");
+  // A text and a vector field: the copy's are replaced, the base's kept.
+  ti = VuIdent { name: "a", tags: [1, 2] };
+  tu = VuIdent { name: "b", ..ti };
+  assert(tu.name == "b" && len(tu.tags) == 2 && tu.tags[1] == 2 && ti.name == "a", "a text field: {tu.name} {tu.tags} {ti.name}");
+  tw = VuIdent { tags: [7], ..ti };
+  assert(len(tw.tags) == 1 && tw.tags[0] == 7 && tw.name == "a" && len(ti.tags) == 2, "a vector field: {tw.tags} {tw.name} {ti.tags}");
+  // A stored reference field: the copy links what it is handed.
+  o1 = VuOther { k: 1 };
+  o2 = VuOther { k: 2 };
+  l1 = VuLink { to: &o1, n: 10 };
+  l2 = VuLink { to: &o2, ..l1 };
+  o2.k = 22;
+  assert(l2.to.k == 22 && l2.n == 10 && l1.to.k == 1, "a stored reference: {l2.to.k} {l2.n} {l1.to.k}");
+}

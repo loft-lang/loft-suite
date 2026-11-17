@@ -18,7 +18,7 @@
 // CHANNEL: expect — each function's diagnostic.
 // ARMED: no instrument.
 // WITNESS: a build admitting one of these compiles its function and leaves its claim unanswered.
-// HOLDS: `a-record-update-copies-the-base-then-writes-the-named-fields` beside it.
+// HOLDS: `a-record-update-copies-its-base-then-writes-the-named-fields` beside it.
 
 struct Unit { hp: integer, x: integer }
 struct Other { k: integer }
