@@ -1,0 +1,173 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CAPTURED TEXT A CLOSURE WRITES IS THE FUNCTION'S, WRITES AND ALL (`@FR-L-CapWrite`).  A closure
+// that writes a captured `text` and the frame that writes it after the call both reach the one
+// text (loft#2286); the function that returns it answers what the closure wrote (loft#2297); and an
+// early `return` of it, before the closure is created, answers the value it had there
+// (loft#2350).  Three sections, each with its cells and receipt.
+//
+// ── 2286-a-frame-and-its-closure-both-write-a-captured-text ──
+//
+// A closure that writes a captured `text`, and a frame that writes the same text after the
+// call, both reach it — and the frame's formatted result is delivered through the ONE
+// return buffer its signature published.
+//
+// @FR-L-CapWrite: a captured write is shared in both directions.  The interpreter crashed
+// (SIGSEGV in `OpAppendStackText`) on `s = "a"; f = fn() -> text { s = "{s}b"; s };
+// a = f(); s = "{s}c"; "{a} {s}"` while `--native` answered `ab abc`: the tail's pooled
+// work text was `__work_4` on pass 1 and `__work_3` on pass 2 (the capture changes which
+// buffers are free), and pass 2 promoted it as a SECOND hidden `&text` parameter, so the
+// attribute and variable orders crossed and the result was written through a corrupted
+// buffer (loft#2286).  Pass 2 now delivers into the buffer pass 1 published.
+//
+// Axes this file MOVES:  where the closure lives (a local, a struct's fn field, a field read
+//                        into a local and called twice); calls before and after the frame
+//                        write, and in a loop; what the closure answers (the capture, a
+//                        derived text); a second captured text; the tail (a format, an `if`,
+//                        an explicit `return`); the caller (one function called twice).
+// Axes it HOLDS FIXED:   the captured value is a `text` (a heap capture is L-CapHeap's).
+//
+// The channel is the value; the old build crashed on every cell but the `if` tail.
+//
+// @falsified-at: 279e26c8c — interpret exit 139 -> 0 (SIGSEGV), native exit 1 -> 0 (the
+// fn-ref dispatch of `twice` did not compile, E0308: `local`'s stale second buffer); scored
+// by hand against a build carrying the defect.
+//   HOLDS: clean under `LOFT_POISON=1` and the leak check, both backends.
+//
+// ── 2297-a-captured-text-the-closure-writes-is-the-functions-result ──
+//
+// A text local that a closure WRITES and that the function then RETURNS answers what the
+// closure wrote, and the frame's own `s += x` on such a text reaches the same text.
+//
+// @FR-L-CapWrite: a captured write is shared in both directions.  Two routes lost it
+// (loft#2297).  A text local that was the function's return source became the hidden
+// `&text` return buffer, which is never boxed, so the closure wrote its own copy and
+// `fn t() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); s }` answered `a`.  And a frame
+// `s += "c"` on the boxed text found no operator (`No matching operator '+='`), so the
+// author had to spell it `s = "{s}c"`.
+//
+// Axes this file MOVES:  how the closure writes (a format rebind, `+=`); the frame write
+//                        after the call (none, `+=`, `+=` between two calls); where the
+//                        closure runs (here, in another function); the tail (bare, an
+//                        explicit `return`, through a local); a `text?` local; a text
+//                        PARAMETER the closure writes.
+// Axes it HOLDS FIXED:   the return is the function's last statement — a `return s` placed
+//                        before the closure is created is not covered here.
+//
+// The channel is the value (and the compile error for the `+=` cells).
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native-c exit 1 -> 0: the frame `+=` is
+// refused (`No matching operator '+='`); without those cells `tail_rebind` answers `a`;
+// scored by hand against the installed main build.
+//   HOLDS: clean under `LOFT_STRICT_STORES=1`, both backends.
+//
+// ── 2350-a-text-a-closure-writes-is-returned-with-the-write-whatever-returns-it-first ──
+//
+// A text local a closure writes is returned WITH the write when a `return` of it comes before
+// the closure is created — the early return answers the value it had there.
+//
+// @FR-L-CapWrite: a captured write is shared in both directions.  Pass 1 met `return s` before
+// any closure was parsed and made `s` the function's hidden `&text` return buffer, which the
+// scalar-capture flip never boxes, so the closure wrote its own copy (loft#2350, the shape
+// loft#2297 left).  Now, at the end of the body's first pass, such a buffer keeps its place in
+// the signature under a compiler name and `s` is an ordinary local again — boxed, since a
+// closure writes it — and every `return` delivers into the buffer.
+//
+// Axes this file MOVES:  the early return (taken / not taken; one, two); the closure's write
+//                        (rebind, `+=`, called twice); a frame write after the call; an
+//                        explicit `return` at the end; the workaround spelling (return
+//                        through another local); a function with no closure (the control).
+// Axes it HOLDS FIXED:   the captured value is a `text`.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native-c exit 1 -> 0: `early(false)`
+//   answers `a` for `ab`; scored by hand against the installed main build.
+// CHANNEL: the asserts.
+// WITNESS: main answers `early(false)` = "a", `early_rebind(false)` = "a", `twice(2)` = "a".
+// HOLDS: the leak check and LOFT_STRICT_STORES are clean on both trees and both backends.
+
+struct B { tag: integer, f: fn() -> text }
+fn local() -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; "{a} {s}" }
+fn field() -> text {
+  s = "a"; b = B { tag: 1, f: fn() -> text { s = "{s}b"; s } }; a = b.f(); s = "{s}c"; "{a} {s}"
+}
+fn twice() -> text {
+  s = "a"; b = B { tag: 1, f: fn() -> text { s = "{s}b"; s } }; g = b.f; a = g(); a2 = g();
+  s = "{s}c"; "{a} {a2} {s}"
+}
+fn looped() -> text {
+  s = "a"; f = fn() -> text { s = "{s}b"; s }; a = ""; for i in 0..3 { a = f(); } s = "{s}c"; "{a} {s}"
+}
+fn after() -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; a2 = f(); "{a} {a2} {s}" }
+fn derived() -> text { s = "a"; f = fn() -> text { s = "{s}b"; "k{len(s)}" }; a = f(); s = "{s}c"; "{a} {s}" }
+fn branch() -> text {
+  s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; if len(s) > 2 { "{a}+{s}" } else { "no" }
+}
+fn early() -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}c"; return "{a} {s}"; }
+fn two() -> text {
+  s = "a"; u = "x"; f = fn() -> text { s = "{s}b"; u = "{u}y"; "{s}{u}" }; a = f(); s = "{s}c"; u = "{u}z";
+  "{a} {s} {u}"
+}
+fn w(n: integer) -> text { s = "a"; f = fn() -> text { s = "{s}b"; s }; a = f(); s = "{s}{n}"; "{a} {s}" }
+fn test_a_frame_and_its_closure_both_write_a_captured_text() {
+  assert(local() == "ab abc", "a local closure: {local()}");
+  assert(field() == "ab abc", "a fn field: {field()}");
+  assert(twice() == "ab abb abbc", "a fn field read into a local, called twice: {twice()}");
+  assert(looped() == "abbb abbbc", "called in a loop: {looped()}");
+  assert(after() == "ab abcb abcb", "called after the frame write: {after()}");
+  assert(derived() == "k2 abc", "the closure answers a derived text: {derived()}");
+  assert(branch() == "ab+abc", "an if tail: {branch()}");
+  assert(early() == "ab abc", "an explicit return: {early()}");
+  assert(two() == "abxy abc xyz", "two captured texts: {two()}");
+  assert("{w(1)}|{w(2)}" == "ab ab1|ab ab2", "one function called twice: {w(1)}|{w(2)}");
+  print("2286 a frame and its closure both write a captured text ok\n");
+}
+
+fn tail_rebind() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); s }
+fn tail_then_append() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); s += "c"; s }
+fn closure_appends() -> text { s = "a"; f = fn() { s += "b"; }; f(); s }
+fn through_a_local() -> text { s = "a"; f = fn() { s = "{s}b"; }; f(); f(); r = s; r }
+fn nullable() -> text { s: text? = "a"; f = fn() { s = "{s}b"; }; f(); s ?? "null" }
+fn append_between_calls() -> text { s = "a"; f = fn() { s += "b"; }; f(); s += "c"; f(); s }
+fn run(g: fn()) { g(); }
+fn called_elsewhere() -> text { s = "a"; f = fn() { s += "b"; }; run(f); s }
+fn explicit_return() -> text { s = "a"; f = fn() { s += "b"; }; f(); return s; }
+fn parameter(s: text) -> text { f = fn() { s += "b"; }; f(); s }
+
+fn test_a_captured_text_the_closure_writes_is_the_functions_result() {
+  assert(tail_rebind() == "ab", "tail_rebind {tail_rebind()}");
+  assert(tail_then_append() == "abc", "tail_then_append {tail_then_append()}");
+  assert(closure_appends() == "ab", "closure_appends {closure_appends()}");
+  assert(through_a_local() == "abb", "through_a_local {through_a_local()}");
+  assert(nullable() == "ab", "nullable {nullable()}");
+  assert(append_between_calls() == "abcb", "append_between_calls {append_between_calls()}");
+  assert(called_elsewhere() == "ab", "called_elsewhere {called_elsewhere()}");
+  assert(explicit_return() == "ab", "explicit_return {explicit_return()}");
+  assert(parameter("a") == "ab", "parameter {parameter("a")}");
+  s = "a";
+  f = fn() { s += "b"; };
+  f();
+  s += "c";
+  assert(s == "abc", "frame {s}");
+}
+
+fn s3_early(c: boolean) -> text { s = "a"; if c { return s; } f = fn() { s += "b"; }; f(); s }
+fn early_rebind(c: boolean) -> text { s = "a"; if c { return s; } f = fn() { s = "{s}b"; }; f(); f(); s }
+fn early_after(c: boolean) -> text { s = "a"; if c { return s; } f = fn() { s += "b"; }; f(); s += "c"; return s; }
+fn s3_twice(c: integer) -> text { s = "a"; if c == 0 { return s; } if c == 1 { s += "x"; return s; } f = fn() { s += "b"; }; f(); s }
+fn s3_through_a_local(c: boolean) -> text { s = "a"; if c { r = s; return r; } f = fn() { s += "b"; }; f(); s }
+fn no_closure(c: boolean) -> text { s = "a"; if c { return s; } s += "b"; s }
+
+fn test_the_early_return_answers_its_value() {
+  assert(s3_early(true) == "a" && early_rebind(true) == "a" && s3_twice(0) == "a" && s3_twice(1) == "ax", "s3_early: {s3_early(true)} {early_rebind(true)} {s3_twice(0)} {s3_twice(1)}");
+}
+fn test_the_closures_write_is_returned() {
+  assert(s3_early(false) == "ab", "s3_early(false) {s3_early(false)}");
+  assert(early_rebind(false) == "abb", "early_rebind(false) {early_rebind(false)}");
+  assert(early_after(false) == "abc", "early_after(false) {early_after(false)}");
+  assert(s3_twice(2) == "ab", "s3_twice(2) {s3_twice(2)}");
+  assert(s3_through_a_local(false) == "ab" && s3_through_a_local(true) == "a", "s3_through_a_local {s3_through_a_local(false)}");
+}
+fn test_a_function_with_no_closure() {
+  assert(no_closure(true) == "a" && no_closure(false) == "ab", "no_closure {no_closure(true)} {no_closure(false)}");
+}
