@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RUNTIME-DECIDED CALL NEEDS ITS MEMBERS TO RETURN ONE TYPE (`@FR-Disp-Return`).  When the variant
+// decides the member at run time, members returning different types are refused at the call — a
+// nullable beside a dense return, and two integer widths.  Each function is one refused call with
+// its expectation.
+//
+// ── a-nullable-and-a-dense-return-are-refused-at-a-runtime-call ──
+//
+// A NULLABLE AND A DENSE RETURN ARE REFUSED AT A RUN-TIME CALL (`@FR-Disp-Return`, crossed with
+// `@FR-Disp-Dynamic` and `@FR-Disp-Key`'s "a `τ?`'s nullability included"): `rt(RFire) -> text`
+// and `rt(REnt) -> text?` disagree, so a `REnt`-held call that chooses between them is refused
+// naming both, never typed as the join `text?`.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members with their returns.
+// HOLDS: the static call at `RFire` compiles.
+// @EXPECT_ERROR: `rt(REnt)` is decided by the runtime variant, but its definitions return different types — rt(RFire) -> text and rt(REnt) -> text?
+//
+// ── two-members-of-different-widths-are-refused-at-a-runtime-call ──
+//
+// TWO MEMBERS RETURNING DIFFERENT INTEGER WIDTHS ARE REFUSED AT A RUN-TIME CALL
+// (`@FR-Disp-Return`, crossed with `@FR-Disp-Dynamic`): `rw(RFire) -> integer` and
+// `rw(REnt) -> u8` are both reached by a call with a `REnt`-held argument, and `integer` and
+// `u8` are two types (`Disp-Key` keys them apart) — so the call is refused naming the two, not
+// given the wider of them.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members with their returns.
+// HOLDS: a static call at `RFire` is not refused.
+// @EXPECT_ERROR: `rw(REnt)` is decided by the runtime variant, but its definitions return different types — rw(RFire) -> integer and rw(REnt) -> u8
+
+enum REnt { RFire { n: integer }, RIce { n: integer } }
+
+fn rt(a: RFire) -> text { "fire {a.n}" }
+fn rt(a: REnt) -> text? { "any {a.n}" }
+
+fn test_a_nullable_and_a_dense_return_are_refused_at_a_runtime_call() {
+  println(rt(RFire { n: 2 }));
+  x: REnt = RFire { n: 1 };
+  y = rt(x);
+  println(y ?? "none");
+}
+
+
+fn rw(a: RFire) -> integer { a.n }
+fn rw(_a: REnt) -> u8 { 7 }
+
+fn test_two_members_of_different_widths_are_refused_at_a_runtime_call() {
+  println("{rw(RFire { n: 2 })}");
+  x: REnt = RFire { n: 1 };
+  println("{rw(x)}");
+}
