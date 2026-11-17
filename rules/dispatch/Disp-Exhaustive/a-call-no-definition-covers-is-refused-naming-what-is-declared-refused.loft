@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL NO DEFINITION COVERS IS REFUSED, NAMING WHAT IS DECLARED (`@FR-Disp-Exhaustive`).  A call no
+// member takes names the declared members; a nullable enum argument with no static selection is
+// refused the same way; and a runtime call with a variant-and-argument pair no member covers names
+// the pair.  Each function is one refused call with its expectation; an error no expectation names
+// fails the file.
+//
+// ── a-call-no-member-takes-is-refused-naming-the-declared ──
+//
+// A CALL NO MEMBER TAKES IS REFUSED, NAMING THE ARGUMENT TYPES AND THE DECLARED DEFINITIONS
+// (`@FR-Disp-Exhaustive`): for the STATIC types `(EPt, text)` no member of `ex` applies — a
+// struct converts to neither `integer` nor `float`, and the second position needs an integer —
+// so the call is refused at compile time; it never reaches a run-time "no applicable method".
+// One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the argument types and both members.
+// HOLDS: a call each member takes (`ex(1, 2)`, `ex(1.5, 2)`) is not refused.
+// @EXPECT_ERROR: no definition of `ex` takes (EPt, text) — declared: ex(integer, integer), ex(float, integer)
+//
+// ── a-nullable-enum-with-no-static-selection-is-refused ──
+//
+// A NULLABLE ENUM ARGUMENT WITH NO STATIC SELECTION IS REFUSED (`@FR-Disp-Exhaustive`, with
+// `@FR-Disp-Dynamic`'s "nullable when the call has a static selection"): `en(EFire)` and
+// `en(EIce)` cover every PRESENT variant of `EEnt`, so a dense `EEnt` argument is covered by
+// the runtime dispatch — but a `EEnt?` may be null, and a null "reaches the static selection",
+// of which there is none (no member takes `EEnt` or `EEnt?`).  The call is refused at compile
+// time rather than given a run-time no-answer path for the null.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the nullable argument type and the declared members.
+// HOLDS: the dense call `en(d)` above it is covered and not refused.
+// @EXPECT_ERROR: no definition of `en` takes (EEnt?) — declared: en(EFire), en(EIce)
+//
+// ── an-uncovered-variant-and-argument-pair-is-refused-naming-the-pair ──
+//
+// AN UNCOVERED VARIANT-AND-ARGUMENT PAIR IS REFUSED NAMING THE PAIR (`@FR-Disp-Exhaustive`
+// crossed with `@FR-Disp-Applicable`).  `eb(XFire, integer = 10)` and `eb(XIce, integer = 20)`
+// cover an `XEnt` argument for every variant when the second argument is an integer or omitted;
+// a `text` second argument is taken by neither member (Disp-Applicable: `text` does not satisfy
+// `integer`), so the call is not covered for any variant, and the refusal is at compile time —
+// no run-time "no applicable method" path.
+//
+// @falsified-at: none — a conformance guard; refused as the rule says, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the pair and the declared members.
+// HOLDS: `a-covered-call-is-covered-for-every-variant-and-every-omitted-default` beside it.
+// @EXPECT_ERROR: `eb(XEnt, text)` has no definition for the pair (XFire, text)
+
+struct EPt { x: integer }
+
+fn ex(a: integer, b: integer) -> text { "ii {a} {b}" }
+fn ex(a: float, b: integer) -> text { "fi {a} {b}" }
+
+fn test_a_call_no_member_takes_is_refused_naming_the_declared() {
+  println("{ex(1, 2)}|{ex(1.5, 2)}");
+  println(ex(EPt { x: 1 }, "t"));
+}
+
+enum EEnt { EFire { n: integer }, EIce { n: integer } }
+
+fn en(a: EFire) -> text { "fire {a.n}" }
+fn en(a: EIce) -> text { "ice {a.n}" }
+
+fn pick(k: integer) -> EEnt? { if k == 1 { EFire { n: 1 } } else if k == 2 { EIce { n: 2 } } else { null } }
+
+fn test_a_nullable_enum_with_no_static_selection_is_refused() {
+  d: EEnt = EIce { n: 3 };
+  println(en(d));
+  x = pick(1);
+  println(en(x));
+}
+
+enum XEnt { XFire { n: integer }, XIce { n: integer } }
+
+fn eb(e: XFire, k: integer = 10) -> text { "fire {e.n} {k}" }
+fn eb(e: XIce, k: integer = 20) -> text { "ice {e.n} {k}" }
+
+fn test_an_uncovered_variant_and_argument_pair_is_refused_naming_the_pair() {
+  x: XEnt = XFire { n: 1 };
+  println(eb(x, "t"));
+}

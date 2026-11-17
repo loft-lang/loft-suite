@@ -31,7 +31,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the answers.
-// HOLDS: `an-uncovered-variant-and-argument-pair-is-refused-naming-the-pair` beside it — the same
+// HOLDS: `a-call-no-definition-covers-is-refused-naming-what-is-declared-refused` beside it — the same
 //   set with an argument no member takes for one variant is refused.
 
 enum XEnt { XFire { n: integer }, XIce { n: integer }, XRock { n: integer } }
