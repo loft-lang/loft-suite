@@ -57,7 +57,7 @@ struct F9 { f9_k: integer, f9_nm: text }
 
 // LONE keyed collections, one element type each: the record-backed promotion is keyed on the
 // ELEMENT TYPE across the whole program, so a shared one would let a grouped row below carry
-// these (`901-linked-group-fill.loft` records that trap).
+// these (`a-write-through-any-member-of-a-linked-group-reaches-every-member.loft` records that trap).
 struct KH { kh_a: hash<F1[f1_k]> }
 struct KS { ks_a: sorted<F2[f2_k]> }
 struct KI { ki_a: index<F3[f3_k]> }
