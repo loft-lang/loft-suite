@@ -1,0 +1,444 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A BINDING FROM A VALUE BRANCH COPIES THE ARM IT TAKES (`@FR-B-Copy` crossed with
+// `@FR-O-Complete`: a plain whole-value bind copies, and every path of a bound value branch is its
+// own binding).  `x = if c { a } else { b }`, a `match`, an `else if` chain or a `??` binds the
+// chosen arm as the single bind `x = a` would: a whole local copies, a fresh value is adopted.
+// Three sections, each with the cells, the axes and the receipt of the defect it was written for:
+// a rebind from a branch that hands back a live local, a record local first bound from a branch
+// and rebound later (loft#2398), and a vector local bound from a branch.  Values hand-computed.
+//
+// ── test_a_rebind_from_a_branch_handing_back_a_local (a-branch-handing-back-a-local-copies-it-into-a-binding-assigned-before) ──
+//
+// `@FR-B-Copy` — a binding that already holds a value, rebound from a value BRANCH that hands
+// back another live local on one path (`c = b ?? Owned`, `c = if k { b } else { lit }`), COPIES
+// that local's record, exactly as the bare `c = b` copies it.  The rebind is the runtime join on
+// that local (`bind_lowering::choice_var_arm`, R1: the local's arm copied, a fresh arm adopted);
+// bound plainly, the binding named the local's record and both freed it at scope exit ("a store
+// was freed twice"; the self-hosted ownership oracle's `classify_var`).  The C writer joins
+// whatever `re_bind` joins, not a call's answer alone.  `LOFT_NO_CHOICE_VAR_JOIN=1` binds plainly.
+//
+// Crossed: the renamed return buffer (`pick`), a plain local read after the rebind
+// (`local_kept`), the rebind in a loop (`looped`), a struct instead of a struct enum (`ppick`),
+// each with the local's arm and the literal's arm taken; and a join the oracle answers
+// (`folded`, the C writer's half).
+//
+// Held FIXED, and guarded apart: the FIRST bind of a binding assigned again later from
+// `b ?? <literal>` (the lifted arm's temp and the binding both freed the copy, loft#2475):
+// `2475-a-first-bind-from-a-coalesce-then-rebound-frees-the-copy-once.loft`.
+
+// `--native` still binds the choice plainly (the rustc writer joins a call's answer only).
+//
+// @falsified-at: 9152f7fd3 — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the assertions, the re-free failure and the leak gate.
+// ARMED: the leak gate the suite runner arms by default; no other switch.
+// HOLDS: every other assertion passes on both trees, and nothing else leaks or faults.
+//
+// ── test_a_record_local_first_bound_from_a_value_branch (a-record-local-first-bound-from-a-value-branch-then-rebound-owns-a-copy) ──
+//
+// A record local FIRST bound from a value branch whose arm is a variable — `at = if c { a } else
+// { a }` — and rebound later copies the chosen arm, as the single bind `at = a` does
+// (`formal/binding.md` @FR-B-Copy: a plain whole-value bind copies; `formal/ownership.md`
+// @FR-O-Complete: every path of a bound value branch is its own binding).  Because the local is
+// rebound, it owns what it holds from its first bind on, so the rebind releases the old value.
+// Handed the arm's store instead, that release freed the arm's variable — the CALLER's record for
+// a parameter arm — and the next allocation reused the store: the caller read someone else's
+// data, on both backends, with no diagnostic (loft#2398).
+//
+// The cells vary the branch (`if`, `match`, an `else if` chain), the arm (parameter, local, a
+// parameter beside a call that does not run), the place (a loop body), the record (a
+// struct-enum, a struct) and the binding's nullability.  Each
+// reads the arm's variable after the rebind, then allocates, then reads it again.  Values are
+// hand-computed.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0
+// CHANNEL: the first parameter cell on both backends — on the control the caller's element is
+//   gone after the allocation (`-1`) on the interpreter, and null (`t[0] is null`) on native.
+// HOLDS: leak, panic and free-refusal are clean on both trees.
+//
+// ── the test_* functions below (a-vector-local-bound-from-a-value-branch-copies-the-chosen-arm) ──
+//
+// A vector local bound from a VALUE BRANCH — `x = if c { va } else { vb }`, a `match`, an
+// `else if` chain, a `??` — copies the chosen arm where a single bind of that arm's tail
+// would (`formal/binding.md` @FR-B-Copy: a plain whole-value bind copies; `formal/ownership.md`
+// @FR-O-Complete: every path of a bound value branch is its own binding).  The FIRST bind of a
+// plain `if` already did, through the post-parse per-arm lift; every other spelling handed the
+// local the chosen arm's STORE, so a write through `x` reached `va` — on a reassignment of a
+// dense, a nullable and a null-initialised local, on record and text elements, on projection
+// and mixed arms, on parameter sources, inside a loop, and on a FIRST bind through a `match` or
+// a `??` — both backends.  The bind is now written out per arm by the parser's own vector-bind
+// selector, the one home of the vector copy: a whole variable and an owned field read copy, a
+// `??` hoist of a projection copies exactly where the projection would, and every other arm
+// (a call's buffer, a literal, an index read's view) keeps the value it has.
+//
+// The keyed twin is the control: `OpReplaceKeyed` copies whatever the arm, and always did.
+//
+// @falsified-at: faa38979 — interpret exit 1 -> 0, interpret 5 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   ⚠ That control is on no public ref, so this receipt records a falsification that
+//   cannot be re-run — see GUARDS.md § The patch receipt for the form that can be.
+//   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
+//   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
+//   both. The native side was not scored in this sweep.
+
+enum Own { Owned, Unknown, Borrowed { base: integer }, Join { base: integer } }
+struct BhP { x: integer, t: text }
+
+fn not_yet() -> Own { Borrowed { base: 65534 } }
+fn join(a: Own, c: Own) -> Own { if a == c { a } else { Join { base: 7 } } }
+fn bh_mk(i: integer) -> Own { if i == 0 { not_yet() } else { Borrowed { base: i } } }
+
+fn fold(n: integer) -> Own? {
+  bound: Own? = null;
+  for i in 0..n { c = bh_mk(i); bound = if bound == null { c } else { join(bound!, c) }; }
+  bound
+}
+
+fn pick(n: integer) -> Own {
+  class = Owned;
+  bound = fold(n);
+  class = bound ?? Owned;
+  if class == not_yet() { Owned } else { class }
+}
+
+fn local_kept(n: integer) -> text {
+  class = Unknown;
+  bound = fold(n);
+  class = bound ?? Owned;
+  r = "{class}";
+  r
+}
+
+fn bh_looped(n: integer) -> text {
+  class = Owned;
+  s = "";
+  for k in 0..n {
+    bound = fold(k);
+    class = bound ?? Unknown;
+    s += "{class};";
+  }
+  s
+}
+
+fn pmk(i: integer) -> BhP? { if i == 0 { null } else { BhP { x: i, t: "p{i}" } } }
+
+fn ppick(n: integer) -> BhP {
+  q = BhP { x: 0, t: "start" };
+  b = pmk(n);
+  q = b ?? BhP { x: -1, t: "lit" };
+  if q.x == 2 { BhP { x: 99, t: "two" } } else { q }
+}
+
+// The bound local itself folded in this frame: the oracle answers `Join(base=bound)`.
+fn folded(n: integer) -> Own {
+  class = Owned;
+  bound: Own? = null;
+  for i in 0..n { c = bh_mk(i); bound = if bound == null { c } else { join(bound!, c) }; }
+  class = bound ?? Owned;
+  if class == not_yet() { Owned } else { class }
+}
+
+fn test_a_rebind_from_a_branch_handing_back_a_local() {
+  a = "";
+  for r in 0..50 {
+    a = "{pick(0)} {pick(1)} {pick(2)} | {local_kept(0)} {local_kept(1)} {local_kept(2)} | {bh_looped(3)} | {ppick(0).t} {ppick(1).t} {ppick(2).t} | {folded(0)} {folded(1)} {folded(3)}";
+  }
+  assert(a == "Owned {{}} Owned {{}} Join {{base:7}} | Owned {{}} Borrowed {{base:65534}} Join {{base:7}} | Unknown {{}};Borrowed {{base:65534}};Join {{base:7}}; | lit p1 two | Owned {{}} Owned {{}} Join {{base:7}}", a);
+}
+
+enum Ty { TInt, TText { dep: vector<integer> }, TOpt { inner: Ty } }
+
+struct RlP { a: integer, tags: vector<integer> }
+
+fn base(t: Ty) -> Ty {
+  match t { TOpt { inner } => base(inner), _ => t }
+}
+
+fn bare(t: Ty) -> Ty {
+  match t { TText { dep: _ } => TText { dep: [] }, _ => t }
+}
+
+fn dl(t: Ty) -> integer {
+  match t { TText { dep } => len(dep), _ => -1 }
+}
+
+fn params(c: boolean, a: Ty) -> integer {
+  at = if c { a } else { a };
+  at = bare(at);
+  dl(at)
+}
+
+fn mixed(c: boolean, a: Ty) -> integer {
+  at = if c { a } else { base(a) };
+  at = bare(at);
+  dl(at)
+}
+
+fn rl_looped(c: boolean, a: Ty) -> integer {
+  r = 0;
+  for i in 0..3 {
+    at = if c || i < 0 { a } else { a };
+    at = bare(at);
+    r += dl(at) + 1;
+  }
+  r
+}
+
+fn by_match(k: integer, a: Ty, b: Ty) -> integer {
+  at = match k { 0 => a, 1 => b, _ => a };
+  at = bare(at);
+  dl(at)
+}
+
+fn by_chain(k: integer, a: Ty, b: Ty) -> integer {
+  at = if k == 0 { a } else if k == 1 { b } else { a };
+  at = bare(at);
+  dl(at)
+}
+
+fn nullable(c: boolean, a: Ty?) -> integer {
+  at = if c { a } else { a };
+  at = bare(at ?? TInt);
+  dl(at ?? TInt)
+}
+
+fn reset(p: RlP) -> RlP {
+  RlP { a: p.a + 1, tags: [] }
+}
+
+fn record(c: boolean, a: RlP) -> integer {
+  at = if c { a } else { a };
+  at = reset(at);
+  at.a
+}
+
+// The caller's vector still holds its element after the call, and after an allocation that
+// would reuse a released store.
+fn intact(t: vector<Ty>, what: text) {
+  assert(dl(t[0]!) == 1, "{what}: the caller's element after the call: {dl(t[0]!)}");
+  u = [TInt, TInt, TInt];
+  assert(dl(t[0]!) == 1 && len(t) == 2 && len(u) == 3, "{what}: the caller's element after an allocation: {dl(t[0]!)} {len(t)}");
+}
+
+fn test_a_record_local_first_bound_from_a_value_branch() {
+  t1 = [TText { dep: [3] }, TInt];
+  assert(params(false, t1[0]!) == 0, "parameter arms: the rebound local's value");
+  intact(t1, "parameter arms");
+
+  t2 = [TText { dep: [3] }, TInt];
+  assert(mixed(true, t2[0]!) == 0, "the parameter arm beside a call arm: the rebound local's value");
+  intact(t2, "the parameter arm beside a call arm");
+
+  t3 = [TText { dep: [3] }, TInt];
+  assert(rl_looped(false, t3[0]!) == 3, "in a loop: three rebound values, each 0 + 1");
+  intact(t3, "in a loop");
+
+  t4 = [TText { dep: [3] }, TInt];
+  assert(nullable(false, t4[0]) == 0, "a nullable binding: the rebound local's value");
+  intact(t4, "a nullable binding");
+
+  t5 = [TText { dep: [3] }, TText { dep: [4, 4] }];
+  assert(by_match(1, t5[0]!, t5[1]!) == 0 && by_chain(1, t5[0]!, t5[1]!) == 0, "a match and an else-if chain: the rebound local's value");
+  w5 = [TInt, TInt, TInt];
+  assert(dl(t5[0]!) == 1 && dl(t5[1]!) == 2 && len(w5) == 3, "a match and an else-if chain: the caller's elements after an allocation: {dl(t5[0]!)} {dl(t5[1]!)}");
+
+  s = TText { dep: [4, 5] };
+  c = true;
+  at = if c { s } else { s };
+  at = bare(at);
+  u = [TInt, TInt, TInt];
+  assert(dl(at) == 0 && dl(s) == 2 && len(u) == 3, "local arms: the local keeps its record: {dl(s)}");
+
+  ps = [RlP { a: 1, tags: [7] }];
+  assert(record(false, ps[0]) == 2, "a struct: the rebound local's value");
+  w = [RlP { a: 9, tags: [] }, RlP { a: 9, tags: [] }];
+  assert(ps[0].a == 1 && len(ps[0].tags) == 1 && ps[0].tags[0] == 7 && len(w) == 2, "a struct: the caller's record after an allocation: {ps[0].a} {len(ps[0].tags)}");
+}
+
+struct S { k: integer, n: text }
+struct H { v: vector<integer>, id: integer }
+struct N { v: vector<integer>?, id: integer }
+
+fn reassign_if(c: boolean) -> text {
+  va = [1, 2]; vb = [3, 4]; vo = [9];
+  x: vector<integer> = vo;
+  x = if c { va } else { vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn reassign_match(sel: integer) -> text {
+  va = [1, 2]; vb = [3, 4]; vo = [9];
+  x: vector<integer> = vo;
+  x = match sel { 1 => va, _ => vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn reassign_else_if(p: boolean, q: boolean) -> text {
+  va = [1, 2]; vb = [3, 4]; vc = [5, 6]; vo = [9];
+  x: vector<integer> = vo;
+  x = if p { va } else if q { vb } else { vc };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}{vc[0]}"
+}
+fn reassign_nullable(c: boolean) -> text {
+  va = [1, 2]; vb = [3, 4]; vo = [9];
+  x: vector<integer>? = vo;
+  x = if c { va } else { vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn reassign_null_init(c: boolean) -> text {
+  va = [1, 2]; vb = [3, 4];
+  x: vector<integer>? = null;
+  x = if c { va } else { vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn test_a_reassignment_from_a_value_branch_copies_on_every_spelling() {
+  assert(reassign_if(true) == "713" && reassign_if(false) == "713", "if: {reassign_if(true)} {reassign_if(false)}, want 713 713");
+  assert(reassign_match(1) == "713" && reassign_match(2) == "713", "match: {reassign_match(1)} {reassign_match(2)}, want 713 713");
+  assert(reassign_else_if(true, false) == "7135" && reassign_else_if(false, true) == "7135" && reassign_else_if(false, false) == "7135", "else if: {reassign_else_if(true, false)} {reassign_else_if(false, true)} {reassign_else_if(false, false)}, want 7135 ×3");
+  assert(reassign_nullable(true) == "713" && reassign_nullable(false) == "713", "nullable: {reassign_nullable(true)} {reassign_nullable(false)}, want 713 713");
+  assert(reassign_null_init(true) == "713" && reassign_null_init(false) == "713", "null-initialised: {reassign_null_init(true)} {reassign_null_init(false)}, want 713 713");
+}
+
+fn records(c: boolean) -> text {
+  va = [S { k: 1, n: "a" }, S { k: 2, n: "b" }]; vb = [S { k: 3, n: "c" }]; vo = [S { k: 9, n: "o" }];
+  x: vector<S> = vo;
+  x = if c { va } else { vb };
+  x[0].k = 7;
+  "{x[0].k}{va[0].k}{vb[0].k}"
+}
+fn texts(c: boolean) -> text {
+  va = ["a", "b"]; vb = ["c", "d"]; vo = ["o"];
+  x: vector<text> = vo;
+  x = if c { va } else { vb };
+  x[0] = "z";
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn test_the_element_kind_does_not_matter() {
+  assert(records(true) == "713" && records(false) == "713", "records: {records(true)} {records(false)}, want 713 713");
+  assert(texts(true) == "zac" && texts(false) == "zac", "texts: {texts(true)} {texts(false)}, want zac zac");
+}
+
+fn mk(b: integer) -> vector<integer> { [b, b + 1] }
+fn projection_arms(c: boolean) -> text {
+  s = H { v: [1, 2], id: 1 }; t = H { v: [3, 4], id: 2 }; vo = [9];
+  x: vector<integer> = vo;
+  x = if c { s.v } else { t.v };
+  x[0] = 7;
+  "{x[0]}{s.v[0]}{t.v[0]}"
+}
+fn mixed_arms(c: boolean) -> text {
+  va = [1, 2]; vo = [9];
+  x: vector<integer> = vo;
+  x = if c { va } else { mk(3) };
+  x[0] = 7;
+  "{x[0]}{x[1]}{va[0]}"
+}
+fn block_arms(c: boolean) -> text {
+  va = [1, 2]; vb = [3, 4]; vo = [9];
+  x: vector<integer> = vo;
+  x = if c { y = 5; va } else { z = 6; vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn parameter_sources(va: vector<integer>, vb: vector<integer>, c: boolean) -> text {
+  vo = [9];
+  x: vector<integer> = vo;
+  x = if c { va } else { vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn index_arms_view(c: boolean) -> text {
+  vv = [[1, 2], [3, 4]]; vo = [9];
+  x: vector<integer> = vo;
+  x = if c { vv[0] } else { vv[1] };
+  x[0] = 7;
+  "{x[0]}{vv[0][0]}{vv[1][0]}"
+}
+fn test_each_arm_gets_the_bind_a_single_bind_of_its_tail_has() {
+  assert(projection_arms(true) == "713" && projection_arms(false) == "713", "an owned field read copies: {projection_arms(true)} {projection_arms(false)}, want 713 713");
+  assert(mixed_arms(true) == "721" && mixed_arms(false) == "741", "a variable copies beside a call that delivers: {mixed_arms(true)} {mixed_arms(false)}, want 721 741");
+  assert(block_arms(true) == "713" && block_arms(false) == "713", "a block arm's tail: {block_arms(true)} {block_arms(false)}, want 713 713");
+  a = [1, 2]; b = [3, 4];
+  assert(parameter_sources(a, b, true) == "713" && parameter_sources(a, b, false) == "713" && a[0] == 1, "a parameter as the source: {parameter_sources(a, b, true)} {parameter_sources(a, b, false)} a0={a[0]}, want 713 713 1");
+  // The control: an INDEX read is a view whatever the spelling (@FR-B-View-Depth).
+  assert(index_arms_view(true) == "773" && index_arms_view(false) == "717", "an index read stays a view: {index_arms_view(true)} {index_arms_view(false)}, want 773 717");
+}
+
+fn in_a_loop() -> text {
+  va = [1, 2]; vb = [3, 4]; vo = [9];
+  x: vector<integer> = vo;
+  s = 0;
+  for i in 0..4 {
+    x = if i % 2 == 0 { va } else { vb };
+    x[0] = 7 + i;
+    s = s * 10 + x[0];
+  }
+  "{s} {va[0]}{vb[0]}"
+}
+fn test_a_reassignment_inside_a_loop_copies_on_every_iteration() {
+  assert(in_a_loop() == "7900 13", "loop: {in_a_loop()}, want 7900 13");
+}
+
+fn coalesce_reassign() -> text {
+  va = [1, 2]; vo = [9];
+  nothing: vector<integer>? = null;
+  x: vector<integer> = vo;
+  x = nothing ?? va;
+  x[0] = 7;
+  "{x[0]}{va[0]}"
+}
+fn coalesce_projection() -> text {
+  s = N { v: [1, 2], id: 1 }; va = [3, 4]; vo = [9];
+  x: vector<integer> = vo;
+  x = s.v ?? va;
+  x[0] = 7;
+  y: vector<integer> = s.v ?? va;
+  y[0] = 8;
+  "{x[0]}{y[0]}{s.v[0]}{va[0]}"
+}
+fn null_arm(c: boolean) -> text {
+  va = [1, 2]; vo = [9];
+  x: vector<integer>? = vo;
+  x = if c { va } else { null };
+  if x != null { x[0] = 7; }
+  "{x} {va[0]}"
+}
+fn test_a_coalesce_copies_its_default_and_a_hoisted_projection() {
+  assert(coalesce_reassign() == "71", "?? default: {coalesce_reassign()}, want 71");
+  assert(coalesce_projection() == "7813", "?? of an owned field, reassigned and first-bound: {coalesce_projection()}, want 7813");
+  assert(null_arm(true) == "[7,2] 1" && null_arm(false) == "null 1", "a null arm: {null_arm(true)} | {null_arm(false)}, want [7,2] 1 | null 1");
+}
+
+fn first_bind_match(sel: integer) -> text {
+  va = [1, 2]; vb = [3, 4];
+  x: vector<integer> = match sel { 1 => va, _ => vb };
+  x[0] = 7;
+  "{x[0]}{va[0]}{vb[0]}"
+}
+fn first_bind_nested(p: boolean, q: boolean) -> text {
+  va = [1, 2]; vb = [3, 4]; vc = [5, 6];
+  x = if p { va } else if q { vb } else { vc };
+  x[0] = 7;
+  y: vector<integer> = match p { true => if q { va } else { vb }, _ => vc };
+  y[0] = 8;
+  "{x[0]}{y[0]}{va[0]}{vb[0]}{vc[0]}"
+}
+fn test_a_first_bind_through_a_wrapper_block_is_declared_at_the_statement() {
+  assert(first_bind_match(1) == "713" && first_bind_match(2) == "713", "first bind by match: {first_bind_match(1)} {first_bind_match(2)}, want 713 713");
+  assert(first_bind_nested(true, false) == "78135" && first_bind_nested(false, true) == "78135" && first_bind_nested(false, false) == "78135", "first bind by else-if and a nested if: {first_bind_nested(true, false)} {first_bind_nested(false, true)} {first_bind_nested(false, false)}, want 78135 ×3");
+}
+
+struct Yh { k: integer, v: integer }
+fn keyed_control(c: boolean) -> text {
+  ha: hash<Yh[k]> = [Yh { k: 1, v: 10 }]; hb: hash<Yh[k]> = [Yh { k: 2, v: 20 }]; ho: hash<Yh[k]> = [Yh { k: 9, v: 90 }];
+  x: hash<Yh[k]> = ho;
+  x = if c { ha } else { hb };
+  x += Yh { k: 5, v: 50 };
+  "{len(x)}{len(ha)}{len(hb)}"
+}
+fn test_the_keyed_twin_copies_through_its_replace_op() {
+  assert(keyed_control(true) == "211" && keyed_control(false) == "211", "keyed: {keyed_control(true)} {keyed_control(false)}, want 211 211");
+}
