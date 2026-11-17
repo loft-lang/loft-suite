@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A KEYED LOCAL REBOUND FROM A CALL EXCHANGES ITS STORE, AND ANSWERS WHAT THE COPY ANSWERS
+// (`@FR-H-SwapKeyed`, with `@FR-H-SwapRebind`).  `h = build(…)` from a call that gave its collection
+// up is an exchange of the two stores on both backends, without the reset, and every other name
+// reads what a copy would have left.  Two sections, each with its cells and receipt.
+//
+// ── a-keyed-local-rebound-from-a-call-exchanges-its-store ──
+//
 // `@FR-H-SwapKeyed` — a keyed LOCAL rebound from a call that gave its collection up (`h =
 // build(…)`, `OpReplaceKeyed`'s free-source form) is an EXCHANGE of the two stores on both
 // backends: the local's store takes the callee's content, and the slot that ends up holding the
@@ -19,6 +26,29 @@
 // ARMED: `LOFT_NATIVE_LEAK_CHECK=1`, which `scripts/falsify.sh` arms on every run of its own
 //   accord; the interpreter's store census prints at exit unasked.
 // HOLDS: exit, asserts and panic are unmoved on both trees.
+//
+// ── a-keyed-rebind-answers-what-the-copy-answers-beside-every-other-name ──
+//
+// `@FR-H-SwapKeyed` crossed with `@FR-H-SwapRebind` — a keyed LOCAL rebound from a call that gave
+// its collection up is the exchange WITHOUT the reset, on both backends: the old collection
+// leaves with the released slot and is freed with it.  What a program can see is only that the
+// answer is the copy's: the new collection whole, nothing of the old, and every OTHER name
+// unchanged.  `a-keyed-local-rebound-from-a-call-exchanges-its-store.loft` walks every keyed
+// kind; this file crosses the exchange with what else holds or reads the old collection: a
+// view of an old element held across the rebind (`@FR-H-Materialise` — reassigning the
+// container disturbs it, so it reads its old value), a call that hands back another local's
+// collection (not given up — that local keeps its own), elements that own text and vectors
+// rebound five hundred times, a rebind to an empty collection, a rebind from a join, and a keyed
+// FIELD (not a local — the copy path) with its neighbours.  Every cell checks value, length and
+// absent keys, and the leak gate checks that each released slot was freed and not parked.
+//
+// @falsified-at: 9fb2a2898 — hand-measured, interpret and native: c1 and c1b fail (loft#2037).
+//   A second control is a hand edit of one expected value, which fails that cell on both backends.
+// CHANNEL: the assertion count, the exit code and the leak report, identically on both backends.
+// ARMED: `LOFT_LEAK_CHECK=1` (the suite arms it on every run).
+// HOLDS: panic is clean on both backends; the answers are the same under `LOFT_NO_STORE_SWAP=1`.
+//   c1 and c1b are loft#2037's cells: on 9fb2a2898 both fail on both backends (the view read and
+//   wrote the NEW collection, `501` and `7`), measured by hand.
 
 struct E { k: integer, n: text, j: integer }
 
@@ -197,10 +227,96 @@ fn walk_spatial() {
   assert(len(s) == 6 && total_spatial(s) == 137, "spatial: rebound from a call handed the local");
 }
 
-fn main() {
+fn test_a_keyed_local_rebound_from_a_call_exchanges_its_store() {
   walk_hash();
   walk_sorted();
   walk_index();
   walk_trie();
   walk_spatial();
+}
+
+struct S2E { k: integer, v: integer, name: text, tags: vector<integer> }
+struct Box { h: hash<S2E[k]>, tail: text }
+
+fn build(n: integer, base: integer) -> hash<S2E[k]> {
+  r: hash<S2E[k]> = [];
+  for i in 0..n { r += [S2E { k: i, v: base + i, name: "n{base + i}", tags: [i, base] }]; }
+  r
+}
+
+fn s2_build_sorted(n: integer, base: integer) -> sorted<S2E[k]> {
+  r: sorted<S2E[k]> = [];
+  for i in 0..n { r += [S2E { k: n - i, v: base + i, name: "s{i}", tags: [i] }]; }
+  r
+}
+
+fn id(x: hash<S2E[k]>) -> hash<S2E[k]> { x }
+
+fn total(h: hash<S2E[k]>) -> integer {
+  t = 0;
+  for e in h { t += e.v; }
+  t
+}
+
+// loft#2037: a keyed local rebound from a CALL is reassigned (`@FR-B-Disturb`) — the rebind is
+// `OpReplaceKeyed` into the local's own store, and the view is copied out before it, so `e`
+// reads its old element.
+fn test_a_view_of_an_old_element_across_the_rebind() {
+  h = build(3, 100);
+  e = h[1];
+  h = build(2, 500);
+  assert((e.v ?? -1) == 101 && (e.name ?? "") == "n101", "c1 the view reads its old element: {e.v ?? -1}");
+  assert(len(h) == 2 && (h[1].v ?? -1) == 501 && h[2] == null, "c1 new {len(h)}");
+}
+
+// loft#2037's write half: the write through the copied-out view stays out of the new collection.
+fn test_a_write_through_an_old_view_stays_out_of_the_new_collection() {
+  h = build(3, 100);
+  e = h[1];
+  h = build(2, 500);
+  e.v = 7;
+  assert((e.v ?? -1) == 7, "c1b the write lands in the view's copy: {e.v ?? -1}");
+  assert((h[1].v ?? -1) == 501 && len(h) == 2, "c1b and not in the new collection: {h[1].v ?? -1}");
+}
+
+fn test_a_callee_handing_back_another_locals_collection() {
+  g = build(2, 10);
+  h = build(4, 0);
+  first = len(h);
+  h = id(g);
+  g += [S2E { k: 9, v: 9, name: "late", tags: [] }];
+  assert(first == 4 && len(h) == 2 && total(h) == 21 && h[9] == null, "c2 h holds a copy: {len(h)} {total(h)}");
+  assert(len(g) == 3 && total(g) == 30, "c2 g keeps its own: {len(g)} {total(g)}");
+}
+
+fn test_elements_owning_heap_rebound_many_times() {
+  h = build(3, 0);
+  for i in 0..500 { h = build(3, i); }
+  // the last build: v = 499, 500, 501
+  assert(len(h) == 3 && total(h) == 1500, "c3 {len(h)} {total(h)}");
+  assert((h[2].name ?? "") == "n501" && len(h[2].tags ?? []) == 2 && (h[2].tags[1] ?? -1) == 499, "c3 the owned heap of the last build");
+}
+
+fn test_rebound_to_an_empty_collection() {
+  h = build(5, 0);
+  was = len(h);
+  h = build(0, 0);
+  assert(was == 5 && len(h) == 0 && h[0] == null, "c4 nothing of the five survives: {len(h)}");
+}
+
+fn test_rebound_from_a_join() {
+  s = s2_build_sorted(2, 0);
+  for i in 0..4 {
+    s = if i % 2 == 0 { s2_build_sorted(3, i * 10) } else { s2_build_sorted(1, i) };
+  }
+  // the last pass, i = 3, is odd: one element, k 1, v 3
+  assert(len(s) == 1 && (s[1].v ?? -1) == 3 && s[2] == null, "c5 {len(s)}");
+}
+
+fn test_a_keyed_field_rebound() {
+  b = Box { h: build(2, 0), tail: "end" };
+  for i in 1..4 { b.h = build(i, i * 100); }
+  // the last build: 3 elements, v = 300, 301, 302
+  assert(len(b.h) == 3 && total(b.h) == 903, "c6 {len(b.h)} {total(b.h)}");
+  assert(b.tail == "end", "c6 the neighbour is intact: {b.tail}");
 }

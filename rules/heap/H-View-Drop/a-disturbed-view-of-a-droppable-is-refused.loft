@@ -61,7 +61,7 @@ fn bh(base: integer) -> hash<KH[k]> { r: hash<KH[k]> = [KH { k: 1, h: H { id: ba
 // loft#2037: a KEYED local rebound from a CALL while a view of a droppable element lives is
 // refused, as the literal rebind (r3's shape) is; it compiled before and `e.h.id` read `500`,
 // the NEW collection's element.  Plain-view half:
-// `rules/heap/H-SwapKeyed/a-keyed-rebind-answers-what-the-copy-answers-beside-every-other-name.loft` c1.
+// `rules/heap/H-SwapKeyed/a-keyed-local-rebound-from-a-call-exchanges-its-store-and-answers-what-the-copy-answers.loft` c1.
 fn r10_keyed_local_rebound_from_a_call() { h = bh(100); e = h[1]; h = bh(500); print("{e.h.id ?? -1}"); }
 
 fn bv(base: integer) -> vector<H> { [H { id: base }] }
