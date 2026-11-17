@@ -1,6 +1,35 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A LINK IN A GENERATOR IS A LINK, AND YIELDING IT YIELDS ITS VALUE (`@FR-G-Own`, `@FR-B-Ref-Uniform`,
+// `@FR-B-Ref-Alias`, `@FR-G-Yield`).  `r = &b` inside a generator is a live link to the parameter it
+// names, a yielded lambda keeps the link, and a `yield` of a `&τ` local yields the value the link
+// names — the consumer's (loft#2420; its struct-enum and nested cells also guard loft#2421 on
+// `--native`).  Two sections, each with its cells and receipt.
+//
+// ── a-link-in-a-generator-names-its-parameter ──
+//
+// A LINK IN A GENERATOR NAMES ITS PARAMETER, AND A YIELDED LAMBDA KEEPS THE LINK
+// (`@FR-G-Own`, `@FR-B-Ref-Alias`, `@FR-G-Yield`).  `r = &b` inside a generator is a live link to
+// the record parameter: a write through it reaches the caller, a write to `b` after a yield is
+// read through it, and a yielded lambda capturing `r` keeps aliasing (B-Ref-Alias) rather than
+// copying the record.  The scalar-link twin is `B-Ref-Lvalue/a-generator-parameter-or-local-is-a-
+// place-a-link-names.loft`, which holds on both backends.
+//
+// Every record cell here is a NATIVE defect, ignored until it is fixed: a `&` link to a record
+// parameter of a generator does not build — E0596 (`var_b` not mutable) when it is written
+// before a yield, E0425 (`var_r` not found) when it is read after one.  The interpreter answers
+// every cell as hand-computed.
+//
+// @falsified-at: 58ea03896 — hand-measured, native: the record-link cells fail rustc (loft#2061);
+//   the interpreter answered every cell.
+// CHANNEL: the asserts on both backends, and the rustc build on native.
+// ARMED: no instrument.
+// WITNESS: each message names the hand-computed sequence.
+// HOLDS: the scalar control on both backends.
+//
+// ── 2420-a-yielded-link-yields-its-value ──
+//
 // A `yield` of a `&τ` local yields the VALUE the link names (`@FR-B-Ref-Uniform`: a `&τ` is
 // used exactly like a `τ`), and that value is the consumer's (`@FR-G-Own`): an existing
 // record is yielded as a copy, so a later write through the link does not reach what the
@@ -42,6 +71,42 @@
 // CHANNEL: the assertions; on the interpreter also the crash and the `BUG (#306)` line.
 
 struct Box { n: integer }
+
+fn scalar_link(b: integer) -> iterator<integer> { c = &b; yield 5; c += 3; yield b; }
+fn s(g: iterator<integer>) -> text { r = ""; for v in g { r += "{v} "; } r }
+
+fn test_the_scalar_control() {
+  assert(s(scalar_link(200)) == "5 203 ", "5 203: {s(scalar_link(200))}");
+}
+
+fn record_link(b: Box) -> iterator<integer> { r = &b; yield r.n; b.n = 7; yield r.n; r.n = 9; yield b.n; }
+
+// loft#2061 — native once refused this (rustc), the interpreter answered it.
+fn test_a_record_link_across_yields() {
+  bx = Box { n: 3 };
+  // 3; b.n = 7 read through r; r.n = 9 read through b; the caller sees 9.
+  assert(s(record_link(bx)) == "3 7 9 " && bx.n == 9, "3 7 9 and 9");
+}
+
+fn makers(b: Box) -> iterator<fn() -> integer> {
+  r = &b;
+  yield fn() -> integer { r.n };
+  b.n = 7;
+  yield fn() -> integer { r.n * 2 };
+}
+
+// loft#2061 — native once refused this (rustc), the interpreter answered it.
+fn test_a_yielded_lambda_keeps_the_link() {
+  bx = Box { n: 3 };
+  g = makers(bx);
+  a = next(g);
+  a1 = a();
+  b = next(g);
+  a2 = a();
+  // a reads 3, then 7 once the generator wrote b.n; b reads 7 * 2 = 14; the caller sees 7.
+  assert(a1 == 3 && a2 == 7 && b() == 14 && bx.n == 7, "3 7 14 7: {a1} {a2} {b()} {bx.n}");
+}
+
 struct O { b: Box }
 enum E { A { n: integer }, B }
 
