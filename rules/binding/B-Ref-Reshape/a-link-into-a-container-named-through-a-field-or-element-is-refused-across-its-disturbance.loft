@@ -1,0 +1,129 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LINK INTO A CONTAINER NAMED THROUGH A FIELD OR AN ELEMENT IS REFUSED ACROSS ITS DISTURBANCE
+// (`@FR-B-Ref-Reshape`, loft#2161).  A `&` link names the place itself, so where a view would be
+// copied out (`@FR-B-Disturb`) a link live across the event is refused — however the container is
+// spelled: a field grown by a vector, a field's text appended to, a container inside an element
+// grown, a field rebuilt whole, and a call handed both the field's element and the container it
+// grows.  Each section is one refusal with its receipt; the view-side twin is
+// `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+//
+// ── 2161-a-reference-into-a-field-across-its-append-of-a-vector-is-refused ──
+//
+// loft#2161 — A REFERENCE INTO A FIELD ACROSS ITS APPEND OF A VECTOR IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  Growing the field `w.a` by a whole vector moves every element, exactly as `+= [x]` does, and was not recognised as a growth: the program compiled and the write through `c` was lost.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+// @EXPECT_ERROR: cannot grow `w` while `c` references a place inside it
+//
+// ── 2161-a-text-link-into-a-field-across-its-append-is-refused ──
+//
+// loft#2161 — A TEXT LINK INTO A FIELD ACROSS ITS APPEND IS REFUSED (`@FR-B-Ref-Reshape`,
+// `@FR-B-Disturb`).  A `&text` link to an element is a view by the same relation a record link
+// is (it holds the slot's address), and appending a vector to the field moves every slot.  The
+// append was not recognised as a growth, so the program compiled; with two elements and room
+// to spare the write happened to land, which is exactly the allocator-dependent answer
+// `(B-Disturb)` rules out.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: leak, panic and free-refusal are equal on both trees, on both backends (falsify reports only the channels that move).
+// @EXPECT_ERROR: cannot grow `w` while `t` references a place inside it
+//
+// ── 2161-a-reference-into-a-container-inside-an-element-across-its-growth-is-refused ──
+//
+// loft#2161 — A REFERENCE INTO A CONTAINER INSIDE AN ELEMENT ACROSS ITS GROWTH IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  `vv[0] += [x]` grows the vector held in an element; a container reached through an element read was not recognised at all.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+// @EXPECT_ERROR: cannot grow `vv` while `c` references a place inside it
+//
+// ── 2161-a-reference-into-a-rebuilt-field-is-refused ──
+//
+// loft#2161 — A REFERENCE INTO A REBUILT FIELD IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  `w.a = [..]` gives the field a new value, so the element `c` names is gone; the rebuild was subtracted as an overwrite and the write landed in the NEW vector.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+// @EXPECT_ERROR: cannot overwrite the part of `w` that holds `c` while `c` references a place inside it
+//
+// ── 2161-a-call-handed-a-field-element-and-a-container-it-grows-is-refused ──
+//
+// loft#2161 — A CALL HANDED A FIELD ELEMENT AND A CONTAINER IT GROWS BY A VECTOR IS REFUSED (`@FR-B-Ref-Reshape`, `@FR-B-Disturb`).  A plain struct parameter aliases the caller's element (`calls.md` F-ParamHeap), so `rd(w.a[0], w)` with `rd` appending a vector to `w.a` reads a moved element; the callee's growth was not collected.
+//
+// @falsified-at: b36d0449f — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 0/1 (the suite's verdict, not a count of matches)
+// CHANNEL: the expected diagnostic.
+// ARMED: no instrument.
+// HOLDS: the plain-bind spelling materialises instead —
+//   `rules/binding/B-Disturb/a-disturbance-ends-the-places-inside-its-container-and-only-those.loft`.
+// @EXPECT_ERROR: cannot pass both `w` and a reference into it to `rd`
+// @catches: LOFT_NO_CALLEE_DISTURB — without the callee's disturbance the call is no longer refused, which is what this program checks.
+
+struct S { n: integer }
+struct W { tag: integer, a: vector<S> }
+
+fn test_a_reference_into_a_field_across_its_append_of_a_vector_is_refused() {
+  w = W { tag: 1, a: [S { n: 101 }] };
+  more: vector<S> = [S { n: 2 }, S { n: 3 }];
+  c = &w.a[0];
+  w.a += more;
+  c.n = 7;
+  println("{w.a[0].n}");
+}
+
+struct T { tag: integer, ts: vector<text> }
+
+fn test_a_text_link_into_a_field_across_its_append_is_refused() {
+  w = T { tag: 1, ts: ["ab", "cd"] };
+  more: vector<text> = ["x", "y"];
+  t = &w.ts[0];
+  w.ts += more;
+  t = "zz";
+  println("{w.ts[0]}");
+}
+
+struct S3S { n: integer }
+struct S3W { tag: integer, a: vector<S3S> }
+
+fn test_a_reference_into_a_container_inside_an_element_across_its_growth_is_re() {
+  vv: vector<vector<S3S>> = [[S3S { n: 101 }], [S3S { n: 201 }]];
+  c = &vv[0][0];
+  vv[0] += [S3S { n: 3 }];
+  c.n = 7;
+  println("{vv[0][0].n}");
+}
+
+struct S4S { n: integer }
+struct S4W { tag: integer, a: vector<S4S> }
+
+fn test_a_reference_into_a_rebuilt_field_is_refused() {
+  w = S4W { tag: 1, a: [S4S { n: 101 }] };
+  c = &w.a[0];
+  w.a = [S4S { n: 901 }];
+  c.n = 7;
+  println("{w.a[0].n}");
+}
+
+struct S5S { n: integer }
+struct S5W { tag: integer, a: vector<S5S> }
+
+fn rd(e: S5S, w: S5W) -> integer {
+  more: vector<S5S> = [S5S { n: 2 }, S5S { n: 3 }];
+  w.a += more;
+  e.n
+}
+
+fn test_a_call_handed_a_field_element_and_a_container_it_grows_is_refused() {
+  w = S5W { tag: 1, a: [S5S { n: 101 }] };
+  println("{rd(w.a[0], w)}");
+}
