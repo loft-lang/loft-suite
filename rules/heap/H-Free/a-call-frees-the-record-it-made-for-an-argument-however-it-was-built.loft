@@ -1,0 +1,235 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL FREES THE RECORD IT MADE FOR AN ARGUMENT, HOWEVER THE ARGUMENT WAS BUILT (`@FR-H-Free`:
+// every exit releases what the frame owns).  A block argument (a match arm's projection or a
+// literal), a choice whose arm is a call into a frame buffer, and a scalar vector built inline each
+// leave a store the call's frame owns, freed once it answers.  Three sections, each with its cells
+// and receipt.
+//
+// ── a-call-taking-a-block-argument-frees-the-record-it-made ──
+//
+// @catches: LOFT_NO_BLOCK_ARG_ROOT — the switch reads a block argument as an unnameable mint, the copy of the answer loses its source-free, and the record the callee made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `last(match code { NdBlock { block } =>
+// block[0].ops, _ => [] })` passes a block: a `match` arm's projection or a vector literal.  The
+// copy of `last`'s answer frees the store the answer came in unless an argument holds it, and
+// after the call the block's value is named by its last operator — the literal's work variable
+// or the projection's root.  Read as unnameable, the copy kept the fresh `NdNull` `last` made on
+// an empty vector (the self-hosted elaborator's `text_instance_carried`; main, both backends).
+// An answer that IS an element of the argument stays protected.
+//
+// Axes this file MOVES:  the block (a `match` arm, an `if` of a literal and a field, a block
+//                        with a statement first); what the callee answers (fresh, an element of
+//                        a literal, an element of a field).
+// Axes it HOLDS FIXED:   the argument is a vector of records.
+//
+// @ARMED: LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   HOLDS: every cell, on every backend.
+//
+// ── a-call-taking-a-join-arm-call-frees-the-store-it-made ──
+//
+// @catches: LOFT_NO_JOIN_ARM_ARG_ROOT — the switch reads the join arm's call as a mint, the copy of the answer loses its source-free, and every store the callee made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `g = guard(x.code, if held { pt } else
+// { base(pt) }, k)` passes a choice whose second arm is a call into a frame buffer.  The copy
+// of `guard`'s answer frees the store the callee made unless an argument holds it, and it can
+// tell only when it can name every argument's store: the arm's buffer is that name once the
+// call has run.  Read as unnameable, the copy kept every store the callee made (the
+// self-hosted elaborator's `place_assignment`, one `Node` per compound assignment).
+//
+// Axes this file MOVES:  what the callee answers (a fresh node, its first argument, the
+//                        choice argument on either arm); a loop.
+// Axes it HOLDS FIXED:   the choice is the callee's second argument; one buffer call per arm.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   HOLDS: every cell, on every backend.
+//
+// ── a-call-taking-a-scalar-vector-built-inline-frees-the-record-it-made ──
+//
+// @catches: LOFT_NO_SCALAR_VECTOR_EXEMPT — the switch counts a scalar vector built inline as an argument the bracket cannot name, the copy of the answer loses its source-free, and every record the callee made leaks
+//
+// @FR-H-Free: every exit releases what the frame owns.  `ac = arm_typed(b.code, mkdeps(b.tp))`
+// copies the callee's answer and frees the store it came in, unless an argument holds that
+// store — so it must be able to name every argument's store.  A vector of scalars holds no
+// record, so a record answer never lies in it: it needs no name.  Counted as unnameable when it
+// was built inline, it cost the copy its source-free, one record per call (the self-hosted
+// elaborator's `match_expr`).  A callee answering a VECTOR may hand that vector back, and keeps
+// its protection.
+//
+// Axes this file MOVES:  the vector argument (built inline, a named local); what the callee
+//                        answers (a fresh record, the vector argument, a record held in a
+//                        vector-of-records argument); a loop with an early break.
+// Axes it HOLDS FIXED:   the vector's elements are integers.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   HOLDS: every cell, on every backend.
+
+enum Node { NdNull, NdInt { n: integer }, NdSpan { pos: integer, inner: Node }, NdBlock { block: vector<Bl> } }
+struct Bl { operators: vector<Node>, k: integer }
+struct Box { items: vector<Node> }
+fn mk(k: integer) -> Node { NdInt { n: k } }
+fn last(ops: vector<Node>) -> Node { if len(ops) == 0 { NdNull } else { ops[-1] } }
+fn first(ops: vector<Node>, d: Node) -> Node { if len(ops) == 0 { d } else { ops[0] } }
+fn unspan(n: Node) -> Node { match n { NdSpan { inner } => unspan(inner), _ => n } }
+fn sz(n: Node) -> integer { match n { NdInt { n } => n, NdSpan { inner } => 100 + sz(inner), NdNull => -1, _ => 0 } }
+fn carried(code: Node) -> integer {
+  tail = unspan(last(match code { NdBlock { block } => block[0].operators, _ => [] }));
+  sz(tail)
+}
+fn lit(k: integer) -> integer { t = last(if k > 0 { [mk(k), mk(k + 1)] } else { [] }); sz(t) }
+fn held(b: Box, k: integer) -> integer { t = first(if k > 0 { b.items } else { [mk(9)] }, mk(5)); sz(t) }
+fn blk(b: Box, k: integer) -> integer { t = last({ x = k * 2; if x > 2 { b.items } else { [mk(x)] } }); sz(t) }
+
+fn test_a_match_argument() {
+  a = NdBlock { block: [Bl { operators: [NdInt { n: 1 }, NdSpan { pos: 3, inner: NdInt { n: 7 } }], k: 0 }] };
+  b = NdBlock { block: [Bl { operators: [], k: 0 }] };
+  c = NdInt { n: 4 };
+  t = 0;
+  for _ in 0..3 { t += carried(a) * 100 + carried(b) * 10 + carried(c); }
+  assert(t == 2067, "{t}");
+}
+
+fn test_literal_field_and_block_arguments() {
+  b = Box { items: [mk(3), mk(4)] };
+  s = 0;
+  for k in 0..4 { s += lit(k) * 10000 + held(b, k) * 100 + blk(b, k); }
+  assert(s == 81810 && sz(b.items[0]) == 3 && sz(b.items[1]) == 4, "{s}");
+}
+
+enum S2Node { S2NdNull, S2NdInt { n: integer }, NdCall { def_nr: integer, args: vector<S2Node> } }
+enum TypeT { TyInt { lo: integer }, TyOpt { inner: TypeT } }
+struct Ex { code: S2Node, tp: integer }
+
+fn ex(code: S2Node, tp: integer) -> Ex { Ex { code: code, tp: tp } }
+fn base(t: TypeT) -> TypeT { match t { TyOpt { inner } => base(inner), _ => t } }
+fn lo(t: TypeT) -> integer { match t { TyInt { lo } => lo, TyOpt { inner } => lo(inner) } }
+fn cl(d: integer, args: vector<S2Node>) -> S2Node { NdCall { def_nr: d, args: args } }
+fn s2_mk(k: integer) -> S2Node { S2NdInt { n: k } }
+fn s2_sz(n: S2Node) -> integer { match n { S2NdNull => 1, S2NdInt { n } => n, NdCall { def_nr, args } => { s = 100 * def_nr; for a in args { s += s2_sz(a); } s } } }
+
+fn guard(code: S2Node, target: TypeT, k: integer) -> S2Node {
+  if lo(target) + k % 2 == 0 {
+    return code;
+  }
+  cl(9, [code, S2NdInt { n: k }])
+}
+
+fn pw(g: S2Node, k: integer) -> S2Node? {
+  if k % 3 == 0 { return null; }
+  NdCall { def_nr: 5, args: [g] }
+}
+
+fn pa(x: Ex, pt: TypeT, held: boolean, k: integer) -> Ex {
+  g = guard(x.code, if held { pt } else { base(pt) }, k);
+  cw = pw(g, k);
+  if cw == null {
+    return ex(S2NdNull, 0);
+  }
+  ex(cw!, 0)
+}
+
+// answers its first argument, its second, or a fresh node
+fn pick(a: S2Node, b: S2Node, w: integer) -> S2Node {
+  if w == 0 { return a; }
+  if w == 1 { return b; }
+  cl(7, [a, b])
+}
+
+fn go(a: S2Node, h: boolean, w: integer) -> integer {
+  g = pick(a, if h { a } else { s2_mk(40) }, w);
+  s2_sz(g)
+}
+
+fn looped(a: S2Node) -> integer {
+  t = 0;
+  for i in 0..4 { g = pick(a, if i % 2 == 0 { a } else { s2_mk(i) }, i % 3); t += s2_sz(g); }
+  t
+}
+
+fn test_the_guard_shape() {
+  s = 0;
+  for k in 0..12 {
+    x = Ex { code: S2NdInt { n: k }, tp: 1 };
+    s += s2_sz(pa(x, TyOpt { inner: TyInt { lo: 0 } }, k % 4 < 2, k).code);
+  }
+  assert(s == 7676, "{s}");
+}
+
+fn test_what_the_callee_answers() {
+  a = s2_mk(5);
+  r = "{go(a, true, 0)} {go(a, false, 0)} {go(a, true, 1)} {go(a, false, 1)} {go(a, true, 2)} {go(a, false, 2)}";
+  assert(r == "5 5 5 40 710 745", r);
+  assert(s2_sz(a) == 5, "{s2_sz(a)}");
+}
+
+fn test_in_a_loop() {
+  a = s2_mk(5);
+  assert(looped(a) == 721, "{looped(a)}");
+}
+
+enum S3Node { S3NdNull, S3NdInt { n: integer }, S3NdBlock { name: text, ops: vector<S3Node>, deps: vector<integer> } }
+struct B { code: S3Node, tp: integer }
+struct MArm { code: S3Node, k: integer }
+fn arm_typed(arm: S3Node, deps: vector<integer>) -> S3Node {
+  match arm {
+    S3NdBlock { name, ops } => S3NdBlock { name: name, ops: ops, deps: deps },
+    _ => arm
+  }
+}
+fn mkdeps(t: integer) -> vector<integer> { [t, 1] }
+fn s3_sz(n: S3Node) -> integer { match n { S3NdInt { n } => n, S3NdBlock { name, ops, deps } => { s = 100 + len(name) + 10 * len(deps); for o in ops { s += s3_sz(o); } s }, _ => 0 } }
+fn arms(bs: vector<B>, typed: boolean) -> integer {
+  out: vector<MArm> = [];
+  for b in bs {
+    ac = b.code;
+    if typed && b.tp > 0 {
+      ac = match b.code { S3NdBlock { name } => if name == "Object" { b.code } else { arm_typed(b.code, mkdeps(b.tp)) }, _ => b.code };
+    }
+    out += [MArm { code: ac, k: b.tp }];
+    if b.tp == 9 { break; }
+  }
+  s = 0;
+  for m in out { s += s3_sz(m.code); }
+  s
+}
+struct R { n: integer, tag: text }
+struct S3Box { items: vector<R>, ks: vector<integer> }
+fn mkv(k: integer) -> vector<integer> { [k, k + 1] }
+fn rec(k: integer, ks: vector<integer>) -> R { R { n: k + len(ks), tag: "r{k}" } }
+fn same(ks: vector<integer>, k: integer) -> vector<integer> { if k > 0 { ks } else { [k] } }
+fn s3_pick(b: S3Box, k: integer) -> R { if k < len(b.items) { b.items[k] } else { R { n: -1, tag: "none" } } }
+
+fn test_a_rebind_from_the_call() {
+  bs = [B { code: S3NdBlock { name: "arm", ops: [S3NdInt { n: 3 }], deps: [] }, tp: 1 }, B { code: S3NdBlock { name: "Object", ops: [], deps: [] }, tp: 2 }, B { code: S3NdInt { n: 9 }, tp: 3 }, B { code: S3NdBlock { name: "x", ops: [], deps: [7] }, tp: 0 }];
+  assert(arms(bs, true) == 352 && arms(bs, false) == 332, "{arms(bs, true)} {arms(bs, false)}");
+}
+
+fn test_an_early_break() {
+  cs = [B { code: S3NdBlock { name: "arm", ops: [S3NdInt { n: 3 }], deps: [] }, tp: 1 }, B { code: S3NdBlock { name: "brk", ops: [], deps: [] }, tp: 9 }, B { code: S3NdInt { n: 1 }, tp: 2 }];
+  assert(arms(cs, true) == 249, "{arms(cs, true)}");
+}
+
+fn test_what_the_callee_hands_back() {
+  b = S3Box { items: [R { n: 1, tag: "a" }, R { n: 2, tag: "b" }], ks: [9] };
+  s = 0;
+  t = "";
+  for k in 0..4 {
+    r = rec(k, mkv(k));
+    s += r.n;
+    v = same(mkv(k), k);
+    s += len(v) * 10;
+    w = b.ks;
+    w = same(w, k);
+    s += w[0] * 100;
+    p = s3_pick(b, k);
+    t += p.tag;
+    r = rec(k, w);
+    s += r.n * 1000;
+  }
+  assert(s == 12784 && t == "abnonenone" && "{b.ks}" == "[9]", "{s} {t}");
+}
