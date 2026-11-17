@@ -16,7 +16,7 @@
 // refusal stops the file: this one is the append; the field, literal, tuple and returned
 // literal are the sibling files.  The legal half — a refill, a move on one path only, a view, a
 // parameter's own hold, a call argument — is in
-// `a-generator-moved-into-a-holder-is-released-once-by-it.loft` and the cells beside it.
+// `a-generator-held-in-a-field-or-an-element-is-released-once-by-its-holder.loft` and the cells beside it.
 //
 // @falsified-at: d1bff0fb0 — hand-measured, interpret and native: the control compiles this file
 //   and prints `1 2` then `null`.
