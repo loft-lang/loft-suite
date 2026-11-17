@@ -1,0 +1,139 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EACH PASS FREES THE ANSWER IT COPIED (`@FR-H-Free`).  A comprehension whose body is one call owns
+// each answer it copies into an element, whatever the element's layout, and a local bound in each
+// pass of a loop releases its store at the end of that pass.  Two sections, each with its cells and
+// receipt.
+//
+// ── a-comprehension-releases-each-call-it-copies-whatever-its-layout ──
+//
+// @catches: LOFT_NO_COMP_LINE_PEEL — the switch keeps a comprehension body that starts a new source line in its block, so the slot reads the call's declared borrow and leaks every store the call made
+//
+// @FR-H-Free: every exit releases what the frame owns there.  A comprehension whose body is
+// one call (`[for x in es { f(x, d) }]`) owns each answer: it copies it into the element and
+// releases it.  The call here answers its argument on one arm and a store it makes on the
+// others, so the slot must take the copy-or-adopt.  Written inside a function that spans
+// several lines, the body carried a line marker, read as a second operator, and the slot
+// kept the call's borrow: every store the call made leaked, one per element (the self-hosted
+// elaborator's `with_deps` on a tuple type).  The layout of the source is no part of the
+// meaning: this file keeps the multi-line shape on purpose.
+//
+// Axes this file MOVES:  which arm the call answers through (its argument, a store it made,
+//                        a nested call); a recursive call; the comprehension in a literal field
+//                        and bound to a local first.
+// Axes it HOLDS FIXED:   the body is one call on the comprehension's own line.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   HOLDS: every cell, on every backend.
+//
+// ── a-local-bound-in-each-pass-frees-each-copied-answer ──
+//
+// @catches: LOFT_C_STALE_HELD_KEEP — the switch compares the answer with the store the local held on the previous pass, freed by then; a reused slot matches it, and the C copy keeps the answer unfreed
+//
+// @FR-H-Free: every exit releases what the frame owns.  `t` is bound in three loops, so it has
+// an owner witness that releases its store at the end of each pass.  The C writer compared the
+// call's answer with the store `t` held before the bind — a freed slot by then, which the
+// allocator hands to the next answer — and on a match it copied the answer and skipped its
+// free (the self-hosted elaborator's `fill_instance`, `t = substitute_var(…)`; C only).  A
+// value that reads `t` (`t = sv(t, …)`) still compares with it.
+//
+// Axes this file MOVES:  the bind (a view, a call's answer, a call reading the local); the
+//                        answer (fresh, an argument, a view of the parameter).
+// Axes it HOLDS FIXED:   one local bound in several loops; a vector of records.
+//
+// @ARMED: LOFT_STRICT_STORES=1 — the leaked answer shows as a store left at exit only when the
+//   allocator's slot reuse is checked strictly; the plain leak count reads the per-test runs clean.
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   HOLDS: every cell, on every backend.
+
+enum T { TInt, TText { dep: vector<integer> }, TRef { n: integer, dep: vector<integer> }, TTuple { elems: vector<T> }, TOpt { inner: T } }
+
+fn with_deps(t: T, deps: vector<integer>) -> T {
+  match t {
+    TText { dep: _ } => TText { dep: deps },
+    TRef { n } => TRef { n: n, dep: deps },
+    TOpt { inner } => TOpt { inner: with_deps(inner, deps) },
+    TTuple { elems } => TTuple { elems: [for x in elems { with_deps(x, deps) }] },
+    _ => t
+  }
+}
+
+fn bound_first(es: vector<T>, deps: vector<integer>) -> vector<T> {
+  v = [for x in es { with_deps(x, deps) }];
+  v
+}
+
+fn sz(t: T) -> integer {
+  match t {
+    TInt => 1,
+    TText { dep } => 10 + len(dep),
+    TRef { n, dep } => 100 * n + len(dep),
+    TTuple { elems } => { s = 1000; for e in elems { s += sz(e); } s },
+    TOpt { inner } => 5 + sz(inner)
+  }
+}
+
+fn test_in_a_literal_field_recursively() {
+  t = TTuple { elems: [TText { dep: [] }, TRef { n: 2, dep: [] }, TInt, TOpt { inner: TText { dep: [1] } }] };
+  s = 0;
+  for i in 0..10 { s += sz(with_deps(t, [i, 1])); }
+  assert(s == 12320, "{s}");
+}
+
+fn test_bound_to_a_local_first() {
+  s = 0;
+  for e in bound_first([TText { dep: [] }, TInt, TRef { n: 3, dep: [7] }], [4, 5, 6]) { s += sz(e); }
+  assert(s == 13 + 1 + 303, "{s}");
+}
+
+enum S2T { S2TInt, S2TRef { n: integer, dep: vector<integer> }, TVec { inner: S2T, dep: vector<integer> }, S2TOpt { inner: S2T } }
+fn deps(t: S2T) -> vector<integer> { match t { S2TRef { dep } => dep, TVec { dep } => dep, _ => [] } }
+fn wd(t: S2T, d: vector<integer>) -> S2T { match t { S2TRef { n } => S2TRef { n: n, dep: d }, TVec { inner } => TVec { inner: inner, dep: d }, _ => t } }
+fn sub(t: S2T, h: integer, b: S2T) -> S2T {
+  match t {
+    S2TRef { n } => if n == h { b } else { t },
+    TVec { inner, dep } => TVec { inner: sub(inner, h, b), dep: dep },
+    S2TOpt { inner } => { s = sub(inner, h, b); if (s is S2TOpt) { s } else { S2TOpt { inner: s } } },
+    _ => t
+  }
+}
+fn sv(t: S2T, h: integer, b: S2T) -> S2T {
+  match t {
+    S2TRef { n, dep } => if n == h { wd(b, deps(b) + dep) } else { t },
+    _ => sub(t, h, b)
+  }
+}
+fn s2_sz(t: S2T) -> integer { match t { S2TInt => 1, S2TRef { n, dep } => 10 * n + len(dep), TVec { inner, dep } => 100 + s2_sz(inner) + len(dep), S2TOpt { inner } => 1000 + s2_sz(inner) } }
+struct V { name: text, tds: vector<S2T> }
+struct F { vars: vector<V> }
+fn walk(vs: vector<V>, b: S2T) -> integer {
+  f = F { vars: [] };
+  pre = 0;
+  for v in vs { t = v.tds[0] ?? S2TInt; pre += s2_sz(t); }
+  for v in vs { t = sv(v.tds[0] ?? S2TInt, 3, b); c = v; c.tds = [t]; f.vars += [c]; }
+  s = 0;
+  for v in f.vars { t = v.tds[0] ?? S2TInt; s += s2_sz(t); }
+  s + pre * 10000
+}
+fn reread(vs: vector<V>, b: S2T) -> integer {
+  s = 0;
+  for v in vs { t = v.tds[0] ?? S2TInt; t = sv(t, 3, b); s += s2_sz(t); }
+  s
+}
+
+fn test_a_local_bound_in_each_pass() {
+  b = S2TRef { n: 7, dep: [1] };
+  vs = [V { name: "a", tds: [S2TRef { n: 3, dep: [2, 3] }] }, V { name: "b", tds: [] }, V { name: "c", tds: [TVec { inner: S2TRef { n: 3, dep: [] }, dep: [5] }] }];
+  w = walk(vs, b) + walk(vs, b);
+  assert(w == 3280492 && s2_sz(b) == 71, "{w}");
+}
+
+fn test_a_call_reading_the_local() {
+  b = S2TRef { n: 7, dep: [1] };
+  vs = [V { name: "a", tds: [S2TRef { n: 3, dep: [2, 3] }] }, V { name: "b", tds: [] }, V { name: "c", tds: [TVec { inner: S2TRef { n: 4, dep: [] }, dep: [5] }] }];
+  r = reread(vs, b) + reread(vs, b);
+  assert(r == 2 * (73 + 1 + 141), "{r}");
+}
