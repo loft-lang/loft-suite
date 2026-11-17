@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC CLOSES NO OTHER TEMPLATE'S SELF-REFERENCE (`@FR-G-Regular`, `@FR-G-Mono`, loft#2546).
+// A self-naming template (`enum B<T> { … vector<B<T>> }`) mints its own self-reference `B<T>` at
+// its declaration, and a type variable's placeholder is shared between templates, so a binding
+// of another generic's `T` once closed `B<T>` too: a `B<integer>` nothing asked for, minted after
+// layout — "Adding a value to a non enum type", an internal compiler error.  Each self-naming
+// template below is declared AFTER the generic whose instantiation used to mint it.  The control
+// is the generic that builds an open instance only as a call argument (`inner(Inner { v: x })`):
+// a temporary nothing names, which a fix closing only named instances left open.
+// Values by hand: d(A at 1, no children) = 1; the first of
+// Box[Inner 7, Inner 8] = 7; inner(Inner { v: 6 }) = 6, at text "t".
+//
+// @falsified-by: tests/falsified/2546-a-generic-closes-no-other-templates-self-reference.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the compile (an internal compiler error on the control) and the asserts.
+//   ARMED: every run.
+//   WITNESS: the control panics "Adding a value to a non enum type".
+//   HOLDS: the control answers the call-argument test once the panic is out of the way.
+
+
+enum A<T> { An, Ac { h: T, t: vector<A<T>> } }
+fn d<T>(l: A<T>) -> integer { match l { An => 0, Ac { h: _, t } => 1 + len(t) } }
+
+fn test_a_generic_over_a_self_naming_enum_with_another_after_it() {
+  x: A<integer> = Ac { h: 1, t: [] };
+  assert(d(x) == 1, "d: {d(x)}");
+}
+
+struct Inner<T> { v: T }
+struct Box<T> { items: vector<T> }
+fn first<T>(b: Box<Inner<T>>) -> T { b.items[0].v }
+
+fn test_a_nested_instance_argument_with_a_template_after_it() {
+  b = Box { items: [Inner { v: 7 }, Inner { v: 8 }] };
+  assert(first(b) == 7, "first: {first(b)}");
+}
+
+fn inner<T>(i: Inner<T>) -> T { i.v }
+fn e2<T>(x: T) -> T { inner(Inner { v: x }) }
+
+fn test_control_an_instance_built_as_a_call_argument_closes() {
+  assert(e2(6) == 6 && e2("t") == "t", "e2: {e2(6)} {e2("t")}");
+}
+
+// Self-naming templates nothing above uses — declared AFTER every call site, the order in
+// which a binding of `d`'s or `first`'s `T` minted their `<integer>` instance.
+enum B<T> { Bn, Bc { h: T, t: vector<B<T>> } }
+enum Z<T> { Zn, Zc { h: T, t: vector<Z<T>> } }
