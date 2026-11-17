@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN EMPTY-LITERAL ARM BESIDE A LATE-TYPED ARM TAKES ITS TYPE (`@FR-I-Join`, loft#2545).  The
+// arms of an `if` join, and an untyped empty literal `[]` takes its sibling's type — in either arm.
+// A then arm calling a function declared further down (or matching a forward enum) has no type
+// on the first pass; the `[]` beside it in the ELSE arm then answered `void` where the same `[]`
+// as a then arm answers "not yet", the `if` took the void, and `m = if c { mk(t) } else { [] }`
+// bound `m` as void — refused when the vector arrived on the second pass.  The control swaps the
+// arms.  Values by hand: mk(3) = [3, 4], mk(0) = [], a negative t takes the `[]` — lengths
+// 2 0 0; Sq { w: 3 } gives [3, 3], Dot gives [0] — lengths 2 1 0.
+//
+// @falsified-by: tests/falsified/2545-an-empty-literal-arm-beside-a-late-typed-arm-takes-its-type.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the compile (the control refuses the bind) and the asserts.
+//   ARMED: every run.
+//   WITNESS: the control refuses "`m = …` binds nothing: the right-hand side answers no value".
+//   HOLDS: the swapped-arms control on both trees.
+
+fn members(t: integer) -> vector<integer> {
+  m = if t >= 0 { mk(t) } else { [] };
+  m
+}
+
+fn swapped(t: integer) -> vector<integer> {
+  m = if t < 0 { [] } else { mk(t) };
+  m
+}
+
+fn shaped(s: Shape, t: integer) -> vector<integer> {
+  m = if t >= 0 { match s { Sq { w } => [w, w], Dot => [0] } } else { [] };
+  m
+}
+
+fn mk(k: integer) -> vector<integer> { if k > 0 { [k, k + 1] } else { [] } }
+
+enum Shape { Sq { w: integer }, Dot }
+
+fn test_a_forward_call_beside_an_empty_else() {
+  r = "{len(members(3))} {len(members(0))} {len(members(-1))}";
+  assert(r == "2 0 0", "members: {r}");
+}
+
+fn test_a_forward_enum_match_beside_an_empty_else() {
+  r = "{len(shaped(Sq { w: 3 }, 1))} {len(shaped(Dot, 1))} {len(shaped(Dot, -1))}";
+  assert(r == "2 1 0", "shaped: {r}");
+}
+
+fn test_control_the_empty_literal_as_the_then_arm() {
+  r = "{len(swapped(3))} {len(swapped(0))} {len(swapped(-1))}";
+  assert(r == "2 0 0", "swapped: {r}");
+}
