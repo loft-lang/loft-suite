@@ -12,7 +12,7 @@
 // CHANNEL: the compile diagnostic.
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the definition.
-// HOLDS: `operators/Op-Back/every-row-of-the-table-reaches-the-definition-that-compiles`.
+// HOLDS: `operators/Op-Back/every-operator-form-reaches-the-definition-that-compiles`.
 
 struct OdM { c: integer }
 
