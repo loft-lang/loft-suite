@@ -1,0 +1,151 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY POSITION WITH AN EXPECTED TYPE BUILDS THE TARGET (`@FR-F-Target-Pos`, crossed with
+// `@FR-F-Target` and `@FR-F-Interp`).  A call argument and a return (loft#2064), an annotated binding,
+// a struct-literal field and a reassignment of a typed local build a target value from a template;
+// a hole is not such a position, but a call written inside a hole meets its parameters as the same
+// call does outside.  Three sections, each with its cells and receipt.
+//
+// ── 2064-every-position-with-an-expected-type-builds-the-target ──
+//
+// EVERY POSITION WITH AN EXPECTED TYPE BUILDS THE TARGET; A HOLE IS NOT ONE (`@FR-F-Target-Pos`,
+// crossed with `@FR-F-Interp` and `@FR-F-Target`).  Owner ruling 2026-10-19: a call argument and a
+// return position target.  Axes moved: a second argument, a method argument, an early `return`
+// and the tail after it, both branches of an `if`, a call result passed on, a lambda's body, a
+// template with no hole; and inside a target's hole, a keyed lookup, a vector element and a bare
+// literal stay VALUES (the template's destination does not reach into the hole), while a call
+// written in a text template's hole still builds its own parameter (loft#2064).
+//
+// @falsified-at: 3cae84177 — interpret and native: every call inside an assert message's hole
+//   is refused "expected Q, got text on argument N".
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the call log that moved.
+// HOLDS: an annotated binding and a struct field build the target as before (the sibling cell).
+//
+// ── an-annotated-binding-and-a-field-build-the-target ──
+//
+// AN ANNOTATED BINDING AND A FIELD BUILD THE TARGET (`@FR-F-Target-Pos`, crossed with
+// `@FR-F-Target`).  The positions the rule names — an annotated binding and a struct-literal
+// field of the target type — build a `Q`; so does a reassignment of a local already typed `Q`
+// (its declared type is the expected type).  An UNannotated binding expects nothing, so the
+// same template is a `text`.
+//
+// A call ARGUMENT and a RETURN position target too (owner ruling 2026-10-19: the rule text had
+// said they did not, while the compiler and LOFT_LITERALS.md said they did; the rule changed).
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the call log that moved.
+// HOLDS: the same log on both backends.
+//
+// ── an-argument-inside-a-hole-targets-its-parameter ──
+//
+// AN ARGUMENT INSIDE A HOLE TARGETS ITS PARAMETER (`@FR-F-Target-Pos`, crossed with
+// `@FR-F-Interp`).  A hole holds an arbitrary expression parsed at full language level
+// `(F-Interp)`, so a call written inside a hole meets its parameters exactly as the same call
+// does outside one, and a call argument targets, so it targets inside a hole too.
+//
+// loft#2064: `a = take("x{n}")` built a `Q`, but `"{take("x{n}")}"` was refused "expected Q,
+// got text on argument 1 of call to take" on both backends — the gate that keeps the TEMPLATE's
+// destination out of a hole also kept out the destination of a call written in that hole.
+//
+// @falsified-at: 3cae84177 — interpret and native: the hole's call is refused "expected Q, got
+//   text on argument 1 of call to take".
+// CHANNEL: the asserts (today: a compile refusal).
+// ARMED: no instrument.
+// WITNESS: the message prints both counts.
+// HOLDS: `q: Q = "{"seed"}"` still hands "seed" to `hole_text` as a value.
+
+struct Q { const log: vector<text> }
+struct W { n: integer }
+fn lit(self: Q, s: text) { self.log += ["L({s})"]; }
+fn hole_int(self: Q, v: integer) { self.log += ["I({v})"]; }
+fn cat(v: vector<text>) -> text { r = ""; for x in v { r += x; } r }
+fn take(q: Q) -> text { cat(q.log) }
+fn take2(a: integer, q: Q) -> text { "{a}{cat(q.log)}" }
+fn sink(self: W, q: Q) -> text { "{self.n}{cat(q.log)}" }
+fn early(n: integer) -> Q { if n > 5 { return "big{n}"; } "small{n}" }
+fn branch(n: integer) -> Q { if n > 5 { "b{n}" } else { "s{n}" } }
+fn test_positions() {
+  n = 4;
+  assert(take2(1, "x{n}") == "1L(x)I(4)", "second arg: {take2(1, "x{n}")}");
+  w = W { n: 3 };
+  assert(w.sink("m{n}") == "3L(m)I(4)", "method arg: {w.sink("m{n}")}");
+  assert(cat(early(9).log) == "L(big)I(9)", "early return: {cat(early(9).log)}");
+  assert(cat(early(2).log) == "L(small)I(2)", "tail after early: {cat(early(2).log)}");
+  assert(cat(branch(7).log) == "L(b)I(7)" && cat(branch(1).log) == "L(s)I(1)", "if branches");
+  assert(take(early(8)) == "L(big)I(8)", "a call result passed on");
+  f = fn(k: integer) -> Q { "lam{k}" };
+  assert(cat(f(5).log) == "L(lam)I(5)", "lambda return: {cat(f(5).log)}");
+  assert(take("plain") == "L(plain)", "no hole: {take("plain")}");
+}
+fn hole_text(self: Q, v: text) { self.log += ["T({v})"]; }
+struct E { name: text, n: integer }
+struct Db { es: hash<E[name]> }
+fn test_lookups_inside_a_target_hole() {
+  db = Db { es: [E { name: "a", n: 7 }, E { name: "b", n: 9 }] };
+  q: Q = "x{db.es["b"].n}y{db.es["a"].name}";
+  assert(cat(q.log) == "L(x)I(9)L(y)T(a)", "keyed: {cat(q.log)}");
+  v = [3, 5];
+  r: Q = "{v[1]}{"seed"}";
+  assert(cat(r.log) == "I(5)T(seed)", "element + literal: {cat(r.log)}");
+  s = "{db.es["b"].n}-{cat(q.log)}";
+  assert(s == "9-L(x)I(9)L(y)T(a)", "text template: {s}");
+}
+
+struct Holder { q: Q, n: integer }
+
+
+fn s2_cat(v: vector<text>) -> text {
+  r = "";
+  for x in v { r += x; }
+  r
+}
+
+fn build(n: integer) -> Q { "r{n}" }
+
+fn test_an_annotated_binding() {
+  n = 4;
+  q: Q = "a{n}";
+  assert(s2_cat(q.log) == "L(a)I(4)" && len(q.log) == 2, "{s2_cat(q.log)}");
+}
+
+fn test_a_struct_literal_field() {
+  n = 4;
+  h = Holder { q: "f{n}", n: 1 };
+  assert(s2_cat(h.q.log) == "L(f)I(4)" && h.n == 1, "{s2_cat(h.q.log)}");
+}
+
+fn test_a_reassignment_of_a_typed_local() {
+  n = 4;
+  q: Q = "a{n}";
+  assert(len(q.log) == 2, "first build");
+  q = "b{n}";
+  assert(s2_cat(q.log) == "L(b)I(4)", "a reassignment builds a fresh Q: {s2_cat(q.log)}");
+}
+
+fn test_an_unannotated_binding_is_text() {
+  n = 4;
+  s = "a{n}";
+  assert(s == "a4" && len(s) == 2, "[{s}]");
+}
+
+fn test_a_return_and_an_argument() {
+  n = 4;
+  assert(s2_cat(build(9).log) == "L(r)I(9)", "{s2_cat(build(9).log)}");
+  t = take("arg{n}");
+  assert(t == "L(arg)I(4)", "{t}");
+}
+
+
+fn s3_take(q: Q) -> integer { len(q.log) }
+
+fn test_a_call_inside_a_hole() {
+  n = 4;
+  a = s3_take("x{n}");
+  s = "{s3_take("x{n}")}";
+  assert(a == 2 && s == "2", "{a} [{s}]");
+}
