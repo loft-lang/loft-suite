@@ -1,0 +1,159 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEMPLATE THAT NAMES ITSELF AT ITS OWN VARIABLES COMPILES ON ITS OWN (`@FR-G-Regular`, loft#2171).
+// A variant naming its own enum at its own type variables, a generic over such a regular enum
+// binding its own field (its open instance `Lst<T>`, loft#2058), and `Tree<T>` inside `Tree<T>` through a vector each mint one template.
+// Three sections, each with its cells and receipt.
+//
+// ── 2171-a-self-referencing-generic-enum-compiles-on-its-own ──
+//
+// A SELF-REFERENCING GENERIC ENUM COMPILES ON ITS OWN (`@FR-G-Regular`, loft#2171).  A variant
+// that names its own enum at its own type variables (`Node { left: reference<Tree<T>> }`) mints
+// the open instance `Tree<T>` while the variant is still being read, so the instance's copy of
+// the variant lacked that field.  It was caught up only when something named `Tree<T>` again —
+// a generic FUNCTION over it on pass 1, the field itself on pass 2 — so a program with no such
+// function laid the variant out with one field on pass 1 and two on pass 2, and the compiler
+// stopped on its own two-pass contract (an internal compiler error), on both backends, even
+// where the program never used the enum.  A struct template already refreshed its instances
+// at the end of its declaration; an enum now does too.
+//
+// Axes it MOVES: how the self-reference is held (`reference<…>`, nullable, `vector<…>`), how
+// many self fields, how many type variables, how many such enums, and use (declared only, a
+// value, a tree built and walked through the field).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: fdd915061 — interpret exit 101 -> 0, interpret panicked -> clean, native exit 101 -> 0, native panicked -> clean
+// CHANNEL: the compile — the control stops on the H5 contract before any cell runs.
+// ARMED: no instrument.
+// WITNESS: the control's internal compiler error names `Node` growing `left` on pass 2.
+// HOLDS: the generic-function spelling and the non-generic enum compiled on the control.
+//
+// ── a-generic-over-a-regular-enum-binds-its-own-field ──
+//
+// A GENERIC OVER A REGULAR ENUM BINDS ITS OWN FIELD (`@FR-G-Regular`, crossed with `@FR-G-Type`
+// and `@FR-G-Mono`).  `enum Lst<T> { Nil, Cons { h: T, t: vector<Lst<T>> } }` names itself
+// regularly, so it is a template with one instance per `T`.  A generic `fn f<T>(l: Lst<T>)`
+// sees the OPEN instance `Lst<T>` and "each monomorph reads the instance its bindings close
+// it to — its fields, its variants" (`G-Type`), so `match l { Cons { t } => … }` and `if l is
+// Cons { t }` bind the variant's `t`.  Hand-computed: the list below has two cells.
+//
+// loft#2058: the template's own `t: vector<Lst<T>>` minted the open instance `Lst<T>` before
+// its `Cons` variant had `t`, so inside a generic both spellings were refused on both backends.
+//
+// @falsified-at: 38a114cb9 — hand-measured, interpret and native: "variant Cons has no field 't'".
+// CHANNEL: the asserts (today: a compile refusal).
+// ARMED: no instrument.
+// WITNESS: each message names the count read.
+// HOLDS: the concrete spelling (`a-template-names-itself-at-its-own-variables.loft`).
+//
+// ── a-template-names-itself-at-its-own-variables ──
+//
+// A TEMPLATE NAMES ITSELF AT ITS OWN VARIABLES (`@FR-G-Regular`, crossed with `@FR-G-Type`,
+// `@FR-G-Gen` and `@FR-G-Check`).  `Tree<T>` inside `Tree<T>` through a vector, and an enum
+// template `Lst<T>` whose variant holds `vector<Lst<T>>`, have one instance per binding of
+// `T`; a BOUNDED generic walks the open instance `Tree<T>` and each monomorph reads its own
+// instance.  Hand-computed: the rock tree weighs 5 + 2 + 7 + 1 = 15; the text list has three
+// cells.  The generic function over the open ENUM instance is a separate, ignored cell
+// (`a-generic-over-a-regular-enum-binds-its-own-field.loft`).
+//
+// @falsified-at: none — the rules held when this walk measured them; the guard keeps them held.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value that moved.
+// HOLDS: the same values on both backends; the leak check passes.
+
+enum Tree<T> { Leaf { v: T }, Node { v: T, left: reference<Tree<T>>, right: reference<Tree<T>> } }
+enum Lst<T> { Nil, Cons { h: T, t: reference<Lst<T>>? } }
+enum Rose<T> { Bud, Stem { v: T, kids: vector<Rose<T>> } }
+enum Pair<K, V> { End, Link { k: K, v: V, next: reference<Pair<K, V>> } }
+enum Unused<T> { None1, Some1 { o: reference<Unused<T>> } }
+
+fn total(t: Tree<integer>) -> integer {
+  match t { Leaf { v } => v, Node { v, left, right } => v + total(left) + total(right) }
+}
+
+fn test_a_tree_built_and_walked_through_its_self_fields() {
+  nodes: vector<Tree<integer>> = [Leaf { v: 1 }, Leaf { v: 20 }];
+  nodes += [Node { v: 300, left: &nodes[0], right: &nodes[1] }];
+  assert(total(nodes[2]) == 321, "walked: {total(nodes[2])}");
+}
+
+fn test_a_nullable_self_field() {
+  n: Lst<text> = Nil;
+  c: Lst<text> = Cons { h: "a", t: null };
+  r = match c { Cons { h, t } => "{h}{if t { "+" } else { "." }}", Nil => "nil" };
+  assert(r == "a." && match n { Nil => true, _ => false }, "nullable: {r}");
+}
+
+fn test_a_vector_of_itself() {
+  r: Rose<integer> = Stem { v: 4, kids: [Bud, Stem { v: 5, kids: [] }] };
+  got = match r { Stem { v, kids } => v * 10 + len(kids), Bud => -1 };
+  assert(got == 42, "vector: {got}");
+}
+
+fn test_two_type_variables() {
+  p: Pair<text, integer> = End;
+  assert(match p { End => true, _ => false }, "two variables");
+}
+
+
+enum S2Lst<T> { S2Nil, S2Cons { h: T, t: vector<S2Lst<T>> } }
+
+fn by_match<T>(l: S2Lst<T>) -> integer {
+  match l {
+    S2Nil => 0,
+    S2Cons { h: _, t } => if len(t) == 0 { 1 } else { 1 + by_match(t[0]) },
+  }
+}
+
+fn by_is<T>(l: S2Lst<T>) -> integer {
+  if l is S2Cons { t } { len(t) } else { -1 }
+}
+
+fn test_a_generic_binds_the_self_naming_field() {
+  l: S2Lst<text> = S2Cons { h: "a", t: [S2Cons { h: "b", t: [] }] };
+  n: S2Lst<integer> = S2Cons { h: 1, t: [] };
+  assert(by_match(l) == 2 && by_match(n) == 1, "{by_match(l)} {by_match(n)}");
+  assert(by_is(l) == 1 && by_is(n) == 0, "{by_is(l)} {by_is(n)}");
+}
+
+struct S3Tree<T> { v: T, kids: vector<S3Tree<T>> }
+enum S3Lst<T> { S3Nil, S3Cons { h: T, t: vector<S3Lst<T>> } }
+interface Weighed { fn weight(self: Self) -> integer }
+struct Rock { kg: integer }
+
+fn weight(self: Rock) -> integer { self.kg }
+
+fn heavy<T: Weighed>(t: S3Tree<T>) -> integer {
+  n = t.v.weight();
+  for k in t.kids { n += heavy(k); }
+  n
+}
+
+fn count<T>(t: S3Tree<T>) -> integer {
+  n = 1;
+  for k in t.kids { n += count(k); }
+  n
+}
+
+fn cells(l: S3Lst<text>) -> integer {
+  match l {
+    S3Nil => 0,
+    S3Cons { h: _, t } => if len(t) == 0 { 1 } else { 1 + cells(t[0]) },
+  }
+}
+
+fn test_a_bounded_generic_walks_a_regular_struct() {
+  t = S3Tree { v: Rock { kg: 5 }, kids: [S3Tree { v: Rock { kg: 2 }, kids: [] }, S3Tree { v: Rock { kg: 7 }, kids: [S3Tree { v: Rock { kg: 1 }, kids: [] }] }] };
+  assert(heavy(t) == 15 && count(t) == 4, "{heavy(t)} {count(t)}");
+  s: S3Tree<text> = S3Tree { v: "root", kids: [S3Tree { v: "a", kids: [] }] };
+  assert(count(s) == 2 && s.kids[0].v == "a", "a second instance: {count(s)}");
+}
+
+fn test_a_regular_enum_instance() {
+  l: S3Lst<text> = S3Cons { h: "a", t: [S3Cons { h: "b", t: [S3Cons { h: "c", t: [] }] }] };
+  e: S3Lst<text> = S3Nil;
+  assert(cells(l) == 3 && cells(e) == 0, "{cells(l)} {cells(e)}");
+}
