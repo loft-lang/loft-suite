@@ -19,7 +19,7 @@
 // CHANNEL: the compile, then the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the value.
-// HOLDS: `slice-arms-that-leave-a-length-uncovered-are-refused` beside it.
+// HOLDS: `a-match-that-leaves-a-value-uncovered-is-refused` beside it.
 
 fn total(v: vector<integer>) -> integer {
   match v {
