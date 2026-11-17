@@ -18,7 +18,7 @@
 // CHANNEL: the compile diagnostic.
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the right conversion name.
-// HOLDS: `a-conversion-is-named-for-the-type-it-answers` beside it.
+// HOLDS: `a-conversion-into-a-type-of-this-source-is-named-for-what-it-answers` beside it.
 //
 // ── a-plain-method-named-like-a-conversion-backs-no-cast ──
 //
@@ -32,7 +32,7 @@
 // CHANNEL: the compile diagnostic.
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the method and the operator spelling.
-// HOLDS: `a-conversion-is-named-for-the-type-it-answers` beside it.
+// HOLDS: `a-conversion-into-a-type-of-this-source-is-named-for-what-it-answers` beside it.
 
 struct Vec2 { x: integer }
 struct OcCel { deg: integer }

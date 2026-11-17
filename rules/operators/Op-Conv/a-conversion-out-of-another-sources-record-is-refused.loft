@@ -16,7 +16,7 @@
 // CHANNEL: the compile (the expected diagnostic).
 // ARMED: no instrument.
 // WITNESS: the diagnostic names both types.
-// HOLDS: `a-conversion-into-a-type-of-this-source-takes-any-self` beside it.
+// HOLDS: `a-conversion-into-a-type-of-this-source-is-named-for-what-it-answers` beside it.
 // @EXPECT_ERROR: `operator to_oc_pt` converts `text` to `OcPt`, and neither is a type of this package
 //
 // ── a-conversion-from-a-foreign-record-into-a-built-in-is-refused ──
@@ -29,7 +29,7 @@
 // CHANNEL: the compile (the expected diagnostic).
 // ARMED: no instrument.
 // WITNESS: the diagnostic names both types.
-// HOLDS: `a-conversion-into-a-type-of-this-source-takes-any-self` beside it.
+// HOLDS: `a-conversion-into-a-type-of-this-source-is-named-for-what-it-answers` beside it.
 // @EXPECT_ERROR: `operator to_integer` converts `OcPt` to `integer`, and neither is a type of this package
 
 use op_conv_fixture_lib::*;
