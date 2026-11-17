@@ -1,0 +1,207 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY READER OF A LINKED NARROW LOCAL DECODES IT (`@FR-L-Narrow-Linked`, with `@FR-B-Ref-Uniform`,
+// `@FR-L-Narrow-Decode`).  A narrow local whose address a `&` takes is read through the link exactly
+// as a narrow field is — a linked `u8?` once read `OtherVal` (loft#2073), a linked `i8` its range
+// (loft#2072) — and stack-trace reflection decodes it too.  Two sections, each with its cells and
+// receipt.
+//
+// ── one-link-reads-a-linked-narrow-local-and-a-field-alike ──
+//
+// ONE LINK READS A LINKED NARROW LOCAL AND A FIELD ALIKE (`@FR-L-Narrow-Linked`, with
+// `@FR-B-Ref-Uniform` and `@FR-L-Narrow-Decode`): a narrow local whose address a `&` takes holds
+// the FIELD encoding (`value - start` in the stored width), so one `&i8` / `&Lim` / `&u8?`
+// parameter reaches a local and a struct field through the same code, and every read decodes —
+// the bias added back, the null code tested first where the slot reserves one.  The rule's own
+// warning is followed: `u8` / `u16` cannot fail this (their bias is zero), so every case carries
+// an `i8`, a `limit(1000, 1100)` or a `u8?`.  The B-Ref-Uniform cell crosses the link KINDS; this
+// one crosses the SAME callee over a local and a field, and the reflection reader the rule names.
+//
+// Values hand-computed:
+//   i8 -1, -=127 → -128, +=255 → 127;  Lim 1050, +=50 → 1100, then 1000;  u8? null → 254 → null.
+//   dec(&i8): local -127 → -128, field 0 → -1;  up(&Lim): local 1099 → 1100, field 1000 → 1001;
+//   clear(&u8?): local 9 → null, field 254 → null.  Re-point x=-1, y=-2, r=&x; r=&y; r=-3 →
+//   x -1, y -3.  Seams: the linked i8 at -128 copied into an integer is -128, plus 1000 is 872.
+//
+// Axes it MOVES: the narrow type (signed one byte, biased one byte, nullable one byte), the
+//   link kind (bind, argument, re-point), the place the same callee reaches (local, field),
+//   the value at both range edges and at null, and the reader (format, arithmetic, copy).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the values.
+// HOLDS: an unlinked neighbour of each type keeps its value.
+//
+// ── stack-trace-reflection-decodes-a-linked-narrow-local ──
+//
+// STACK-TRACE REFLECTION DECODES A LINKED NARROW LOCAL (`@FR-L-Narrow-Linked`: "The obligation
+// runs to EVERY reader of the slot … reflection through `stack_trace()` … each must decode"):
+// `stack_trace()` reads frame slots from ordinary loft code, so a linked `i8` holding -1, a
+// linked `limit(1000, 1100)` holding 1050 and a linked `u8?` holding null or 254 must be
+// reported as those values — never the raw stored code, never an opaque "other".
+//
+// The interpreter fills `variables`; under `--native` a frame has no slot reader and every list
+// is empty (STACKTRACE.md ST-6), which the native lane asserts instead.
+//
+// Values hand-computed: the values written through the links.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; the dense cells answered as hand-computed on
+//   18594597b (interpret: decoded; native: empty, ST-6).  The linked `u8?` cell and the type-name
+//   cell failed there (loft#2073: `OtherVal`; loft#2072: `integer(-128, 127)` for an `i8`).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the reported variables.
+// HOLDS: an UNLINKED `u8?` holding null is reported `null` (the control function).
+
+type Lim = integer limit(1000, 1100);
+struct NHold { f: i8, l: Lim, n: u8? }
+
+fn dec(p: &i8) { p -= 1; }
+fn up(p: &Lim) { p += 1; }
+fn clear(p: &u8?) { p = null; }
+
+fn test_a_bind_writes_and_reads_through_the_encoding() {
+  a: i8 = -1;
+  ra = &a;
+  s1 = "{ra}";
+  ra = -128;
+  s2 = "{a}";
+  ra = 127;
+  s3 = "{a}";
+  b: Lim = 1050;
+  rb = &b;
+  s4 = "{rb}";
+  rb = 1100;
+  s5 = "{b}";
+  rb = 1000;
+  s6 = "{b}";
+  c: u8? = null;
+  rc = &c;
+  s7 = "{rc == null}";
+  rc = 254;
+  s8 = "{c}";
+  rc = null;
+  s9 = "{c == null}";
+  keep: i8 = -7;
+  s = "{s1} {s2} {s3}|{s4} {s5} {s6}|{s7} {s8} {s9}|{keep}";
+  assert(s == "-1 -128 127|1050 1100 1000|true 254 true|-7", "bind: {s}");
+}
+
+fn test_one_callee_reaches_a_local_and_a_field() {
+  a: i8 = -127;
+  b: Lim = 1099;
+  c: u8? = 9;
+  h = NHold { f: 0, l: 1000, n: 254 };
+  dec(a);
+  dec(h.f);
+  up(b);
+  up(h.l);
+  clear(c);
+  clear(h.n);
+  s = "{a} {h.f}|{b} {h.l}|{c == null} {h.n == null}";
+  assert(s == "-128 -1|1100 1001|true true", "local and field: {s}");
+}
+
+fn test_a_re_point_and_the_decode_seams() {
+  x: i8 = -1;
+  y: i8 = -2;
+  r = &x;
+  r = &y;
+  r = -3;
+  a: i8 = -128;
+  ra = &a;
+  n: integer = a;
+  m = a + 1000;
+  s = "{x} {y}|{n} {m} {ra}";
+  assert(s == "-1 -3|-128 872 -128", "re-point and seams: {s}");
+}
+
+
+
+fn show(v: ArgValue) -> text {
+  match v { NullVal => "null", IntVal { n } => "{n}", LongVal { n } => "{n}", OtherVal => "other", _ => "?" }
+}
+
+fn report(f: StackFrame, names: text) -> text {
+  o = "";
+  for v in f.variables {
+    if names.contains("{v.name},") {
+      o += "{v.name}={show(v.value)};";
+    }
+  }
+  o
+}
+
+fn test_a_linked_signed_and_biased_local_reads_decoded() {
+  a: i8 = -1;
+  b: Lim = 1050;
+  ra = &a;
+  rb = &b;
+  ra = -1;
+  rb = 1050;
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  if len(f.variables) > 0 {
+    s = report(f, "a,b,");
+    assert(s == "a=-1;b=1050;", "interpreter reflection: {s}");
+  } else {
+    assert(len(f.arguments) == 0, "native frames carry nothing (ST-6)");
+  }
+}
+
+fn test_an_unlinked_nullable_local_reads_null() {
+  c: u8? = null;
+  d: u8? = 254;
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  if len(f.variables) > 0 {
+    s = report(f, "c,d,");
+    assert(s == "c=null;d=254;", "the unlinked control: {s} ({c} {d})");
+  }
+}
+
+// loft#2073 — a LINKED `u8?` read as `OtherVal` for both null and 254 on 18594597b.
+fn test_a_linked_nullable_local_reads_decoded() {
+  c: u8? = 7;
+  e: u8? = 7;
+  rc = &c;
+  re = &e;
+  rc = 254;
+  re = null;
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  if len(f.variables) > 0 {
+    s = report(f, "c,e,");
+    assert(s == "c=254;e=null;", "linked nullable: {s}");
+  }
+}
+
+// A frame argument's `type_name` is the reader's spelling, as `type_name()` gives it: `i8`,
+// not the range `integer(-128, 127)` (loft#2072).
+fn typed_frame(a: i8, b: Lim, c: u8?) -> text {
+  fs = stack_trace();
+  f = fs[len(fs) - 1];
+  o = "";
+  for v in f.arguments {
+    if "a,b,c,".contains("{v.name},") {
+      o += "{v.name}:{v.type_name};";
+    }
+  }
+  if len(o) == 0 {
+    o = "{a} {b} {c}";
+  }
+  o
+}
+
+fn test_a_reported_argument_names_its_declared_type() {
+  o = typed_frame(-2, 1050, 3);
+  assert(o == "a:i8;b:Lim;c:u8?;" || o == "-2 1050 3", "declared types: {o}");
+}
+
