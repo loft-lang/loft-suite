@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A MEMBER IS KEYED BY ITS PARAMETER TYPES, NOT ITS NAMES, SO A SECOND ONE IS A REDEFINITION
+// (`@FR-Disp-Key`).  Two definitions differing only in a parameter name are one key, and a consumer
+// definition of a spelling a library's set already carries is that key again.  Each is refused
+// with its expectation.
+//
+// ── two-definitions-differing-only-in-a-parameter-name-are-a-redefinition ──
+//
+// TWO DEFINITIONS DIFFERING ONLY IN A PARAMETER'S NAME ARE A REDEFINITION (`@FR-Disp-Key`):
+// a member is keyed by its parameter TYPES, never a parameter's name, so `kr(x: u8)` and
+// `kr(y: u8)` are one key twice.  The set already holds a second, distinct member (`kr(x:
+// integer)`), so the refusal must come from the key, not from the name having one definition.
+// One refusal per file: a refusal stops the file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the redefined name.
+// HOLDS: the other spelling (`integer`) is a member, not a redefinition.
+// @EXPECT_ERROR: Cannot redefine 'kr'
+//
+// ── a-consumer-definition-of-a-spelling-the-library-set-carries-is-a-redefinition ──
+//
+// A CONSUMER'S DEFINITION OF A SPELLING A LIBRARY'S SET ALREADY CARRIES IS A REDEFINITION
+// (`@FR-Disp-Key`, last sentence: "a consumer's definition of ANOTHER spelling joins it, while
+// one the set already carries is a redefinition").  The fixture library
+// `disp_key_fixture_lib.loft` beside this file exports `dk_hit(f: DkFire)` and
+// `dk_hit(x: integer)`; defining `dk_hit(f: DkFire)` again here would leave one of the two
+// bodies unreachable, so the program is refused, naming the library's definition.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the redefined name.
+// HOLDS: a parameter NAME different from the library's (`g` against `f`) does not make it a
+//   new spelling.
+// @EXPECT_ERROR: Cannot redefine 'dk_hit'
+
+use disp_key_fixture_lib::*;
+
+fn kr(x: integer) -> text { "integer {x}" }
+fn kr(x: u8) -> text { "u8 {x}" }
+fn kr(y: u8) -> text { "u8 again {y}" }
+
+fn test_two_definitions_differing_only_in_a_parameter_name_are_a_redefinition() {
+  b: u8 = 3;
+  println(kr(b));
+}
+
+
+fn dk_hit(g: DkFire) -> text { "own fire {g.n}" }
+
+fn test_a_consumer_definition_of_a_spelling_the_library_set_carries_is_a_redef() {
+  println(dk_hit(DkFire { n: 1 }));
+}
