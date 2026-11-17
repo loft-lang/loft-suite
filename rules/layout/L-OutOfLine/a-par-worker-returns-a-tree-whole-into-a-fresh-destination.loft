@@ -1,6 +1,19 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A `par` WORKER RETURNS A TREE WHOLE, INTO A FRESH DESTINATION (`@FR-L-OutOfLine`, @C159).  A
+// worker that builds a list returns it with every child claimed afresh in the caller's store, and
+// a struct return travels through a hidden destination the caller makes fresh for each worker.
+// Two sections, each with its cells and receipt.
+//
+// ── a-par-worker-returns-a-tree ──
+//
+// @C159 / `@FR-L-OutOfLine` (S7) — a `par` worker that builds a list returns it whole: the
+// result is copied into the caller's store with every child claimed afresh there, so it reads
+// back and outlives the worker that built it.
+//
+// ── a-worker-returns-a-tree-into-a-fresh-destination ──
+//
 // A `par` WORKER RETURNS A TREE INTO A FRESH DESTINATION (`@FR-L-OutOfLine`).  A struct return
 // travels through a hidden destination the caller makes; a callee handed a present one reuses
 // it as made, so the literal it builds reads the slots it fills — an out-of-line child's old
@@ -35,6 +48,21 @@ fn total(l: List?) -> integer {
   if !l { return 0; }
   l.v + total(l.next)
 }
+
+fn test_workers_return_lists() {
+  jobs = [Job { n: 3 }, Job { n: 5 }, Job { n: 10 }, Job { n: 1 }];
+  sums = "";
+  kept: vector<List> = [];
+  for jb in jobs par(l = build(jb), 4) {
+    sums += "{total(l)},";
+    kept += [l];
+  }
+  assert(sums == "3,10,45,0,", "each worker's list, summed: {sums}");
+  assert(total(kept[2]) == 45 && kept[2].next.next.v == 7, "a worker's list outlives the worker");
+}
+
+
+
 
 fn sums(jobs: vector<Job>, workers: integer) -> text {
   s = "";
