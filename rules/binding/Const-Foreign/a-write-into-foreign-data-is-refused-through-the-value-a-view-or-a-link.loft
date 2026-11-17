@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WRITE INTO FOREIGN DATA IS REFUSED THROUGH THE VALUE, A VIEW OR A LINK (`@FR-Const-Foreign`
+// crossed with `@FR-B-View`).  A `-> const T` producer's value is foreign data and value-const;
+// Const-Foreign: "a `&` link to a part is a VIEW (B-View), read-only like the value; every write
+// — through the value, a view or a link — is Const-Value's compile-time error, never a runtime
+// check".  Each function is one write, through a name of its own, so each expectation can only be
+// met by its own refusal: a field write straight through the value, an append straight through
+// it, a field write through a struct view of a member record (`s = b.inner` aliases without `&`),
+// an append through a link to a vector member (a write that grows, not only one that overwrites)
+// and an element write through that link.  The cells beside it hold the producer to a
+// `vector<u8>`; this one moves it to a RECORD.  Where the same view is read and its copy written:
+// `a-view-of-foreign-data-reads-in-place-and-its-copies-are-the-readers-own.loft`.
+//
+// @falsified-at: none — a conformance guard: every refusal reads as written on the tree of the
+//   suite pin that adds this cell, interpret and native-c; corrupting any one expectation fails
+//   the file.  Its link-append and struct-view cases were two cells, each a conformance guard on
+//   18594597b, interpret and native.
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//   WITNESS: each diagnostic names the binding written through.
+//   HOLDS: the read-in-place cell beside it.
+//
+// @EXPECT_ERROR: Cannot modify 'bv': it holds read-only data the program does not own
+// @EXPECT_ERROR: Cannot modify 'ba': it holds read-only data the program does not own
+// @EXPECT_ERROR: Cannot modify 's': it holds read-only data the program does not own
+// @EXPECT_ERROR: Cannot modify 'r': it holds read-only data the program does not own
+// @EXPECT_ERROR: Cannot modify 'e': it holds read-only data the program does not own
+
+struct CfIn { v: integer }
+struct CfBox { inner: CfIn, xs: vector<integer> }
+
+fn cf_mk() -> const CfBox { CfBox { inner: CfIn { v: 1 }, xs: [1, 2] } }
+
+fn through_the_value_a_field() {
+  bv = cf_mk();
+  bv.inner.v = 9;
+}
+
+fn through_the_value_an_append() {
+  ba = cf_mk();
+  ba.xs += [3];
+}
+
+fn through_a_struct_view() {
+  b = cf_mk();
+  s = b.inner;
+  s.v = 9;
+}
+
+fn through_a_link_an_append() {
+  b = cf_mk();
+  r = &b.xs;
+  r += [3];
+}
+
+fn through_a_link_an_element() {
+  b = cf_mk();
+  e = &b.xs;
+  e[0] = 5;
+}
