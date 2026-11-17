@@ -1,0 +1,611 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW MATERIALISES WHERE ITS CONTAINER IS DISTURBED, WHATEVER SPELLS IT (`@FR-B-View`'s
+// materialise clause, `@FR-B-Disturb`'s reassignment).  A projection binds a view of its
+// container's place; where the container is reassigned while the view is still used, the view
+// takes its own copy at the bind and the author is told — and the spelling of the view changes
+// nothing: a `match`/`is` payload binding onto a collection field, grouped or not (loft#1664), a
+// nullable local (loft#2362), a projection through a discharged local `va!.f` (loft#2447) and a
+// discharged element `g.places[j]!` (loft#2404).  Each spelling once kept an alias into the
+// record the reassignment freed, or owned a store it only borrowed.  Four sections, each with its
+// cells and receipt; the plain struct-field projection is
+// `1184-a-view-assigned-back-onto-its-own-source.loft`, which the compiler's comments cite.
+//
+// ── 1664-a-group-member-payload-binding-materialises-like-any-view ──
+//
+// A `match`/`is` payload binding onto a collection field is a VIEW of that field, and
+// `(B-View)` materialises it where its subject is DISTURBED while it is still used — whether
+// the field is a vector or a keyed collection, and whether or not it is a member of a LINKED
+// GROUP (loft#1664, `formal/binding.md` @FR-B-View, `formal/collections.md` @FR-Col-Group).
+//
+// Two defects, one rule:
+// * A GROUP member's writes are spelled against its origin FIELD, so they reach the group's
+//   siblings (`(Col-Group)`).  That spelling does not name the binding, so once the binding was
+//   materialised the write still went to the reassigned subject while every read came from
+//   the copy: `binding_len` read 1 where the subject read 3.  The scope pass now spells those
+//   writes back to the binding where it materialises it; undisturbed, they still reach every
+//   member (a3, b1).
+// * A KEYED payload binding was never a view in the disturbance walk at all, so it was never
+//   copied: after its subject was reassigned it named a store nobody owned.  The interpreter
+//   answered a wrong length, `--native` panicked "Store access out of bounds" — in or out of a
+//   group (a6, b2).  It is now copied at the bind like its vector twin, through
+//   `OpReplaceKeyed`.
+//
+// Expected values are hand-computed: two() gives the subject two records, and a linked group's
+// members hold the same records (`(Col-Group)`), so a subject answers "2/2".
+//
+// @falsified-at: b938c9cb4 — interpret exit 1 -> 0, interpret 8 assertion failures -> 0, native exit 1 -> 0, native 14 assertion failures -> 0
+// @falsified-by: tests/falsified/1664-a-group-member-payload-binding-materialises-like-any-view.patch — interpret exit 1 -> 0, interpret 8 assertion failures -> 0, native exit 1 -> 0, native 14 assertion failures -> 0
+//   CHANNEL: the value (lengths of the binding and of the reassigned subject's members).
+//   WITNESS (measured on the control's build): a1's binding read 1 with the subject "3/3"; a6
+//   read binding 3 with the subject "3/3" on the interpreter, and a lone a6 run panicked
+//   `--native` with "Store access out of bounds" (src/store.rs); b2 read the subject 2 where 1
+//   is right.
+//   HOLDS: leak and free-refusal are clean on both trees, and the undisturbed controls (a3, a4,
+//   b1) pass on both — the sibling-reaching field spelling is kept wherever the binding lives.
+//
+// ── 2362-a-nullable-view-materialises-like-its-dense-twin ──
+//
+// `@FR-B-View`'s materialise clause, on a NULLABLE local: a view rebound while its container is
+// reassigned takes its copy at the bind, and "the nullability of the bound value changes
+// nothing".  A `τ?` local (`t: Ty? = …; t = x.tp`, then `x = …`) kept an alias into the record
+// the reassignment freed, where its dense twin copied: the interpreter read the freed record —
+// as null, or as whatever the slot held next (loft#2362).  The C backend was right.  Every
+// cell is one rebind of a nullable local off a projection whose container is then reassigned;
+// the axes are the projection (a struct-enum field, a struct field, a nested field, a vector
+// element), the slot it displaces (a record, the null sentinel, a value set back to null) and
+// the trip count, with a live-record census so the copy is not paid for with a leak.
+//
+// Expected, by hand: c_enum's last round binds `TNever` (2) and ends on `TVoid` (1); c_null
+// binds `TInt { min: 4 }` (14); c_struct binds P { 7, "s7" }; c_nested P { 6, "s6" }; c_elem
+// reads 1a from the first vector and 9z from its replacement; c_reset alternates 1..3 with
+// `true`; c_census sums 0..n-1 and holds as many records after 1 000 rounds as after 10.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   CHANNEL: an assertion, on the interpreter.
+//   WITNESS: "c_null 50" — the freed record's slot read as the record built after it.
+//   HOLDS: every cell on the C backend, on both trees; the dense twin (`t = TVoid`) on both.
+//
+// ── 2447-a-view-through-a-discharged-local-materialises-like-a-plain-one ──
+//
+// `@FR-B-View`'s materialise clause through a DISCHARGE: `c = va!.f` is the projection `va.f`
+// with the absence of `va` discharged, so it is a view of `va` on the same terms, and a
+// reassignment of `va` while it is live (`@FR-B-Disturb`) gives it its copy at the bind.  A
+// bare variable's `!` lowers to `{ if va is absent { <exit> }; va }` — the variable itself, no
+// temp — and nothing that names a view's place looked through it: the rebind released the
+// record the view still read, on both backends (loft#2447).  The `?? return` and `?? continue`
+// discharges are the same lowering with another exit, whose scope cleanup frees the bind's own
+// destination; the interpreter read that as the value reading it and kept an alias.
+//
+// The axes: the field type (a struct enum, a struct, a nullable struct — the tagged slot — and
+// a nested field), the spelling (`va!.f`, `(va!).f`, `(va ?? return …).f`, `(va ?? continue).f`)
+// and the trip count, each with values no other cell reuses.  Two controls: an UNDISTURBED view
+// still writes through to its container, and the plain `va.f` twin materialises as before.  A
+// live-record census holds the copies to no leak.
+//
+// Expected, by hand: c_loop builds `if(11,12)` from two rounds; c_line keeps 21 across the
+// rebind to 22 and two mints of 23; c_struct 31, c_paren 41, c_slot 51; c_nested 61; c_return
+// joins 71 and 72 and leaves on the third round; c_continue skips round 2 and joins 81 and 83;
+// c_alias writes 99 through the view into `va`; c_plain 101; c_census sums 0..n-1 and holds as
+// many records after 1 000 rounds as after 10.
+//
+// @falsified-at: 309999235 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: a halt, on both backends.
+//   WITNESS: "panic: cond is null" in c_loop — the view read the record the rebind released.
+//   HOLDS: c_alias (an undisturbed view writes through) and c_plain (the dense twin) on both
+//   trees; the rest score under LOFT_STRICT_STORES=1, which names each read of a freed store.
+//
+// ── 2404-a-discharged-element-is-a-view-whatever-the-declaration-order ──
+//
+// `@FR-B-View` through a discharge: `g.places[j]!` names element j of the container, so
+// reading `g.places[j]!.level` views the store of `g`.  The `!` temp, which is the subject's value
+// under a compiler name, BORROWS that store.  It never owns it.  It owned it when the element's
+// struct was declared BELOW its holder.  Pass 1 created the `_ncr_N` temp as `Unknown(Visited)`,
+// resolved it to a dep-less `ref(Visited)` between the passes, and kept that type in pass 2,
+// because the pass-2-wins rule for generated temps tested only their `__` prefix.  Read as an
+// owner, the temp's scope-exit free released the `Game` store.  Every later read of `g` then
+// read a freed store, which the next allocation took over (loft#2404).  The `?` / `?? d`
+// twin (`__ncc_N`) was right all along, and so was a user bind `el = g.places[j]!`, whose deps
+// come from its assignment.
+//
+// The cells: the read as an assignment source and as a `const` argument; the three
+// spellings that mint the temp (`!`, `?? panic(…)`, `?? return`); a holder that is a local
+// rather than a parameter; and a record census over many rounds.  The CONTROLS are the
+// `__ncc_` twin, a holder whose element is declared first (`Shelf` / `Box`), and a HASH of a
+// late-declared element (`Atlas` / `Room`), whose keyed read never took the dep-less type.
+// They pass on both builds, which shows the guard scores the order and not the discharge.
+//
+// Expected, by hand: `go_*` copy place 1's level (`v2`, 8) into `world`.  `stamp` then adds an
+// `x`, and an unrelated `Game` built afterwards must not show through, so the answer is
+// "v2x 8 2 v2 99" each time.  The local cell reads "v1" / 7 for j = 0, the shelf "b" / 4, the
+// atlas "r2" / 6.  The census sums 8 per round and holds as many records after 1 000 rounds
+// as after 10.
+//
+// @falsified-at: 52fe0ca44 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: exit, on both backends; the halt is the cell's own `!` in `stamp`.
+//   WITNESS: "g.places[1] is null" — the freed Game store, taken over by `other`.
+//   HOLDS: the controls (`go_default`, `c_shelf`, `c_atlas`) pass on both trees.  The cell
+//   also fails on main @ 369b941cf on both backends.
+
+struct Vb1664 { vb_k: integer, vb_n: integer }
+enum G1664 { Gn, Gy { g_data: vector<Vb1664>, g_look: sorted<Vb1664[vb_k]> } }
+enum H1664 { Hn, Hy { h_look: sorted<Vb1664[vb_k]>, h_data: vector<Vb1664> } }
+enum K1664 { Kn, Ky { k_look: sorted<Vb1664[vb_k]> } }
+
+fn one1664() -> G1664 { Gy { g_data: [Vb1664 { vb_k: 1, vb_n: 10 }], g_look: [] } }
+fn two1664() -> G1664 {
+  Gy { g_data: [Vb1664 { vb_k: 5, vb_n: 50 }, Vb1664 { vb_k: 6, vb_n: 60 }], g_look: [] }
+}
+fn lens1664(e: G1664) -> text {
+  match e { Gy { g_data, g_look } => "{len(g_data)}/{len(g_look)}", _ => "-" }
+}
+
+fn test_a1_the_filed_shape() {
+  e = one1664();
+  b = 0;
+  match e { Gy { g_data } => { e = two1664(); g_data += [Vb1664 { vb_k: 2, vb_n: 20 }]; b = len(g_data); }, _ => {} };
+  assert(b == 2, "the binding's own copy: got {b}");
+  assert(lens1664(e) == "2/2", "the reassigned subject: got {lens1664(e)}");
+}
+
+fn test_a2_a_write_with_no_later_read() {
+  e = one1664();
+  match e { Gy { g_data } => { e = two1664(); g_data += [Vb1664 { vb_k: 2, vb_n: 20 }]; }, _ => {} };
+  assert(lens1664(e) == "2/2", "the reassigned subject: got {lens1664(e)}");
+}
+
+fn test_a3_undisturbed_writes_reach_every_member() {
+  e = one1664();
+  b = 0;
+  match e {
+    Gy { g_data } => {
+      g_data += [Vb1664 { vb_k: 2, vb_n: 20 }];
+      g_data += [Vb1664 { vb_k: 3, vb_n: 30 }];
+      b = len(g_data);
+    },
+    _ => {}
+  };
+  assert(b == 3, "the binding: got {b}");
+  assert(lens1664(e) == "3/3", "both members: got {lens1664(e)}");
+}
+
+fn test_a4_a_disturbance_after_the_last_use() {
+  e = one1664();
+  mid = "";
+  match e { Gy { g_data } => { g_data += [Vb1664 { vb_k: 2, vb_n: 20 }]; mid = lens1664(e); e = two1664(); }, _ => {} };
+  assert(mid == "2/2", "before the reassignment: got {mid}");
+  assert(lens1664(e) == "2/2", "after: got {lens1664(e)}");
+}
+
+fn test_a5_a_reassignment_reached_through_the_back_edge() {
+  e = one1664();
+  b = 0;
+  match e {
+    Gy { g_data } => {
+      for i in 0..2 { g_data += [Vb1664 { vb_k: 20 + i, vb_n: i }]; e = two1664(); }
+      b = len(g_data);
+    },
+    _ => {}
+  };
+  assert(b == 3, "every write in the binding's copy: got {b}");
+  assert(lens1664(e) == "2/2", "the subject: got {lens1664(e)}");
+}
+
+fn test_a6_a_keyed_group_member() {
+  e = one1664();
+  b = 0;
+  match e { Gy { g_look } => { e = two1664(); g_look += [Vb1664 { vb_k: 2, vb_n: 20 }]; b = len(g_look); }, _ => {} };
+  assert(b == 2, "the keyed binding's own copy: got {b}");
+  assert(lens1664(e) == "2/2", "the reassigned subject: got {lens1664(e)}");
+}
+
+fn test_a7_the_members_declared_keyed_first() {
+  h: H1664 = Hy { h_look: [], h_data: [Vb1664 { vb_k: 1, vb_n: 10 }] };
+  b = 0;
+  match h {
+    Hy { h_data } => {
+      h = Hy { h_look: [], h_data: [Vb1664 { vb_k: 5, vb_n: 5 }, Vb1664 { vb_k: 6, vb_n: 6 }] };
+      h_data += [Vb1664 { vb_k: 2, vb_n: 2 }];
+      b = len(h_data);
+    },
+    _ => {}
+  };
+  s = match h { Hy { h_look, h_data } => "{len(h_data)}/{len(h_look)}", _ => "-" };
+  assert(b == 2, "the binding: got {b}");
+  assert(s == "2/2", "the subject: got {s}");
+}
+
+fn test_a8_the_is_spelling() {
+  e = one1664();
+  b = 0;
+  if e is Gy { g_data } { e = two1664(); g_data += [Vb1664 { vb_k: 2, vb_n: 20 }]; b = len(g_data); }
+  assert(b == 2, "the binding: got {b}");
+  assert(lens1664(e) == "2/2", "the subject: got {lens1664(e)}");
+}
+
+fn test_a9_a_two_element_append() {
+  e = one1664();
+  b = 0;
+  match e {
+    Gy { g_data } => {
+      e = two1664();
+      g_data += [Vb1664 { vb_k: 2, vb_n: 20 }, Vb1664 { vb_k: 3, vb_n: 30 }];
+      b = len(g_data);
+    },
+    _ => {}
+  };
+  assert(b == 3, "the binding: got {b}");
+  assert(lens1664(e) == "2/2", "the subject: got {lens1664(e)}");
+}
+
+fn test_b1_an_undisturbed_keyed_member_reaches_its_sibling() {
+  e = one1664();
+  match e { Gy { g_look } => { g_look += [Vb1664 { vb_k: 2, vb_n: 20 }]; }, _ => {} };
+  assert(lens1664(e) == "2/2", "both members: got {lens1664(e)}");
+}
+
+fn test_b2_a_keyed_binding_in_no_group() {
+  k: K1664 = Ky { k_look: [Vb1664 { vb_k: 1, vb_n: 10 }] };
+  b = 0;
+  match k {
+    Ky { k_look } => {
+      k = Ky { k_look: [Vb1664 { vb_k: 7, vb_n: 70 }] };
+      k_look += [Vb1664 { vb_k: 2, vb_n: 20 }];
+      b = len(k_look);
+    },
+    _ => {}
+  };
+  s = match k { Ky { k_look } => len(k_look), _ => -1 };
+  assert(b == 2, "the binding's own copy: got {b}");
+  assert(s == 1, "the reassigned subject: got {s}");
+}
+
+enum Ty { TVoid, TNever, TInt { min: integer } }
+struct P { n: integer, s: text }
+struct W { p: P, k: integer }
+struct O { w: W, tp: Ty }
+
+fn kind(t: Ty) -> integer { match t { TVoid => 1, TNever => 2, TInt { min } => 10 + min } }
+fn mk(i: integer) -> O {
+  O { w: W { p: P { n: i, s: "s{i}" }, k: i }, tp: if i % 2 == 0 { TInt { min: i } } else { TNever } }
+}
+
+fn census_records() -> integer {
+  cr_t = store_memory();
+  cr_i = cr_t.find("records ");
+  if !cr_i { return -1 }
+  cr_j = cr_i + 8;
+  cr_n = 0;
+  while cr_j < len(cr_t) && cr_t[cr_j] >= '0' && cr_t[cr_j] <= '9' {
+    cr_n = cr_n * 10 + (cr_t[cr_j] as integer - '0' as integer);
+    cr_j += 1;
+  }
+  cr_n
+}
+
+// The issue's shape: a struct-enum field, a `continue` round, the container reassigned again.
+fn c_enum() -> text {
+  t: Ty? = TVoid;
+  acc = 0;
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s);
+    t = x.tp;
+    if s % 2 == 0 {
+      if !(t is TNever) { t = TVoid; }
+      continue;
+    }
+    x = mk(s + 7);
+    acc += kind(t!);
+    t = TVoid;
+  }
+  "{acc} {kind(t!)}"
+}
+
+// The displaced slot holds the null sentinel.
+fn c_null() -> integer {
+  t: Ty? = null;
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s + 3);
+    t = x.tp;
+    x = mk(40);
+  }
+  kind(t!)
+}
+
+fn c_struct() -> text {
+  t: P? = P { n: 0, s: "" };
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s + 6);
+    t = x.w.p;
+    if s % 2 == 0 { continue; }
+    x = mk(s + 20);
+  }
+  "{t!.n} {t!.s}"
+}
+
+fn c_nested() -> text {
+  t: P? = null;
+  x = mk(0);
+  for s in 0..2 {
+    x = mk(s + 5);
+    t = x.w.p;
+    x = mk(70);
+  }
+  "{t!.n} {t!.s}"
+}
+
+fn c_elem() -> text {
+  t: P? = null;
+  v = [P { n: 1, s: "a" }, P { n: 2, s: "bb" }];
+  acc = "";
+  for s in 0..2 {
+    t = v[s];
+    v = [P { n: 9, s: "z" }, P { n: 9, s: "z" }];
+    acc += "{t!.n}{t!.s}";
+  }
+  acc
+}
+
+fn c_reset() -> text {
+  t: P? = null;
+  x = mk(0);
+  acc = "";
+  for s in 0..3 {
+    x = mk(s + 1);
+    t = x.w.p;
+    x = mk(90);
+    acc += "{t!.n}";
+    t = null;
+    acc += "{t == null}";
+  }
+  acc
+}
+
+fn c_census(n: integer) -> integer {
+  t: P? = null;
+  x = mk(0);
+  tot = 0;
+  for s in 0..n {
+    x = mk(s);
+    t = x.w.p;
+    x = mk(s + 1);
+    tot += t!.n;
+  }
+  assert(tot == n * (n - 1) / 2, "c_census total {tot}");
+  census_records()
+}
+
+fn test_a_nullable_view_materialises_like_its_dense_twin() {
+  assert(c_enum() == "2 1", "c_enum {c_enum()}");
+  assert(c_null() == 14, "c_null {c_null()}");
+  assert(c_struct() == "7 s7", "c_struct {c_struct()}");
+  assert(c_nested() == "6 s6", "c_nested {c_nested()}");
+  assert(c_elem() == "1a9z", "c_elem {c_elem()}");
+  assert(c_reset() == "1true2true3true", "c_reset {c_reset()}");
+  assert(census_records() >= 0, "the census answers");
+  assert(c_census(1000) == c_census(10), "c_census grows: {c_census(10)} -> {c_census(1000)}");
+}
+
+enum Nd { NNull, NInt { n: integer }, NIf { c: Nd, t: Nd } }
+struct S3P { x: integer }
+struct VA { cond: Nd?, p: S3P, slot: S3P? }
+struct S3W { a: VA }
+
+fn s3_mk(i: integer) -> VA? { VA { cond: NInt { n: i }, p: S3P { x: i }, slot: S3P { x: i } } }
+fn mkw(i: integer) -> S3W? { S3W { a: VA { cond: NInt { n: i }, p: S3P { x: i }, slot: S3P { x: i } } } }
+fn mkd(i: integer) -> VA { VA { cond: NInt { n: i }, p: S3P { x: i }, slot: S3P { x: i } } }
+fn maybe(i: integer, gone: integer) -> VA? { if i == gone { null } else { s3_mk(i) } }
+
+fn show(n: Nd) -> text {
+  match n { NInt { n } => "{n}", NIf { c, t } => "if({show(c)},{show(t)})", _ => "null" }
+}
+
+fn s3_census_records() -> integer {
+  cr_t = store_memory();
+  cr_i = cr_t.find("records ");
+  if !cr_i { return -1 }
+  cr_j = cr_i + 8;
+  cr_n = 0;
+  while cr_j < len(cr_t) && cr_t[cr_j] >= '0' && cr_t[cr_j] <= '9' {
+    cr_n = cr_n * 10 + (cr_t[cr_j] as integer - '0' as integer);
+    cr_j += 1;
+  }
+  cr_n
+}
+
+// The issue's shape: the view joins the accumulator across rounds of a loop.
+fn c_loop() -> text {
+  cond: Nd? = null;
+  for i in [11, 12] {
+    va = s3_mk(i);
+    if va == null { continue; }
+    cond = if cond == null { va!.cond } else { NIf { c: cond!, t: va!.cond! } };
+  }
+  show(cond!)
+}
+
+// Straight-line, the freed record re-minted before the view is read.
+fn c_line() -> text {
+  va = s3_mk(21);
+  cond = va!.cond;
+  va = s3_mk(22);
+  other = s3_mk(23);
+  again = s3_mk(23);
+  "{show(cond!)} {other!.p.x + again!.p.x}"
+}
+
+fn s3_c_struct() -> integer { va = s3_mk(31); c = va!.p; va = s3_mk(32); spare = s3_mk(33); c.x + spare!.p.x - 33 }
+fn c_paren() -> integer { va = s3_mk(41); c = (va!).p; va = s3_mk(42); c.x }
+fn c_slot() -> integer { va = s3_mk(51); c = va!.slot; va = s3_mk(52); c!.x }
+fn s3_c_nested() -> integer { w = mkw(61); c = w!.a.p; w = mkw(62); c.x }
+
+fn c_return() -> text {
+  r = "";
+  for i in [71, 72, 73] {
+    va = maybe(i, 73);
+    c = (va ?? return r).slot;
+    va = s3_mk(79);
+    r += "{c!.x};";
+  }
+  r
+}
+
+fn c_continue() -> text {
+  r = "";
+  for i in [81, 82, 83] {
+    va = maybe(i, 82);
+    c = (va ?? continue).p;
+    va = s3_mk(89);
+    r += "{c.x};";
+  }
+  r
+}
+
+// Control: nothing disturbs `va`, so the view aliases and the write reaches the container.
+fn c_alias() -> integer { va = s3_mk(91); c = va!.p; c.x = 99; va!.p.x }
+
+// Control: the plain projection off a dense local, which materialised before the fix.
+fn c_plain() -> integer { va = mkd(101); c = va.p; va = mkd(102); c.x }
+
+fn s3_c_census(n: integer) -> integer {
+  tot = 0;
+  for s in 0..n {
+    va = s3_mk(s);
+    c = va!.slot;
+    va = s3_mk(s + 1);
+    tot += c!.x;
+  }
+  assert(tot == n * (n - 1) / 2, "s3_c_census total {tot}");
+  s3_census_records()
+}
+
+fn test_a_view_through_a_discharged_local_materialises_like_a_plain_one() {
+  assert(c_loop() == "if(11,12)", "c_loop {c_loop()}");
+  assert(c_line() == "21 46", "c_line {c_line()}");
+  assert(s3_c_struct() == 31, "s3_c_struct {s3_c_struct()}");
+  assert(c_paren() == 41, "c_paren {c_paren()}");
+  assert(c_slot() == 51, "c_slot {c_slot()}");
+  assert(s3_c_nested() == 61, "s3_c_nested {s3_c_nested()}");
+  assert(c_return() == "71;72;", "c_return {c_return()}");
+  assert(c_continue() == "81;83;", "c_continue {c_continue()}");
+  assert(c_alias() == 99, "c_alias {c_alias()}");
+  assert(c_plain() == 101, "c_plain {c_plain()}");
+  assert(s3_census_records() >= 0, "the census answers");
+  assert(s3_c_census(1000) == s3_c_census(10), "s3_c_census grows: {s3_c_census(10)} -> {s3_c_census(1000)}");
+}
+
+struct Game { world: Lv, places: vector<Visited> }
+struct Visited { place: text, level: Lv }
+struct Lv { name: text, n: integer }
+
+// The control holder: its element is declared FIRST.
+struct Box { name: text, n: integer }
+struct Shelf { top: Box, boxes: vector<Box> }
+
+// The control container: a hash, its element declared below it like `Visited`.
+struct Atlas { here: Lv, rooms: hash<Room[key]> }
+struct Room { const key: text, level: Lv }
+
+fn s4_mk() -> Game {
+  Game {
+    world: Lv { name: "w1", n: 1 },
+    places: [Visited { place: "p", level: Lv { name: "v1", n: 7 } },
+             Visited { place: "q", level: Lv { name: "v2", n: 8 } }]
+  }
+}
+
+fn take(l: const Lv, to: Lv) {
+  to.name = l.name;
+  to.n = l.n;
+}
+
+fn go_bang(g: Game, j: integer) { g.world = g.places[j]!.level; }
+fn go_carg(g: Game, j: integer) { take(g.places[j]!.level, g.world); }
+fn go_panic(g: Game, j: integer) { g.world = (g.places[j] ?? panic("gone")).level; }
+fn go_return(g: Game, j: integer) { g.world = (g.places[j] ?? return).level; }
+fn go_default(g: Game, j: integer) { g.world = g.places[j]?.level; }
+
+// Write through `g`, build an unrelated Game where a freed store would be reused, then read `g`.
+fn stamp(g: Game) -> text {
+  g.world.name += "x";
+  other = Game { world: Lv { name: "zz", n: 99 }, places: [] };
+  "{g.world.name} {g.world.n} {len(g.places)} {g.places[1]!.level.name} {other.world.n}"
+}
+
+fn s4_census_records() -> integer {
+  cr_t = store_memory();
+  cr_i = cr_t.find("records ");
+  if !cr_i { return -1 }
+  cr_j = cr_i + 8;
+  cr_n = 0;
+  while cr_j < len(cr_t) && cr_t[cr_j] >= '0' && cr_t[cr_j] <= '9' {
+    cr_n = cr_n * 10 + (cr_t[cr_j] as integer - '0' as integer);
+    cr_j += 1;
+  }
+  cr_n
+}
+
+fn c_local() -> text {
+  g = s4_mk();
+  j = 0;
+  if len(g.places) > 0 { g.world = g.places[j]!.level; }
+  other = Game { world: Lv { name: "zz", n: 99 }, places: [] };
+  "{g.world.name} {g.world.n} {len(g.places)} {other.world.n}"
+}
+
+fn c_shelf() -> text {
+  s = Shelf { top: Box { name: "t", n: 0 }, boxes: [Box { name: "a", n: 3 }, Box { name: "b", n: 4 }] };
+  j = 1;
+  s.top = s.boxes[j]!;
+  "{s.top.name} {s.top.n} {len(s.boxes)}"
+}
+
+fn c_atlas() -> text {
+  a = Atlas { here: Lv { name: "h", n: 0 }, rooms: [] };
+  a.rooms += [Room { key: "r1", level: Lv { name: "r1", n: 5 } },
+              Room { key: "r2", level: Lv { name: "r2", n: 6 } }];
+  k = "r2";
+  a.here = a.rooms[k]!.level;
+  other = Atlas { here: Lv { name: "zz", n: 99 }, rooms: [] };
+  "{a.here.name} {a.here.n} {len(a.rooms)} {other.here.n}"
+}
+
+fn s4_c_census(n: integer) -> integer {
+  tot = 0;
+  for r in 0..n {
+    g = s4_mk();
+    go_bang(g, r % 2);
+    go_carg(g, 1);
+    tot += g.world.n;
+  }
+  assert(tot == n * 8, "s4_c_census total {tot}");
+  s4_census_records()
+}
+
+fn test_a_discharged_element_is_a_view_whatever_the_declaration_order() {
+  g1 = s4_mk(); go_bang(g1, 1);
+  s1 = stamp(g1);
+  assert(s1 == "v2x 8 2 v2 99", "go_bang {s1}");
+  g2 = s4_mk(); go_carg(g2, 1);
+  s2 = stamp(g2);
+  assert(s2 == "v2x 8 2 v2 99", "go_carg {s2}");
+  g3 = s4_mk(); go_panic(g3, 1);
+  s3 = stamp(g3);
+  assert(s3 == "v2x 8 2 v2 99", "go_panic {s3}");
+  g4 = s4_mk(); go_return(g4, 1);
+  s4 = stamp(g4);
+  assert(s4 == "v2x 8 2 v2 99", "go_return {s4}");
+  g5 = s4_mk(); go_default(g5, 1);
+  s5 = stamp(g5);
+  assert(s5 == "v2x 8 2 v2 99", "go_default (control) {s5}");
+  assert(c_local() == "v1 7 2 99", "c_local {c_local()}");
+  assert(c_shelf() == "b 4 2", "c_shelf (control) {c_shelf()}");
+  assert(c_atlas() == "r2 6 2 99", "c_atlas (control) {c_atlas()}");
+  assert(s4_census_records() >= 0, "the census answers");
+  assert(s4_c_census(1000) == s4_c_census(10), "s4_c_census grows: {s4_c_census(10)} -> {s4_c_census(1000)}");
+}
