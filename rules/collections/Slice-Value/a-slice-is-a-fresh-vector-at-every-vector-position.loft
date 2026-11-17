@@ -1,0 +1,197 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE IS A FRESH VECTOR AT EVERY VECTOR POSITION (`@FR-Slice-Value`, `@FR-H-Alloc`,
+// `@FR-Col-Concat`).  `v[a..b]` yields a fresh sub-collection, owed wherever a vector stands, not
+// only at a bind: as an argument, a return, an element, an operand of a concat (`v[..-1] + [x]`,
+// the source untouched) and a method's receiver (loft#1728: `len(v[a..b])`, `v[a..b].len()`, a
+// user method).  Three sections, each with its cells and receipt.
+//
+// ── a-slice-is-a-fresh-value-at-every-vector-position ──
+//
+// A SLICE IS A FRESH VALUE AT EVERY VECTOR POSITION (`@FR-Slice-Value` crossed with
+// `@FR-H-Alloc`).  Slice-Value: `v[a..b]` yields a FRESH sub-collection, a vector by H-Alloc (a
+// fresh store), and "the value is owed at EVERY vector-typed position, not only a bind: an
+// argument, a return, a block tail, a struct field's value and a literal's element"; a
+// scalar-element slice is copied in one block, any other element by element, "both are the
+// same fresh value"; and the subject is evaluated EXACTLY ONCE.  The cells beside this rule
+// measure bounds and receivers; this one holds the bounds simple and moves the POSITION and
+// the ELEMENT KIND, and writes through the slice and through the source after it: a fresh
+// value is independent in both directions and has exactly the slice's length.
+//
+// Axes it MOVES: position (bind, argument, return, struct field; a literal element and a block
+// tail are the two `@IGNORE`d files beside this one),
+// element kind (integer — one block; a record with a text — element by element), write
+// direction (slice → source, source → slice), the subject (a variable, a call with an effect).
+// Values hand-computed from `src = [10, 20, 30, 40, 50]`.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the slice and the source.
+// HOLDS: the bounds cells beside it.  A literal ELEMENT and a block TAIL are owed the same value
+//   and are refused or crash on 18594597b — `a-slice-as-a-literal-element-is-a-fresh-vector`,
+//   `a-slice-as-a-block-tail-is-a-fresh-vector`, both `@IGNORE`d.
+//
+// ── a-slice-in-a-concat-is-a-copy-of-its-range ──
+//
+// A SLICE IN A CONCAT IS A COPY OF ITS RANGE (`@FR-Slice-Value`, `@FR-Col-Concat`).  A slice is
+// owed as a fresh vector at every vector-typed position, and an operand of `+` over vectors is
+// one: `v[..-1] + [x]` drops the last element into a new vector, the source untouched.  The slice
+// stayed an iterator there ("No matching operator '+' on 'iterator<integer>' and
+// 'vector<integer>'") while `w = v[..-1]` copied.  Left operand, right operand, both, as an
+// argument, a field's value, records with a text, one fresh value per loop turn, and the
+// slice of the very local the concat is assigned to (`v = v[..-1] + [x]`: the assignment must not
+// empty `v` before the slice reads it — it gave `[x]`, caught before it shipped).
+//
+// Values hand-computed from v = [1, 2, 3] and rs = a, b, c.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0 (main refuses the `+`).
+// CHANNEL: the asserts.
+// ARMED: the leak check (the suite arms it): each copy is released once.
+// WITNESS: each message names the position.
+// HOLDS: every cell on both backends.
+//
+// ── 1728-a-slice-is-a-vector-as-a-methods-receiver ──
+//
+// loft#1728, `@FR-Slice-Value` — a vector slice is the fresh vector a bind would make of it at a
+// method's RECEIVER too: `len(v[a..b])`, `v[a..b].len()` and a user method called on a slice.
+//
+// Since @PLN174 F4a a slice is a vector at every vector-typed position, but a receiver is
+// resolved by its TYPE before any coercion sees it: the call read an iterator, found no `len`
+// for one, and refused the program ("Unknown function len" / "Unknown field
+// iterator<integer>.len").  Now both spellings materialise the slice through
+// `iterator_as_vector`, the one home, where resolution would otherwise fail — the free call in
+// `Parser::call_with_slice_receiver`, the method spelling where the member is a method a vector
+// declares and no iterator does (`Parser::slice_receiver_method`).
+//
+// Values are hand-computed over `[1, 2, 3, 4, 5]`; s7 (a text slice, which is text) is the
+// control that never took this road.
+//
+// @falsified-at: 61bfd933a — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the EXIT — the control refuses the file.
+//   WITNESS: "Unknown field iterator<integer>.len" and "Unknown function len".
+//   HOLDS: the text-slice control answers the same on both trees; a keyed range slice stays
+//   refused by (Slice-KeyedIter); no leak and no panic.
+
+struct SvR { n: integer, t: text }
+struct SvHold { xs: vector<integer> }
+
+fn sv_src() -> vector<integer> { [10, 20, 30, 40, 50] }
+
+fn sv_take(v: vector<integer>) -> integer {
+  v += [1];
+  v[0] = 5;
+  len(v) * 100 + v[0]
+}
+
+fn sv_tail(v: vector<integer>) -> vector<integer> { v[2..] }
+
+fn sv_mk(c: &integer) -> vector<integer> {
+  c += 1;
+  [1, 2, 3, 4]
+}
+
+fn test_a_bound_slice_is_independent_both_ways() {
+  src = sv_src();
+  s = src[1..4];
+  s[0] = 99;
+  s += [7];
+  src[3] = 44;
+  assert(len(s) == 4 && s[0] == 99 && s[2] == 40 && s[3] == 7, "the slice: {s}");
+  assert(len(src) == 5 && src[1] == 20 && src[3] == 44, "the source: {src}");
+}
+
+fn test_a_slice_argument_is_the_callees_own() {
+  src = sv_src();
+  r = sv_take(src[1..3]);
+  assert(r == 305, "the callee's answer: {r}");
+  assert(len(src) == 5 && src[1] == 20, "the source: {src}");
+}
+
+fn test_a_returned_slice_is_fresh() {
+  src = sv_src();
+  r = sv_tail(src);
+  r[0] = 1;
+  assert(len(r) == 3 && r[0] == 1 && r[2] == 50, "the result: {r}");
+  assert(src[2] == 30 && len(src) == 5, "the source: {src}");
+}
+
+fn test_a_slice_field_value_is_fresh() {
+  src = sv_src();
+  h = SvHold { xs: src[..2] };
+  h.xs[0] = 77;
+  src[1] = 21;
+  assert(len(h.xs) == 2 && h.xs[0] == 77 && h.xs[1] == 20, "the field: {h.xs}");
+  assert(src[0] == 10, "the source: {src}");
+}
+
+fn test_a_record_slice_copies_element_by_element() {
+  recs = [SvR { n: 1, t: "a" }, SvR { n: 2, t: "b" }, SvR { n: 3, t: "c" }];
+  rs = recs[-2..];
+  rs[0].n = 9;
+  rs[0].t += "!";
+  recs[2].t = "z";
+  assert(len(rs) == 2 && rs[0].n == 9 && rs[0].t == "b!" && rs[1].t == "c", "the slice: {rs[0].n} {rs[0].t} {rs[1].t}");
+  assert(len(recs) == 3 && recs[1].n == 2 && recs[1].t == "b", "the source: {recs[1].n} {recs[1].t}");
+}
+
+fn test_the_subject_is_evaluated_once() {
+  c = 0;
+  s = sv_mk(c)[1..3];
+  assert(c == 1 && len(s) == 2 && s[0] == 2 && s[1] == 3, "once: {c} {s}");
+}
+
+
+struct V { s: text }
+struct H { v: vector<integer> }
+
+fn total(r: vector<integer>) -> integer {
+  t = 0;
+  for x in r { t += x; }
+  t
+}
+
+fn names(r: vector<V>) -> text {
+  t = "";
+  for x in r { t += x.s; }
+  t
+}
+
+fn test_either_side_of_the_plus() {
+  v = [1, 2, 3];
+  a = v[..-1] + [9];
+  b = [0] + v[1..];
+  c = v[..1] + v[2..];
+  assert("{a} {b} {c} {v}" == "[1,2,9] [0,2,3] [1,3] [1,2,3]", "left, right, both: {a} {b} {c} {v}");
+  v = v[..-1] + [9];
+  assert("{v}" == "[1,2,9]", "into the local it slices: {v}");
+  h = H { v: [1, 2, 3] };
+  h.v = h.v[..-1] + [8];
+  assert("{h.v}" == "[1,2,8]", "into the field it slices: {h.v}");
+}
+
+fn test_in_other_positions() {
+  v = [1, 2, 3];
+  assert(total(v[0..-1] + [10]) == 13, "an argument: 1 + 2 + 10");
+  h = H { v: v[1..] + [7] };
+  assert("{h.v}" == "[2,3,7]", "a field: {h.v}");
+  rs = [V { s: "a" }, V { s: "b" }, V { s: "c" }];
+  n = names(rs[..-1] + [V { s: "z" }]);
+  assert(n == "abz" && names(rs) == "abc", "records: {n}");
+  s = 0;
+  for i in 0..3 { s += total(v[i..] + [i]); }
+  assert(s == 17, "per turn: 6 + 6 + 5 = {s}");
+}
+
+fn s3_total(self: vector<integer>) -> integer { t = 0; for x in self { t += x; } t }
+
+fn test_s1() { v = [1, 2, 3, 4, 5]; assert(len(v[1..4]) == 3, "s1 {len(v[1..4])}"); }
+fn test_s2() { v = [1, 2, 3, 4, 5]; assert(v[1..4].len() == 3, "s2"); }
+fn test_s3() { v = [1, 2, 3, 4, 5]; assert(v[0..2].s3_total() == 3, "s3 {v[0..2].s3_total()}"); }
+fn test_s4() { v = [1, 2, 3, 4, 5]; assert(len(v[2..]) == 3, "s4"); }
+fn test_s5() { b: vector<u8> = [1 as u8, 2 as u8, 3 as u8, 4 as u8, 5 as u8]; assert(len(b[1..4]) == 3, "s5"); }
+fn test_s6() { v = [1, 2, 3, 4, 5]; t = "{len(v[0..3])}"; n = 0; if len(v[1..2]) == 1 { n = 1; } assert(t == "3" && n == 1, "s6 {t} {n}"); }
+fn test_s7() { s = "hello"; assert(len(s[1..3]) == 2, "s7"); }

@@ -12,7 +12,7 @@
 // CHANNEL: the compile (an internal compiler error), then the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the values.
-// HOLDS: `a-slice-is-a-fresh-value-at-every-vector-position` beside it.
+// HOLDS: `a-slice-is-a-fresh-vector-at-every-vector-position` beside it.
 
 fn main() {
   src = [10, 20, 30, 40, 50];
