@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A DISCARDED TEXT WRITE IS DISCARDED WHOLE (`@FR-H-WriteLocked-Whole`, with `@FR-H-Write-Else`,
+// `@FR-H-TextReplace`).  An operation of several store steps changes nothing in a locked store,
+// not only the step the lock was met at: a text replaced by a longer one (a release of the old
+// block and a claim of a new) and a text appended to (a resize and a copy) leave the field as it
+// was, and the guard's arm runs once for each.  The control writes the same on an unlocked
+// record, where both land.  Values by hand: locked — arms "ST", the field still "abc" (3 bytes);
+// unlocked — no arm, "a much longer textdef".
+//
+// A keyed filing guarded the same way halts today (loft#2549); it joins this cell once fixed.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c.
+//   CHANNEL: the asserts and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the halting half (an unguarded locked write) in tests/locked_writes.rs.
+
+struct D { s: text, n: integer }
+
+fn test_a_locked_text_replace_and_append_change_nothing() {
+  d = D { s: "abc", n: 1 };
+  d#lock = true;
+  out = "";
+  d.s = "a much longer text" else { out += "S" };
+  d.s += "def" else { out += "T" };
+  r = "{out} {d.s} {len(d.s)} {d.n}";
+  assert(r == "ST abc 3 1", "locked: {r}");
+}
+
+fn test_control_an_unlocked_record_takes_both_writes() {
+  u = D { s: "abc", n: 1 };
+  out = "";
+  u.s = "a much longer text" else { out += "S" };
+  u.s += "def" else { out += "T" };
+  r = "[{out}] {u.s}";
+  assert(r == "[] a much longer textdef", "unlocked: {r}");
+}
