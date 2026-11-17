@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // `@FR-H-Copy-Refuse` crossed with `@FR-H-Move` — the legal half of
-// `a-copy-of-what-the-function-does-not-own-is-refused-where-a-move-is-not-refused.loft`.
+// `a-copy-of-a-droppable-is-refused-however-deep-and-whoever-owns-it-refused.loft`.
 // What (H-Copy-Refuse) lists as legal, because no second structure is made: an owned local
 // placed once (a move), a value passed as an argument and then moved (passing binds without
 // copying, calls.md F-ParamHeap), a view of a member (`x = s.h`, B-View), an owned struct

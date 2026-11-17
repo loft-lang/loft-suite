@@ -1,0 +1,129 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COPY OF A DROPPABLE IS REFUSED, HOWEVER DEEP IT SITS AND WHOEVER OWNS IT (`@FR-H-Copy-Refuse`).
+// A plain bind copies whatever its shape, and a copy of a droppable is refused: two members deep in
+// a record, and of what the function does not own where a move would not be.  Each function is one
+// refusal with its expectation; an error no expectation names fails the file.
+//
+// ── a-plain-bind-copies-whatever-its-shape-and-a-copy-of-a-droppable-is-refused ──
+//
+// `@FR-H-Copy-Refuse` crossed with `@FR-B-Copy`: every shape B-Copy calls a copy is the copy
+// H-Copy-Refuse refuses when the type owns a droppable without `OpCopy`.  B-Copy says the
+// SHAPE decides, never the nullability — so a nullable whole-value bind of a parameter is
+// refused as its dense twin is; a struct-enum value is a heap record like a struct, so its
+// whole bind is refused too; and a record UPDATE `S { f: e, ..b }` is the bind `d = b`
+// followed by writes, so a base the function does not own (a parameter, a member of one) is
+// refused.  Each refusal names the copy; the legal positions are
+// `a-link-a-view-and-an-argument-make-no-second-structure.loft`.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the expectations and the exit code.
+//
+// ── a-copy-of-a-record-owning-a-droppable-two-members-deep-is-refused ──
+//
+// A COPY OF A RECORD OWNING A DROPPABLE TWO MEMBERS DEEP IS REFUSED (`@FR-H-Copy-Refuse` crossed
+// with `@FR-H-Lease`).  H-Lease: a structure whose type owns a droppable — declares `OpDrop`
+// "or holds a member that does, at any depth" — holds its own lease, so a copy makes a second
+// structure and takes a second lease or is refused.  H-Copy-Refuse: a COPY of such a type
+// without `OpCopy` — "the type itself, or a member at any depth" — is a compile-time error on
+// the line that writes it.  The droppable here sits two records down (`Outer.mid.r`) and the
+// copy is a whole-value bind of a parameter (B-Copy).
+//
+// @EXPECT_ERROR: cannot copy `p` here
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 18594597b, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the copied parameter.
+// HOLDS: `a-byte-move-of-a-refused-droppable-is-legal-and-runs-no-hook` beside it.
+//
+// ── a-copy-of-what-the-function-does-not-own-is-refused-where-a-move-is-not-refused ──
+//
+// `@FR-H-Copy-Refuse` crossed with `@FR-H-Move` — the two rules partition every position that
+// places an existing droppable into a new structure: a value the function OWNS, placed once,
+// MOVES; a value it does NOT own — a parameter, a member of a container, a loop variable
+// over one — is a COPY, refused on the line that writes it.  Each refused cell below is the
+// non-owned twin of a move the legal half
+// (`a-move-of-an-owned-local-releases-once.loft`) shows compiling: the same position — a
+// literal's field, a tuple member, an append (a local vector and a vector field), a
+// whole-value bind, a `return`, a `??` operand — with the source moved from an owned local to
+// a parameter, a struct member, an element, a tuple member or a loop variable.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.  The
+//   control is a hand edit of one expected substring, which fails the file on both backends.
+// CHANNEL: the expectations and the exit code, identically on both backends.
+// ARMED: no instrument — the refusal is on by default.
+// HOLDS: nothing runs on either backend.
+
+struct H { id: integer }
+fn OpDrop(self: H) { print("D{self.id} "); }
+struct S { h: H, tag: integer }
+struct O { s: S }
+enum E { A { h: H }, Z }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r1_a_nullable_whole_value_bind(p: H?) -> integer { x = p; (x?).id }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r2_a_record_update_over_a_parameter(p: S) -> integer { t = S { tag: 1, ..p }; t.tag }
+
+// @EXPECT_ERROR: cannot copy `e` here
+fn r3_a_struct_enum_bound_whole(e: E) -> integer { x = e; if x is A { 1 } else { 0 } }
+
+// @EXPECT_ERROR: cannot copy `o` here
+fn r4_a_record_update_over_a_member(o: O) -> integer { t = S { tag: 2, ..o.s }; t.tag }
+
+struct CrR { id: integer }
+fn OpDrop(self: CrR) { println("D{self.id}"); }
+struct CrMid { r: CrR, n: integer }
+struct CrOuter { mid: CrMid, k: integer }
+
+fn cr_bind(p: CrOuter) -> integer {
+  x = p;
+  x.k
+}
+
+fn test_a_copy_of_a_record_owning_a_droppable_two_members_deep_is_refused() {
+  o = CrOuter { mid: CrMid { r: CrR { id: 1 }, n: 2 }, k: 3 };
+  assert(cr_bind(o) == 3, "unreachable");
+}
+
+fn mk(i: integer) -> H { H { id: i } }
+struct B { hs: vector<H> }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r1_a_parameter_into_a_literal_field(p: H) { s = S { h: p, tag: 0 }; print("{s.tag}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `s` here
+fn r2_a_member_into_a_literal_field() { s = S { h: mk(2), tag: 0 }; t = S { h: s.h, tag: 1 }; print("{t.tag}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `v` here
+fn r3_an_element_appended() { v = [mk(3)]; w: vector<H> = []; w += [v[0]]; print("{len(w)}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `t` here
+fn r4_a_tuple_member_into_a_literal_field() { t = (mk(4), 1); u = S { h: t.0, tag: 0 }; print("{u.tag}"); }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r5_a_parameter_returned(p: H) -> H { return p; }
+
+// @EXPECT_ERROR: cannot copy a member of `s` here
+fn r6_a_member_returned() -> H { s = S { h: mk(6), tag: 0 }; return s.h; }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r7_a_parameter_as_a_coalesce_operand(p: H) { x = p ?? mk(7); print("{x.id}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `v` here
+fn r8_a_loop_variable_appended() { v = [mk(8)]; w: vector<H> = []; for e in v { w += [e]; } print("{len(w)}"); }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r9_a_parameter_bound_whole(p: H) { x = p; print("{x.id}"); }
+
+// @EXPECT_ERROR: cannot copy `p` here
+fn r10_a_parameter_appended_to_a_vector_field(p: H) { b = B { hs: [] }; b.hs += [p]; print("{len(b.hs)}"); }
+
+// @EXPECT_ERROR: cannot copy a member of `s` here
+fn r11_a_member_into_a_tuple_member() { s = S { h: mk(11), tag: 0 }; t = (s.h, 1); print("{t.1}"); }
