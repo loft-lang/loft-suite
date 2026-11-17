@@ -1,0 +1,212 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VALUE DELIVERED ONTO, OR FROM INSIDE, ITS OWN PLACE KEEPS ITS VALUE (`@FR-H-CopySelf`).
+// A whole value delivered onto the place that holds it is a no-op — nothing released, nothing
+// claimed — and one delivered from inside its destination keeps every element (a nested collection,
+// loft#1916) and every field (a record, loft#2391); every rewrite that hands a value its own home
+// writes what the plain copy writes.  Three sections, each with its cells and receipt.
+//
+// ── 1916-a-nested-collection-assigned-onto-itself-keeps-its-elements ──
+//
+// loft#1916, `@FR-H-CopySelf` — a whole value delivered onto the place that already holds it is
+// a no-op, and a value delivered from INSIDE its destination keeps its elements.
+//
+// A collection field two or more steps deep, assigned onto itself, came back EMPTY on both
+// backends: the right-hand side was bound to a temporary that VIEWED the destination, then the
+// destination was cleared, then the (now empty) view was appended.  Depth 1 was elided as a
+// syntactic no-op and never reached that path.  A right-hand side that is a projection is now
+// copied before the clear.
+//
+// Axes it MOVES: the depth of the place (one step, two, three), the step kinds (a field, a
+// vector element, a nested hash), the source (the place itself, a sibling's field, a vector held
+// INSIDE the destination's own elements), and a loop (one statement, many evaluations).  Each
+// cell checks the VALUE and the LENGTH; the leak gate checks the copy is released.  Values are
+// hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-by: tests/falsified/1916-a-nested-collection-assigned-onto-itself-keeps-its-elements.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the VALUE — a self-assigned place comes back empty on the control.
+//   WITNESS: `exit 1, 1 assertion failure` on both backends (scored at 6598df45d).
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
+//
+// ── 2391-a-record-written-from-inside-its-own-place-keeps-its-value ──
+//
+// loft#2391, `@FR-H-CopySelf` / `@FR-H-Copy` — a RECORD delivered into a place from inside that
+// place keeps its value: the record twin of loft#1916's collection cells beside it.
+//
+// `c.tp = match c.tp { Opt { inner } => inner, _ => c.tp }` read back as neither variant, on both
+// backends and with nothing said: the copy released what the place owns before it wrote, and the
+// source was one of those records.  A source that reads the place's root (a projection, a match
+// over it, a call whose result borrows a parameter) is now copied into a record of its own first.
+//
+// Axes this file MOVES:  the place (a local's field, an element's field, a parameter's field, a
+//                        whole element); the source (a match binding of the place's child, a
+//                        borrowing call answering the child, the whole field, or null).
+// Axes it HOLDS FIXED:   one struct-enum type; one write per statement.
+// The controls were already right: a vector field from its own element's field (loft#1916) and a
+// local rebound from its own child (`(H-Materialise)`).  Still open, so not here: a LOCAL viewing
+// a record inside the place written back into it (`y = match c.tp { … }; c.tp = y`).
+//
+// Values hand-computed beside each assert.
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
+//
+// ── a-value-handed-back-to-its-own-home-is-unchanged ──
+//
+// `@FR-H-CopySelf` crossed with `@FR-R-Rebind`, `@FR-R-Place` and `@FR-R-Compact`: a whole value
+// delivered onto the place that already holds it is a no-op — nothing released, nothing claimed
+// — so every rewrite that hands a value's own home as its destination writes exactly what a
+// fresh copy would have left.  R-Rebind's `d = step(d, …)` whose exit literal takes `buf: d.buf`
+// (the field onto itself) and one that grows that field first; R-Place's "the buffer IS the
+// place" with a callee answering its parameter (`o.items = id_items(o.items)`) and the plain
+// self-assignments `o.items = o.items`, `o.d = o.d`, `o.d.buf = o.d.buf`; R-Compact's identity
+// form (every element kept on its own slot) and a compaction that keeps a prefix in place.
+// Each repeated where a released handle would be read again: the store checkers catch a free.
+//
+// @falsified-at: none — a conformance guard (a rule crossing; its ledger rows are in
+//   doc/claude/RULE_CROSSINGS-history.md); every cell held on both backends when written.
+//   CHANNEL: the assertions and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+
+struct I1916 { sub: vector<integer> }
+struct O1916 { inner: I1916, vv: vector<vector<integer>> }
+struct W1916 { o: O1916 }
+struct N1916 { kids: vector<N1916>, tag: integer }
+struct K1916 { k: integer, v: integer }
+struct H1916 { h: hash<K1916[k]> }
+struct HO1916 { inner: H1916 }
+
+fn test_two_and_three_steps_deep() {
+  o = O1916 { inner: I1916 { sub: [5, 6, 7] }, vv: [[1, 2], [3]] };
+  o.inner.sub = o.inner.sub;
+  assert("{o.inner.sub}" == "[5,6,7]", "o.inner.sub: {o.inner.sub}");
+  o.vv[0] = o.vv[0];
+  assert("{o.vv}" == "[[1,2],[3]]", "o.vv[0]: {o.vv}");
+  w = W1916 { o: O1916 { inner: I1916 { sub: [8] }, vv: [] } };
+  w.o.inner.sub = w.o.inner.sub;
+  assert("{w.o.inner.sub}" == "[8]", "w.o.inner.sub: {w.o.inner.sub}");
+}
+
+fn test_an_element_step() {
+  v = [I1916 { sub: [8, 9] }, I1916 { sub: [10] }];
+  v[0].sub = v[0].sub;
+  v[1].sub = v[0].sub;
+  assert("{v[0].sub} {v[1].sub}" == "[8,9] [8,9]", "elements: {v[0].sub} {v[1].sub}");
+}
+
+fn test_depth_one_stays_a_no_op() {
+  i = I1916 { sub: [1, 2] };
+  i.sub = i.sub;
+  assert("{i.sub}" == "[1,2]", "depth one: {i.sub}");
+}
+
+fn test_a_source_inside_the_destination() {
+  n = N1916 { kids: [N1916 { kids: [N1916 { kids: [], tag: 3 }, N1916 { kids: [], tag: 4 }], tag: 2 }], tag: 1 };
+  n.kids = n.kids[0].kids;
+  assert(n.kids.len() == 2 && n.kids[0].tag == 3 && n.kids[1].tag == 4, "kids: {n.kids.len()}");
+}
+
+fn test_a_nested_hash() {
+  b = HO1916 { inner: H1916 { h: [K1916 { k: 1, v: 10 }, K1916 { k: 2, v: 20 }] } };
+  b.inner.h = b.inner.h;
+  assert(b.inner.h.len() == 2 && (b.inner.h[2].v ?? -1) == 20, "hash: {b.inner.h.len()}");
+}
+
+fn test_in_a_loop() {
+  o = O1916 { inner: I1916 { sub: [4, 5] }, vv: [] };
+  for r in 0..3 { o.inner.sub = o.inner.sub; o.inner.sub += [r]; }
+  assert("{o.inner.sub}" == "[4,5,0,1,2]", "loop: {o.inner.sub}");
+}
+
+
+enum T { Leaf { n: integer }, Opt { inner: T } }
+struct Ex { tp: T, k: integer }
+struct Box { t: T }
+struct Node { id: integer, kids: vector<Node> }
+fn leaf(t: T) -> integer { match t { Leaf { n } => n, _ => -1 } }
+fn peel_param(c: Ex) -> integer { c.tp = match c.tp { Opt { inner } => inner, _ => c.tp }; leaf(c.tp) }
+fn pick(c: Ex) -> T? { if c.k > 0 { match c.tp { Opt { inner } => inner, _ => c.tp } } else { null } }
+fn tp_of(c: Ex) -> T { c.tp }
+fn test_a_record_written_from_inside_its_own_place_keeps_its_value() {
+  // a field from a match binding of its own child: 1
+  c = Ex { tp: Opt { inner: Leaf { n: 1 } }, k: 0 };
+  c.tp = match c.tp { Opt { inner } => inner, _ => c.tp };
+  assert(leaf(c.tp) == 1, "field {leaf(c.tp)}");
+  // an element's field: 2
+  v: vector<Box> = [Box { t: Opt { inner: Leaf { n: 2 } } }];
+  v[0].t = match v[0].t { Opt { inner } => inner, _ => v[0].t };
+  assert(leaf(v[0].t) == 2, "element field {leaf(v[0].t)}");
+  // a parameter's field: 3
+  assert(peel_param(Ex { tp: Opt { inner: Leaf { n: 3 } }, k: 0 }) == 3, "param");
+  // a whole element: 6
+  w: vector<T> = [Opt { inner: Leaf { n: 6 } }];
+  w[0] = match w[0] { Opt { inner } => inner, _ => w[0] };
+  assert(leaf(w[0]) == 6, "element {leaf(w[0])}");
+  // a borrowing call that answers null: the field takes T's default, its first variant
+  // Leaf { n: 0 } (@C163), so the Opt arm does not match -> -1, and leaf reads 0
+  e = Ex { tp: Opt { inner: Leaf { n: 4 } }, k: 0 };
+  e.tp = pick(e);
+  r = match e.tp { Opt { inner } => leaf(inner) * 10, _ => -1 };
+  assert(r == -1 && leaf(e.tp) == 0, "null source {r} {leaf(e.tp)}");
+  // the same call answering the field's own child: 5
+  f = Ex { tp: Opt { inner: Leaf { n: 5 } }, k: 1 };
+  f.tp = pick(f);
+  assert(leaf(f.tp) == 5, "present source {leaf(f.tp)}");
+  // a call answering the whole field it is written to: 9
+  d = Ex { tp: Leaf { n: 9 }, k: 0 };
+  d.tp = tp_of(d);
+  assert(leaf(d.tp) == 9, "self call {leaf(d.tp)}");
+  // controls: a vector field from its own element's field, a local from its own child
+  n = Node { id: 0, kids: [Node { id: 1, kids: [Node { id: 4, kids: [] }, Node { id: 5, kids: [] }] }] };
+  n.kids = n.kids[0].kids;
+  assert(len(n.kids) == 2 && n.kids[1].id == 5, "vector field");
+  l: T = Opt { inner: Leaf { n: 7 } };
+  l = match l { Opt { inner } => inner, _ => l };
+  assert(leaf(l) == 7, "local");
+}
+
+struct Doc { buf: vector<text>, n: integer, name: text }
+struct O { items: vector<text>, d: Doc }
+
+fn step(d: Doc, w: text) -> Doc { Doc { buf: d.buf, n: d.n + 1, name: d.name } }
+fn grow(d: Doc, w: text) -> Doc { d.buf += [w]; Doc { buf: d.buf, n: d.n + len(w), name: "{d.name}+" } }
+fn id_items(v: vector<text>) -> vector<text> { v }
+
+fn test_a_rebind_through_a_callee() {
+  d = Doc { buf: ["a", "b"], n: 0, name: "d" };
+  for i in 0..5 { d = step(d, "w{i}"); }
+  assert(d.n == 5 && len(d.buf) == 2 && d.buf[1] == "b" && d.name == "d", "step: {d.n} {len(d.buf)}");
+  for i in 0..3 { d = grow(d, "x{i}"); }
+  assert(d.n == 11 && len(d.buf) == 5 && d.buf[4] == "x2" && d.buf[0] == "a" && d.name == "d+++", "grow: {d.n} {d.name}");
+}
+
+fn test_self_assignments_of_places() {
+  o = O { items: ["p", "q"], d: Doc { buf: ["z"], n: 1, name: "o" } };
+  for _ in 0..3 {
+    o.items = o.items;
+    o.d = o.d;
+    o.d.buf = o.d.buf;
+    o.items = id_items(o.items);
+  }
+  assert(len(o.items) == 2 && o.items[1] == "q" && len(o.d.buf) == 1 && o.d.buf[0] == "z" && o.d.name == "o", "{o.items} {o.d.name}");
+  o.items += ["r"];
+  assert(len(o.items) == 3 && o.items[0] == "p", "still its own: {o.items}");
+}
+
+fn test_a_compaction_onto_its_own_slots() {
+  v = ["k0", "k1", "k2", "k3"];
+  t: vector<text> = [];
+  for e in v { t += [e]; }
+  v = t;
+  assert(len(v) == 4 && v[0] == "k0" && v[3] == "k3", "identity: {v}");
+  u = ["m0", "m1", "m2", "m3"];
+  t2: vector<text> = [];
+  for e in u { if e != "m2" { t2 += [e]; } }
+  u = t2;
+  assert(len(u) == 3 && u[0] == "m0" && u[1] == "m1" && u[2] == "m3", "prefix kept: {u}");
+}
