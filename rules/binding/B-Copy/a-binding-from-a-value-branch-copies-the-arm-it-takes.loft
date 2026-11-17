@@ -5,9 +5,11 @@
 // `@FR-O-Complete`: a plain whole-value bind copies, and every path of a bound value branch is its
 // own binding).  `x = if c { a } else { b }`, a `match`, an `else if` chain or a `??` binds the
 // chosen arm as the single bind `x = a` would: a whole local copies, a fresh value is adopted.
-// Three sections, each with the cells, the axes and the receipt of the defect it was written for:
+// Six sections, each with the cells, the axes and the receipt of the defect it was written for:
 // a rebind from a branch that hands back a live local, a record local first bound from a branch
-// and rebound later (loft#2398), and a vector local bound from a branch.  Values hand-computed.
+// and rebound later (loft#2398), a vector local bound from a branch, and three CHOICE joins — a
+// choice handing a local over whole, a first bind from a choice over a `??`, and a choice over a
+// `??` into a local that only views.  Values hand-computed.
 //
 // ── test_a_rebind_from_a_branch_handing_back_a_local (a-branch-handing-back-a-local-copies-it-into-a-binding-assigned-before) ──
 //
@@ -80,6 +82,68 @@
 //   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
 //   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
 //   both. The native side was not scored in this sweep.
+//
+// ── its test_* functions (a-choice-that-hands-a-local-over-whole-copies-it) ──
+//
+// @catches: LOFT_NO_CHOICE_VAR_JOIN — the switch binds the choice plainly, so the local names the other local's store beside it and an early return frees that store twice
+//
+// @FR-B-Copy: a whole-value bind of another variable makes an independent value, and so does a
+// choice that hands one over whole on one of its arms (`class = bound ?? Owned`,
+// `class = if c { bound! } else { Owned }`).  Bound plainly, `class` named `bound`'s store
+// beside it, and an early `return` of something else released that store through both (the
+// self-hosted elaborator's `classify_var` and `tag_in`).  The choice is a join on `bound`:
+// copied where the answer is its store, adopted where it is the fresh arm's.
+//
+// Axes this file MOVES:  the choice (`??`, `if` with `!`); the exit (the tail, an early
+//                        return); a loop; the local rebound after the choice.
+// Axes it HOLDS FIXED:   the other arm is a fresh unit variant; one other local.
+//
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_NO_CHOICE_VAR_JOIN=1`) — interpret 3 of 4 tests fail; native-c 3 of 4 fail.
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   WITNESS: the three choice cells fail on both backends; the fourth test holds.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
+//
+// ── its test_* functions (a-first-bind-from-a-choice-over-a-coalesce-copies-its-temporary) ──
+//
+// @catches: LOFT_NO_NCC_CHOICE_JOIN — the switch binds the choice plainly, so the local names the `??`'s store and a rebind that releases what it displaces frees that store under the `??`'s own temporary
+//
+// @FR-B-Copy: a choice that hands a value over whole on one arm makes an independent value, and
+// a `??` arm hands over the store its subject answered (`chain = if p { f() ?? Leaf } else {
+// Leaf }`).  The local then owns what it binds: a later rebind (`chain = wrap(…, chain)`)
+// releases the store it displaces.  Bound plainly, the local named the store the `??`'s
+// temporary still held, and the frame freed it through both (the self-hosted elaborator's
+// `enum_field`).  The first bind is a join on the temporary: copied where the answer is its
+// store, adopted where it is the other arm's.
+//
+// Axes this file MOVES:  which arm the first bind takes (the `??`, the literal); whether the
+//                        `??` answers its subject; how many rebinds follow (none, one, two).
+// Axes it HOLDS FIXED:   the subject is a nullable call answering into its hidden buffer.
+//
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_NO_NCC_CHOICE_JOIN=1`) — interpret 1 of 4 tests fail; native-c 1 of 4 fail.
+//   CHANNEL: the VALUES (hand-computed) and the double-free gate.
+//   WITNESS: one cell fails on both backends; the other three hold.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
+//
+// ── its test_* functions (a-choice-over-a-coalesce-into-a-view-binds-it-as-a-view) ──
+//
+// @catches: LOFT_C_FIRST_CHOICE_JOIN_ANY — the switch lets the C writer copy into a local that only views what it binds, and no exit frees the copy (C only)
+//
+// @FR-B-Copy: a choice handing another variable over whole is copied into a local that OWNS
+// what it binds.  `last_t = if n > 0 { def.attributes[n - 1].typedef[0] ?? TyVoid } else {
+// TyVoid }` keeps `def`'s borrow: the local is a view the exits never free, and its first bind
+// aliases the field.  The C writer copied it as it copies an owner's (`join_bind`), so every
+// run that took the field leaked the copy (the self-hosted elaborator's `call_args`: about
+// fifty records per program).  The bytecode writer asks whether the local owns
+// (`first_bind_choice_join`); the C writer asks the same.
+//
+// Axes this file MOVES:  which arm the choice takes (the field, the `??` default, the else);
+//                        a loop around it.
+// Axes it HOLDS FIXED:   the field is the first element of a vector inside a parameter.
+//
+// @falsified-at: 774dc9645 (switch A/B, `LOFT_C_FIRST_CHOICE_JOIN_ANY=1`) — native-c 2 of 2 tests fail under the suite's own `LOFT_LEAK_CHECK=1`, `10 stores not freed at program exit: kt=100 Ty×10`; interpret INERT (expected: the cure is the C writer's).
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   WITNESS: the leaked `Ty` stores on C.
+//   HOLDS: every cell, on every backend — with the cure on, every test passes on both backends.
 
 enum Own { Owned, Unknown, Borrowed { base: integer }, Join { base: integer } }
 struct BhP { x: integer, t: text }
@@ -441,4 +505,141 @@ fn keyed_control(c: boolean) -> text {
 }
 fn test_the_keyed_twin_copies_through_its_replace_op() {
   assert(keyed_control(true) == "211" && keyed_control(false) == "211", "keyed: {keyed_control(true)} {keyed_control(false)}, want 211 211");
+}
+
+enum ChOwn { ChOwned, ChBorrowed { base: integer }, ChJoin { base: integer } }
+
+fn ok(o: ChOwn) -> integer { match o { ChOwned => 0, ChBorrowed { base } => 100 + base, ChJoin { base } => 1000 + base } }
+
+fn early(k: integer) -> ChOwn {
+  bound: ChOwn? = null;
+  if k > 0 { bound = ChBorrowed { base: k }; }
+  class = ChOwned;
+  class = bound ?? ChOwned;
+  if k == 3 { return ChOwned; }
+  class
+}
+
+fn with_unwrap(k: integer) -> ChOwn {
+  bound: ChOwn? = null;
+  if k > 0 { bound = ChBorrowed { base: k }; }
+  class = ChOwned;
+  class = if k > 1 { bound! } else { ChOwned };
+  if k == 3 { return ChOwned; }
+  class
+}
+
+fn ch_in_a_loop(k: integer) -> ChOwn {
+  bound: ChOwn? = null;
+  if k > 0 { bound = ChBorrowed { base: k }; }
+  class = ChOwned;
+  for i in 0..2 { class = bound ?? ChOwned; }
+  if k == 3 { return ChOwned; }
+  class
+}
+
+fn rebound_after(k: integer) -> ChOwn {
+  bound: ChOwn? = null;
+  if k > 0 { bound = ChBorrowed { base: k }; }
+  class = ChOwned;
+  class = bound ?? ChOwned;
+  bound = ChJoin { base: 7 };
+  if k == 3 { return ChOwned; }
+  class
+}
+
+fn test_early_return() {
+  assert(ok(early(0)) == 0 && ok(early(3)) == 0 && ok(early(9)) == 109, "{ok(early(0))} {ok(early(3))} {ok(early(9))}");
+}
+
+fn test_with_unwrap() {
+  assert(ok(with_unwrap(1)) == 0 && ok(with_unwrap(3)) == 0 && ok(with_unwrap(9)) == 109, "{ok(with_unwrap(1))} {ok(with_unwrap(9))}");
+}
+
+fn test_in_a_loop() {
+  assert(ok(ch_in_a_loop(3)) == 0 && ok(ch_in_a_loop(9)) == 109, "{ok(ch_in_a_loop(9))}");
+}
+
+fn test_rebound_after() {
+  assert(ok(rebound_after(3)) == 0 && ok(rebound_after(9)) == 109, "{ok(rebound_after(9))}");
+}
+
+
+enum Node { NdNull, NdInt { n: integer }, NdBoolean { b: boolean }, NdVar { n: integer }, NdCall { def_nr: integer, args: vector<Node> }, NdIf { cond: Node, t: Node, f: Node } }
+
+fn v_if(test: Node, t: Node, f: Node) -> Node { NdIf { cond: test, t: t, f: f } }
+fn cl(op: integer, args: vector<Node>) -> Node { NdCall { def_nr: op, args: args } }
+fn tag_in(place: Node, vs: vector<integer>) -> Node {
+  cond = NdNull;
+  for v in vs {
+    test = cl(1, [cl(2, [cl(3, [place, NdInt { n: 0 }])]), NdInt { n: v }]);
+    cond = if cond is NdNull { test } else { v_if(cond, NdBoolean { b: true }, test) };
+  }
+  cond
+}
+fn field_get(d: integer, r: Node) -> Node? {
+  if d < 0 { return null; }
+  cl(9, [r, NdInt { n: d }])
+}
+fn sz(n: Node) -> integer {
+  match n {
+    NdNull => 1, NdInt { n } => n, NdBoolean { b } => 2, NdVar { n } => 100 * n,
+    NdCall { def_nr, args } => { s = 1000 * def_nr; for a in args { s += sz(a); } s },
+    NdIf { cond, t, f } => 7 + sz(cond) + sz(t) + sz(f)
+  }
+}
+fn chain_of(place: Node, partial: boolean, groups: integer, at: integer) -> Node {
+  chain = if partial { field_get(at, cl(5, [])) ?? NdNull } else { NdNull };
+  for oi in 0..groups {
+    arm = field_get(oi, place) ?? NdNull;
+    chain = if !partial && oi == 0 { arm } else { v_if(tag_in(place, [oi, oi + 1]), arm, chain) };
+  }
+  chain
+}
+
+fn test_the_coalesce_arm_rebound_twice() {
+  r = sz(chain_of(NdVar { n: 2 }, true, 2, 4));
+  assert(r == 57241, "{r}");
+}
+
+fn test_the_literal_arm_rebound_twice() {
+  r = sz(chain_of(NdVar { n: 3 }, false, 2, 4));
+  assert(r == 31220, "{r}");
+}
+
+fn test_the_coalesce_arm_rebound_once() {
+  r = sz(chain_of(NdVar { n: 1 }, true, 1, 4));
+  assert(r == 35321, "{r}");
+}
+
+fn test_the_coalesce_falls_back_and_is_kept() {
+  r = sz(chain_of(NdVar { n: 1 }, true, 0, -1));
+  assert(r == 1, "{r}");
+}
+
+
+enum CvTy { TyVoid, TyInt { w: integer } }
+struct A { name: text, typedef: vector<CvTy> }
+struct D { attributes: vector<A> }
+
+fn kind(t: CvTy) -> integer { match t { TyVoid => 1, TyInt { w } => 100 + w } }
+
+fn ca(def: D) -> integer {
+  n = len(def.attributes);
+  last_t = if n > 0 { def.attributes[n - 1].typedef[0] ?? TyVoid } else { TyVoid };
+  kind(last_t) + n
+}
+
+fn test_every_arm_in_a_loop() {
+  s = 0;
+  for i in 0..20 {
+    d = D { attributes: [A { name: "a", typedef: [TyInt { w: i }] }, A { name: "b", typedef: if i % 2 == 0 { [] } else { [TyInt { w: 2 * i }] } }] };
+    s += ca(d) + ca(D { attributes: [] });
+  }
+  assert(s == 1270, "{s}");
+}
+
+fn test_the_field_arm_once() {
+  r = ca(D { attributes: [A { name: "x", typedef: [TyInt { w: 7 }] }] });
+  assert(r == 108, "{r}");
 }
