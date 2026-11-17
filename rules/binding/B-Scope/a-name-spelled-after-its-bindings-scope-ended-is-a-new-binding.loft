@@ -1,0 +1,497 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NAME SPELLED AFTER ITS BINDING'S SCOPE ENDED STARTS A NEW BINDING, AT ANY TYPE (`@FR-B-Scope`).
+// A local bound inside a block ends at the block's `}`, a loop variable ends with its loop and a
+// comprehension's variable ends with the comprehension; a later bind of the same spelling — a
+// plain local, a loop variable, a value from a function defined further down — is a new binding
+// with its own type, never the ended one reused.  Each spelling once leaked the ended binding:
+// refused as a type change or a shadow, read with the ended one's type, or built through the
+// loop variable's view into the walked collection.  Five sections, each with its cells and
+// receipt: after a block (loft#1700), with the value from a later function (loft#2411), after a
+// loop at the same type (loft#2332), a loop variable after a block (loft#2321) and a later local
+// beside a comprehension's variable (loft#2330).
+//
+// ── 1700-a-bind-after-its-block-ended-is-a-new-binding-at-any-type ──
+//
+// loft#1700 (`@FR-B-Scope`) — A BIND AFTER ITS BLOCK ENDED IS A NEW BINDING, AT ANY TYPE.
+// `(B-Scope)` ends a local bound inside a block at the block's `}`, and a bind after it starts a
+// new binding in the enclosing block.  The parser kept one variable per name, so the new binding
+// inherited the ended one's type and `if c { w = 1 } w = "x"` was refused as a type change.  A
+// bind after the block ended, at a type the ended binding refuses, now gets a variable of its
+// own, as a `for` loop's and a pattern's do; the spelling names it until the enclosing block
+// ends.  Only where the old compiler refused (loft#1145's rule), so a program that compiled is
+// unchanged — a same-type rebind keeps its single binding and its lints.
+//
+// The closure capturing a spelling several bindings share is
+// `1700b-a-closure-captures-the-binding-its-name-spells-now.loft`.
+//
+// @falsified-at: 5ba2b5ef5 — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-by: tests/falsified/1700-a-bind-after-its-block-ended-is-a-new-binding-at-any-type.patch — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — the control tree refuses this file ("cannot change type").
+// ARMED: every run.
+// WITNESS: `Variable 'w' cannot change type from integer to text`.
+// HOLDS: the same-type rebind and the read-after-end refusal (the corpus's B-Scope guards).
+//
+// ── 2411-a-bind-from-a-later-function-after-its-block-ended-is-a-new-binding ──
+//
+// loft#2411 (`@FR-B-Scope`) — A BIND FROM A LATER FUNCTION, AFTER ITS BLOCK ENDED, IS A NEW
+// BINDING.  The same rule as `1700-a-bind-after-its-block-ended-is-a-new-binding-at-any-type.loft`,
+// with the value coming from a call to a function defined further down: the first pass has no
+// type for it yet, and it read the new binding with the ended one's type — `r >= 0` refused on
+// a vector, the compile stopping before the second pass could split the binding.  A local whose
+// latest first-pass bind has no type yet now reads as untyped there, as a fresh one would; a
+// declared local keeps its declaration (its last two cells, and the text cell, held before).
+//
+// @falsified-at: 369b941cf — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — the control refuses this file ("No matching operator").
+// ARMED: every run.
+// WITNESS: `No matching operator '>=' on 'integer' and 'vector<integer>'`.
+// HOLDS: `texts`, `same`, `declared` (a text read of the ended vector, a same-type rebind, a
+// declared local).
+//
+// ── 2332-a-bind-after-a-loop-is-a-new-binding-at-the-loop-variables-type ──
+//
+// loft#2332 — `@FR-B-Scope`: a loop variable ends with its loop, so a bind of its spelling after
+// the loop starts a NEW binding — also at the SAME type.  The bind reused the loop's variable,
+// which views an element of the walked collection: the new value was built through that view into
+// the collection (`top` answered t=3 for 6, the second element overwritten), inside an enclosing
+// loop the view became an owner that freed the walked store every pass (`nested`, a use after free
+// under LOFT_STRICT_STORES), and rebound in a later loop the interpreter hung (`later_loop`).
+//
+// Every value by hand.
+//
+// Axes this file MOVES:  where the later bind sits (the function's block, an enclosing loop's
+//                        body, a later loop's body), its form (plain, declared), whether pass 1
+//                        knows the value's type (a function declared before, after), the loop
+//                        variable's kind (a record view, text, integer, destructured binders),
+//                        backends.
+// Axes it HOLDS FIXED:   one loop over one collection before the bind; the collection a field.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — main answers `top 3 3` on both backends.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
+//
+// ── 2321-a-loop-variable-over-an-ended-blocks-name-is-a-new-binding ──
+//
+// loft#2321 — `@FR-B-Scope`: a local bound inside a block ends at its `}`, so a loop variable — a
+// `for` statement's or a comprehension's — spelled like it after that block, or in a sibling arm,
+// is a NEW binding, of any type.  It was refused: the statement loop as a shadow ("a loop variable
+// cannot reuse the name of a local still in scope"), the comprehension as a type change reported
+// on the ended local's own bind — the loop's variable kept the spelling after its body, so the
+// second pass met the earlier arm's `t = "a"` with `t` already naming the loop's variable.
+//
+// Every value by hand.
+//
+// Axes this file MOVES:  the loop (statement, comprehension), where the ended local sits (the
+//                        other arm of an `if`, a bare block before, an `if` before), the two
+//                        types (equal, different), the loop variable's kind (integer, text,
+//                        a record), the order (the local first, the loop first), backends.
+// Axes it HOLDS FIXED:   one function per cell; the local a plain statement bind.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the compile — main refuses this file.
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
+//
+// ── 2330-a-comprehension-variable-keeps-its-type-beside-a-later-local-of-its-name ──
+//
+// `@FR-B-Scope` — a comprehension's loop variable ends with the comprehension, so a LATER
+// local spelled like it is a new binding with its own type.  The comprehension variable
+// took that later binding's type instead: a later `c = cs[end]` (a `character?`, an
+// element read) re-typed the comprehension's `c` to `character?`, and `@FR-N-Store` then
+// warned that a nullable `character?` "is stored into the comprehension element of the
+// non-null type `character`" — a warning, the tier that gates a library's CI, about a
+// value that is never null (loft#2330).
+//
+// Armed with `LOFT_DENY_WARNINGS=1`, so the spurious warning fails the cell; each function
+// asserts its hand-computed answer too, so a variable that stopped warning while reading
+// the wrong binding fails as well.  The axes: where the later local sits (a `while` body,
+// the function's own block, a `for` body, BEFORE the comprehension in an ended block),
+// the later local's type (the same nullable, `integer?`, `text`), a filtered comprehension,
+// and two comprehensions spelling one name.
+//
+// @ARMED: LOFT_DENY_WARNINGS=1
+// @falsified-at: 0e95172cd (loft#2330) — interpret and native-c: three unexpected warnings
+// (`later_in_while`, `filtered`, `two_comprehensions`), the cell refused under deny-warnings.
+//   CHANNEL: the false warning, made the exit by LOFT_DENY_WARNINGS=1.
+//   WITNESS: main warns `a nullable `character?` is stored into the comprehension
+//   element` three times (the while, filtered and two-comprehension shapes).
+//   HOLDS: the leak check and the panic channel are clean on BOTH trees, on the
+//   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
+//   exit moves.
+
+// The filed shape: the later local in a `while` body.  "a(b": cs = [a,(,b]; end 0 -> 1,
+// end 1 '(' -> 3; 3 < 3 stops.
+
+enum E { A, B }
+
+fn test_a_bind_after_its_block_ended_is_a_new_binding_at_any_type() {
+  c = true;
+  if c { w = 1; assert(w == 1, "the first binding"); }
+  w = "x";
+  assert(w == "x", "a new binding at another type: {w}");
+  t = 0;
+  for e in [1, 2] { t += e; }
+  e = "e";
+  assert(e == "e" && t == 3, "after a loop variable: {e} {t}");
+  {
+    if c { d = 1; assert(d == 1, "nested first"); }
+    d = "d";
+    assert(d == "d", "inside a nested block: {d}");
+  }
+  if c { i1 = 1; assert(i1 == 1, "i1"); }
+  if c { i1 = "i"; assert(i1 == "i", "rebound inside another block: {i1}"); }
+  ev = E.A;
+  match ev { A => { m = 1; assert(m == 1, "arm body"); }, B => {} }
+  m = "m";
+  assert(m == "m", "after a match arm's local: {m}");
+  if c { h = 1; assert(h == 1, "h"); }
+  h: text = "h";
+  assert(h == "h", "a declared new binding: {h}");
+  if c { j = [1, 2]; assert(len(j) == 2, "a heap binding"); }
+  j = "j";
+  assert(j == "j", "a heap binding ended, a text one started: {j}");
+  n = 0;
+  for i in 0..3 { if c { l = i; n += l; } l = [i, i]; n += len(l); }
+  assert(n == 9, "a scalar then a vector per iteration: {n}");
+  if c { k = 1; assert(k == 1, "k"); }
+  k = "k";
+  f = fn(s: text) -> text { "{k}{s}" };
+  assert(f("y") == "ky", "a closure capturing the new binding: {f("y")}");
+  // unchanged: the same type keeps one binding
+  if c { s = 1; assert(s == 1, "s"); }
+  s = 2;
+  assert(s == 2, "the same type: {s}");
+  println("a bind after its block ended is a new binding at any type: every cell holds");
+}
+
+fn ops(c: boolean) -> integer {
+  if c { r = [1, 2]; assert(len(r) == 2, "the first binding"); }
+  r = later_int(37);
+  if r >= 0 { r + 5 } else { -1 }
+}
+
+fn items(c: boolean) -> vector<integer> {
+  if c { r = "ended"; assert(r == "ended", "the first binding"); }
+  r = later_int(11);
+  [r, r * 2]
+}
+
+fn texts(c: boolean) -> text {
+  if c { v = [3]; assert(len(v) == 1, "the first binding"); }
+  v = later_text("ab");
+  "{v}{v + "c"}"
+}
+
+fn looped(n: integer) -> integer {
+  t = 0;
+  for i in 0..n {
+    if i > 0 { q = [i]; t += len(q); }
+    q = later_int(i);
+    t += q * 10;
+  }
+  t
+}
+
+fn same(c: boolean) -> integer {
+  if c { s = 4; assert(s == 4, "the first binding"); }
+  s = later_int(6);
+  s * 3
+}
+
+fn declared(c: boolean) -> integer {
+  d: integer = later_int(8);
+  if c { d = later_int(9); }
+  d + 1
+}
+
+fn later_int(n: integer) -> integer { n }
+fn later_text(s: text) -> text { s }
+
+fn test_a_bind_from_a_later_function_after_its_block_ended_is_a_new_binding() {
+  assert(ops(true) == 42, "an operator on the new binding: {ops(true)}");
+  assert(ops(false) == 42, "the block not taken: {ops(false)}");
+  assert(items(true) == [11, 22], "a vector of the new binding: {items(true)}");
+  assert(texts(true) == "ababc", "a text new binding: {texts(true)}");
+  assert(looped(3) == 32, "per iteration: {looped(3)}");
+  assert(same(true) == 18, "the same type keeps one binding: {same(true)}");
+  assert(declared(true) == 10, "a declared local: {declared(true)}");
+  println("a bind from a later function after its block ended is a new binding: every cell holds");
+}
+
+struct S3A { n: text, k: integer }
+struct D { attrs: vector<S3A>, name: text }
+struct S3E { defs: vector<D>, log: vector<text> }
+
+fn mk(n: text) -> S3A { S3A { n: n, k: len(n) } }
+fn def(e: S3E, d: integer) -> D { e.defs[d]! }
+
+fn ksum(d: D) -> integer {
+  t = 0;
+  for x in d.attrs { t += x.k; }
+  t
+}
+
+// 1: the bind in the function's own block, after a walk of the field it appends to
+fn top() {
+  d = D { attrs: [S3A { n: "p", k: 1 }, S3A { n: "qq", k: 2 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  a = mk("rrr");
+  d.attrs += [a];
+  assert(s == 3 && ksum(d) == 6 && len(d.attrs) == 3, "top {s} {ksum(d)}");
+  assert(d.attrs[1].n == "qq" && d.attrs[2].n == "rrr", "top elements");
+}
+
+// 2: inside an enclosing loop, the walk through a call returning the record
+fn add_fields(e: S3E, d: integer, names: vector<text>) {
+  for fname in names {
+    for a in def(e, d).attrs {
+      if a.n == fname {
+        e.log += ["dup {fname}"];
+      }
+    }
+    a = mk(fname);
+    e.defs[d].attrs += [a];
+  }
+}
+fn nested() {
+  e = S3E { defs: [D { attrs: [], name: "d" }], log: [] };
+  add_fields(e, 0, ["x", "yy", "x", "zzz"]);
+  assert(len(e.defs[0].attrs) == 4 && ksum(e.defs[0]) == 7, "nested {ksum(e.defs[0])}");
+  assert(len(e.log) == 1 && e.log[0] == "dup x", "nested log {e.log}");
+}
+
+// 3: a s3_declared bind
+fn s3_declared() {
+  d = D { attrs: [S3A { n: "p", k: 1 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  a: S3A = mk("rrr");
+  d.attrs += [a];
+  assert(s == 1 && ksum(d) == 4 && d.attrs[0].n == "p", "s3_declared {s} {ksum(d)}");
+}
+
+// 4: the value from a function s3_declared further down, so pass 1 does not know its type
+fn forward() {
+  d = D { attrs: [S3A { n: "p", k: 1 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  a = mk_late("rrrr");
+  d.attrs += [a];
+  assert(s == 1 && ksum(d) == 5 && d.attrs[0].n == "p", "forward {s} {ksum(d)}");
+}
+
+// 5: the bind in a later loop's body
+fn later_loop() {
+  d = D { attrs: [S3A { n: "p", k: 1 }], name: "d" };
+  s = 0;
+  for a in d.attrs { s += a.k; }
+  for y in ["uu", "vvv"] {
+    a = mk(y);
+    d.attrs += [a];
+  }
+  assert(s == 1 && ksum(d) == 6 && len(d.attrs) == 3 && d.attrs[0].n == "p", "later {s} {ksum(d)}");
+}
+
+// 6: a text loop variable, then a text bind that grows
+fn text_var() {
+  names = ["ab", "cde"];
+  s = 0;
+  for t in names { s += len(t); }
+  t = "xyzw";
+  t += "!";
+  assert(s == 5 && t == "xyzw!" && names[0] == "ab" && names[1] == "cde", "text {s} {t}");
+}
+
+// 7: an integer loop variable
+fn int_var() {
+  s = 0;
+  for i in 0..3 { s += i; }
+  i = 50;
+  i += 1;
+  assert(s == 3 && i == 51, "int {s} {i}");
+}
+
+// 8: destructured binders
+fn destructured() {
+  v = [(1, "ab"), (2, "cde")];
+  s = 0;
+  for (n, t) in v { s += n + len(t); }
+  t = "xy";
+  t += "z";
+  n = 40;
+  assert(s == 8 && t == "xyz" && n == 40 && v[1].1 == "cde", "destructured {s} {t} {n}");
+}
+
+fn mk_late(n: text) -> S3A { S3A { n: n, k: len(n) } }
+
+fn test_a_bind_after_a_loop_is_a_new_binding_at_the_loop_variables_type() {
+  top();
+  nested();
+  s3_declared();
+  forward();
+  later_loop();
+  text_var();
+  int_var();
+  destructured();
+}
+
+struct P { n: integer }
+
+// 1: a text local in the `if` arm, an integer `for` in the `else` arm
+fn arms_for(k: integer) -> text {
+  r = "";
+  if k == 1 { t = "a"; r = t; } else { n = 0; for t in [1, 2] { n += t; } r = "{n}"; }
+  r
+}
+// 2: the same with a comprehension
+fn arms_comp(k: integer) -> text {
+  r = "";
+  if k == 1 { t = "a"; r = t; } else { v = [for t in [1, 2] { t * 2 }]; r = "{len(v)}:{v[1]}"; }
+  r
+}
+// 3: equal types, a statement loop
+fn arms_same(k: integer) -> integer {
+  r = 0;
+  if k == 1 { t = 5; r = t; } else { for t in [1, 2] { r += t; } }
+  r
+}
+// 4: a bare block before a loop over text
+fn block_then_for() -> text {
+  r = "";
+  { t = 7; r = "{t}"; }
+  for t in ["x", "y"] { r += t; }
+  r
+}
+// 5: an `if` before a comprehension over records
+fn if_then_comp(k: integer) -> integer {
+  r = 0;
+  if k > 0 { t = "a"; r = len(t); }
+  v = [for t in [P { n: 3 }, P { n: 4 }] { t.n * 10 }];
+  r + v[0] + v[1]
+}
+// 6: the loop first, the local after (the order that always compiled)
+fn loop_then_local() -> text {
+  n = 0;
+  for t in [1, 2] { n += t; }
+  t = "z";
+  "{n}{t}"
+}
+// 7: the ended local read after the loop is still out of reach; a bind there is a new one
+fn bind_after(k: integer) -> text {
+  r = "";
+  if k == 1 { t = "a"; r = t; }
+  v = [for t in [4] { t }];
+  t = v[0] * 2;
+  "{r}{t}"
+}
+
+fn test_a_loop_variable_over_an_ended_blocks_name_is_a_new_binding() {
+  o1 = "{arms_for(1)}|{arms_for(2)}";
+  assert(o1 == "a|3", "c1 {o1}");
+  o2 = "{arms_comp(1)}|{arms_comp(2)}";
+  assert(o2 == "a|2:4", "c2 {o2}");
+  o3 = "{arms_same(1)}|{arms_same(2)}";
+  assert(o3 == "5|3", "c3 {o3}");
+  o4 = block_then_for();
+  assert(o4 == "7xy", "c4 {o4}");
+  o5 = "{if_then_comp(1)}|{if_then_comp(0)}";
+  assert(o5 == "71|70", "c5 {o5}");
+  o6 = loop_then_local();
+  assert(o6 == "3z", "c6 {o6}");
+  o7 = "{bind_after(1)}|{bind_after(2)}";
+  assert(o7 == "a8|8", "c7 {o7}");
+  println("ok");
+}
+
+fn later_in_while(t: text) -> integer {
+  cs: vector<character> = [for c in t { c }];
+  end = 0;
+  while end < len(cs) {
+    c = cs[end];
+    if c == '(' { end += 1; }
+    end += 1;
+  }
+  end
+}
+
+// The later local in the function's own block.  cs[1] is 'x' -> 10.
+fn later_at_top(t: text) -> integer {
+  cs: vector<character> = [for c in t { c }];
+  c = cs[1];
+  if c == 'x' { 10 } else { len(cs) }
+}
+
+// Over a vector<integer>, the later local an `integer?`.  [2, 4, 6] sums to 12.
+fn later_integer(v: vector<integer>) -> integer {
+  ds: vector<integer> = [for c in v { c * 2 }];
+  s = 0;
+  for i in 0..len(ds) {
+    c = ds[i];
+    if c != null { s += c; }
+  }
+  s
+}
+
+// The later local of another type.  "ax" and "bx": 2 + 2.
+fn s5_later_text(t: text) -> integer {
+  cs: vector<character> = [for c in t { c }];
+  n = 0;
+  for k in 0..len(cs) {
+    c = "{cs[k]}x";
+    n += len(c);
+  }
+  n
+}
+
+// The nullable local BEFORE the comprehension, in a block that has ended.  t[1] is 'b' ->
+// 100, plus three characters.
+fn earlier_ended(t: text) -> integer {
+  n = 0;
+  if len(t) > 1 {
+    c = t[1];
+    if c == 'b' { n += 100; }
+  }
+  cs: vector<character> = [for c in t { c }];
+  n + len(cs)
+}
+
+// A filtered comprehension.  "abz" keeps [b, z]; m 0 -> 1, m 1 'z' -> 2 + 5 = 7.
+fn filtered(t: text) -> integer {
+  cs: vector<character> = [for c in t if c != 'a' { c }];
+  m = 0;
+  while m < len(cs) {
+    c = cs[m];
+    m += 1;
+    if c == 'z' { m += 5; }
+  }
+  m
+}
+
+// Two comprehensions spelling one name.  "pq": k 0 'p' -> 1, k 1 'q' -> 12; 12 + 2 = 14.
+fn two_comprehensions(t: text) -> integer {
+  a: vector<character> = [for c in t { c }];
+  b: vector<character> = [for c in t { c }];
+  k = 0;
+  while k < len(b) {
+    c = a[k];
+    if c == 'q' { k += 10; }
+    k += 1;
+  }
+  k + len(a)
+}
+
+fn test_a_comprehension_variable_keeps_its_type_beside_a_later_local_of_its_na() {
+  assert(later_in_while("a(b") == 3, "later_in_while {later_in_while("a(b")}");
+  assert(later_at_top("axb") == 10, "later_at_top {later_at_top("axb")}");
+  assert(later_integer([1, 2, 3]) == 12, "later_integer {later_integer([1, 2, 3])}");
+  assert(s5_later_text("ab") == 4, "s5_later_text {s5_later_text("ab")}");
+  assert(earlier_ended("abc") == 103, "earlier_ended {earlier_ended("abc")}");
+  assert(filtered("abz") == 7, "filtered {filtered("abz")}");
+  assert(two_comprehensions("pq") == 14, "two_comprehensions {two_comprehensions("pq")}");
+}
