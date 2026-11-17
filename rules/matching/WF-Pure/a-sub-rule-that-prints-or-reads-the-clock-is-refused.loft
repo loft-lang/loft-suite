@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SUB-RULE THAT PRINTS OR READS THE CLOCK IS REFUSED (`@FR-WF-Pure`).  A cursor `match` calls a
+// sub-rule speculatively — even for an arm it does not take — and undoes a failed arm by resetting
+// the cursor's position alone, so a sub-rule may only advance the cursor and build what it answers.
+// One that writes output, or reads the clock (host state), is a static error at the arm that names
+// it; a pure sub-rule beside them is admitted.  Each function is one refusal with its expectation.
+//
+// @falsified-at: none — a conformance guard; both refusals and the admitted control answered on
+//   the tree of the suite pin that adds this cell, interpret and native-c; a corrupted expectation
+//   fails the file.
+//   CHANNEL: the expected errors (each must be met, and nothing else may be reported).
+//   ARMED: every run.
+//
+// @EXPECT_ERROR: sub-rule `noisy` is not pure
+// @EXPECT_ERROR: sub-rule `stamped` is not pure
+
+enum Tok { Num { v: integer }, Plus, End }
+struct Cur { src: vector<Tok>, pos: integer }
+struct N { v: integer }
+
+fn noisy(c: Cur) -> N? {
+  println("tried at {c.pos}");
+  match c { [Num { v }] => N { v: v }, _ => null }
+}
+
+fn stamped(c: Cur) -> N? {
+  t = now();
+  match c { [Num { v }] => N { v: v + 0 * t }, _ => null }
+}
+
+fn pure(c: Cur) -> N? { match c { [Num { v }] => N { v: v }, _ => null } }
+
+fn with_output(c: Cur) -> integer {
+  match c {
+    [a: noisy, Plus] => a.v,
+    _ => -1
+  }
+}
+
+fn with_the_clock(c: Cur) -> integer {
+  match c {
+    [a: stamped, Plus] => a.v,
+    _ => -1
+  }
+}
+
+fn control_a_pure_sub_rule(c: Cur) -> integer {
+  match c {
+    [a: pure, Plus] => a.v,
+    _ => -1
+  }
+}
