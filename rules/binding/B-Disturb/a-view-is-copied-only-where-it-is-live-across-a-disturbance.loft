@@ -1,6 +1,18 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A VIEW IS COPIED ONLY WHERE IT IS LIVE ACROSS A DISTURBANCE OF ITS CONTAINER (`@FR-B-Disturb`,
+// `@FR-B-View`; OWNERSHIP_MODEL.md § "A view lasts as long as the thing it names").  The rule holds
+// per path.  A call's arguments are evaluated before its callee runs, so a view read only into an
+// argument that cannot carry it into the callee is dead when the callee disturbs the container.
+// A loop's exit leaves from the head without passing through the body again, so a view read after
+// the loop is copied only where some path through the body disturbs its container after binding
+// it.  Where no path reads the view across the event it stays a view, and a write through it
+// reaches the container.  Two sections, each with its cells and receipt: a callee's arguments
+// (loft#2349), and a loop's paths.
+//
+// ── 2349-a-view-read-only-into-a-callees-argument-is-not-live-across-the-callee ──
+//
 // `@FR-B-Disturb`, `@FR-B-View` — a view is materialised only where it is LIVE ACROSS a
 // disturbance of its container (OWNERSHIP_MODEL.md § "A view lasts as long as the thing it
 // names").  A call's arguments are evaluated before its callee runs, so a view read only into
@@ -30,6 +42,27 @@
 //   interpreter and the C (measured on main 0e95172cd unarmed, 2026-11-02); only the
 //   exit moves.
 // @catches: LOFT_NO_CALLEE_DISTURB — the switch stops a callee's removal ending the caller's view, and the stale view is what `k_rm_view` checks.
+//
+// ── a-view-read-after-a-loop-is-copied-only-where-a-path-disturbed-it ──
+//
+// `@FR-B-View`, `@FR-B-Disturb` — a view is copied only where it is LIVE ACROSS a disturbance
+// of its container, and `(B-Disturb)` holds per path, through a loop as through an `if`.
+// A loop's next turn reaches the top of its body after the whole body has run, so every use
+// inside the body sees what the body disturbs.  The loop's EXIT does not: it leaves from the
+// head without passing through the body again.  So a view read after the loop is copied only
+// where some path through the body disturbs its container after binding it.
+//
+// v1: the arm that reassigns `x` binds `t` right after it, the other arm leaves both alone —
+// no path reads `t` across a reassignment of `x`, so `t` stays a view and a write through it
+// after the loop reaches `x`.  v2: the same with a `break` out of the binding arm.
+//
+// The copies that must stay: the other arm reassigns `x` without rebinding `t` (c3), the
+// binding arm reassigns `x` after binding `t` (c4), and `t` read at the top of the next turn
+// after an arm that reassigned `x` (c5).
+//
+// @falsified-at: f6ee9b1a9 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: every channel the line above does not name is equal on BOTH trees — `falsify`
+//   reports only what moved.
 
 struct N { xs: vector<integer> }
 struct S { nodes: vector<N> }
@@ -69,7 +102,7 @@ fn k_loop(s: S) -> integer { t = 0; match s.nodes[0] { N { xs } => { for _ in 0.
 fn k_rm_view(s: S) -> integer { match s.nodes[0] { N { xs } => rm_vec(s, xs) } }
 fn k_rm_next(s: S) -> integer { match s.nodes[0] { N { xs } => { r = rm(s, N { xs: xs }); r * 10 + xs[1] } } }
 
-fn main() {
+fn test_a_view_read_only_into_a_callees_argument_is_not_live_across_the_callee() {
   // grow: 2 + 20 = 22 nodes; a second grow 42.  rm: 1 node left.  reset: 1 node.
   s = mk(); a = g_lit(s); assert(a == 2212 && "{s.nodes[0].xs}" == "[1,2]", "g_lit {a}");
   s = mk(); a = g_elem(s); assert(a == 2202, "g_elem {a}");
@@ -88,4 +121,83 @@ fn main() {
   s = mk(); a = k_loop(s); assert(a == 2212 + 4212, "k_loop {a}");
   s = mk(); a = k_rm_view(s); assert(a == 112, "k_rm_view {a}");
   s = mk(); a = k_rm_next(s); assert(a == 1122, "k_rm_next {a}");
+}
+
+struct In { n: integer }
+struct Ex { code: integer, tp: In }
+enum Node { Stmt { v: integer }, Other }
+
+fn expr(i: integer) -> Ex { Ex { code: i, tp: In { n: i * 10 } } }
+
+fn v1() -> integer {
+  x = expr(0);
+  t = In { n: -1 };
+  for nd in [Stmt { v: 1 }, Stmt { v: 2 }, Other] {
+    match nd {
+      Stmt { v } => { x = expr(v); t = x.tp; },
+      _ => {}
+    }
+  }
+  t.n = 77;
+  x.tp.n
+}
+
+fn v2() -> integer {
+  x = expr(0);
+  t = In { n: -1 };
+  for nd in [Stmt { v: 1 }, Stmt { v: 2 }, Stmt { v: 3 }] {
+    match nd {
+      Stmt { v } => { x = expr(v); t = x.tp; if v == 2 { break; } },
+      _ => {}
+    }
+  }
+  t.n = 78;
+  x.tp.n * 1000 + x.code
+}
+
+fn c3() -> integer {
+  x = expr(0);
+  t = In { n: -1 };
+  for nd in [Stmt { v: 1 }, Stmt { v: 2 }, Other] {
+    match nd {
+      Stmt { v } => { x = expr(v); t = x.tp; },
+      _ => { x = expr(99); }
+    }
+  }
+  t.n * 10000 + x.tp.n
+}
+
+fn c4() -> integer {
+  x = expr(0);
+  t = In { n: -1 };
+  for nd in [Stmt { v: 1 }, Stmt { v: 2 }, Other] {
+    match nd {
+      Stmt { v } => { x = expr(v); t = x.tp; x = expr(v + 50); },
+      _ => {}
+    }
+  }
+  t.n * 10000 + x.tp.n
+}
+
+fn c5() -> integer {
+  x = expr(0);
+  t = In { n: -1 };
+  s = 0;
+  for nd in [Stmt { v: 1 }, Other, Stmt { v: 2 }, Other] {
+    s += t.n;
+    match nd {
+      Stmt { v } => { x = expr(v); t = x.tp; },
+      _ => { x = expr(99); }
+    }
+  }
+  s
+}
+
+fn test_a_view_read_after_a_loop_is_copied_only_where_a_path_disturbed_it() {
+  assert(v1() == 77, "v1: the write after the loop reaches x.tp: {v1()}");
+  assert(v2() == 78002, "v2: after a break, the write reaches x.tp: {v2()}");
+  assert(c3() == 200990, "c3: t keeps turn two's value, x the other arm's: {c3()}");
+  assert(c4() == 200520, "c4: t keeps the value it was bound to: {c4()}");
+  // -1, then 10 twice (turn one's t, read across the other arm's reassignment), then 20.
+  assert(c5() == 39, "c5: the next turn reads t as it was bound: {c5()}");
 }
