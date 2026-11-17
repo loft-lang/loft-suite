@@ -40,7 +40,7 @@
 //
 // Held FIXED, so NOT measured here: one capture per closure, a two-arm join, the closure called
 // in the frame that built it (an escaping closure over a join is
-// `closures/L-CapOwn/2131-a-closure-over-a-value-branch-local-owns-only-the-arm-that-ran.loft`).
+// `closures/L-CapOwn/a-closure-over-a-branch-owns-only-the-arm-that-ran.loft`).
 
 struct In { v: integer }
 struct Box { inner: In, id: integer }
