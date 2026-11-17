@@ -28,7 +28,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the measured size or the values.
-// HOLDS: `layout/L-Align/pln110-size-struct`, `layout/L-Tuple/a-record-is-padded-to-its-alignment`.
+// HOLDS: `layout/L-Align/pln110-size-struct`, `layout/L-Tuple/a-stored-tuple-is-a-record-packed-like-a-struct-keeping-its-written-positions`.
 
 struct SaA { a: u8, b: integer, c: u16, d: u8 }
 struct SaB { a: u8, b: u16, c: i32, d: u8 }

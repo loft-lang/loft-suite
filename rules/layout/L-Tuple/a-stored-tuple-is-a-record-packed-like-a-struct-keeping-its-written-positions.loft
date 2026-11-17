@@ -1,0 +1,200 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STORED TUPLE IS A RECORD PACKED LIKE A STRUCT, KEEPING ITS WRITTEN POSITIONS (`@FR-L-Tuple`,
+// `@FR-L-Struct`, `@FR-L-Align`, @C138).  Its members pack largest alignment first and the record
+// pads to its largest; the order in the bytes is not the order written, and every read and write
+// still finds the member by its written position.  Three sections, each with its cells and receipt.
+//
+// ── a-record-is-padded-to-its-alignment ──
+//
+// `@C138` `(L-Align)` — every scalar in a store sits on its natural boundary: a record's size is
+// a multiple of its alignment, and a stored tuple is a record — largest alignment first
+// (`@FR-L-Tuple`, @C139), each member on its own boundary.  So a collection's n-th element is aligned, and a `&` link to an 8-byte member of a
+// record-backed `&(text, integer)` is an aligned 8-byte place, which `--native` dereferences
+// as a `*mut i64` (it panicked at the packed offset 4).  Crossed: an odd-sized record (stride
+// 9), a record nested in a tuple, a tuple whose members leave gaps, and the record-backed
+// `&(text, integer)` by a bind, a `&` argument, an element write and a field write.  The value
+// cells pass on a packed layout too; the size pins and the link are the subject.
+//
+// @falsified-at: 3b80d5dae — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native
+//   exit 1 -> 0, native 6 assertion failures -> 0, native panicked -> clean.
+// @falsified-by: tests/falsified/a-record-is-padded-to-its-alignment.patch — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+//   Re-derived at 653383a5a as the padding alone: no tail padding for a record (`calc.rs`) or
+//   a stored tuple (`record_member_offsets`), and no compile-time `alignment_violations` check.
+//   The native panic is no longer reachable from a patch: it was the link at a PACKED member
+//   offset 4, and member placement no longer depends on the tail padding (a stored tuple lays
+//   out largest alignment first, `@FR-L-Tuple`, @C139) — `test_a_record_backed_text_integer_member`
+//   passes on this control.
+// HOLDS: leak and refusals are clean on both trees and both backends.
+//
+// ── a-tuple-packed-like-a-struct-keeps-its-written-positions ──
+//
+// `@FR-L-Tuple` crossed with `@FR-L-Struct`: a stored tuple is a synthetic struct packed by
+// L-Struct — largest alignment first — so the ORDER of its members in the bytes is not the
+// written one, and that order has no effect on a member's name: `t.0 … t.n` stay the written
+// positions.  So a tuple whose members have every alignment (a boolean, a float, a single, a
+// character, a text, an integer), written in an order L-Struct reorders, reads back by
+// position after every boundary between the stack form and the stored form: kept in a vector,
+// in a struct field next to fields of other widths, written member by member in place, and
+// handed out of the store by a function.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
+//
+// ── a-tuple-packs-by-descending-alignment-and-pads-to-its-largest ──
+//
+// A TUPLE PACKS BY DESCENDING ALIGNMENT AND PADS TO ITS LARGEST (`@FR-L-Tuple` crossed with
+// `@FR-L-Align`).  L-Tuple: a stored tuple is a synthetic `__tuple<…>` record packed by L-Struct
+// — largest alignment first, the size rounded up to the largest member alignment (L-Align) —
+// and that order has no effect on a member's name or on `t.i`.  The cell beside this one
+// (`a-record-is-padded-to-its-alignment`) measures tuples whose largest member is 8 bytes; this
+// one moves the largest alignment down to 4 and 2, nests a tuple in a tuple on both sides of
+// the size question, and writes every member through `t.i` in a vector element, where the
+// stored layout is the one read.
+//
+// Sizes hand-computed:
+//   (u8, u16)                2 + 1 = 3, align 2      -> 4
+//   (u8, i32, u8)            4 + 1 + 1 = 6, align 4  -> 8
+//   (text, u8)               4 + 1 = 5, align 4      -> 8
+//   (u16, integer)           8 + 2 = 10, align 8     -> 16
+//   ((u8, u16), u8)          4 + 1 = 5, align 2      -> 6
+//   (u8, (integer, u8))      16 + 1 = 17, align 8    -> 24
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the measured size or the values.
+// HOLDS: `a-record-is-padded-to-its-alignment` beside it.
+
+struct S9 { n: integer, b: u8 }
+struct Lab { name: text, n: integer }
+struct Host { tag: u8, pair: (text, integer), tail: u16 }
+
+fn bump_pair(p: &(text, integer)) {
+  p.1 += 5;
+  c = &p.1;
+  c += 1;
+}
+
+fn bump(p: &integer) { p += 1; }
+fn arg_pair(p: &(text, integer)) { bump(p.1); }
+
+fn test_a_stride_9_element() {
+  // 8 + 1 = 9 bytes, padded to 16: element i at 16 * i.
+  vs: vector<S9> = [S9 { n: 10, b: 1 }, S9 { n: 20, b: 2 }, S9 { n: 30, b: 3 }];
+  assert(sizeof(S9) == 16 && size(vs) == 48, "stride: {sizeof(S9)} {size(vs)}");
+  vs[1].n += 7;
+  vs[2].b = 250;
+  assert(vs[0].n == 10 && vs[0].b == 1 && vs[1].n == 27 && vs[1].b == 2 && vs[2].n == 30 && vs[2].b == 250,
+    "values: {vs[1].n} {vs[2].b}");
+  t = 0;
+  for e in vs { t += e.n + e.b; }
+  assert(t == 10 + 1 + 27 + 2 + 30 + 250, "sum {t}");
+}
+
+fn test_a_record_backed_text_integer_member() {
+  // `&(text, integer)` is a reference to the `__tuple<text,integer>` RECORD (T-Ref-Rep): the
+  // integer sits at 8 after the 4-byte text handle, and a link to it is an 8-byte place.
+  t: (text, integer) = ("s", 1);
+  bump_pair(t);
+  assert(t.0 == "s" && t.1 == 7, "bind: {t.1}");
+  u: (text, integer) = ("ab", 3);
+  arg_pair(u);
+  assert(u.0 == "ab" && u.1 == 4, "argument: {u.0} {u.1}");
+  // The same record as a vector element and a struct field, written in place.
+  rows: vector<(text, integer)> = [("a", 1), ("bb", 2)];
+  rows[1].1 += 6;
+  assert(rows[1].0 == "bb" && rows[1].1 == 8 && rows[0].1 == 1, "element: {rows[1].0} {rows[1].1} {rows[0].1}");
+  h = Host { tag: 7, pair: ("x", 100), tail: 65000 };
+  h.pair.1 += 6;
+  assert(h.tag == 7 && h.pair.0 == "x" && h.pair.1 == 106 && h.tail == 65000, "field: {h.tag} {h.pair.1} {h.tail}");
+}
+
+fn test_a_struct_nested_in_a_tuple() {
+  // (Lab, u8): Lab inline at 0 (16 bytes, aligned 8), the u8 at 16 -> 24.
+  vs: vector<(Lab, u8)> = [(Lab { name: "p", n: 1 }, 5), (Lab { name: "q", n: 2 }, 6)];
+  assert(sizeof((Lab, u8)) == 24 && size(vs) == 48, "nested: {sizeof((Lab, u8))} {size(vs)}");
+  assert(vs[0].0.name == "p" && vs[1].0.n == 2 && vs[1].1 == 6 && vs[0].1 == 5, "nested values");
+}
+
+fn test_a_vector_of_mixed_tuples() {
+  // (u8, integer, u16): a record, largest alignment first — the integer at 0, the u16 at 8,
+  // the u8 at 10 -> 11, padded to 16.
+  vs: vector<(u8, integer, u16)> = [(1, 100000000000, 2), (3, -5, 65535)];
+  vs += [(9, 7, 8)];
+  assert(sizeof((u8, integer, u16)) == 16 && size(vs) == 48, "mixed: {size(vs)}");
+  assert(vs[0].1 == 100000000000 && vs[1].0 == 3 && vs[1].1 == -5 && vs[1].2 == 65535 && vs[2].2 == 8,
+    "mixed values");
+  t = 0;
+  for (a, b, c) in vs { t += a + b + c; }
+  assert(t == 1 + 100000000000 + 2 + 3 - 5 + 65535 + 9 + 7 + 8, "sum {t}");
+}
+
+struct S2Host { flag: boolean, t: (boolean, float, character, text, integer, single), tail: integer }
+
+fn mk(k: integer) -> (boolean, float, character, text, integer, single) {
+  (k % 2 == 1, k as float + 0.5, 'a', "s{k}", k * 1000, 1.25f)
+}
+
+fn first_of(v: vector<(boolean, float, character, text, integer, single)>, i: integer) -> (boolean, float, character, text, integer, single) {
+  v[i]
+}
+
+fn test_positions_survive_every_boundary() {
+  v: vector<(boolean, float, character, text, integer, single)> = [];
+  for k in 0..4 { v += [mk(k)]; }
+  e = v[3];
+  assert(e.0 && e.1 == 3.5 && e.2 == 'a' && e.3 == "s3" && e.4 == 3000 && e.5 == 1.25f, "a stored element: {e.3} {e.4}");
+  h = S2Host { flag: true, t: mk(5), tail: 77 };
+  assert(h.t.0 && h.t.1 == 5.5 && h.t.3 == "s5" && h.t.4 == 5000 && h.flag && h.tail == 77, "a struct field: {h.t.4} {h.tail}");
+  h.t.4 = -1;
+  h.t.3 = "w";
+  h.t.0 = false;
+  assert(!h.t.0 && h.t.1 == 5.5 && h.t.2 == 'a' && h.t.3 == "w" && h.t.4 == -1 && h.t.5 == 1.25f && h.tail == 77,
+         "written member by member: {h.t.3} {h.t.4}");
+  r = first_of(v, 2);
+  assert(!r.0 && r.1 == 2.5 && r.3 == "s2" && r.4 == 2000 && len(v) == 4, "handed out of the store: {r.4}");
+}
+
+fn test_the_sizes() {
+  assert(sizeof((u8, u16)) == 4, "(u8, u16) {sizeof((u8, u16))}");
+  assert(sizeof((u8, i32, u8)) == 8, "(u8, i32, u8) {sizeof((u8, i32, u8))}");
+  assert(sizeof((text, u8)) == 8, "(text, u8) {sizeof((text, u8))}");
+  assert(sizeof((u16, integer)) == 16, "(u16, integer) {sizeof((u16, integer))}");
+  assert(sizeof(((u8, u16), u8)) == 6, "((u8, u16), u8) {sizeof(((u8, u16), u8))}");
+  assert(sizeof((u8, (integer, u8))) == 24, "(u8, (integer, u8)) {sizeof((u8, (integer, u8)))}");
+}
+
+fn test_a_two_byte_aligned_element_keeps_every_member() {
+  v: vector<(u8, u16)> = [(1, 65000), (250, 2), (7, 300)];
+  v[1].1 += 3;
+  v[2].0 = 9;
+  assert(size(v) == 12 && len(v) == 3, "stride: {size(v)} {len(v)}");
+  assert(v[0].0 == 1 && v[0].1 == 65000 && v[1].0 == 250 && v[1].1 == 5 && v[2].0 == 9 && v[2].1 == 300, "values: {v[1].1} {v[2].0}");
+}
+
+fn test_a_four_byte_aligned_element_keeps_every_member() {
+  v: vector<(u8, i32, u8)> = [(1, -2000000000, 2), (3, 2000000000, 4)];
+  v[0].2 = 200;
+  v[1].1 -= 1;
+  assert(size(v) == 16, "stride: {size(v)}");
+  assert(v[0].0 == 1 && v[0].1 == -2000000000 && v[0].2 == 200 && v[1].0 == 3 && v[1].1 == 1999999999 && v[1].2 == 4, "values: {v[0].2} {v[1].1}");
+}
+
+fn test_a_nested_tuple_element_keeps_every_member() {
+  v: vector<((u8, u16), u8)> = [((1, 2), 3), ((4, 60000), 5)];
+  v[1].0.1 += 1;
+  v[0].1 = 33;
+  assert(size(v) == 12, "stride: {size(v)}");
+  assert(v[0].0.0 == 1 && v[0].0.1 == 2 && v[0].1 == 33 && v[1].0.0 == 4 && v[1].0.1 == 60001 && v[1].1 == 5, "values: {v[1].0.1} {v[0].1}");
+  w: vector<(u8, (integer, u8))> = [(9, (-7, 8))];
+  w[0].1.0 *= 3;
+  assert(size(w) == 24 && w[0].0 == 9 && w[0].1.0 == -21 && w[0].1.1 == 8, "wide nested: {size(w)} {w[0].1.0}");
+}
+
