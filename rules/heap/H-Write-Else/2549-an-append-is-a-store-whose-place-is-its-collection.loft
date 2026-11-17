@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN APPEND IS A STORE WHOSE PLACE IS ITS COLLECTION (`@FR-H-Write-Else`, `@FR-H-WriteLocked-Whole`,
+// `@FR-H-WriteNull`, loft#2549).  `c += [v] else { B }` — a scalar or record vector, a text vector,
+// a keyed filing into a hash by an integer or a text key, a vector appended to a vector — takes
+// nothing when its collection is locked or absent: no claim, no filing, the collection as it was,
+// and B runs once.  An unlocked collection takes every append and runs no arm.  Unguarded, an
+// append through an element that does not exist lands nowhere (a keyed filing there once crashed
+// the interpreter, and a vector appended there did too).
+// Values by hand: locked — arms X H R T K V in order, every length 1; unlocked — xs 1 + 1 + 2 = 4,
+// the others 2, no arm; through the absent `ds[3]` — arms A B, `ds` and its element unchanged.
+//
+// @falsified-by: tests/falsified/2549-an-append-is-a-store-whose-place-is-its-collection.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the compile (the control refuses a vector append's `else`) and the asserts.
+//   ARMED: every run.
+//   WITNESS: the control refuses "`else` after a statement belongs to a store — … writes no place".
+//   HOLDS: a text field's guarded write in the H-WriteLocked-Whole cell, on both trees.
+
+struct E { k: integer, v: integer }
+struct R { k: integer, v: integer }
+struct T { n: text, v: integer }
+struct D { xs: vector<integer>, hs: hash<E[k]>, rs: vector<R>, ts: vector<text>, th: hash<T[n]> }
+
+fn mk() -> D { D { xs: [1], hs: [E { k: 1, v: 10 }], rs: [R { k: 2, v: 20 }], ts: ["a"], th: [T { n: "a", v: 1 }] } }
+
+fn every_append(d: D) -> text {
+  out = "";
+  ys = [8, 9];
+  d.xs += [4] else { out += "X" };
+  d.hs += [E { k: 6, v: 60 }] else { out += "H" };
+  d.rs += [R { k: 7, v: 70 }] else { out += "R" };
+  d.ts += ["z"] else { out += "T" };
+  d.th += [T { n: "z", v: 9 }] else { out += "K" };
+  d.xs += ys else { out += "V" };
+  "[{out}] {len(d.xs)} {len(d.hs)} {len(d.rs)} {len(d.ts)} {len(d.th)}"
+}
+
+fn test_a_locked_collection_takes_no_append_and_runs_each_arm() {
+  d = mk();
+  d#lock = true;
+  r = every_append(d);
+  assert(r == "[XHRTKV] 1 1 1 1 1", "locked: {r}");
+}
+
+fn test_control_an_unlocked_collection_takes_every_append() {
+  r = every_append(mk());
+  assert(r == "[] 4 2 2 2 2", "unlocked: {r}");
+}
+
+fn test_an_absent_collection_takes_nothing_guarded_or_not() {
+  ds: vector<D> = [mk()];
+  out = "";
+  ds[3].hs += [E { k: 6, v: 60 }] else { out += "A" };
+  ds[3].xs += [4] else { out += "B" };
+  ys = [8, 9];
+  ds[3].xs += ys;
+  ds[3].th += [T { n: "q", v: 2 }];
+  r = "[{out}] {len(ds)} {len(ds[0].hs)} {len(ds[0].xs)} {len(ds[0].th)}";
+  assert(r == "[AB] 1 1 1 1", "absent: {r}");
+}

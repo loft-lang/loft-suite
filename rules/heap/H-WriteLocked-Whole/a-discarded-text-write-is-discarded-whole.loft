@@ -9,15 +9,29 @@
 // record, where both land.  Values by hand: locked — arms "ST", the field still "abc" (3 bytes);
 // unlocked — no arm, "a much longer textdef".
 //
-// A keyed filing guarded the same way halts today (loft#2549); it joins this cell once fixed.
+// A keyed filing (a claim, a key written, a placement in the table) is discarded as whole: the
+// hash keeps its one entry and the new key reads null (loft#2549).
 //
-// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
-//   the suite pin that adds this cell, interpret and native-c.
-//   CHANNEL: the asserts and the leak gate.
-//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
-//   HOLDS: the halting half (an unguarded locked write) in tests/locked_writes.rs.
+// @falsified-by: tests/falsified/a-discarded-text-write-is-discarded-whole.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the run's exit (the control halts on the locked filing) and the asserts.
+//   ARMED: every run.
+//   WITNESS: the control reports "write to a locked store" at the guarded keyed filing.
+//   HOLDS: the two text tests, on both trees; the halting half (an unguarded locked write) is
+//   tests/locked_writes.rs.
 
 struct D { s: text, n: integer }
+
+struct E { k: integer, v: integer }
+struct H { hs: hash<E[k]> }
+
+fn test_a_locked_keyed_filing_files_nothing() {
+  h = H { hs: [E { k: 5, v: 50 }] };
+  h#lock = true;
+  out = "";
+  h.hs += [E { k: 6, v: 60 }, E { k: 7, v: 70 }] else { out += "H" };
+  r = "{out} {len(h.hs)} {h.hs[6] == null} {h.hs[5].v ?? -1}";
+  assert(r == "H 1 true 50", "locked filing: {r}");
+}
 
 fn test_a_locked_text_replace_and_append_change_nothing() {
   d = D { s: "abc", n: 1 };
