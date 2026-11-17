@@ -1,0 +1,449 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EACH RUN OF A BUILD IN A LOOP IS ITS OWN RECORD, AND A KEPT CLOSURE KEEPS ITS PASS (`@FR-L-CapKeep`,
+// with `@FR-L-CapOwn`, `@FR-O-Latest` and `@FR-H-FreeTwice`).  A closure sees the value a variable had
+// when the closure was formed: a fn-ref kept from a loop pass keeps that pass's captures
+// (loft#1636); a capture the loop re-assigns keeps the store it named at the build, released once
+// by the last of its names; a pass-scoped fn-ref beside a kept one frees its record once; and a
+// staying record rebuilt in one pass frees its capture once.  Four sections, each with its cells
+// and receipt.
+//
+// ── 1636-a-closure-kept-from-a-loop-pass-keeps-that-pass ──
+//
+// loft#1636, `@FR-L-CapKeep` — A CLOSURE KEPT FROM A LOOP PASS KEEPS THAT PASS.
+//
+// `(L-CapScalar)`: a closure sees the value a variable had when the closure was formed, and each
+// run of a build is its own record.  A loop rebuilds one record local every pass, so a fn-ref
+// kept from an earlier pass in a local declared outside the loop used to read the LATEST pass's
+// captures: `g()` answered `11` for `1`, and a captured vector read the next pass's elements.
+// `(L-CapKeep)` releases a record once, by the last of the frame's names for it to let go, and
+// which name is last is decided by store identity at run time — so every cell below also traces
+// the hooks of what the closures captured, and a lost, doubled or LATE release shows as the
+// wrong sequence.  A pass nobody kept releases at its own `}` (`D70` before `M71`), and only a
+// record another name still holds outlives its pass.
+//
+// Every expected value is hand-computed.  The `k` cells are controls: shapes that were right
+// before and must stay right.
+//
+// @falsified-at: 5acd8d91c — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: assertion failures, both backends.
+// HOLDS: clean under `LOFT_STRICT_STORES=1`.
+//
+// ── 2357-a-capture-re-assigned-in-its-loop-keeps-the-store-its-build-named ──
+//
+// `@FR-L-CapKeep` / `@FR-O-Latest` / `@FR-L-CapOwn` — a closure built in a loop over a local the
+// loop re-assigns: each run of the build is its own record, it keeps the store the capture
+// named AT ITS BUILD, and that store is released once, by the last of its names to let go,
+// decided by store identity (loft#2357).  The re-assignment `v = …` after a build re-minted the
+// SAME backing in place, so the closure read the value assigned after it (`6` for `5`, silent, on
+// both backends and for every holder); a returned holder read a store the frame then freed;
+// and a record capture re-built in its work-ref (`p = P { … }`) answered the later record.
+//
+// Three let-go points carry it: the re-mint of a backing a record holds mints fresh; a rebuild
+// releases the store its record held unless another name still holds it; the frame's end
+// leaves a RETURNED record the store its slot holds.
+//
+// The axes moved: where the re-assignment stands (after the build, before it, the build in a
+// branch of a pass that re-assigns, the build in the LAST pass after it, a `break` after a
+// build, a nested loop that builds twice per pass, only on even passes), the holder (a returned
+// struct's fn field, a struct read in the frame, a fn-ref local called in the frame, a returned
+// fn-ref), the capture (a vector, a record), five passes, and two fields over one local.  Every
+// value is worked out by hand: a pass `i` re-assigns `v` to `i + 2` elements, so a build in
+// pass `i` after the previous pass's re-assignment reads `i + 1` elements.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, C exit 1 -> 0, 4 of 5 test functions (the
+//   asserted values: `2 6 6 2` for `5 5 5 5` — a returned holder read a released store even
+//   without poison — `1 6` for `4 6`, `6 40` for `5 30`)
+// CHANNEL: the asserted values, and LOFT_POISON / LOFT_STRICT_STORES (a freed store read, a store
+//   left at exit) on both backends.
+// ARMED: no instrument for the values; the store falsifiers for the release half.
+// HOLDS: the before-the-build shapes answer the same on both trees.
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, which releases the store the capture's build still names.
+//
+// ── a-pass-scoped-fn-ref-beside-a-kept-one-frees-its-record-once ──
+//
+// `@FR-L-CapKeep` with `@FR-H-FreeTwice` — A PASS-SCOPED FN-REF BESIDE A KEPT ONE FREES ITS
+// RECORD ONCE.  A fn-ref declared inside a loop holds a record confined to the pass, and the
+// frame frees that record's local at its end.  A second loop that keeps a fn-ref past it makes
+// the frame release its fn-refs by store identity, and the pass-scoped fn-ref then released its
+// confined record at each pass end as well, standing down only against the frame's OTHER
+// records: the record was freed twice, both backends, at any pass count.  A frame with only the
+// pass-scoped loop never had the second release.
+//
+// Expected values by hand: `two_loops(n)` builds `g` over `a`, concatenates `[i]`, and appends
+// `{len}{last}`; the kept `g4` does the same over `a2` and is read once more after its loop.
+//   n = 1: "19 " and 19, then 19 * 100 + 19 = 1919.
+//   n = 3: "19 20 31 " and 19, 20, 31 -> 192031, then * 100 + 31 = 19203131.
+//   n = 0: "" and the `{ 0 }` lambda -> 0.   `one_loop(3)`: "19 20 31 ".
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_CONFINED_RECORD_STAND_DOWN=1` — "a store was freed twice" in
+//   `test_one_pass` and `test_three_passes`, both backends.
+// CHANNEL: the re-free gate (LOFT_REFREE_FAILS), and the values by assertion.
+// HOLDS: `test_zero_passes` and `test_the_pass_scoped_loop_alone` under the switch.
+//
+// ── a-staying-record-rebuilt-in-one-pass-frees-its-capture-once ──
+//
+// `@FR-L-CapKeep` with `@FR-L-CapOwn` — A STAYING RECORD REBUILT IN ONE PASS FREES ITS CAPTURE
+// ONCE.  A loop rebuilds a closure over a vector local and rebinds the local after each build;
+// the closure stays in the frame and is read after the loop.  After exactly ONE pass the record
+// holds the store the declaration's backing (`__vdb_1`) minted, and the frame's end freed that
+// backing while the record's cascade freed the same store: a double free on both backends.
+// With 0 passes nothing was built and with 2 or more the stores have rotated apart, so a cell
+// that runs three passes never sees it.  Each case here runs ONE pass, beside the 0- and 2-pass
+// controls; the rebinds vary one axis each: a literal, a variable, `[]`, a comprehension, and
+// the closure held by a fn-ref local or by a fn field of a struct in the frame.
+//
+// Expected values by hand (`g` reads the `a` of its own build, `{len}{first}`):
+//   literal(1): built over [9] -> "19", then a = [0]; g() after the loop -> "19".
+//   literal(0): g is the `{ "" }` lambda -> "".   literal(2): "19", "10", then "10".
+//   variable(1): built over [9], a = b ([7]) -> "19"; empty(1): a = [] -> "19".
+//   comprehension(1): built over [1, 2, 3] -> 3 + 0 = 3.   field(1): the same through h.f -> 3.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_REFREE_FAILS=1
+// @falsified-at: `LOFT_NO_STAYING_RECORD_TAKES_BACKING=1` — "a store was freed twice" in every
+//   one-pass test, both backends.
+// CHANNEL: the re-free gate (LOFT_REFREE_FAILS), and the values by assertion.
+// HOLDS: `test_zero_and_two_passes` under the switch.
+
+struct H { id: integer }
+
+fn OpDrop(self: H) { note("D{self.id}"); }
+fn mk(id: integer) -> H { note("M{id}"); H { id: id } }
+
+fn trace_path() -> text { return "loft_1636_kept_trace.tmp"; }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  return cur;
+}
+
+fn ok(nm: text, got: text, want: text) {
+  assert(got == want, "{nm}: {got}, want {want}");
+}
+
+fn keep(g: fn() -> integer) -> fn() -> integer { g }
+fn mkf(i: integer) -> fn() -> integer { w = [mk(70 + i)]; fn() -> integer { w[0].id } }
+
+// 1 — the issue's shape: a scalar capture, kept by a plain copy on the first pass.
+fn c1() -> integer {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { f = fn() -> integer { i * 10 + 1 }; if i == 0 { g = f; } }
+  g()
+}
+// 2 — kept through a call that hands the fn-ref back.
+fn c2() -> integer {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { f = fn() -> integer { i * 10 + 1 }; if i == 0 { g = keep(f); } }
+  g()
+}
+// 3 — a captured loop-body VECTOR: the literal refills its backing ahead of the build.
+fn c3() -> integer {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { w = [i + 3, 9]; f = fn() -> integer { w[0] * 100 + i }; if i == 0 { g = f; } }
+  g()
+}
+// 4 — a captured text.
+fn c4() -> text {
+  g = fn() -> text { "" };
+  for i in 0..2 { t = "a{i}"; f = fn() -> text { "{t}/{i}" }; if i == 0 { g = f; } }
+  g()
+}
+// 5 — a captured vector of droppables, kept on the first pass.
+fn c5() {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { w = [mk(70 + i)]; f = fn() -> integer { w[0].id }; if i == 0 { g = f; } }
+  note("G{g()}");
+}
+// 6 — kept on EVERY pass: each rebind of `g` releases the pass it displaced.
+fn c6() {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { w = [mk(70 + i)]; f = fn() -> integer { w[0].id }; g = f; }
+  note("G{g()}");
+}
+// 7 — kept on no pass: the rebuild releases each displaced pass.
+fn c7() {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { w = [mk(70 + i)]; f = fn() -> integer { w[0].id }; if i > 5 { g = f; } }
+  note("X{g()}");
+}
+// 8 — two names kept from two passes.
+fn c8() -> text {
+  g = fn() -> integer { 0 };
+  h = fn() -> integer { 0 };
+  for i in 0..3 { f = fn() -> integer { i * 10 + 1 }; if i == 0 { g = f; } if i == 2 { h = f; } }
+  "{g()} {h()}"
+}
+// 9 — kept on passes 0 and 2: the second keep releases the first.
+fn c9() {
+  g = fn() -> integer { 0 };
+  for i in 0..3 { w = [mk(70 + i)]; f = fn() -> integer { w[0].id }; if i != 1 { g = f; } }
+  note("G{g()}");
+}
+// 10 — a record capture.
+fn c10() {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { h = mk(70 + i); f = fn() -> integer { h.id }; if i == 0 { g = f; } }
+  note("G{g()}");
+}
+// 11 — through a `&fn(…)` parameter: the caller holds the pass it was given.
+fn fill(p: &fn() -> integer) { for i in 0..2 { f = fn() -> integer { i * 10 + 1 }; if i == 0 { p = f; } } }
+fn c11() -> integer { g = fn() -> integer { 0 }; fill(g); g() }
+// 12 — returned: the caller holds the pass the frame kept.
+fn c12() -> fn() -> integer {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { f = fn() -> integer { i * 10 + 1 }; if i == 0 { g = f; } }
+  g
+}
+// 13 — a mutated scalar capture, kept: it goes on counting from its own pass.
+fn c13() -> text {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { k = i * 100 + 4; f = fn() -> integer { k += 1; k }; if i == 0 { g = f; } f(); }
+  a = g();
+  b = g();
+  "{a} {b}"
+}
+// 14-16 — a closure a CALL returned: the passes nobody kept are released at their rebind.
+fn c14() { g = fn() -> integer { 0 }; for i in 0..3 { f = mkf(i); g = f; } note("G{g()}"); }
+fn c15() { g = fn() -> integer { 0 }; for i in 0..2 { f = mkf(i); if i > 5 { g = f; } } note("X{g()}"); }
+fn c16() { g = fn() -> integer { 0 }; for i in 0..3 { f = mkf(i); if i != 1 { g = f; } } note("G{g()}"); }
+
+// Controls.
+fn k1() -> integer {
+  g = fn() -> integer { 0 };
+  for i in 0..2 { f = fn() -> integer { i * 10 + 1 }; if i == 1 { g = f; } }
+  g()
+}
+fn k2() -> integer { h = 0; for i in 0..3 { f = fn() -> integer { i * 10 + 1 }; h = f(); } h }
+fn k3() -> integer {
+  g = fn() -> integer { 0 };
+  for i in 0..5 { f = fn() -> integer { i * 10 + 1 }; if i == 1 { g = f; break; } }
+  g()
+}
+
+fn test_a_closure_kept_from_a_loop_pass_keeps_that_pass() {
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+
+  ok("c1 a scalar, copied     ", "{c1()}", "1");
+  ok("c2 kept through a call  ", "{c2()}", "1");
+  ok("c3 a loop-body vector   ", "{c3()}", "300");
+  ok("c4 a text               ", c4(), "a0/0");
+  c5();
+  ok("c5 droppables, pass 0   ", drain(), "M70,M71,D71,G70,D70");
+  c6();
+  ok("c6 kept every pass      ", drain(), "M70,M71,D70,G71,D71");
+  c7();
+  ok("c7 kept on no pass      ", drain(), "M70,D70,M71,D71,X0");
+  ok("c8 two names, two passes", c8(), "1 21");
+  c9();
+  ok("c9 passes 0 and 2       ", drain(), "M70,M71,D71,M72,D70,G72,D72");
+  c10();
+  ok("c10 a record capture    ", drain(), "M70,M71,D71,G70,D70");
+  ok("c11 a &fn parameter     ", "{c11()}", "1");
+  r = c12();
+  ok("c12 returned            ", "{r()}", "1");
+  ok("c13 a mutated scalar    ", c13(), "6 7");
+  c14();
+  ok("c14 a call, every pass  ", drain(), "M70,M71,D70,M72,D71,G72,D72");
+  c15();
+  ok("c15 a call, no pass     ", drain(), "M70,D70,M71,D71,X0");
+  c16();
+  ok("c16 a call, passes 0, 2 ", drain(), "M70,M71,D71,M72,D70,G72,D72");
+
+  ok("k1 the last pass        ", "{k1()}", "11");
+  ok("k2 never kept           ", "{k2()}", "21");
+  ok("k3 a break              ", "{k3()}", "11");
+
+  delete(trace_path());
+  println("a closure kept from a loop pass keeps that pass: every cell holds");
+}
+
+struct S2H { tag: integer, f: fn() -> integer, g: fn() -> integer }
+struct P { n: integer }
+
+fn host() -> S2H { S2H { tag: 0, f: fn() -> integer { 0 }, g: fn() -> integer { 0 } } }
+
+fn after_returned() -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { h.f = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  h
+}
+fn after_in_frame() -> integer {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { h.f = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  h.f()
+}
+fn after_local() -> integer {
+  v = [1, 2, 3];
+  g = fn() -> integer { 0 };
+  for i in 0..3 { g = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  g()
+}
+fn after_returned_fn() -> fn() -> integer {
+  v = [1, 2, 3];
+  g = fn() -> integer { 0 };
+  for i in 0..3 { g = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  g
+}
+fn branch(at: integer) -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { v = [for k in 0..(i + 2) { k }]; if i == at { h.f = fn() -> integer { len(v) + i }; } }
+  h
+}
+fn broken() -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..9 { h.f = fn() -> integer { len(v) + i }; if i == 2 { break; } v = [for k in 0..(i + 2) { k }]; }
+  h
+}
+fn nested() -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { for j in 0..2 { h.f = fn() -> integer { len(v) + i + j }; } v = [for k in 0..(i + 2) { k }]; }
+  h
+}
+fn passes(n: integer, even_only: boolean) -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..n {
+    h.f = fn() -> integer { len(v) + i };
+    if !even_only || i % 2 == 0 { v = [for k in 0..(i + 2) { k }]; }
+  }
+  h
+}
+fn two_fields() -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 {
+    h.f = fn() -> integer { len(v) + i };
+    h.g = fn() -> integer { len(v) * 10 };
+    v = [for k in 0..(i + 2) { k }];
+  }
+  h
+}
+fn record(keep: boolean) -> integer {
+  p = P { n: 1 };
+  h = host();
+  for i in 0..3 { h.f = fn() -> integer { p.n + i }; p = P { n: i * 10 + 1 }; }
+  if keep { return h.f(); }
+  h.f() * 2
+}
+fn before() -> S2H {
+  v = [1, 2, 3];
+  h = host();
+  for i in 0..3 { v = [for k in 0..(i + 2) { k }]; h.f = fn() -> integer { len(v) + i }; }
+  h
+}
+
+fn test_re_assigned_after_the_build() {
+  a = after_returned();
+  f = after_returned_fn();
+  got = "{a.f()} {after_in_frame()} {after_local()} {f()}";
+  assert(got == "5 5 5 5", "after the build: {got}");
+}
+
+fn test_built_in_a_branch() {
+  b1 = branch(1);
+  b2 = branch(2);
+  assert("{b1.f()} {b2.f()}" == "4 6", "branch: {b1.f()} {b2.f()}");
+}
+
+fn test_a_break_a_nested_loop_and_more_passes() {
+  b = broken();
+  n = nested();
+  five = passes(5, false);
+  even = passes(5, true);
+  got = "{b.f()} {n.f()} {five.f()} {even.f()}";
+  assert(got == "5 6 9 8", "break, nested, five, even: {got}");
+}
+
+fn test_two_fields_and_a_record_capture() {
+  t = two_fields();
+  assert("{t.f()} {t.g()}" == "5 30", "two fields: {t.f()} {t.g()}");
+  assert(record(true) == 13 && record(false) == 26, "record capture: {record(true)}");
+}
+
+fn test_the_control() {
+  b = before();
+  assert(b.f() == 6, "re-assigned before the build: {b.f()}");
+}
+
+
+fn two_loops(n: integer) -> text {
+  a = [9]; t = "";
+  for i in 0..n { g = fn() -> text { "{len(a)}{a[len(a) - 1]}" }; a = a + [i]; t += g() + " "; }
+  a2 = [9]; g4 = fn() -> integer { 0 }; t4 = 0;
+  for i in 0..n { g4 = fn() -> integer { len(a2) * 10 + a2[len(a2) - 1]! }; a2 = a2 + [i]; t4 = t4 * 100 + g4(); }
+  t4 = t4 * 100 + g4();
+  "{t}{t4}"
+}
+fn one_loop(n: integer) -> text {
+  a = [9]; t = "";
+  for i in 0..n { g = fn() -> text { "{len(a)}{a[len(a) - 1]}" }; a = a + [i]; t += g() + " "; }
+  t
+}
+
+fn test_one_pass() { r = two_loops(1); assert(r == "19 1919", "two_loops(1): {r}"); }
+fn test_three_passes() { r = two_loops(3); assert(r == "19 20 31 19203131", "two_loops(3): {r}"); }
+fn test_zero_passes() { r = two_loops(0); assert(r == "0", "two_loops(0): {r}"); }
+fn test_the_pass_scoped_loop_alone() { r = one_loop(3); assert(r == "19 20 31 ", "one_loop(3): {r}"); }
+
+struct S4H { tag: integer, f: fn() -> integer }
+
+fn literal(n: integer) -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for i in 0..n { g = fn() -> text { "{len(a)}{a[0]}" }; a = [i]; t += g() + " "; }
+  t + g()
+}
+fn variable(n: integer) -> text {
+  a = [9]; b = [7]; g = fn() -> text { "" }; t = "";
+  for _i in 0..n { g = fn() -> text { "{len(a)}{a[0]}" }; a = b; t += g() + " "; }
+  t + g()
+}
+fn empty(n: integer) -> text {
+  a = [9]; g = fn() -> text { "" }; t = "";
+  for _i in 0..n { g = fn() -> text { "{len(a)}{a[0]}" }; a = []; t += g() + " "; }
+  t + g()
+}
+fn comprehension(n: integer) -> integer {
+  v = [1, 2, 3];
+  g = fn() -> integer { 0 };
+  for i in 0..n { g = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  g()
+}
+fn field(n: integer) -> integer {
+  v = [1, 2, 3];
+  h = S4H { tag: 0, f: fn() -> integer { 0 } };
+  for i in 0..n { h.f = fn() -> integer { len(v) + i }; v = [for k in 0..(i + 2) { k }]; }
+  h.f()
+}
+
+fn test_a_literal_rebind() { r = literal(1); assert(r == "19 19", "literal(1): {r}"); }
+fn test_a_variable_rebind() { r = variable(1); assert(r == "19 19", "variable(1): {r}"); }
+fn test_an_empty_rebind() { r = empty(1); assert(r == "19 19", "empty(1): {r}"); }
+fn test_a_comprehension_rebind() { r = comprehension(1); assert(r == 3, "comprehension(1): {r}"); }
+fn test_a_fn_field() { r = field(1); assert(r == 3, "field(1): {r}"); }
+fn test_zero_and_two_passes() {
+  r0 = literal(0);
+  assert(r0 == "", "literal(0): {r0}");
+  r2 = literal(2);
+  assert(r2 == "19 10 10", "literal(2): {r2}");
+}
