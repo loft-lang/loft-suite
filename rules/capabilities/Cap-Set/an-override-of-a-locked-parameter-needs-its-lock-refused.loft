@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OVERRIDE OF A LOCKED PARAMETER NEEDS ITS LOCK (`@FR-Cap-Set`, `@FR-Cap-Call`, `@FR-Cap-Deny`).
+// A parameter the host pins with `f.p#default` may be overridden only by a script granted that lock:
+// a value other than the default with the call granted and the lock not, the lock granted without
+// the call, and an argument that merely HOLDS the default's value — a local or a parameter set to
+// it — are all overrides, since `≡` asks the expression at the call.  Each section is one refusal
+// set with its expectations and receipt, under this directory's `[sandbox]` policy; the admitted
+// twins are the cells beside it.
+//
+// ── overriding-a-locked-parameter-needs-its-lock ──
+//
+// OVERRIDING A LOCKED PARAMETER NEEDS ITS LOCK (`@FR-Cap-Set`, `@FR-Cap-Call`, `@FR-Cap-Deny`).
+// The refused twins of `the-default-or-a-granted-lock-admits-the-argument.loft`: a `count` other
+// than the default with the call granted and the lock not; and the lock granted without the call's
+// gate — `(Cap-Set)` judges the arguments of a call `(Cap-Call)` admits, it does not admit the call.
+//
+// @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
+//   rule says on both backends on the tree it landed on.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names the lock or the gate.
+// HOLDS: every refusal on both backends.
+//
+// ── a-variable-holding-the-default-is-an-override ──
+//
+// A VARIABLE HOLDING THE DEFAULT IS AN OVERRIDE (`@FR-Cap-Set`, `@FR-Cap-Deny`).  The refused twins
+// of `a-constant-that-folds-to-the-default-is-the-default.loft`: a local assigned 1 and a parameter
+// a caller passes 1 both hold the default's value, but `≡` asks the expression at the call (owner
+// ruling 2026-10-19), and a variable folds to nothing — so each is an override, refused under a
+// profile that grants the call but not the lock.
+//
+// @falsified-at: none — the refusal held on the tree the ruling landed on, as it did before it.
+// CHANNEL: the expected diagnostics (admission refusals at load).
+// ARMED: the `[sandbox]` policy in this directory's loft.toml.
+// WITNESS: each refusal names `spawn.count#default`.
+// HOLDS: a folded constant stays the default (the sibling file).
+
+capability world
+capability spawn.count
+
+fn spawn(kind: text, count: integer = 1 spawn.count#default) -> integer world#append { len(kind) * 10 + count }
+
+// @EXPECT_ERROR: sandboxed `set_override` overrides a parameter the host pinned with `spawn.count#default` — not granted
+fn set_override() -> integer { spawn("gob", 4) }
+
+// @EXPECT_ERROR: sandboxed `set_lock_only` reaches `spawn`, which needs capability `world#append` — not granted
+fn set_lock_only() -> integer { spawn("gob", 4) }
+
+capability world
+capability spawn.count
+
+
+// @EXPECT_ERROR: sandboxed `set_local` overrides a parameter the host pinned with `spawn.count#default` — not granted
+fn set_local() -> integer { one = 1; spawn("gob", one) }
+
+// @EXPECT_ERROR: sandboxed `set_param` overrides a parameter the host pinned with `spawn.count#default` — not granted
+fn set_param(n: integer) -> integer { spawn("gob", n) }
+
+fn pass_one() -> integer { set_param(1) }

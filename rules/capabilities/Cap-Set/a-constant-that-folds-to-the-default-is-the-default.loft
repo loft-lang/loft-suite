@@ -6,7 +6,7 @@
 // 2026-10-19: `≡` is "folds at compile time to the default's value", so `2 - 1` and a named
 // constant holding 1 are the default and need no lock.  A variable is not, whatever it holds —
 // the proof belongs to the expression written at the call (the refused twins are the sibling
-// `a-variable-holding-the-default-is-an-override.loft`).
+// `an-override-of-a-locked-parameter-needs-its-lock-refused.loft`).
 //
 // @falsified-at: 29440fa35 — interpret: `set_folded` and `set_named` are refused "overrides a
 //   parameter the host pinned with `spawn.count#default`" (≡ read as the same literal).

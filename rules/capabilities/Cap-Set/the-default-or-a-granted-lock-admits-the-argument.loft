@@ -6,7 +6,7 @@
 // untagged `kind` takes any text, and the locked `count` takes its default — omitted or written
 // as the literal `1` — without the lock.  With `spawn.count#default` granted, or the enclosing
 // `spawn#default` (a segment prefix, as for a call gate), any `count` is admitted.  The refused
-// twins are in `overriding-a-locked-parameter-needs-its-lock.loft`.
+// twins are in `an-override-of-a-locked-parameter-needs-its-lock-refused.loft`.
 //
 // @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
 //   rule says on both backends on the tree it landed on.
