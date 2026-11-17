@@ -1,6 +1,15 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// AN UNORDERED WALK VISITS EVERY ENTRY ONCE: A TABLE IN SLOT ORDER, A LINKED TABLE IN KEY ORDER
+// (`@FR-Col-Unordered`, `@FR-Col-Order`, `@FR-S-Hash`).  `for x in unordered(h)` visits every entry
+// of a hash once in slot order, where the ordered walk visits them in key order; a sorted and a
+// vector keep their own order; and a hash holding store records — a linked type's, whose entries
+// are records of their own — walks `unordered` in key order (loft#2453).  Two sections, each with
+// its cells and receipt.
+//
+// ── an-unordered-walk-is-slot-order-and-a-linked-table-key-order ──
+//
 // `@FR-Col-Unordered` crossed with `@FR-Col-Order`: `for x in unordered(h)` visits every entry
 // of a hash once, in SLOT order, where the ordered walk visits them in key order; a sorted and
 // a vector keep their Col-Order order under `unordered`.  Slot order is fixed by the inserts and
@@ -16,6 +25,21 @@
 // CHANNEL: the assertions and the leak gate.
 // Every cell held on both backends when written; the ledger rows are in
 // doc/claude/RULE_CROSSINGS-history.md.
+//
+// ── 2453-a-hash-holding-records-walks-unordered-in-key-order ──
+//
+// loft#2453, `@FR-Col-Unordered` / `@FR-Col-Order` / `@FR-S-Hash` — A HASH HOLDING STORE RECORDS
+// WALKS `unordered` IN KEY ORDER.
+//
+// A linked type's entries are records of their own (Col-Inline's `linked` fact), whose numbers
+// follow the allocator, so `for e in unordered(h)` over such a table is in key order: keys
+// inserted out of order, after removals and re-inserts, a table built after others filled and
+// emptied the store, and a text key.  An inline table keeps its insertion order: the control
+// that no sort was added there.
+//
+// @falsified-at: loft main dbf8b05ae — u1 "0,7,3,10,6,2,9,5,1,8,4," on the interpreter,
+//   "1,8,4,0,7,3,10,6,2,9,5," on --native-c.
+// CHANNEL: the assertions and the leak gate.
 
 struct E { k: integer, v: text }
 struct G { k: integer, v: text }
@@ -93,4 +117,38 @@ fn test_other_kinds_keep_their_order() {
   u = "";
   for e in unordered(v) { u += "{e}"; }
   assert(u == "312", "vector: {u}");
+}
+
+struct T { name: text, n: integer }
+struct S2Holder { r: reference<G>?, s: reference<T>? }
+struct I { k: integer, v: text }
+fn walk_g(h: hash<G[k]>) -> text { s = ""; for e in unordered(h) { s += "{e.k},"; } s }
+fn test_a_hash_holding_records_walks_unordered_in_key_order() {
+  h: hash<G[k]> = [];
+  for i in 0..11 { h += [G { k: (i * 7) % 11, v: "{i}" }]; }
+  assert(walk_g(h) == "0,1,2,3,4,5,6,7,8,9,10,", "u1 {walk_g(h)}");
+  h[3] = null;
+  h[8] = null;
+  h += [G { k: 20, v: "x" }];
+  h += [G { k: -1, v: "y" }];
+  assert(walk_g(h) == "-1,0,1,2,4,5,6,7,9,10,20,", "u2 {walk_g(h)}");
+  inl: hash<I[k]> = [];
+  for i in 0..6 { inl += [I { k: 50 - i * 10, v: "{i}" }]; }
+  si = "";
+  for e in unordered(inl) { si += "{e.k},"; }
+  assert(si == "50,40,30,20,10,0,", "u3 {si}");
+  warm: hash<G[k]> = [];
+  for i in 0..40 { warm += [G { k: i, v: "w" }]; }
+  for i in 0..40 { warm[i] = null; }
+  h2: hash<G[k]> = [];
+  for i in 0..11 { h2 += [G { k: (i * 7) % 11, v: "{i}" }]; }
+  assert(walk_g(h2) == "0,1,2,3,4,5,6,7,8,9,10,", "u4 {walk_g(h2)}");
+  t: hash<T[name]> = [];
+  t += [T { name: "pear", n: 1 }, T { name: "apple", n: 2 }, T { name: "fig", n: 3 }];
+  st = "";
+  for e in unordered(t) { st += "{e.name},"; }
+  assert(st == "apple,fig,pear,", "u5 {st}");
+  hold = S2Holder { };
+  assert(hold.r == null && hold.s == null, "holder");
+  println("unordered ok");
 }
