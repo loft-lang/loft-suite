@@ -1,0 +1,113 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL TWO MEMBERS TAKE EQUALLY WELL IS REFUSED AS AMBIGUOUS (`@FR-Disp-Ambiguous`).  Overload
+// resolution ranks each applicable member; where two tie it refuses rather than choosing — two
+// widenings at one position, a widening into a nullable beside a widening into a range, two members
+// better at different positions, and a runtime tuple two crossed members take.  Each function is one
+// refused call with its expectation; an error no expectation names fails the file.
+//
+// ── two-widenings-at-one-position-are-refused ──
+//
+// TWO WIDENINGS AT ONE POSITION ARE REFUSED (`@FR-Disp-Ambiguous`, ranked by
+// `@FR-Disp-Specific`): a `u8` widens into `integer` and into `i16` alike (C-Int — both ranges
+// hold 0..=255), so the two members rank WIDENED at the only position and neither is more
+// specific.  The rank table does not order two ranges that both hold the argument by their
+// size, so the call is refused naming both, never resolved to the tighter range.  One refusal
+// per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: an `integer` argument is EXACT for `aw(integer)` and is not refused (Disp-Specific's
+//   cell).
+// @EXPECT_ERROR: `aw(u8)` is ambiguous — it is taken by aw(integer) and aw(i16)
+//
+// ── a-widening-into-a-nullable-ties-a-widening-into-a-range ──
+//
+// A WIDENING INTO A NULLABLE TIES A WIDENING INTO A RANGE (`@FR-Disp-Ambiguous`, ranked by
+// `@FR-Disp-Specific`'s "a nullability step adds to the base rank"): a `u8` into `u8?` is EXACT
+// plus the N-Intro step (WIDENED), a `u8` into `integer` is WIDENED with no step, so the two
+// members rank alike and the call is refused naming both.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: the tie is the call's, not the set's: a `u8?` argument reaches `an(u8?)` EXACT.
+// @EXPECT_ERROR: `an(u8)` is ambiguous — it is taken by an(integer) and an(u8?)
+//
+// ── two-members-better-at-different-positions-are-refused ──
+//
+// TWO MEMBERS BETTER AT DIFFERENT POSITIONS ARE REFUSED (`@FR-Disp-Ambiguous`, with
+// `@FR-Disp-Specific`'s "no worse at every position and better at one"): at `(AFire, u8)`,
+// `ax(AFire, integer)` is [EXACT, WIDENED] and `ax(AEnt, u8)` is [WIDENED, EXACT] — each better
+// at one position and worse at the other, and no third member beats both — so the static call
+// is refused naming both, in the order the set declares them.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both members.
+// HOLDS: a member better at BOTH positions resolves it — Disp-Select's cell.
+// @EXPECT_ERROR: `ax(AFire, u8)` is ambiguous — it is taken by ax(AFire, integer) and ax(AEnt, u8)
+//
+// ── a-runtime-tuple-two-crossed-members-take-is-refused ──
+//
+// A RUNTIME TUPLE TWO CROSSED MEMBERS TAKE IS REFUSED AT COMPILE TIME (`@FR-Disp-Ambiguous`
+// crossed with `@FR-Disp-Dynamic`): both arguments are held at the enum, so the call selects
+// per runtime variant pair, and each leaf is what `Disp-Select` picks for that pair.  At
+// `(AFire, AIce)` the members `ay(AFire, AEnt)` and `ay(AEnt, AIce)` both apply, neither is more
+// specific, and the enum-level `ay(AEnt, AEnt)` is LESS specific than both — so the dispatcher
+// would have a leaf with no answer, and the call is refused naming the pair and both members,
+// though the static types `(AEnt, AEnt)` alone are covered.  One refusal per file.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected on 18594597b,
+//   interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the variant pair and both members.
+// HOLDS: adding `ay(AFire, AIce)` resolves the pair (Disp-Dynamic's each-runtime-variant-tuple cell).
+// @EXPECT_ERROR: `ay(S4AEnt, S4AEnt)` is ambiguous at (S4AFire, S4AIce) — that pair is taken by ay(S4AFire, S4AEnt) and ay(S4AEnt, S4AIce)
+
+fn aw(x: integer) -> text { "integer {x}" }
+fn aw(x: i16) -> text { "i16 {x}" }
+
+fn test_two_widenings_at_one_position_are_refused() {
+  b: u8 = 7;
+  println(aw(b));
+}
+
+fn an(x: integer) -> text { "integer {x}" }
+fn an(x: u8?) -> text { "u8? {x}" }
+
+fn test_a_widening_into_a_nullable_ties_a_widening_into_a_range() {
+  b: u8 = 7;
+  println(an(b));
+}
+
+enum AEnt { AFire { n: integer }, AIce { n: integer } }
+
+fn ax(a: AFire, k: integer) -> text { "fire,integer {a.n} {k}" }
+fn ax(a: AEnt, k: u8) -> text { "ent,u8 {a.n} {k}" }
+
+fn test_two_members_better_at_different_positions_are_refused() {
+  b: u8 = 3;
+  println(ax(AFire { n: 1 }, b));
+}
+
+enum S4AEnt { S4AFire { n: integer }, S4AIce { n: integer }, ARock { n: integer } }
+
+fn ay(a: S4AFire, b: S4AEnt) -> text { "fire-any {a.n}{b.n}" }
+fn ay(a: S4AEnt, b: S4AIce) -> text { "any-ice {a.n}{b.n}" }
+fn ay(a: S4AEnt, b: S4AEnt) -> text { "any-any {a.n}{b.n}" }
+
+fn test_a_runtime_tuple_two_crossed_members_take_is_refused() {
+  x: S4AEnt = S4AFire { n: 1 };
+  y: S4AEnt = ARock { n: 2 };
+  println(ay(x, y));
+}

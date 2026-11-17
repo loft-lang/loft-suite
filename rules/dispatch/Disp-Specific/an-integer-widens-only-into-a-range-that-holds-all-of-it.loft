@@ -32,7 +32,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the answers.
-// HOLDS: `two-widenings-at-one-position-are-refused` (Disp-Ambiguous) — two members that both
+// HOLDS: `a-call-two-members-take-equally-well-is-refused-as-ambiguous-refused` (Disp-Ambiguous) — two members that both
 //   hold the range are refused, so each answer here is the one subset member.
 
 fn ws1(x: u16) -> text { "u16 {x}" }
