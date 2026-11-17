@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A STORED REFERENCE RETURNED HANDS BACK A FRESH COPY, HOWEVER IT IS SPELLED (`@FR-F-Ret`,
+// `@FR-O-Move`).  The record a stored `reference<T>` names lives in a store neither the callee nor
+// any argument owns, so the callee copies it into its return and the record stays where the
+// reference left it — returned plainly (`h.link`, loft#1977) or through `??` (`h.link ?? S {…}`,
+// loft#2511), whose `__ncc` local hid the stored read.  Two sections, each with its cells and receipt.
+//
+// ── a-function-returning-a-stored-reference-hands-back-a-copy ──
+//
 // `@FR-F-Ret`, `@FR-O-Move` — a function that hands up the record a stored `reference<T>`
 // names (`fn rf(h: H) -> S? { h.link }`) returns a FRESH copy, and the record stays where the
 // reference left it.  That record lives in a store neither the callee nor any argument owns,
@@ -24,6 +32,24 @@
 //   (`LOFT_STRICT_STORES=1`: USE AFTER FREE).
 //   HOLDS: the read through a local (`x = h.link; x`), behind `??`, and as a field
 //   (`h.link.n`) were clean on both trees.
+//
+// ── 2511-a-stored-reference-returned-through-or-hands-back-a-copy ──
+//
+// `@FR-F-Ret`, loft#2511 — a function that hands up a stored `reference<T>` through `??`
+// (`h.link ?? S { n: 31 }`) returns a FRESH copy of the record, as the plain spelling does
+// (loft#1977).  `??` binds the read to its `__ncc` local and hands the local up on the arm where
+// it is set, so the return was not seen as reading a stored reference: the callee handed the
+// caller the holder's own record, and the caller's release freed the holder's store a second
+// time.  Each cell holds `S { n: 5 }` (`6` one field deeper) behind the reference; the fallback
+// records number 31..36 so each arm is told apart, and every expected value is worked from those.
+//
+// @falsified-at: 0de1794d4 — interpret exit 1 -> 0, interpret 2 assertion failures -> 0; native INERT.
+//   CHANNEL: the run under `LOFT_STORES=warn` — the control frees the holder's store twice on the
+//   interpreter at each set link, which fails the cell; the C backend's test runner hides it (its
+//   `main` run, not `--tests`, reports the double free).
+//   HOLDS: the null-link arms were clean on the control; the answers were right throughout.
+//   Score it again with `make falsify GUARD=<this file> REF=0de1794d4`.
+
 struct S { n: integer }
 struct H { link: reference<S>? }
 struct HR { link: reference<S> }
@@ -52,6 +78,62 @@ fn c_inner() { f = H { link: S { n: 5 } }; assert(rf_inner(f) == 5 && f.link.n =
 fn c_method() { f = H { link: S { n: 5 } }; x = rdn(f.get()); assert(x == 5 && f.link.n == 5, "method: {f.link.n}"); }
 fn c_null() { f = H { }; x = rdn(rf(f)); b = rf(f); assert(x == -1 && b == null, "null: {x}"); }
 fn c_loop() { f = H { link: S { n: 5 } }; t = 0; for _ in 0..1000 { t += rdn(rf(f)); } assert(t == 5000 && f.link.n == 5, "loop: t={t} {f.link.n}"); }
-fn main() {
+fn test_a_function_returning_a_stored_reference_hands_back_a_copy() {
   c_lift(); c_bind(); c_fresh(); c_nn(); c_local(); c_ret(); c_if(); c_or(); c_nest(); c_inner(); c_method(); c_null(); c_loop();
+}
+
+struct S2S { n: integer }
+struct S2H { link: reference<S2S>? }
+struct S2W { inner: S2H }
+
+fn s2_rdm(s: S2S) -> integer { s.n }
+fn s2_rf_or(h: S2H) -> S2S { h.link ?? S2S { n: 31 } }
+fn s2_rf_nest(w: S2W) -> S2S { w.inner.link ?? S2S { n: 32 } }
+fn get_or(self: S2H) -> S2S { self.link ?? S2S { n: 33 } }
+fn rf_arm(h: S2H, k: integer) -> S2S { if k > 0 { h.link ?? S2S { n: 34 } } else { S2S { n: 35 } } }
+fn s2_rf_ret(h: S2H, k: integer) -> S2S { if k > 0 { return h.link ?? S2S { n: 36 }; } S2S { n: 37 } }
+
+fn test_the_set_link_is_copied() {
+  f = S2H { link: S2S { n: 5 } };
+  assert_eq(s2_rdm(s2_rf_or(f)), 5, "or set");
+  b = s2_rf_or(f);
+  b.n = 99;
+  assert_eq(f.link.n ?? -1, 5, "the holder keeps its record");
+  assert_eq(b.n, 99, "the copy took the write");
+}
+
+fn test_the_null_link_answers_the_fallback() {
+  g = S2H { };
+  assert_eq(s2_rdm(s2_rf_or(g)), 31, "or null");
+}
+
+fn test_one_field_deeper_and_as_a_method() {
+  w = S2W { inner: S2H { link: S2S { n: 6 } } };
+  e = S2W { inner: S2H { } };
+  f = S2H { link: S2S { n: 5 } };
+  g = S2H { };
+  assert_eq(s2_rdm(s2_rf_nest(w)), 6, "nest set");
+  assert_eq(s2_rdm(s2_rf_nest(e)), 32, "nest null");
+  assert_eq(s2_rdm(f.get_or()), 5, "method set");
+  assert_eq(s2_rdm(g.get_or()), 33, "method null");
+}
+
+fn test_in_an_arm_and_a_mid_body_return() {
+  f = S2H { link: S2S { n: 5 } };
+  g = S2H { };
+  assert_eq(s2_rdm(rf_arm(f, 1)), 5, "arm set");
+  assert_eq(s2_rdm(rf_arm(g, 1)), 34, "arm null");
+  assert_eq(s2_rdm(rf_arm(f, 0)), 35, "arm else");
+  assert_eq(s2_rdm(s2_rf_ret(f, 1)), 5, "ret set");
+  assert_eq(s2_rdm(s2_rf_ret(g, 1)), 36, "ret null");
+  assert_eq(s2_rdm(s2_rf_ret(f, 0)), 37, "ret tail");
+}
+
+fn test_a_thousand_calls_release_each_copy() {
+  f = S2H { link: S2S { n: 5 } };
+  g = S2H { };
+  t = 0;
+  for _ in 0..1000 { t += s2_rdm(s2_rf_or(f)) + s2_rdm(s2_rf_or(g)); }
+  assert_eq(t, 36000, "1000 * (5 + 31)");
+  assert_eq(f.link.n ?? -1, 5, "the holder after the loop");
 }
