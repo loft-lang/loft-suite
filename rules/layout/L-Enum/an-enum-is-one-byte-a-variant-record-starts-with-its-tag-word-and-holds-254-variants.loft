@@ -1,0 +1,371 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN ENUM IS ONE BYTE, A VARIANT RECORD STARTS WITH ITS TAG WORD, AND THERE ARE AT MOST 254
+// VARIANTS, NUMBERED FROM ONE (`@FR-L-Enum`, with `@FR-L-Align` and `@FR-L-Null` reserving 0 and 255).
+// Two sections, each with its cells and receipt.
+//
+// ── a-plain-enum-is-one-byte-and-a-variant-record-starts-with-its-tag-word ──
+//
+// A PLAIN ENUM IS ONE BYTE, AND A VARIANT RECORD STARTS WITH ITS TAG WORD (`@FR-L-Enum`, with
+// `@FR-L-Align` rounding sizes and `@FR-L-Null` reserving 0 and 255).  A plain enum stores as a
+// 1-byte discriminant, numbered from 1; a data-carrying variant is a record whose first 8-byte
+// word holds the tag at offset 0, with its fields filling the rest of that word and then
+// following it, each aligned — so `A { s: u8 }` and `C { s: u8, c: character }` fit in the
+// first word (8 bytes) and `B { n: integer }` needs a second (16).  A struct-enum VALUE sizes
+// by the variant it holds at run time (LOFT_DATA.md § sizeof); its TYPE by the largest.
+//
+// Sizes hand-computed:
+//   P (plain): 1; struct { p: P, b: boolean } = 2; vector<P> of 3 = 3 bytes.
+//   A { s: u8 } = 8; B { n: integer } = 8 + 8 = 16; C { s: u8, c: character } = 8 (c at 4);
+//   D { t: text, s: u8 } = 8 (t at 4); F (no fields) = 1; E = the largest, 16.
+//   struct { e: E, b: boolean } = 16 + 1 → 24; vector<E> of 3 = 48.
+//   `as integer`: Red 1, Green 2, Blue 3; a nullable plain enum field holds null apart from them.
+//
+// Axes it MOVES: plain against data-carrying, where the enum sits (local, field, vector
+//   element, parameter), field width inside the variant (1, 4, 8 bytes, a text handle), the
+//   variant held (none, fits the first word, needs a second), nullable plain fields, and
+//   values at the edges (u8 255, integer -1).
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the sizes or values.
+// HOLDS: every variant round-trips its field values through a vector element.
+//
+// ── an-enum-holds-254-variants-numbered-from-one ──
+//
+// AN ENUM HOLDS 254 VARIANTS, NUMBERED 1 TO 254 (`@FR-L-Enum`: "Variants are numbered from 1: 0
+// is the absent value (L-Null) and 255 is the null a write spells, so an enum holds at most 254
+// variants").  The largest legal enum still stores in one byte, its first variant is 1 and its
+// last is 254, and the last round-trips through a field and a vector element; a nullable field
+// of it holds null apart from all 254.  The 255th is the sibling refusal cell.
+//
+// Values hand-computed: V1 → 1, V254 → 254, sizeof 1; a struct { e: LBig, f: LBig? } is 2.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: the message prints the numbers.
+// HOLDS: V254 is not read as the reserved null code 255.
+
+enum LP { Red, Green, Blue }
+enum LE { A { s: u8 }, B { n: integer }, C { s: u8, c: character }, D { t: text, s: u8 }, F }
+struct LHP { p: LP, b: boolean }
+struct LHE { e: LE, b: boolean }
+struct LHN { p: LP?, q: LP? }
+
+fn sz(x: LE) -> integer { sizeof(x) }
+
+fn test_a_plain_enum_is_one_byte_numbered_from_one() {
+  pv: vector<LP> = [LP.Blue, LP.Red, LP.Green];
+  s = "{sizeof(LP)} {sizeof(LHP)} {size(pv)} {LP.Red as integer} {LP.Green as integer} {pv[0] as integer}";
+  assert(s == "1 2 3 1 2 3", "plain: {s}");
+}
+
+fn test_a_variant_record_starts_with_its_tag_word() {
+  a = A { s: 1 };
+  b = B { n: 2 };
+  c = C { s: 3, c: 'd' };
+  d = D { t: "e", s: 4 };
+  s = "{sizeof(a)} {sizeof(b)} {sizeof(c)} {sizeof(d)} {sizeof(LE)} {sizeof(LHE)}";
+  assert(s == "8 16 8 8 16 24", "variant records: {s}");
+  e1: LE = F;
+  e2: LE = A { s: 1 };
+  t = "{sz(e1)} {sz(e2)} {sz(b)}";
+  assert(t == "1 8 16", "a value sizes by its runtime variant: {t}");
+}
+
+fn test_every_variant_round_trips_through_an_element() {
+  v: vector<LE> = [A { s: 255 }, B { n: -1 }, C { s: 9, c: 'z' }, D { t: "q", s: 0 }, F];
+  o = "";
+  for e in v {
+    o += match e { A { s } => "A{s}", B { n } => "B{n}", C { s, c } => "C{s}{c}", D { t, s } => "D{t}{s}", F => "F" } + ";";
+  }
+  assert(o == "A255;B-1;C9z;Dq0;F;" && size(v) == 80, "elements: {o} {size(v)}");
+}
+
+fn test_a_nullable_plain_enum_field_holds_null_apart() {
+  h = LHN { p: null, q: LP.Blue };
+  s = "{h.p == null} {h.q == null} {h.q as integer?} {sizeof(LHN)}";
+  h.p = LP.Red;
+  h.q = null;
+  t = "{h.p as integer?} {h.q == null}";
+  assert(s == "true false 3 2" && t == "1 true", "nullable: {s} / {t}");
+}
+
+
+enum LBig {
+  V1,
+  V2,
+  V3,
+  V4,
+  V5,
+  V6,
+  V7,
+  V8,
+  V9,
+  V10,
+  V11,
+  V12,
+  V13,
+  V14,
+  V15,
+  V16,
+  V17,
+  V18,
+  V19,
+  V20,
+  V21,
+  V22,
+  V23,
+  V24,
+  V25,
+  V26,
+  V27,
+  V28,
+  V29,
+  V30,
+  V31,
+  V32,
+  V33,
+  V34,
+  V35,
+  V36,
+  V37,
+  V38,
+  V39,
+  V40,
+  V41,
+  V42,
+  V43,
+  V44,
+  V45,
+  V46,
+  V47,
+  V48,
+  V49,
+  V50,
+  V51,
+  V52,
+  V53,
+  V54,
+  V55,
+  V56,
+  V57,
+  V58,
+  V59,
+  V60,
+  V61,
+  V62,
+  V63,
+  V64,
+  V65,
+  V66,
+  V67,
+  V68,
+  V69,
+  V70,
+  V71,
+  V72,
+  V73,
+  V74,
+  V75,
+  V76,
+  V77,
+  V78,
+  V79,
+  V80,
+  V81,
+  V82,
+  V83,
+  V84,
+  V85,
+  V86,
+  V87,
+  V88,
+  V89,
+  V90,
+  V91,
+  V92,
+  V93,
+  V94,
+  V95,
+  V96,
+  V97,
+  V98,
+  V99,
+  V100,
+  V101,
+  V102,
+  V103,
+  V104,
+  V105,
+  V106,
+  V107,
+  V108,
+  V109,
+  V110,
+  V111,
+  V112,
+  V113,
+  V114,
+  V115,
+  V116,
+  V117,
+  V118,
+  V119,
+  V120,
+  V121,
+  V122,
+  V123,
+  V124,
+  V125,
+  V126,
+  V127,
+  V128,
+  V129,
+  V130,
+  V131,
+  V132,
+  V133,
+  V134,
+  V135,
+  V136,
+  V137,
+  V138,
+  V139,
+  V140,
+  V141,
+  V142,
+  V143,
+  V144,
+  V145,
+  V146,
+  V147,
+  V148,
+  V149,
+  V150,
+  V151,
+  V152,
+  V153,
+  V154,
+  V155,
+  V156,
+  V157,
+  V158,
+  V159,
+  V160,
+  V161,
+  V162,
+  V163,
+  V164,
+  V165,
+  V166,
+  V167,
+  V168,
+  V169,
+  V170,
+  V171,
+  V172,
+  V173,
+  V174,
+  V175,
+  V176,
+  V177,
+  V178,
+  V179,
+  V180,
+  V181,
+  V182,
+  V183,
+  V184,
+  V185,
+  V186,
+  V187,
+  V188,
+  V189,
+  V190,
+  V191,
+  V192,
+  V193,
+  V194,
+  V195,
+  V196,
+  V197,
+  V198,
+  V199,
+  V200,
+  V201,
+  V202,
+  V203,
+  V204,
+  V205,
+  V206,
+  V207,
+  V208,
+  V209,
+  V210,
+  V211,
+  V212,
+  V213,
+  V214,
+  V215,
+  V216,
+  V217,
+  V218,
+  V219,
+  V220,
+  V221,
+  V222,
+  V223,
+  V224,
+  V225,
+  V226,
+  V227,
+  V228,
+  V229,
+  V230,
+  V231,
+  V232,
+  V233,
+  V234,
+  V235,
+  V236,
+  V237,
+  V238,
+  V239,
+  V240,
+  V241,
+  V242,
+  V243,
+  V244,
+  V245,
+  V246,
+  V247,
+  V248,
+  V249,
+  V250,
+  V251,
+  V252,
+  V253,
+  V254
+}
+
+struct LBH { e: LBig, f: LBig? }
+
+fn test_the_last_of_254_variants_is_254() {
+  h = LBH { e: LBig.V254, f: null };
+  v: vector<LBig> = [LBig.V1, LBig.V254];
+  s = "{LBig.V1 as integer} {LBig.V254 as integer} {sizeof(LBig)} {sizeof(LBH)} {h.e as integer} {h.f == null} {v[1] as integer} {size(v)}";
+  assert(s == "1 254 1 2 254 true 254 2", "254 variants: {s}");
+  h.f = LBig.V254;
+  assert(h.f == LBig.V254 && h.f != null, "a nullable field holds V254: {h.f as integer?}");
+}
+
