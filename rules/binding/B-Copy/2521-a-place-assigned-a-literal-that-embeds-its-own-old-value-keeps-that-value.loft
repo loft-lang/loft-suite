@@ -1,0 +1,125 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLACE ASSIGNED A LITERAL THAT EMBEDS ITS OWN OLD VALUE KEEPS THAT VALUE (`@FR-B-Copy`: every
+// operand is read before the literal's first write into its place).  `e[0] = Node { v: 8, next:
+// e[0] }` and `e[0] = Wrap { tag: 7, inner: e[0]! }` read the right-hand `e[0]` as a VIEW of the
+// element, which the literal's earlier field writes then overwrote before the out-of-line field
+// copied it in: the embedded value read the NEW one, on both backends, with nothing said.  The
+// place's old value is now taken before the writes — copied for an inline struct (loft#2527),
+// and for a variant built apart from the old record and copied in (loft#2521).
+//
+//   test_a_variant_wrapping_its_own_place — an enum variant over an element, a field, two fields
+//     of one literal, a nested field, a loop; controls on the other side of the boundary: another
+//     element, a variable, a nested wrap, the old value bound first (loft#2521).
+//   test_an_element_of_a_local_vector, test_the_field_places, test_a_loop_rewrapping_one_element
+//     — a struct literal over an element of a local vector, an inline field, an element of a
+//     field's vector, an out-of-line field (the demote's road), and a loop (loft#2527).
+// Values hand-computed in each message.
+//
+// The patch receipt belongs to the variant test (loft#2521), the one that moves on both backends:
+// @falsified-at: cfc396d4e — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// @falsified-by: tests/falsified/2521-a-place-assigned-a-literal-that-embeds-its-own-old-value-keeps-that-value.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the asserts — `W7(L7)` where the element held `W7(L22)`.
+//   HOLDS: the controls — a variable, another element, a nested wrap, the old value bound
+//   first — read the same before and after.
+// The struct-literal tests (loft#2527) are their own receipt:
+// @falsified-at: 79c121823 — interpret exit 1 -> 0, C exit 1 -> 0 (`LOFT_STRUCT_ELEMENT_SELF_READ_VIEW=1`)
+//   CHANNEL: the asserts — the embedded old value reads the new one.
+//   ARMED: no instrument.
+//   WITNESS: each message prints the value and the embedded one.
+//   HOLDS: the field places read the same before and after.
+
+enum N {
+  Leaf { v: integer },
+  Wrap { tag: integer, inner: N },
+  Two { l: N, r: N },
+}
+
+struct H {
+  n: N,
+}
+
+struct G {
+  h: H,
+  k: integer,
+}
+
+fn show(n: N) -> text {
+  match n {
+    Leaf { v } => "L{v}",
+    Wrap { tag, inner } => "W{tag}({show(inner)})",
+    Two { l, r } => "T({show(l)},{show(r)})",
+  }
+}
+
+fn test_a_variant_wrapping_its_own_place() {
+  e: vector<N> = [N::Leaf { v: 11 }, N::Leaf { v: 22 }];
+  e[1] = N::Wrap { tag: 7, inner: e[1]! };
+  assert(show(e[1]!) == "W7(L22)", "element: {show(e[1]!)}");
+  h = H { n: N::Leaf { v: 44 } };
+  h.n = N::Wrap { tag: 7, inner: h.n };
+  assert(show(h.n) == "W7(L44)", "field: {show(h.n)}");
+  t: vector<N> = [N::Leaf { v: 77 }];
+  t[0] = N::Two { l: t[0]!, r: t[0]! };
+  assert(show(t[0]!) == "T(L77,L77)", "two fields: {show(t[0]!)}");
+  g = G { h: H { n: N::Leaf { v: 88 } }, k: 5 };
+  g.h.n = N::Wrap { tag: g.k, inner: g.h.n };
+  assert(show(g.h.n) == "W5(L88)", "nested field: {show(g.h.n)}");
+  f: vector<N> = [N::Leaf { v: 99 }];
+  for i in 0..3 {
+    f[0] = N::Wrap { tag: i, inner: f[0]! };
+  }
+  assert(show(f[0]!) == "W2(W1(W0(L99)))", "loop: {show(f[0]!)}");
+  // Controls.
+  other: vector<N> = [N::Leaf { v: 11 }, N::Leaf { v: 22 }];
+  other[1] = N::Wrap { tag: 7, inner: other[0]! };
+  assert(show(other[1]!) == "W7(L11)", "another element: {show(other[1]!)}");
+  n = N::Leaf { v: 33 };
+  n = N::Wrap { tag: 7, inner: n };
+  assert(show(n) == "W7(L33)", "variable: {show(n)}");
+  nest: vector<N> = [N::Leaf { v: 55 }];
+  nest[0] = N::Wrap { tag: 1, inner: N::Wrap { tag: 2, inner: nest[0]! } };
+  assert(show(nest[0]!) == "W1(W2(L55))", "nested wrap: {show(nest[0]!)}");
+  first: vector<N> = [N::Leaf { v: 66 }];
+  old = first[0]!;
+  first[0] = N::Wrap { tag: 3, inner: old };
+  assert(show(first[0]!) == "W3(L66)", "bound first: {show(first[0]!)}");
+}
+
+struct Node { v: integer, next: Node? }
+struct NodeHolder { a: Node, items: vector<Node>, link: Node? }
+
+fn tail_of(n: Node?) -> integer {
+  if n == null { -1 } else { n!.v }
+}
+
+fn test_an_element_of_a_local_vector() {
+  e: vector<Node> = [Node { v: 9, next: null }];
+  e[0] = Node { v: 8, next: e[0] };
+  assert(e[0]!.v == 8 && tail_of(e[0]!.next) == 9, "8 over 9: {e[0]!.v} {tail_of(e[0]!.next)}");
+}
+
+fn test_the_field_places() {
+  h = NodeHolder { a: Node { v: 5, next: null }, items: [Node { v: 3, next: null }], link: Node { v: 7, next: null } };
+  h.a = Node { v: 4, next: h.a };
+  assert(h.a.v == 4 && tail_of(h.a.next) == 5, "an inline field: {h.a.v} {tail_of(h.a.next)}");
+  h.items[0] = Node { v: 2, next: h.items[0] };
+  assert(tail_of(h.items[0]!.next) == 3, "an element of a field: {tail_of(h.items[0]!.next)}");
+  h.link = Node { v: 6, next: h.link };
+  assert(tail_of(h.link!.next) == 7, "an out-of-line field: {tail_of(h.link!.next)}");
+}
+
+fn test_a_loop_rewrapping_one_element() {
+  e: vector<Node> = [Node { v: 0, next: null }];
+  for i in 1..6 {
+    e[0] = Node { v: i * 10, next: e[0] };
+  }
+  // The chain reads 50, 40, 30, 20, 10, 0: a sum of 150 over six nodes.
+  sum = 0;
+  n = 0;
+  p: Node? = e[0];
+  while p != null { sum += p!.v; n += 1; p = p!.next; }
+  assert(sum == 150 && n == 6, "six nodes summing 150: {n} {sum}");
+}
+

@@ -1,0 +1,208 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A STRUCT-ENUM VALUE COPIES LIKE A STRUCT, AT EVERY BIND AND EVERY WIDENING (`@FR-B-Copy`, crossed
+// with `@FR-C-Var`).  A struct-enum value is a heap RECORD exactly as a struct is
+// (`Type::heap_def_nr` names both), so a plain whole-value bind of it COPIES, and a `(C-Var)`
+// widening `c: E = s` from a variant is "a copy like any other": the copy is independent in both
+// directions, on both backends.  `Data::copies_as` is the one home for which record pairs copy
+// (same def, or a variant into its own enum), read by the parser's dep-strip and both
+// interpreter arms.
+//
+//   The bind positions (each with a struct twin in `bind-copies-or-views-the-whole-boundary`): a
+//     first bind, a write through the copy, a re-bind, a parameter source, a branch join of two
+//     variables, a nullable destination and a nullable source (each owning its copy), a
+//     variant-typed source widened into an enum binding, a heap payload deep-copied, an element
+//     destination.
+//   The widening positions (`test_a_widening_*`): a struct literal's field, a field store, an
+//     appended element, a tuple member, a nullable local, a function's return, a payload owning
+//     a vector; each written on both sides after the widening.
+// Values hand-computed in every message.
+//
+// The bind positions' receipt (found walking `@FR-B-Copy` as a lens: the interpreter's two
+// variable-source copy arms spelled `Type::Reference` bare, so `e: Sh = Ci {…}; c = e; e.n = 9`
+// read 9 through `c` on `--interpret` and 1 on `--native`; the branch-arm lift aliased on both;
+// the nullable dep-strip leaked the copy):
+// @falsified-at: 12e58a4d — interpret exit 1 -> 0, interpret 8 assertion failures -> 0,
+//   native exit 1 -> 0, native 1 assertion failures -> 0.  Eight interpreter cells moved (every
+//   bind position); on native only the branch-join cell moved, and the two nullable cells' leak
+//   sits behind the assertion channel on that build.
+//   CHANNEL: the asserts.
+//   HOLDS: on --interpret, leak, panic, free-refusal, expectations are equal on both trees,
+//   measured by `scripts/falsify.sh --bulk` against 12e58a4d; the native side was not scored
+//   in that run.
+//   ARMED: none — the sweep ran without `LOFT_STRICT_STORES`, and the channel moved anyway.
+// The widening positions' receipt:
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b,
+//   interpret and native.
+//   CHANNEL: the asserts.
+//   ARMED: no instrument.
+//   WITNESS: each message prints the value the copy holds.
+//   HOLDS: the bind positions above.
+
+enum SeSh { SeCi { n: integer }, SeSq { n: integer } }
+enum SeHp { SeTag { n: integer, tags: vector<integer> }, SeBare { n: integer } }
+
+fn test_a_first_bind_is_independent() {
+  e: SeSh = SeCi { n: 1 };
+  c = e;
+  e.n = 9;
+  assert(c.n == 1, "a struct-enum whole-value bind aliased its source: {c.n}");
+}
+
+fn test_a_write_through_the_copy_stays_in_the_copy() {
+  e: SeSh = SeCi { n: 1 };
+  c = e;
+  c.n = 9;
+  assert(e.n == 1, "a write through the copy reached the source: {e.n}");
+}
+
+fn test_a_rebind_is_independent() {
+  e: SeSh = SeCi { n: 1 };
+  c: SeSh = SeSq { n: 0 };
+  before = c.n;
+  c = e;
+  e.n = 9;
+  assert(before == 0 && c.n == 1, "a struct-enum rebind aliased its source: {c.n}");
+}
+
+fn se_copy_param(p: SeSh) -> integer {
+  c = p;
+  p.n = 9;
+  c.n
+}
+
+fn test_a_parameter_source_is_copied() {
+  e: SeSh = SeCi { n: 1 };
+  assert(se_copy_param(e) == 1, "a bind from a struct-enum parameter aliased it");
+}
+
+fn test_a_branch_join_of_two_variables_copies() {
+  x = [1];
+  e: SeSh = SeCi { n: 1 };
+  e2: SeSh = SeSq { n: 5 };
+  c = if len(x) > 0 { e } else { e2 };
+  e.n = 9;
+  assert(c.n == 1, "a struct-enum arm of a value branch aliased its variable: {c.n}");
+}
+
+// The two NULLABLE cells score the LEAK channel too: the value was right before the fix,
+// and the copy's store was never released because the destination still depended on its
+// source.
+fn test_a_nullable_destination_copies_and_owns() {
+  e: SeSh = SeCi { n: 1 };
+  c: SeSh? = e;
+  e.n = 9;
+  assert((c ?? SeSq { n: -1 }).n == 1, "a nullable struct-enum destination aliased");
+}
+
+fn test_a_nullable_source_copies_and_owns() {
+  e: SeSh? = SeCi { n: 1 };
+  c = e;
+  e = SeSq { n: 9 };
+  assert((c ?? SeSq { n: -1 }).n == 1, "a bind from a nullable struct-enum aliased");
+}
+
+fn test_a_variant_typed_source_widens_into_an_enum_binding_by_copy() {
+  ci = SeCi { n: 1 };
+  c: SeSh = ci;
+  ci.n = 9;
+  assert(c.n == 1, "(C-Var) widening `c: E = s` aliased the variant: {c.n}");
+}
+
+fn test_a_heap_payload_is_deep_copied() {
+  e: SeHp = SeTag { n: 1, tags: [1] };
+  c = e;
+  if e is SeTag { tags } {
+    tags += [2];
+  }
+  seen = -1;
+  if c is SeTag { tags } {
+    seen = len(tags);
+  }
+  assert(seen == 1, "a payload vector was shared by the copy: {seen}");
+}
+
+// A negative result carried as a cell: an ELEMENT destination copied before the fix and
+// must keep doing so.
+fn test_an_element_destination_copies() {
+  e: SeSh = SeCi { n: 1 };
+  ev: vector<SeSh> = [SeSq { n: 0 }];
+  ev[0] = e;
+  e.n = 9;
+  assert((ev[0] ?? SeSq { n: -1 }).n == 1, "an element write aliased its source");
+}
+
+
+struct SeHolder { e: SeSh, k: integer }
+
+fn se_widen(p: SeCi) -> SeSh {
+  p
+}
+
+fn test_a_widening_into_a_literal_field_copies() {
+  ci = SeCi { n: 11 };
+  h = SeHolder { e: ci, k: 2 };
+  ci.n = 99;
+  assert(h.e.n == 11, "a variant widened into a literal field aliased it: {h.e.n}");
+  h.e.n = 12;
+  assert(ci.n == 99, "a write through the field reached the variant: {ci.n}");
+}
+
+fn test_a_widening_into_a_field_store_copies() {
+  ci = SeCi { n: 21 };
+  h = SeHolder { e: SeSq { n: 0 }, k: 3 };
+  h.e = ci;
+  ci.n = 98;
+  assert(h.e.n == 21 && h.k == 3, "a variant stored into an enum field aliased it: {h.e.n} {h.k}");
+  assert(h.e is SeCi, "the stored field lost its variant");
+}
+
+fn test_a_widening_into_an_element_copies() {
+  ci = SeCi { n: 31 };
+  v: vector<SeSh> = [SeSq { n: 1 }];
+  v += [ci];
+  ci.n = 97;
+  assert(len(v) == 2, "the append changed the length to {len(v)}");
+  assert(v[1].n == 31 && v[0].n == 1, "a variant appended into vector<E> aliased it: {v[1].n} {v[0].n}");
+  v[1].n = 32;
+  assert(ci.n == 97, "a write through the element reached the variant: {ci.n}");
+}
+
+fn test_a_widening_into_a_tuple_member_copies() {
+  ci = SeCi { n: 41 };
+  t: (integer, SeSh) = (5, ci);
+  ci.n = 96;
+  m = t.1;
+  assert(t.0 == 5 && m.n == 41, "a variant widened into a tuple member aliased it: {t.0} {m.n}");
+}
+
+fn test_a_widening_into_a_nullable_local_copies() {
+  ci = SeCi { n: 51 };
+  c: SeSh? = ci;
+  ci.n = 95;
+  assert((c ?? SeSq { n: -1 }).n == 51, "a variant widened into `E?` aliased it");
+}
+
+fn test_a_widening_return_is_fresh() {
+  ci = SeCi { n: 61 };
+  r = se_widen(ci);
+  ci.n = 94;
+  assert(r.n == 61, "a variant parameter returned as its enum aliased the caller's: {r.n}");
+  r.n = 62;
+  assert(ci.n == 94, "a write to the returned enum reached the caller's variant: {ci.n}");
+}
+
+fn test_a_widening_deep_copies_a_heap_payload() {
+  tg = SeTag { n: 71, tags: [1, 2] };
+  c: SeHp = tg;
+  tg.tags += [3];
+  seen = -1;
+  first = -1;
+  if c is SeTag { tags } {
+    seen = len(tags);
+    first = tags[0] ?? -2;
+  }
+  assert(seen == 2 && first == 1 && len(tg.tags) == 3, "a widened payload vector was shared: {seen} {first} {len(tg.tags)}");
+}
+
