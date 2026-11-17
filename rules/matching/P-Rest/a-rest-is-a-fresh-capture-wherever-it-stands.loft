@@ -1,5 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REST IS A FRESH CAPTURE WHEREVER IT STANDS (`@FR-P-Rest`, with `@FR-P-Seq`, `@FR-P-Cap`).  A rest
+// takes what the fixed patterns around it leave, at the head, the middle or the tail, and binds a
+// fresh vector — writing it leaves the subject as it was.  Two sections, each with its cells and
+// receipt.
+//
+// ── 35c-rest-capture ──
+//
 // `@FR-P-Rest` / `@FR-P-Cap` — the rule(s) this file is the guard for; the chapter's banner
 // named them verified via `tests/scripts/35*.loft` without any file citing one back,
 // so `rule_tags.py coverage` read them as unguarded (corrected 2026-09-25).
@@ -15,6 +23,17 @@
 // heap-vector literal in a match arm is a separate pre-existing native-codegen bug (filed).
 // Struct-enum tokens use PAYLOAD variants only (no unit variants): a unit-variant enum record
 // leaks in a vector regardless of matching — a separate pre-existing bug (filed).
+//
+// ── a-rest-is-fresh-wherever-it-stands ──
+//
+// `@FR-P-Rest` crossed with `@FR-P-Seq` and `@FR-P-Cap`: a rest takes what the fixed patterns
+// around it leave, wherever it stands in the sequence, and it is a FRESH vector — writing it
+// changes nothing in the subject, at scalar, record and text elements, returned from a
+// function and taken in a loop.  `@FR-P-Rep-Scalar`'s typed repetition is the same rest.  A
+// field is a subject like a local.  Every cell held on both backends when written, with the
+// leak gate armed; the ledger rows are in doc/claude/RULE_CROSSINGS-history.md.
+//
+// CHANNEL: the assertions and the leak gate.
 
 enum Tok {
   Kw { word: text },
@@ -82,7 +101,7 @@ fn first_word(ts: vector<Tok>) -> text {
   match ts { [Kw { word }, ..rhs] => word, whole => "none" }
 }
 
-fn main() {
+fn test_35c_rest_capture() {
   // scalar
   ri = tail_i([10, 20, 30, 40]);
   assert(len(ri) == 3 && ri[0] == 20 && ri[2] == 40, "scalar rest: {ri[0]}..{ri[2]} len {len(ri)}");
@@ -147,4 +166,34 @@ fn main() {
   );
 
   print("35c-rest-capture: PASS");
+}
+
+struct S { n: integer }
+struct O { v: vector<integer> }
+
+fn middle(v: vector<integer>) -> text { match v { [a, ..m, z] => "{a} {len(m)} {z}", _ => "x" } }
+fn tail(v: vector<text>) -> vector<text> { match v { [_, ..t] => t, _ => [] } }
+fn typed(v: vector<integer>) -> text { match v { [xs:integer*, last] => "{len(xs)} {last}", _ => "x" } }
+
+fn test_where_a_rest_stands() {
+  assert(middle([1, 2, 3, 5]) == "1 2 5", "middle: {middle([1, 2, 3, 5])}");
+  assert(typed([1, 2, 3, 7]) == "3 7", "typed: {typed([1, 2, 3, 7])}");
+  o = O { v: [4, 5, 6] };
+  r = match o.v { [h, ..t] => "{h} {len(t)}", _ => "x" };
+  assert(r == "4 2", "a field: {r}");
+}
+
+fn test_a_rest_is_fresh() {
+  v = [1, 2, 3];
+  r = match v { [_, ..t] => t, _ => [] };
+  r[0] = 9;
+  assert(r[0] == 9 && v[1] == 2 && len(v) == 3, "scalars: {v[1]}");
+  w = [S { n: 1 }, S { n: 2 }];
+  q = match w { [_, ..t] => t, _ => [] };
+  q[0].n = 9;
+  assert(q[0].n == 9 && w[1].n == 2, "records: {w[1].n}");
+  x = ["a", "b", "c"];
+  s: vector<text> = [];
+  for i in 0..3 { s = tail(x); }
+  assert(s[0] == "b" && s[1] == "c" && len(x) == 3, "texts, returned in a loop: {s[0]}{s[1]}");
 }

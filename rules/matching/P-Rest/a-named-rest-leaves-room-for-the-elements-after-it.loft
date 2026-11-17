@@ -24,7 +24,7 @@
 //
 // The struct and struct-enum cells guard `(H-Alloc)`: the middle is a fresh, independent vector,
 // so mutating it must leave the subject intact, and matching the SAME subject twice must answer
-// the same thing.  That reuse cell is the store-lifetime class `35c-rest-capture.loft` records —
+// the same thing.  That reuse cell is the store-lifetime class `a-rest-is-a-fresh-capture-wherever-it-stands.loft` records —
 // a materialised sub-slice that frees a view of the subject's own records reads correct once and
 // wrong the second time.
 //
