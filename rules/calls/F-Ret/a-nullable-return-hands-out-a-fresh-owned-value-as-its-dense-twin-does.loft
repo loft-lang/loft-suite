@@ -1,0 +1,323 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE RETURN HANDS OUT A FRESH, OWNED VALUE, AS ITS DENSE TWIN DOES (`@FR-F-Ret` crossed with
+// `@FR-N-Road` and `@FR-B-Copy`).  A returned whole heap value is owned, never a view of a local or
+// an argument, and which delivery a value takes answers identically for τ and τ? — the dense
+// spelling is not the oracle, F-Ret is.  A `-> S?` return of a view of a local is copied before it
+// escapes (loft#1337), a `-> vector<T>?` answering a projection of its argument hands up a copy
+// (loft#1345), and the nullable result is independent of another call's result and of the
+// callee's input.  Three sections, each with its cells and receipt.
+//
+// ── 1337-a-view-of-a-local-returned-through-a-nullable-return-is-copied ──
+//
+// A VIEW of a local returned through a `-> S?` return is copied before it escapes
+// (loft#1337, `formal/calls.md` @FR-F-Ret: a whole heap value is handed out OWNED, never a
+// view of a local).
+//
+// The dense return has a delivery buffer, and `ref_return`'s copy leg lands every arm in
+// it; a nullable record return has none (a `-> S?` is delivered as the DbRef its tail
+// yields), so what is handed up is exactly what the selector decides.  Two shapes escaped
+// it on both backends: a local rebound through its own reference field (`cur = cur.next`
+// leaves a SELF-dep, which `return_views_local` skipped because the local was already in
+// its `seen` set — so the walker's view of a sibling local read as an owner), and a
+// projection sitting inside an `if` ARM (`if take { t.l } else { null }` — the arm walk
+// stopped at the `if`, the tail was demoted to a discarded statement and the function
+// answered `null` on native and a reused record on the interpreter, with a literal on the
+// other arm as much as with a `null`).
+//
+// The cure is the selector's own `MaterializeView` cell, per ARM where there is no buffer:
+// only the arms that view something this frame frees are copied into one work-ref, a `null`
+// arm stays null, an owned arm is handed up as it is, and a nullable LOCAL source copies
+// only where present.  Every cell below builds what it returns in the frame that frees it,
+// reads the result AFTER a filler allocation (so a handed-up view would read the filler),
+// and is measured on both backends.
+//
+// Held FIXED: a `match` tail (lowered through the same `if` chain), and a projection of an
+// inline CALL's temporary (`mk().inn`, the H9 shape the dense route already copies).
+//
+// @falsified-at: c0a09c95 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
+//   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
+//   both. The native side was not scored in this sweep.
+//
+// ── 1345-a-nullable-vector-return-of-a-projection-is-copied ──
+//
+// A `-> vector<T>?` function that answers a projection of its argument hands up a COPY, never
+// the view.
+//
+// @FR-F-Ret says a returned whole heap value is owned, never a view; @FR-B-Copy says a plain
+// bind is independent of its source.  The buffered non-null return copies such a tail
+// (`Delivery::CopyBorrow`), but a nullable return always branches on its null arm and reached
+// the vector materialiser, whose leaf cases were a local and a buffered call — a projecting
+// arm was left as the view, and the caller's bind aliased the callee's argument field on both
+// backends: `a = nv(b); b.items[0] = 99` read 99 through `a` (loft#1345).  A projection leaf
+// now appends into the buffer.
+//
+// Axes this file MOVES:  the callee (named, fn-ref); the consumer (a plain bind, an `if`
+//                        join with a local, a bind inside a loop with a filler allocation);
+//                        the projection (a field, an element of a field, a tuple element —
+//                        the second SPELLING of a projection, `TupleGet`, which is not a call).
+// Axes it HOLDS FIXED:   the element type is integer; the tail's null arm is second.  A
+//                        lambda's lifetime TUPLE (loft#1349) and a nullable RECORD chosen by
+//                        an `if` on the interpreter (loft#1346) are their own findings.
+//
+// The controls are the non-null twins, which always copied, and the bind-then-rebind
+// workaround.  The over-copy channel is a later write to the caller's field: a view would
+// show it, a copy does not.
+//
+// @falsified-at: dd46146c — interpret exit 1 -> 0, interpret 1 assertion failures -> 0,
+// native exit 1 -> 0, native 1 assertion failures -> 0.
+//   HOLDS: leak, panic, free-refusal, expectations are equal on both trees. Falsify prints
+//   only the channels that MOVE and requires HERE to be clean, so each of those is clean on
+//   both. The native side was not scored in this sweep.
+//
+// ── a-nullable-return-is-as-fresh-as-its-dense-twin ──
+//
+// A NULLABLE RETURN IS AS FRESH AS ITS DENSE TWIN (`@FR-F-Ret` crossed with `@FR-N-Road`).
+// F-Ret: the value a function returns is FRESH and independent — mutating it reaches neither
+// another call's result nor the callee's input.  N-Road: which delivery a value takes answers
+// identically for τ and τ?, and the dense spelling is not the oracle — F-Ret is.  The N-Road
+// cells beside this rule measure a RECORD return; this one moves the returned value to a
+// VECTOR field of a parameter, a whole vector parameter, a struct field of a parameter, a text
+// field and a minted vector of records, each spelled `-> τ` and `-> τ?`, and writes through
+// the result.  Every pair must answer the same, and that answer is F-Ret's.
+//
+// Axes it MOVES: what is returned (a vector field projection, a vector parameter, a struct
+// field projection, a text field, a mint), the spelling (`τ`, `τ?`), what is written after (the
+// result, the source).  Values hand-computed: the source holds [1, 2], `In { k: 5 }`, "ab".
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the result and the source.
+// HOLDS: the N-Road record cells.
+
+struct Leaf { v: integer }
+struct Tree { l: Leaf, w: integer }
+struct Node { value: integer, next: reference<Node>? }
+struct Pair { v: integer, other: reference<Pair> }
+
+// The filed shape: a walker's local views a sibling local through a reference field.
+fn walked() -> Node? {
+  c = Node { value: 4, next: null };
+  b = Node { value: 2, next: c };
+  a = Node { value: 1, next: b };
+  cur: Node? = a;
+  cur = cur.next;
+  cur
+}
+
+// The same walk that ends at null: the copy is made only where the source is present.
+fn walked_to_null() -> Node? {
+  c = Node { value: 4, next: null };
+  cur: Node? = c;
+  cur = cur.next;
+  cur
+}
+
+// A projection inside an `if` arm, beside a null arm and beside a literal arm.
+fn arm_or_null(take: boolean) -> Leaf? {
+  t = Tree { l: Leaf { v: 11 }, w: 1 };
+  if take { t.l } else { null }
+}
+fn arm_or_literal(take: boolean) -> Leaf? {
+  t = Tree { l: Leaf { v: 15 }, w: 1 };
+  if take { t.l } else { Leaf { v: 0 } }
+}
+
+// CONTROLS — the shapes that were already right, so a widening cannot regress them
+// without a name attached.
+fn field_view() -> Leaf? { t = Tree { l: Leaf { v: 5 }, w: 1 }; t.l }
+fn field_view_bound() -> Leaf? { t = Tree { l: Leaf { v: 6 }, w: 1 }; x: Leaf? = t.l; x }
+fn element_view() -> Leaf? { v = [Leaf { v: 7 }, Leaf { v: 8 }]; v[1] }
+fn owned_local() -> Leaf? { x: Leaf? = Leaf { v: 3 }; x }
+fn literal_or_null(take: boolean) -> Leaf? { if take { Leaf { v: 12 } } else { null } }
+fn owned_or_null(take: boolean) -> Leaf? { x = Leaf { v: 13 }; if take { x } else { null } }
+fn param_or_null(p: Leaf, take: boolean) -> Leaf? { if take { p } else { null } }
+fn param(p: Leaf) -> Leaf? { p }
+// The walked records are the caller's: a returned copy of a local's record would name the
+// next local in `other`, which ends with this frame (`@FR-H-RefHome`).
+fn walked_dense(ps: vector<Pair>) -> Pair {
+  x: Pair = ps[0];
+  x = x.other;
+  x
+}
+fn arm_dense(take: boolean) -> Leaf {
+  t = Tree { l: Leaf { v: 9 }, w: 1 };
+  if take { t.l } else { Leaf { v: 0 } }
+}
+
+fn test_a_walkers_view_of_a_sibling_local_is_copied() {
+  r = walked();
+  filler = Leaf { v: 101 };
+  assert(r.value == 2 && filler.v == 101, "the returned record is b's copy: got {r.value}, want 2");
+  n = walked_to_null();
+  assert(n == null, "a walk that ended at null hands up null");
+}
+
+fn test_a_projection_inside_an_if_arm_is_copied() {
+  r = arm_or_null(true);
+  filler = Leaf { v: 102 };
+  assert(r.v == 11 && filler.v == 102, "the taken arm is t.l's copy: got {r.v}, want 11");
+  n = arm_or_null(false);
+  assert(n == null, "the null arm stays null");
+  s = arm_or_literal(true);
+  filler2 = Leaf { v: 103 };
+  assert(s.v == 15 && filler2.v == 103, "beside a literal arm too: got {s.v}, want 15");
+  z = arm_or_literal(false);
+  assert(z.v == 0, "the literal arm is handed up as it is: got {z.v}, want 0");
+}
+
+fn test_the_controls_are_unchanged() {
+  a = field_view(); f1 = Leaf { v: 104 };
+  b = field_view_bound(); f2 = Leaf { v: 105 };
+  c = element_view(); f3 = Leaf { v: 106 };
+  d = owned_local(); f4 = Leaf { v: 107 };
+  e = literal_or_null(true); f5 = Leaf { v: 108 };
+  f = owned_or_null(true); f6 = Leaf { v: 109 };
+  g = param_or_null(Leaf { v: 14 }, true); f7 = Leaf { v: 110 };
+  h = param(Leaf { v: 16 }); f8 = Leaf { v: 111 };
+  got = a.v * 10000000 + b.v * 1000000 + c.v * 100000 + d.v * 10000 + e.v * 1000 + f.v * 100 + g.v + h.v * 100000000;
+  assert(got == 1656843314, "five, six, eight, three, twelve, thirteen, fourteen, sixteen: got {got}");
+  assert(literal_or_null(false) == null && owned_or_null(false) == null && param_or_null(Leaf { v: 1 }, false) == null, "the null arms stay null");
+}
+
+fn test_the_dense_twins_are_unchanged() {
+  ps: vector<Pair> = [Pair { v: 1, other: null }, Pair { v: 2, other: null }, Pair { v: 4, other: null }];
+  ps[0].other = ps[1];
+  ps[1].other = ps[2];
+  r = walked_dense(ps);
+  filler = Leaf { v: 112 };
+  assert(r.v == 2 && r.other.v == 4 && filler.v == 112, "dense walker: got {r.v}, want 2");
+  r.v = 20;
+  assert(ps[1].v == 2, "dense walker: the result is a copy, got {ps[1].v}");
+  s = arm_dense(true);
+  assert(s.v == 9, "dense arm: got {s.v}, want 9");
+  z = arm_dense(false);
+  assert(z.v == 0, "dense literal arm: got {z.v}, want 0");
+}
+
+struct P { x: integer, y: integer }
+struct Bag { items: vector<integer>, rows: vector<vector<integer>>, rec: P }
+fn mk(n: integer) -> Bag { Bag { items: [n, n + 1], rows: [[n], [n + 5]], rec: P { x: n, y: 1 } } }
+fn nv(q: Bag) -> vector<integer>? { if q.rec.y > 0 { q.items } else { null } }
+fn nv0(q: Bag) -> vector<integer> { q.items }
+fn nrow(q: Bag) -> vector<integer>? { if q.rec.y > 0 { q.rows[1] } else { null } }
+fn nnull(q: Bag) -> vector<integer>? { if q.rec.y > 5 { q.items } else { null } }
+fn test_named() {
+  c = 1;
+  dv: vector<integer>? = [1];
+  dv0: vector<integer> = [1];
+  b = mk(1); a = nv(b); b.items[0] = 99;
+  assert((a ?? [0])[0] == 1, "named nullable plain bind: {a}");
+  b = mk(2); j = if c > 0 { nv(b) } else { dv }; b.items[0] = 99;
+  assert((j ?? [0])[0] == 2, "named nullable if join: {j}");
+  b = mk(3); r = nrow(b); b.rows[1][0] = 99;
+  assert((r ?? [0])[0] == 8, "named nullable element projection: {r}");
+  b = mk(4); z = nnull(b);
+  assert(z == null, "the null arm stays null: {z}");
+  b = mk(5); k = nv0(b); b.items[0] = 99;
+  assert(k[0] == 5, "control, non-null plain: {k}");
+  b = mk(6); kj = if c > 0 { nv0(b) } else { dv0 }; b.items[0] = 99;
+  assert(kj[0] == 6, "control, non-null join: {kj}");
+  assert(len(b.items) == 2 && b.items[0] == 99, "the caller's field is intact: {b.items}");
+}
+fn test_fnref() {
+  hv = fn(q: Bag) -> vector<integer>? { if q.rec.y > 0 { q.items } else { null } };
+  hv0 = fn(q: Bag) -> vector<integer> { q.items };
+  c = 1;
+  dv: vector<integer>? = [1];
+  b = mk(11); a = hv(b); b.items[0] = 99;
+  assert((a ?? [0])[0] == 11, "fn-ref nullable plain bind: {a}");
+  b = mk(12); j = if c > 0 { hv(b) } else { dv }; b.items[0] = 99;
+  assert((j ?? [0])[0] == 12, "fn-ref nullable if join: {j}");
+  b = mk(13); k = hv0(b); b.items[0] = 99;
+  assert(k[0] == 13, "control, fn-ref non-null: {k}");
+  s = 0;
+  b = mk(14);
+  for i in 0..200 { t = hv(b); s += len(t ?? []); filler: vector<integer> = [i]; }
+  assert(s == 400 && len(b.items) == 2 && b.items[0] == 14, "in a loop with a filler: {s} {b.items}");
+}
+fn nt(q: (vector<integer>, integer)) -> vector<integer>? { if q.1 > 0 { q.0 } else { null } }
+fn test_tuple_element_spelling() {
+  t = ([31, 32], 1);
+  a = nt(t); t.0[0] = 99;
+  assert((a ?? [0])[0] == 31, "a tuple-element projection: {a}");
+  assert(t.0[0] == 99, "the caller's tuple is intact: {t.0}");
+}
+fn test_workaround_still_copies() {
+  b = mk(21); t = nv(b); a = t; b.items[0] = 99;
+  assert((a ?? [0])[0] == 21, "bind then rebind: {a}");
+}
+
+struct RfIn { k: integer }
+struct RfH { v: vector<integer>, inner: RfIn, t: text }
+struct RfS { n: integer }
+
+fn rf_field(h: RfH) -> vector<integer> { h.v }
+fn rf_field_n(h: RfH) -> vector<integer>? { h.v }
+fn rf_param(p: vector<integer>) -> vector<integer> { p }
+fn rf_param_n(p: vector<integer>) -> vector<integer>? { p }
+fn rf_inner(h: RfH) -> RfIn { h.inner }
+fn rf_inner_n(h: RfH) -> RfIn? { h.inner }
+fn rf_text(h: RfH) -> text { h.t }
+fn rf_text_n(h: RfH) -> text? { h.t }
+fn rf_mint() -> vector<RfS> { [RfS { n: 1 }, RfS { n: 2 }] }
+fn rf_mint_n() -> vector<RfS>? { [RfS { n: 1 }, RfS { n: 2 }] }
+
+fn rf_h() -> RfH { RfH { v: [1, 2], inner: RfIn { k: 5 }, t: "ab" } }
+
+fn test_a_returned_vector_field_is_fresh_in_both_spellings() {
+  h = rf_h();
+  a = rf_field(h);
+  b: vector<integer>? = rf_field_n(h);
+  a[0] = 99;
+  b += [7];
+  assert(len(h.v) == 2 && h.v[0] == 1, "the source moved: {len(h.v)} {h.v[0]}");
+  assert(len(a) == 2 && a[0] == 99, "dense: {len(a)} {a[0]}");
+  assert(len(b) == 3 && (b[2] ?? -1) == 7 && (b[0] ?? -1) == 1, "nullable: {len(b)}");
+}
+
+fn test_a_returned_vector_parameter_is_fresh_in_both_spellings() {
+  src = [1, 2];
+  a = rf_param(src);
+  b: vector<integer>? = rf_param_n(src);
+  a += [3];
+  b += [4, 5];
+  assert(len(src) == 2, "the argument moved: {len(src)}");
+  assert(len(a) == 3 && len(b) == 4, "results: {len(a)} {len(b)}");
+}
+
+fn test_a_returned_struct_field_is_fresh_in_both_spellings() {
+  h = rf_h();
+  a = rf_inner(h);
+  b = rf_inner_n(h);
+  a.k = 50;
+  if b != null { b.k = 60; }
+  assert(h.inner.k == 5, "the source field moved: {h.inner.k}");
+  assert(a.k == 50 && (b ?? RfIn { k: -1 }).k == 60, "results: {a.k} {(b ?? RfIn { k: -1 }).k}");
+}
+
+fn test_a_returned_text_field_is_fresh_in_both_spellings() {
+  h = rf_h();
+  a = rf_text(h);
+  b = rf_text_n(h) ?? "";
+  a += "!";
+  b += "?";
+  assert(h.t == "ab" && a == "ab!" && b == "ab?", "text: {h.t} {a} {b}");
+}
+
+fn test_two_calls_answer_independent_values_in_both_spellings() {
+  a = rf_mint();
+  b = rf_mint();
+  c: vector<RfS>? = rf_mint_n();
+  d: vector<RfS>? = rf_mint_n();
+  a[0].n = 10;
+  c += [RfS { n: 3 }];
+  assert(b[0].n == 1 && len(b) == 2, "dense calls shared: {b[0].n} {len(b)}");
+  assert(len(c) == 3 && len(d) == 2, "nullable calls shared: {len(c)} {len(d)}");
+}
+
