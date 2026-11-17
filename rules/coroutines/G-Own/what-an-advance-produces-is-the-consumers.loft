@@ -1,5 +1,14 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// WHAT AN ADVANCE PRODUCES IS THE CONSUMER'S (`@FR-G-Own`, with `@FR-L-CapOwn`).  `next(g)` is a call, and
+// a call's result is fresh: a yielded record, struct enum or vector is the consumer's (loft#1589); a
+// generator hands over a record literal, a call's record, a tuple holding a record and a lambda with
+// a capture alike; and a yielded lambda keeps its own copy of every heap value it captured, copied
+// into a store its closure record owns at the yield.  Three sections, each with its cells and receipt.
+//
+// ── 1589-a-yielded-record-is-the-consumers ──
+//
 // loft#1589, `@FR-G-Own` — WHAT AN ADVANCE PRODUCES IS THE CONSUMER'S.  `next(g)` is a call, and a
 // call's result is fresh (`formal/heap.md` `(H-Move)`), so a yielded record, struct-enum or
 // vector moves into whatever binds it and the generator keeps no hold on it: a record built in
@@ -31,6 +40,34 @@
 //   after its generator released it; native — `c2 trace: m1,r1,m2,r2,m3,r3, want
 //   m1,r1,d1,m2,r2,d2,m3,r3,d3`, a drained `for` that released nothing.
 // HOLDS: the tuple cell `c14` is a control, right before and after.
+//
+// ── a-generator-hands-its-records-and-lambdas-to-the-consumer ──
+//
+// `@FR-G-Own` — a generator yielding a value the consumer takes over (`formal/coroutines.md`): a
+// record literal, a call's record, a vector, a tuple holding a record, a lambda with a capture;
+// and one abandoned after its first value.  Each expected value is computed by hand.  The
+// surveys of the loft bytecode writer and runner read it too: there the generator must forget
+// the temps holding what it hands over, or the consumer's release frees a store twice.
+//
+// @falsified-at: hand-measured (2026-11-15, f1feb2e4b) — on the loft writer's code
+// (`run_image_survey.py --written` reads this file) with `bgen_yield.loft`'s forgetting of the
+// handed temps removed, the runner stopped "a store was freed twice"; the Rust build answers
+// the same before and after that change, so `falsify.sh` against a Rust ref has no channel here.
+//
+// ── a-yielded-lambda-keeps-its-copy-of-a-captured-vector ──
+//
+// A YIELDED LAMBDA KEEPS ITS COPY OF A CAPTURED VECTOR (`@FR-G-Own`, `@FR-L-CapOwn`).  Every heap
+// value a yielded lambda captures is copied into a store the closure record owns, at the yield:
+// the generator's later growth and element write of the local do not reach the first lambda,
+// while the second lambda, yielded after them, copies the changed vector.  Read whether the
+// consumer calls them during the drain or holds both and calls them after.
+//
+// @falsified-at: none — a conformance guard at a rule pairing no guard named together; every cell
+//   answered as the rule says on both backends on the tree it landed on.
+// CHANNEL: the asserts, and the leak gate for the closure records' stores.
+// ARMED: no instrument.
+// WITNESS: each message names the two hand-computed answers.
+// HOLDS: every cell on both backends, leak-clean.
 
 fn trace_path() -> text { return "loft_1589_yield_trace.tmp"; }
 
@@ -145,7 +182,7 @@ fn c16() -> text { for t in tuple_calls() { note("r{t.1.id}"); } "" }
 fn c17_take() -> (integer, P) { g = tuple_gen(); a = next(g); a }
 fn c17() -> text { a = c17_take(); junk = [P { id: 77 }, P { id: 88 }]; "{a.1.id}{len(junk)}" }
 
-fn main() {
+fn test_a_yielded_record_is_the_consumers() {
   drain();
   ok("c1 returned past the generator", c1(), "13");
   ok("c1 trace      ", drain(), "d1");
@@ -177,4 +214,77 @@ fn main() {
   ok("c17 tuple kept", c17(), "102");
   delete(trace_path());
   println("a yielded record is the consumer's: every cell holds");
+}
+
+struct S2P { x: integer, name: text }
+
+fn s2_mk(i: integer) -> S2P { S2P { x: i * 10, name: "m{i}" } }
+
+fn lits(n: integer) -> iterator<S2P> {
+  for i in 0..n { yield S2P { x: i, name: "p{i}" }; }
+}
+
+fn s2_calls(n: integer) -> iterator<S2P> {
+  for i in 0..n { yield s2_mk(i); }
+}
+
+fn vecs(n: integer) -> iterator<vector<integer>> {
+  for i in 0..n { yield [i, i + 1, i * i]; }
+}
+
+fn pairs(n: integer) -> iterator<(integer, S2P)> {
+  for i in 0..n { yield (i + 100, s2_mk(i)); }
+}
+
+fn adders(n: integer) -> iterator<fn(integer) -> integer> {
+  for i in 0..n {
+    k = i * 7;
+    yield fn(x: integer) -> integer { x + k };
+  }
+}
+
+fn test_a_generator_hands_its_records_and_lambdas_to_the_consumer() {
+  s = "";
+  for p in lits(3) { s += "{p.x}:{p.name} "; }
+  assert(s == "0:p0 1:p1 2:p2 ", "literals: {s}");
+  s = "";
+  for p in s2_calls(3) { s += "{p.x}:{p.name} "; }
+  assert(s == "0:m0 10:m1 20:m2 ", "s2_calls: {s}");
+  s = "";
+  for v in vecs(3) { s += "{v} "; }
+  assert(s == "[0,1,0] [1,2,1] [2,3,4] ", "vectors: {s}");
+  s = "";
+  for t in pairs(2) { s += "{t.0}/{t.1.name} "; }
+  assert(s == "100/m0 101/m1 ", "tuples: {s}");
+  s = "";
+  for f in adders(3) { s += "{f(1)} "; }
+  assert(s == "1 8 15 ", "lambdas: {s}");
+  s = "";
+  for p in s2_calls(5) { s += "first {p.name} "; break; }
+  assert(s == "first m0 ", "abandoned: {s}");
+  println("ok");
+}
+
+fn makers() -> iterator<fn() -> integer> {
+  v = [1, 2];
+  yield fn() -> integer { len(v) * 10 + v[0] };
+  v += [3];
+  v[0] = 7;
+  yield fn() -> integer { len(v) * 10 + v[0] };
+  v += [4];
+}
+
+fn test_called_during_the_drain() {
+  r = "";
+  for f in makers() { r += "{f()} "; }
+  // [1, 2] -> 2 * 10 + 1 = 21; [7, 2, 3] -> 3 * 10 + 7 = 37.
+  assert(r == "21 37 ", "21 37: {r}");
+}
+
+fn test_held_and_called_after_the_generator_moved_on() {
+  g = makers();
+  a = next(g);
+  b = next(g);
+  // `a` was copied before `v += [3]; v[0] = 7` ran, so it still answers 21.
+  assert(a() == 21 && b() == 37, "21 37: {a()} {b()}");
 }
