@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A HASH GROWN THROUGH ITS REBUILDS KEEPS EVERY ENTRY WHERE ITS READERS SEE IT (`@FR-Col-Tag`,
+// @C105, @C152).  A bucket slot carries the key digest's low 32 bits beside its entry, so a
+// rebuild places every entry from its tag alone and entries do not move: a view, a stored
+// `reference<T>` and a group member see what they saw.  Here one entry is held three ways while
+// 300 more are added — growing the table past several rebuilds — and each reader still reads it;
+// a group's keyed member, fed through its vector member, holds every record.  A value never
+// depends on the layout (`@FR-Col-Layouts`), so the answers are the same with untagged slots
+// (LOFT_NO_HASH_TAG) and out-of-line entries (LOFT_NO_HASH_INLINE).  Values by hand: key 7 holds
+// 70; 1 + 300 entries; key 399 holds 399.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed on the tree of
+//   the suite pin that adds this cell, interpret and native-c, under the default layout and with
+//   LOFT_NO_HASH_TAG and LOFT_NO_HASH_INLINE.
+//   CHANNEL: the asserts and the leak gate.
+//   ARMED: the suite's own LOFT_LEAK_CHECK=1.
+//   HOLDS: the Col-Inline cell's walks; the Rust twins in src/hash.rs.
+
+struct T { k: integer, v: integer }
+struct G { by_k: hash<T[k]>, all: vector<T> }
+struct Pin { at: reference<T> }
+
+fn test_a_view_and_a_stored_reference_read_their_entry_across_the_rebuilds() {
+  h: hash<T[k]> = [];
+  h += [T { k: 7, v: 70 }];
+  seen = h[7];
+  p = Pin { at: h[7]! };
+  for i in 100..400 { h += [T { k: i, v: i }]; }
+  s = "{seen.v ?? -1} {p.at.v} {h[7].v ?? -1} {len(h)} {h[399].v ?? -1}";
+  assert(s == "70 70 70 301 399", "after the rebuilds: {s}");
+}
+
+fn test_a_group_member_holds_every_record_its_sibling_took() {
+  g = G { by_k: [], all: [] };
+  g.all += [T { k: 7, v: 70 }];
+  for i in 100..400 { g.all += [T { k: i, v: i }]; }
+  s = "{g.by_k[7].v ?? -1} {len(g.by_k)} {g.all[0].v}";
+  assert(s == "70 301 70", "the group after the rebuilds: {s}");
+}
