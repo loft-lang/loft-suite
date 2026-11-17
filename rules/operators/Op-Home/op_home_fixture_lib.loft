@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// THE FIXTURE LIBRARY for `an-operator-on-another-sources-type-is-refused.loft` (`@FR-Op-Home`):
+// THE FIXTURE LIBRARY for `an-operator-lives-with-its-type-refused.loft` (`@FR-Op-Home`):
 // it declares `OhPt` and its own `operator plus`, so the type's home is this source.  Run on its
 // own it is a cell too: the operator it declares for its own type works.
 //
