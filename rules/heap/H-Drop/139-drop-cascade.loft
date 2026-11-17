@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @PLN139 stages B–E — a container's death releases what it OWNS, and the value it took
+// `@FR-H-Drop` (its container clause, @C111) — @PLN139 stages B–E: a container's death releases
+// what it OWNS, and the value it took
 // ownership of stops releasing itself. Struct fields, enum payloads and collection elements.
 //
 // Before this, a droppable copied into a struct field was released TWICE over: once by the
