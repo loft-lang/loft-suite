@@ -23,7 +23,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message prints the converted fields.
-// HOLDS: `a-conversion-between-two-foreign-types-is-refused` beside it.
+// HOLDS: `a-conversion-out-of-another-sources-record-is-refused` beside it.
 
 use op_conv_fixture_lib::*;
 
