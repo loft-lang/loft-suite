@@ -5,7 +5,7 @@
 // field is allow-by-default: an unlinked field of a parameter reads with no grant.  A field linked
 // `secret#read` reads when the grant is held — field by field and in a whole-value render — and
 // on a value the function BUILT it reads with no grant, since that value is the script's own.
-// The refused twins are in `a-private-field-is-refused-at-every-read.loft`.
+// The refused twins are in `a-private-field-is-refused-at-every-read-equality-included-refused.loft`.
 //
 // @falsified-at: none — a conformance guard for a rule no test named; every cell answered as the
 //   rule says on both backends on the tree it landed on.
