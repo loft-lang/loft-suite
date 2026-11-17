@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NON-EXHAUSTIVE MATCH IS REFUSED, NAMING WHAT IS MISSING (`@FR-M-Exhaust`, with `@FR-M-Total`).
+// A match on an enum missing a variant names the variants, and a hole behind a nested pattern is
+// named by its outer variant.  Each function is one refusal with its expectation.
+//
+// ── a-hole-in-a-token-match-names-the-missing-variants ──
+//
+// A HOLE IN A TOKEN MATCH NAMES THE MISSING VARIANTS (`@FR-M-Exhaust`).  M-Exhaust: a match on
+// an enum covers every variant or carries a `_`; a match missing one is a STATIC ERROR naming
+// what is missing.  The compiler's own use: adding a token kind must break every match that
+// forgot it, and the message must say which — here two of six are missing, both named, in
+// declaration order.  The OCaml bar's C6 family (loft-lang/plans#202, probe `c9`).
+//
+// @EXPECT_ERROR: match on Tok is not exhaustive — missing: Minus, RParen
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 9121f1b50, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names both missing variants.
+// HOLDS: `M-Total/unit-arms-cover-an-enum-without-a-wildcard`, the covered half.
+//
+// ── a-hole-behind-a-nested-pattern-is-named-by-its-outer-variant ──
+//
+// A HOLE BEHIND A NESTED PATTERN IS NAMED BY ITS OUTER VARIANT (`@FR-M-Exhaust` crossed with
+// `@FR-M-Total`).  M-Total: `total(V{f…})` holds only when every field sub-pattern is total, so
+// the two `Node` arms — one asking both children to be `Leaf`, one asking the left to be a
+// `Node` — leave `Node { l: Leaf, r: Node }` uncovered, and `Node` does not count as covered.
+// M-Exhaust then refuses the match, naming the variant whose arms are not total: `Node`, the
+// outer variant, not the uncovered shape inside it.  That is the contract today (the OCaml
+// bar's C6 reads PARTIAL for it); a sharper message is a change to this cell.
+//
+// @EXPECT_ERROR: match on T is not exhaustive — missing: Node
+//
+// @falsified-at: none — a conformance guard; the refusal fires on 9121f1b50, interpret and native.
+// CHANNEL: the compile diagnostic.
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the outer variant.
+// HOLDS: `a-hole-in-a-token-match-names-the-missing-variants` beside it.
+
+enum Tok { Ident { s: text }, Num { v: integer }, Plus, Minus, LParen, RParen }
+
+fn show(t: Tok) -> text {
+  match t {
+    Ident { s } => s,
+    Num { v } => "{v}",
+    Plus => "+",
+    LParen => "(",
+  }
+}
+
+fn test_a_hole_in_a_token_match_names_the_missing_variants() {
+  assert(show(Plus) == "+", "unreachable");
+}
+
+enum T { Leaf, Node { l: reference<T>, r: reference<T> } }
+
+fn f(t: T) -> integer {
+  match t {
+    Leaf => 0,
+    Node { l: Leaf, r: Leaf } => 1,
+    Node { l: Node { l, r }, r: _ } => 2,
+  }
+}
+
+fn test_a_hole_behind_a_nested_pattern_is_named_by_its_outer_variant() {
+  assert(f(Leaf) == 0, "unreachable");
+}
