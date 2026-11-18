@@ -1,6 +1,27 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A VARIANT TAKES THE ENUM THAT OWNS IT, AND REACHES ITS SLOT IN ONE STEP (`@FR-C-Var`).  A bare
+// variant is typed by the enum that declares it, and reaches a nullable slot of that enum directly.
+// Each section keeps its own cases and receipt.
+//
+// ── a-bare-variant-takes-the-enum-that-owns-it ──
+//
+// `@FR-C-Var` with @C157 — a bare variant converts to the one visible enum that owns its name,
+// with no type context; where two enums own it, the other arms of the same `if` or `match` pick
+// the enum.
+//
+// Each cell names one position; the values are written out by hand beside each.
+//
+// @falsified-at: 6f31a726b — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the exit — on the control every cell is refused at compile time ("bare variant
+//   'Green' has no type here"), so nothing runs.
+//   WITNESS: that refusal.
+//   ARMED: nothing.
+//   HOLDS: values, leak and panic — the control never runs, so only the exit can move.
+//
+// ── a-variant-reaches-a-nullable-enum-slot-in-one-step ──
+//
 // A VARIANT REACHES A NULLABLE ENUM SLOT IN ONE STEP (`@FR-C-Var` crossed with `@FR-N-Intro` and
 // `@FR-B-Copy`).  C-Var: `Reference(S) ⤳ Enum(E)` for S a variant of E, "and plain Enum ⤳ Integer
 // tag"; its NB: "the null INTRO `S ⤳ S?` is (N-Intro)", the only null-direction conversion.  So
@@ -23,8 +44,39 @@
 // WITNESS: each message prints the answers.
 // HOLDS: the C-Var cells beside it.
 
+enum Hue { Red, Green, Blue }
+enum Light { Red, Amber }
+enum Shape { Empty, Circle { r: float } }
+
+fn test_a_sole_owner_needs_no_context() {
+  g = Green;                                   // only Hue has Green
+  e = Empty;                                   // a unit variant of a struct enum
+  hs = [Green, Blue];                          // a vector literal
+  assert(g == Hue.Green, "Green is Hue's");
+  assert(e is Empty, "Empty is Shape's");
+  assert(len(hs) == 2 and hs[1] == Hue.Blue, "a vector<Hue>");
+}
+
+fn test_the_arms_of_an_if_pick_the_enum() {
+  n = 1;
+  a = if n == 0 { Red } else { Blue };         // Blue is only Hue's: Blue
+  b = if n == 0 { Blue } else { Red };         // the shared name second: Hue's Red
+  c = if n == 0 { Red } else if n == 1 { Amber } else { Red };   // Amber is Light's: Amber
+  assert(a == Hue.Blue, "a: {a}");
+  assert(b == Hue.Red, "b: {b}");
+  assert(c == Light.Amber, "c: {c}");
+}
+
+fn test_the_arms_of_a_match_pick_the_enum() {
+  n = 0;
+  m = match n { 0 => Red, _ => Amber };        // the shared name FIRST: Light's Red
+  k = match n { 0 => Green, 1 => Red, _ => Blue };   // Hue's Green
+  assert(m == Light.Red, "m: {m}");
+  assert(k == Hue.Green, "k: {k}");
+}
+
 enum CvSh { CvCi { r: integer }, CvSq { w: integer } }
-enum CvCol { Red, Green, Blue }
+enum CvCol { S2Red, S2Green, S2Blue }
 struct CvH { s: CvSh?, ss: vector<CvSh?> }
 
 fn cv_take(e: CvSh?) -> integer {
@@ -65,15 +117,9 @@ fn test_a_field_and_an_element() {
 }
 
 fn test_a_plain_enum_is_its_one_based_tag() {
-  x: integer = CvCol.Blue;
-  y: CvCol? = CvCol.Green;
-  z = CvCol.Red as integer;
-  assert(x == 3 && y == CvCol.Green && z == 1, "tags: {x} {z}");
+  x: integer = CvCol.S2Blue;
+  y: CvCol? = CvCol.S2Green;
+  z = CvCol.S2Red as integer;
+  assert(x == 3 && y == CvCol.S2Green && z == 1, "tags: {x} {z}");
 }
 
-fn main() {
-  test_a_local_and_a_parameter();
-  test_a_nullable_return_on_both_arms();
-  test_a_field_and_an_element();
-  test_a_plain_enum_is_its_one_based_tag();
-}
