@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A VIEW OF EACH KIND IS ITS OWNER'S, AND FREED ONCE (`@FR-O-Borrow`).  A value aliasing another
+// — a field of a record, an element of a vector, a field of a parameter handed back, a `&` link to
+// a record — carries its source in its deps: it reads what the owner holds, sees a write through
+// the owner, is never freed itself, and the one owner frees the store once.  Each test takes one
+// kind of view and reads it after the owner changes or the call returns; the run's leak, re-free
+// and poison checks catch a view freed as an owner or an owner never freed.
+//
+// Values by hand: b = r.inner reads 5, then 7 after `r.inner.x = 7`; w.v[1] is 20; pick(q)
+// answers q's inner, 5; poke writes 9 through the link.
+//
+// Axes it MOVES: the view kind (field, element, parameter field returned, `&` link), a write
+//   through the owner after the view is taken.
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed, interpret
+//   and native, leak- and re-free-clean.
+// CHANNEL: the asserts and the suite's leak check.
+// ARMED: no instrument.
+// WITNESS: each message prints the value read.
+// HOLDS: a match capture's view (2338, beside it).
+// MOVED BY: `LOFT_NO_SEVERAL_VARS=1` (the `switches` census) — the cure this cell also guards.
+
+struct In { x: integer }
+struct Out { inner: In, tag: integer }
+struct W { v: vector<In> }
+fn pick(o: Out) -> In { o.inner }
+fn poke(p: &In) { p.x = 9; }
+
+fn test_a_field_view_sees_the_owners_write() {
+  r = Out { inner: In { x: 5 }, tag: 1 };
+  b = r.inner;
+  first = b.x;
+  r.inner.x = 7;
+  assert(first == 5 && b.x == 7, "field: {first} {b.x}");
+}
+
+fn test_an_element_view() {
+  w = W { v: [In { x: 10 }, In { x: 20 }] };
+  e = w.v[1];
+  assert(e.x == 20, "element: {e.x}");
+}
+
+fn test_a_parameters_field_handed_back() {
+  q = Out { inner: In { x: 5 }, tag: 2 };
+  p = pick(q);
+  assert(p.x == 5 && q.tag == 2, "param: {p.x}");
+}
+
+fn test_a_link_writes_through_to_its_owner() {
+  s = In { x: 1 };
+  poke(s);
+  assert(s.x == 9, "link: {s.x}");
+}
