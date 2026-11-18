@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A WALK OVER A LIST IS A VIEW OF THE LIST IT WAS BOUND TO (`@FR-R-CopyView`).  A local that only
+// walks a list — a match walk over an enum list, a walk over a list a front push (R-Demote) grows —
+// is bound as a view instead of a copy, and every step reads the list it was bound to.  Each section
+// keeps its own cases and receipt.
+//
+// ── a-match-walk-over-an-enum-list-is-a-view ──
+//
 // `@FR-R-CopyView`, the WALK clause over a struct-enum — `cur = l; … match cur { Cons { v, next }
 // => cur = next }` copies `l` at the bind and the payload `next` at every step (`@FR-B-Copy`).
 // The payload is a STEP of the cursor: where it is only read and handed back to the cursor, and
@@ -16,6 +23,24 @@
 // CHANNEL: the asserts and the leak gate.
 // HOLDS: every assertion and the leak gate on all three backends, with the clause and without
 //   it (`LOFT_NO_COPY_VIEW_WALK=1`).
+//
+// ── a-walk-over-a-list-the-demote-grows-reads-the-list-it-was-bound-to ──
+//
+// `@FR-R-CopyView` crossed with `@FR-R-Demote`: a list grown by front pushes (R-Demote: the old
+// head record MOVES into the new node's child, the destination's record keeps its number) and
+// walked by a cursor whose every set is a bind from a variable or a step to a child (R-CopyView's
+// walk clause: a view of what it walks).  Both rewrite away a copy, and together they must
+// still answer what the copies answer: a walk of a struct list and of an enum list after the
+// pushes; a cursor bound to the head and then the head pushed again — the cursor is B-Copy's
+// copy of the list as it was, so it walks the old list, not the moved record nor the emptied
+// head; a list pushed onto inside the walk of another list; and a walk over an out-of-line
+// field grown by the place form.
+//
+// Every cell held on both backends when written; the ledger rows are in
+// doc/claude/RULE_CROSSINGS-history.md.
+//
+// @falsified-at: none — the walk found no defect, so no earlier build answers wrong.
+// CHANNEL: the assertions and the leak gate.
 
 enum List { Nil, Cons { v: integer, next: List } }
 
@@ -120,11 +145,73 @@ fn payload_escapes() -> integer {
   s * 10 + len_of(keep)
 }
 
-fn main() {
+fn test_a_match_walk_over_an_enum_list_is_a_view() {
   assert(digits(three()) == 321, "a walk over a parameter: {digits(three())}");
   assert(two_walks() == 321678, "two walks: {two_walks()}");
   assert(rebuilt_during() == 321088, "rebuilt during the walk: {rebuilt_during()}");
   assert(pushed_during() == 321999321, "pushed during the walk: {pushed_during()}");
   assert(payload_escapes() == 30, "the payload escapes: {payload_escapes()}");
   println("enum walk ok");
+}
+
+struct N { v: integer, next: N? }
+struct Host { tag: integer, g: N? }
+enum L { S2Nil, S2Cons { v: integer, next: L } }
+
+fn s2_digits(n: N?) -> integer {
+  t = 0;
+  cur = n;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  t
+}
+
+fn ldigits(l: L) -> integer {
+  t = 0;
+  cur = l;
+  more = true;
+  while more {
+    match cur {
+      S2Cons { v, next } => { t = t * 10 + v; cur = next; }
+      S2Nil => { more = false; }
+    }
+  }
+  t
+}
+
+fn test_walks_after_front_pushes() {
+  h = N { v: 1 };
+  for i in 2..6 { h = N { v: i, next: h }; }
+  l = S2Nil;
+  for i in 1..5 { l = S2Cons { v: i, next: l }; }
+  assert(s2_digits(h) == 54321 && ldigits(l) == 4321, "walks: {s2_digits(h)} {ldigits(l)}");
+}
+
+fn test_a_cursor_bound_before_a_push_walks_the_old_list() {
+  h = N { v: 1, next: N { v: 2 } };
+  cur = h;
+  h = N { v: 9, next: h };
+  t = 0;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  assert(t == 12 && s2_digits(h) == 912, "the cursor's copy: {t} {s2_digits(h)}");
+  l = S2Cons { v: 1, next: S2Cons { v: 2, next: S2Nil } };
+  c = l;
+  l = S2Cons { v: 9, next: l };
+  assert(ldigits(c) == 12 && ldigits(l) == 912, "an enum list: {ldigits(c)} {ldigits(l)}");
+}
+
+fn test_a_push_inside_the_walk_of_another_list() {
+  src = N { v: 3, next: N { v: 2, next: N { v: 1 } } };
+  rev = N { v: 0 };
+  cur = src;
+  while cur != null { rev = N { v: cur.v, next: rev }; cur = cur.next; }
+  assert(s2_digits(rev) == 1230 && s2_digits(src) == 321, "reversed while walked: {s2_digits(rev)} {s2_digits(src)}");
+}
+
+fn test_a_walk_over_a_field_grown_by_the_place_form() {
+  o = Host { tag: 4 };
+  for i in 1..4 { o.g = N { v: i, next: o.g }; }
+  t = 0;
+  cur = o.g;
+  while cur != null { t = t * 10 + cur.v; cur = cur.next; }
+  assert(t == 321 && o.tag == 4 && s2_digits(o.g) == 321, "the field's list: {t}");
 }
