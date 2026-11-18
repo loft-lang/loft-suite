@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NAME MEANS EXACTLY ITS SPELLING (`@FR-Path-Case`).  Beside `b.txt`, the spelling `B.txt` that
+// matches it only when case is ignored is refused for reading (it does not exist, its content is
+// null) and for writing (it is not created, nor does it overwrite b.txt), and deleting or moving
+// it touches nothing — so `b.txt` and `B.txt` are never one file on one platform and two on
+// another.  A name that differs in more than case is its own file.
+//
+// @falsified-by: tests/falsified/2556-a-refused-path-is-each-operations-own-failure-answer.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 2 assertion failures -> 0
+//   CHANNEL: the asserts.
+//   ARMED: no instrument.
+//   WITNESS: each message names the spelling.
+//   HOLDS: `b.txt` keeps its content through every refused spelling.
+
+fn scratch(tag: text) -> text {
+  d = "{temp_dir() ?? "/tmp"}/loft_suite_paths_{tag}_{now()}_{ticks()}";
+  mkdir_all(d);
+  d
+}
+fn clean(d: text) {
+  for n in list_dir(d) ?? [] { delete("{d}/{n}"); }
+  delete(d);
+}
+
+fn test_a_second_spelling_is_refused_for_reading_and_writing() {
+  d = scratch("case");
+  file("{d}/b.txt").write("lower");
+  assert(!exists("{d}/B.txt") && !exists("{d}/B.TXT"), "B.txt is not b.txt");
+  assert(file("{d}/B.TXT").content() == null, "B.TXT reads nothing");
+  assert(file("{d}/B.txt").write("upper") == FileResult.Other, "B.txt is not created");
+  assert(delete("{d}/B.TXT") == FileResult.Other, "deleting B.TXT touches nothing");
+  assert(move("{d}/B.txt", "{d}/c.txt") == FileResult.Other, "moving B.txt touches nothing");
+  assert("{list_dir(d) ?? []}" == "[\"b.txt\"]", "one file: {list_dir(d) ?? []}");
+  assert((file("{d}/b.txt").content() ?? "") == "lower", "b.txt kept its content");
+  clean(d);
+}
+
+fn test_a_name_that_differs_beyond_case_is_its_own() {
+  d = scratch("case2");
+  file("{d}/b.txt").write("1");
+  assert(file("{d}/bb.txt").write("2").ok(), "bb.txt is another name");
+  assert(len(list_dir(d) ?? []) == 2, "two files");
+  clean(d);
+}

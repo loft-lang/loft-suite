@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REFUSED PATH IS EACH OPERATION'S OWN FAILURE ANSWER (`@FR-Path-Refuse`, @C80).  For a path a
+// rule refuses (`q?.txt` by `@FR-Path-Name`, `B.txt` beside `b.txt` by `@FR-Path-Case`):
+// `exists` false, `list_dir` / `content` / `read_bytes` null, `write_bytes` false, and `write` /
+// `delete` / `move` / `mkdir` FileResult.Other — never a runtime error, and the program runs on.
+//
+// @falsified-by: tests/falsified/2556-a-refused-path-is-each-operations-own-failure-answer.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 2 assertion failures -> 0
+//   CHANNEL: the asserts (a runtime error would stop the test).
+//   ARMED: no instrument.
+//   WITNESS: each message names the operation.
+//   HOLDS: the program continues after every refusal (the last assert runs).
+
+fn scratch(tag: text) -> text {
+  d = "{temp_dir() ?? "/tmp"}/loft_suite_paths_{tag}_{now()}_{ticks()}";
+  mkdir_all(d);
+  d
+}
+fn clean(d: text) {
+  for n in list_dir(d) ?? [] { delete("{d}/{n}"); }
+  delete(d);
+}
+
+fn test_every_operation_answers_its_failure() {
+  d = scratch("refuse");
+  p = "{d}/q?.txt";
+  assert(!exists(p), "exists");
+  assert(list_dir("{d}/x*y") == null, "list_dir");
+  assert(file(p).content() == null, "content");
+  assert(read_bytes(p) == null, "read_bytes");
+  assert(!write_bytes(p, [48 as u8]), "write_bytes");
+  assert(file(p).write("x") == FileResult.Other, "write");
+  assert(delete(p) == FileResult.Other, "delete");
+  assert(mkdir("{d}/a|b") == FileResult.Other, "mkdir");
+  file("{d}/ok.txt").write("ok");
+  assert(move("{d}/ok.txt", p) == FileResult.Other, "move to a refused name");
+  assert(move(p, "{d}/n.txt") == FileResult.Other, "move from a refused name");
+  assert((file("{d}/ok.txt").content() ?? "") == "ok", "the program ran on, ok.txt intact");
+  clean(d);
+}

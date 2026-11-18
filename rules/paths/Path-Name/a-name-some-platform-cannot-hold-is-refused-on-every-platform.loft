@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NAME SOME PLATFORM CANNOT HOLD IS REFUSED ON EVERY PLATFORM (`@FR-Path-Name`, with
+// `@FR-Path-Refuse`).  Every kind the rule lists: a control character; each of < > : " | ? * (a
+// `\` is a separator, `@FR-Path-Sep`, never part of a name); every device name — CON PRN AUX NUL,
+// COM1–COM9, LPT1–LPT9 — in any case, with or without an extension; a name ending in `.` or a
+// space.  Each is refused for writing (FileResult.Other, nothing created) and does not exist.  Beside
+// them, the names that only look alike are written: a comma (`a,b`, legal everywhere),
+// `console.txt`, `COM10`, `LPT0.log`, `nul_x`, `auxiliary`, a dot inside a name.  And `.` and `..`
+// are names of the walk: they exist.
+//
+// @falsified-at: none — a conformance guard from the formal text; every name answered as the rule
+//   says, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message names the name.
+// HOLDS: nothing is written into the directory by a refused name (its listing holds only the
+//   allowed ones).
+
+fn scratch(tag: text) -> text {
+  d = "{temp_dir() ?? "/tmp"}/loft_suite_paths_{tag}_{now()}_{ticks()}";
+  mkdir_all(d);
+  d
+}
+fn clean(d: text) {
+  for n in list_dir(d) ?? [] { delete("{d}/{n}"); }
+  delete(d);
+}
+
+fn test_every_kind_of_illegal_name_is_refused() {
+  d = scratch("name");
+  bad = ["a\u{1}b", "a<b", "a>b", "a:b", "a\"b", "a|b", "q?", "x*y",
+         "CON", "prn", "Aux", "nul.txt", "COM1", "com9.log", "LPT1", "lpt9.x", "Con.TXT",
+         "trail.", "trail "];
+  for n in bad {
+    assert(file("{d}/{n}").write("x") == FileResult.Other, "{n} is refused for writing");
+    assert(!exists("{d}/{n}"), "{n} does not exist");
+  }
+  assert(len(list_dir(d) ?? []) == 0, "nothing written: {list_dir(d) ?? []}");
+  clean(d);
+}
+
+fn test_the_names_that_only_look_alike_are_written() {
+  d = scratch("alike");
+  good = ["a,b", "console.txt", "COM10", "LPT0.log", "nul_x", "a.b.c", "auxiliary"];
+  for n in good {
+    assert(file("{d}/{n}").write("x").ok(), "{n} is a name");
+  }
+  assert(len(list_dir(d) ?? []) == 7, "seven written: {list_dir(d) ?? []}");
+  clean(d);
+}
+
+fn test_dot_and_dot_dot_are_names_of_the_walk() {
+  d = scratch("walk");
+  assert(exists("{d}/.") && exists("{d}/.."), "the walk's names exist");
+  clean(d);
+}
