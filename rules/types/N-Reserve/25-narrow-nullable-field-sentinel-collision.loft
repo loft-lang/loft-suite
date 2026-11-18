@@ -14,7 +14,7 @@
 //
 // It stays as a guard rather than being deleted because the shape it pins — the sentinel
 // arriving through a struct LITERAL — is the one that made it look like a storage bug.
-// `tests/scripts/1249-a-nullable-narrow-sentinel-is-not-a-value.loft` is the full sweep.
+// `tests/scripts/a-nullable-narrow-value-spends-its-top-code-on-null-in-every-place.loft` is the full sweep.
 //
 // @falsified-at: none — the assertions read the same on every build back to the one that filed
 //   this file; what changed is which answer counts as correct, so no earlier build can fail it.

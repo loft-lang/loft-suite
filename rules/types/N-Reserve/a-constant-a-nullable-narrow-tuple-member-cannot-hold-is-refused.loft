@@ -14,7 +14,7 @@
 // CHANNEL: the compile diagnostic.
 // ARMED: no instrument.
 // WITNESS: the diagnostic names the constant and the type.
-// HOLDS: `a-nullable-narrow-tuple-member-spends-its-top-code-in-every-place` beside it.
+// HOLDS: `a-nullable-narrow-value-spends-its-top-code-on-null-in-every-place` beside it.
 
 fn main() {
   t: (u8?, integer) = (255, 1);
