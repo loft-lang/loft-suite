@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE ANSWERS WHAT ITS COPY WOULD, ON EVERY HALF (`@FR-O-SliceView`, `@FR-Slice-Value`).  A slice
+// `v[a..b]` of a scalar vector or a text is a FRESH value; it may be delivered as a view of the
+// source's bytes only where nothing can tell it from that copy.  Each test is one half of the rule
+// where a view would be told apart — and the slice must read what the copy taken at the slice holds:
+//   the SOURCE'S half: a `const` parameter that arrives under a second, writable name, written
+//     after the slice;
+//   the HOLDER'S half: a slice stored into a record that outlives the call, after which the caller
+//     writes its vector;
+//   the LIFETIME'S half: a slice held while a callee writes an element of the source;
+// and the plain case, where a view is admissible: read in a local and passed as an argument.
+//
+// Values by hand: the source is [10, 20, 30, 40], so `[1..3]` is [20, 30] (length 2, sum 50) in
+// every case; the writes (w[1] = 99, u[1] = 5, w[2] = 77) land after the slice; "abcd"[1..3] is "bc".
+//
+// @falsified-at: none — a conformance guard; every value answered as hand-computed, interpret and
+//   native, leak-, re-free- and poison-clean; it CAN fail: the `switches` census finds
+//   `LOFT_NO_RETBUF_WITNESS_GATE=1` and `LOFT_NO_SEVERAL_VARS=1` each move it (no slice-view switch
+//   does — a view and its copy answer alike, which is the rule's promise).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the slice.
+// HOLDS: the source itself takes every write (`v` after the aliased call is [10, 99, 30, 40]).
+
+struct Box { part: vector<integer> }
+fn total(v: const vector<integer>) -> integer { t = 0; for x in v { t += x; } t }
+fn plain(c: const vector<integer>) -> text { s = c[1..3]; "{s} {len(s)} {total(c[1..3])}" }
+fn aliased(c: const vector<integer>, w: vector<integer>) -> text { s = c[1..3]; w[1] = 99; "{s}" }
+fn keep(c: const vector<integer>) -> Box { Box { part: c[1..3] } }
+fn poke(w: vector<integer>) { w[2] = 77; }
+fn held(c: const vector<integer>, w: vector<integer>) -> text { s = c[1..3]; poke(w); "{s}" }
+fn tslice(t: const text) -> text { t[1..3] }
+
+fn test_the_plain_case_reads_the_copy() {
+  v = [10, 20, 30, 40];
+  r = plain(v);
+  assert(r == "[20,30] 2 50", "plain: {r}");
+}
+
+fn test_a_const_source_written_under_a_second_name() {
+  v = [10, 20, 30, 40];
+  r = aliased(v, v);
+  assert(r == "[20,30]" && "{v}" == "[10,99,30,40]", "aliased: {r} {v}");
+}
+
+fn test_a_slice_stored_into_a_record_that_outlives_the_call() {
+  u = [10, 20, 30, 40];
+  bx = keep(u);
+  u[1] = 5;
+  assert("{bx.part}" == "[20,30]", "stored: {bx.part}");
+}
+
+fn test_a_slice_held_while_a_callee_writes_the_source() {
+  x = [10, 20, 30, 40];
+  r = held(x, x);
+  assert(r == "[20,30]" && x[2] == 77, "held: {r} {x}");
+}
+
+fn test_a_text_slice() {
+  r = tslice("abcd");
+  assert(r == "bc", "text: {r}");
+}
