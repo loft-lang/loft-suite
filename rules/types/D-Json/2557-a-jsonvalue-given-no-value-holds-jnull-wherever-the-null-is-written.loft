@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A JSONVALUE GIVEN NO VALUE HOLDS JNULL, WHEREVER THE NULL IS WRITTEN (`@FR-D-Json`, `@FR-D-Opt`,
+// loft#2557).  `JsonValue` is the one enum with a stated zero: a bare one given no value holds `JNull`
+// — an omitted field of a literal, a key a parse leaves out or spells `null`, a `null` element of a
+// `vector<JsonValue>` (in the literal or appended), and a `null` assigned to an element or a field
+// (where @C163 says the slot takes the type's default).  A `JsonValue?` place holds null instead.
+// Each test reads `kind()` and matches `JNull`, so a slot holding the bare absent reference — which
+// reads as no variant at all — fails it.
+//
+// Values by hand: every bare place reads "JNull"; json_parse("1") reads "JInteger"; the `?` field
+// reads null.
+//
+// @EXPECT_WARNING: `null` is stored into the assignment target of the non-null type `JsonValue`
+// @EXPECT_WARNING: `null` is stored into the assignment target of the non-null type `JsonValue`
+//
+// @falsified-by: tests/falsified/2557-a-null-written-into-a-jsonvalue-place-holds-jnull.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the file's expectations, then the asserts.
+//   ARMED: none.
+//   WITNESS: the control's assignment arms write the bare pointer without @C163's note, so the two
+//   expected warnings are missing, and its literal elements warn "the slot holds null"; its values
+//   read "JUnknown" (hand-measured on main @ c177da75c).
+//   HOLDS: an omitted field and a parse read JNull on both trees.
+
+struct S { a: integer, j: JsonValue, o: JsonValue? }
+
+fn is_jnull(v: JsonValue) -> boolean { match v { JNull => true, _ => false } }
+
+fn test_an_omitted_field_and_a_parse() {
+  l = S { a: 1 };
+  p = S.parse("{{\"a\": 2}}");
+  q = S.parse("{{\"a\": 3, \"j\": null, \"o\": null}}");
+  r = "{l.j.kind()} {p.j.kind()} {q.j.kind()} {l.o == null} {q.o == null}";
+  assert(r == "JNull JNull JNull true true", "omitted and parsed: {r}");
+}
+
+fn test_a_null_element_of_a_literal_and_an_append() {
+  v: vector<JsonValue> = [json_parse("1"), null];
+  v += [null];
+  r = "{v[0].kind()} {v[1].kind()} {v[2].kind()} {len(v)}";
+  assert(r == "JInteger JNull JNull 3" && is_jnull(v[1]) && is_jnull(v[2]), "elements: {r}");
+}
+
+fn test_a_null_field_of_a_literal() {
+  t = S { a: 2, j: null };
+  assert(t.j.kind() == "JNull" && is_jnull(t.j) && t.o == null, "literal field: {t.j.kind()}");
+}
+
+fn test_a_null_assigned_to_an_element_and_a_field() {
+  w: vector<JsonValue> = [json_parse("1"), json_parse("2")];
+  w[0] = null;
+  s = S { a: 1, j: json_parse("5") };
+  s.j = null;
+  r = "{w[0].kind()} {w[1].kind()} {s.j.kind()}";
+  assert(r == "JNull JInteger JNull" && is_jnull(s.j), "assigned: {r}");
+}
