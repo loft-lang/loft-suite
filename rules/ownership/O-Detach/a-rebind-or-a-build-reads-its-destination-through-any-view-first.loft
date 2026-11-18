@@ -1,6 +1,13 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
+// A REBIND OR A BUILD READS WHAT ITS DESTINATION HELD THROUGH ANY VIEW, BEFORE IT IS DETACHED
+// (`@FR-O-Detach`).  The old store stays until the new value has read it — whether the read goes
+// through an element or a capture of the destination, through a view of a captured local, or through
+// the views a rebound parameter's old value has.  Each section keeps its own cases and receipt.
+//
+// ── a-build-reads-its-destination-through-an-element-or-a-capture ──
+//
 // A collection build reads what its destination held when the statement began at the two
 // destinations the snapshot could not NAME: a field reached through an ELEMENT
 // (`xs[0].items`), and a collection a CLOSURE captured (loft#1391).
@@ -41,6 +48,48 @@
 // Not covered on purpose: a KEYED destination.  `snapshot_read_destination` declines one by
 // construction — a keyed literal is built THROUGH its destination (loft#703) and a vector copy
 // is not its kind — so it is outside this place question rather than a cell left out of it.
+//
+// ── a-rebind-from-a-view-of-a-capture-keeps-the-old-store-until-it-is-read ──
+//
+// @catches: LOFT_NO_TRANSITIVE_VIEW_READ — the switch sees only a direct view of the local, so the rebind frees the old store before the value copies out of it
+//
+// @FR-O-Detach: a rebind `b = value` keeps the store `b` displaces until the value is built
+// whenever the value may read it.  It reads it through any view of `b`: `bl = block[0]` out of
+// a match capture of `b.code` views the capture, which views `b`.  Freed before the value, the
+// copy of `bl` into the new record read a released store, and the answer was wrong with nothing
+// reported (the self-hosted elaborator's `parse_code`, on the interpreter).
+//
+// released store answers right while nothing has reused that store, so the values fail
+// reliably under `LOFT_POISON=1`, which overwrites every store it releases.
+// Axes this file MOVES:  where the view is taken (inside the match arm, bound out of the
+//                        match); how far it is from `b` (the capture, an element of it, a copy
+//                        of that element into a second local); a write to the view first.
+// Axes it HOLDS FIXED:   the subject is a heap-enum field of a record local; the rebind is a
+//                        call answering a fresh record.
+//
+// @falsified-at: efbb7b00e (LOFT_POISON=1) — interpret exit 1 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.  A copy out of a
+//   HOLDS: every cell, on every backend.
+//
+// ── a-rebound-parameter-is-read-through-its-views-before-it-is-detached ──
+//
+// @catches: LOFT_NO_DETACH_VIEW_READS — the rebind frees the parameter's store before the value is built, and the value copies a view of that store
+//
+// @FR-O-Detach: a rebind detaches the binding after every read of it by the value — a read
+// through a VIEW of it too.  `bl = match code { NdBlock { block } => block[0], … }` views
+// `code`; `code = NdBlock { block: [bl] }` copies `bl`.  With the free placed before the build,
+// a parameter that owns its store (an earlier rebind made one) was copied from freed bytes: the
+// interpreter answered 0 (main; the self-hosted elaborator's `vector_return`).
+//
+// Axes this file MOVES:  whether the parameter owns its store (rebound before, or the caller's);
+//                        whether the view is written before the rebind; the loop count.
+// Axes it HOLDS FIXED:   the view is a `match` payload's element; the value is a literal.
+//
+// @ARMED: LOFT_REFREE_FAILS=1 LOFT_DOUBLE_FREE=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the double-free gate.
+//   HOLDS: every cell, on every backend.
 
 struct O { items: vector<integer>, other: vector<integer>, tag: text }
 struct W { inner: O, n: integer }
@@ -166,4 +215,102 @@ fn test_a_plain_local() {
   v = [1, 2];
   v = [v[1] ?? 0, v[0] ?? 0];
   assert(shows(v) == "[2,1]", "plain local: got {shows(v)}");
+}
+
+struct Blk { k: integer, ops: vector<integer> }
+enum Node { NdBlock { block: vector<Blk> }, NdInt { n: integer } }
+struct Ex { code: Node, tp: integer }
+
+fn ex(c: Node, t: integer) -> Ex { Ex { code: c, tp: t } }
+fn start(k: integer) -> Ex { ex(NdBlock { block: [Blk { k: k, ops: [1, 2] }] }, 0) }
+fn total(b: Ex) -> integer { match b.code { NdBlock { block } => block[0].k * 100 + len(block[0].ops), _ => -1 } }
+
+fn bound_out_of_the_match(k: integer) -> integer {
+  b = start(k);
+  bl = match b.code { NdBlock { block } => block[0], _ => Blk { k: 0, ops: [] } };
+  b = ex(NdBlock { block: [bl] }, 5);
+  total(b)
+}
+
+fn copied_into_a_second_local(k: integer) -> integer {
+  b = start(k);
+  bl = match b.code { NdBlock { block } => block[0], _ => Blk { k: 0, ops: [] } };
+  c = bl;
+  b = ex(NdBlock { block: [c] }, 5);
+  total(b)
+}
+
+fn inside_the_arm(k: integer) -> integer {
+  b = start(k);
+  match b.code {
+    NdBlock { block } => {
+      bl = block[0];
+      n = len(bl.ops);
+      bl.ops = bl.ops[0..n - 1] + [9, 9];
+      b = ex(NdBlock { block: [bl] }, 5);
+    },
+    _ => {}
+  }
+  total(b)
+}
+
+fn test_bound_out_of_the_match() {
+  assert(bound_out_of_the_match(1) == 102 && bound_out_of_the_match(2) == 202, "{bound_out_of_the_match(1)} {bound_out_of_the_match(2)}");
+}
+
+fn test_copied_into_a_second_local() {
+  assert(copied_into_a_second_local(3) == 302, "{copied_into_a_second_local(3)}");
+}
+
+fn test_inside_the_arm() {
+  assert(inside_the_arm(1) == 103 && inside_the_arm(2) == 203, "{inside_the_arm(1)} {inside_the_arm(2)}");
+}
+
+struct S3Blk { ops: vector<integer> }
+enum Nd { S3NdBlock { block: vector<S3Blk> }, NdNull }
+
+fn rework(code: Nd, fresh: boolean, again: boolean) -> Nd {
+  if fresh {
+    match code {
+      S3NdBlock { block } => {
+        cb = block[0];
+        cb.ops += [70];
+        code = Nd::S3NdBlock { block: [cb] };
+      },
+      _ => {}
+    }
+  }
+  bl = match code { S3NdBlock { block } => block[0], _ => return code };
+  if again {
+    bl.ops += [80];
+    code = Nd::S3NdBlock { block: [bl] };
+  }
+  code
+}
+
+fn s3_total(n: Nd) -> integer {
+  match n { S3NdBlock { block } => { t = 0; for o in block[0].ops { t += o; } t * 10 + len(block[0].ops) }, _ => -1 }
+}
+
+fn test_a_view_of_an_owned_parameter_is_copied_before_the_free() {
+  s = "";
+  for c in 0..4 {
+    src = Nd::S3NdBlock { block: [S3Blk { ops: [5, 6] }] };
+    r = rework(src, c % 2 == 1, c >= 2);
+    s += "{s3_total(r)}/{s3_total(src)} ";
+  }
+  assert(s == "112/112 813/813 913/913 1614/813 ", s);
+}
+
+fn fresh_then_copy(code: Nd) -> Nd {
+  code = Nd::S3NdBlock { block: [S3Blk { ops: [7, 8] }] };
+  bl = match code { S3NdBlock { block } => block[0], _ => return code };
+  code = Nd::S3NdBlock { block: [bl] };
+  code
+}
+
+fn test_a_fresh_parameter_rebuilt_from_its_own_view() {
+  t = 0;
+  for _ in 0..3 { t += s3_total(fresh_then_copy(Nd::NdNull)); }
+  assert(t == 456, "{t}");
 }
