@@ -1,0 +1,146 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A WHOLE KEYED VALUE WRITTEN INTO A MEMBER OF A LINKED GROUP REACHES EVERY MEMBER
+// (`@FR-Col-Group`, loft#2563).  `x.by_k = mk_h(2)` — and the same value in a struct literal —
+// was copied into the one member by a route that knows nothing of its group: the member's
+// lookups answered while the vector beside it read length 0, a record the write replaced stayed
+// in the vector, and a keyed sibling stayed empty.  A length that disagrees with its lookups,
+// and nothing said so.
+//
+// Axes this file MOVES:  the member written (a hash, a sorted, an index), what stands beside it
+//                        (a vector, a keyed sibling, both), which member owns the records (the
+//                        one written, or its sibling), the spelling (assignment, struct literal),
+//                        the source (a call, a local, another record's field, the member itself,
+//                        a call that READS the group it replaces), what the group held before,
+//                        and one write against fifty in a loop.
+// Axes it HOLDS FIXED:   an integer key; the element is a plain two-field record.
+//
+// `cg2563_source_reads_the_group` is the cell the first cure failed: the replace clears the
+// group, and a source evaluated AFTER the clear read a group already emptied.  It is asserted
+// for a keyed and for a vector source, the second of which was wrong before this issue.
+//
+// @falsified-at: 6ee97714d — interpret exit 1 -> 0, interpret 6 assertion failures -> 0, native exit 1 -> 0, native 12 assertion failures -> 0
+//   HOLDS: leak, panic, free-refusal and expectations are equal on both trees; the VALUE channel
+//   (the asserts) is the measurement.
+
+struct Cg2563E { cg_k: integer, cg_v: integer }
+struct Cg2563VH { cg_rows: vector<Cg2563E>, cg_by: hash<Cg2563E[cg_k]> }
+struct Cg2563HS { cg_by: hash<Cg2563E[cg_k]>, cg_ord: sorted<Cg2563E[cg_k]> }
+struct Cg2563VS { cg_rows: vector<Cg2563E>, cg_ord: sorted<Cg2563E[cg_k]> }
+struct Cg2563VI { cg_rows: vector<Cg2563E>, cg_ix: index<Cg2563E[cg_k]> }
+struct Cg2563VHS { cg_rows: vector<Cg2563E>, cg_by: hash<Cg2563E[cg_k]>, cg_ord: sorted<Cg2563E[cg_k]> }
+struct Cg2563W { cg_g: Cg2563VH }
+
+fn cg2563_h(n: integer) -> hash<Cg2563E[cg_k]> {
+  h: hash<Cg2563E[cg_k]> = [];
+  for i in 0..n { h += [Cg2563E { cg_k: i + 1, cg_v: (i + 1) * 10 }]; }
+  h
+}
+fn cg2563_s(n: integer) -> sorted<Cg2563E[cg_k]> {
+  h: sorted<Cg2563E[cg_k]> = [];
+  for i in 0..n { h += [Cg2563E { cg_k: i + 1, cg_v: (i + 1) * 10 }]; }
+  h
+}
+fn cg2563_i(n: integer) -> index<Cg2563E[cg_k]> {
+  h: index<Cg2563E[cg_k]> = [];
+  for i in 0..n { h += [Cg2563E { cg_k: n - i, cg_v: (n - i) * 10 }]; }
+  h
+}
+fn cg2563_val(e: Cg2563E?) -> integer { if e == null { -1 } else { e.cg_v } }
+fn cg2563_so(s: sorted<Cg2563E[cg_k]>) -> text { t = ""; for e in s { t += "{e.cg_k}:{e.cg_v} "; } t }
+fn cg2563_keep(x: Cg2563VH, k: integer) -> hash<Cg2563E[cg_k]> {
+  h: hash<Cg2563E[cg_k]> = [];
+  for e in x.cg_rows { if e.cg_k == k { h += [e]; } }
+  h
+}
+fn cg2563_keepv(x: Cg2563VH, k: integer) -> vector<Cg2563E> {
+  h: vector<Cg2563E> = [];
+  for e in x.cg_rows { if e.cg_k == k { h += [e]; } }
+  h
+}
+
+fn test_cg2563_a_keyed_value_assigned_reaches_the_vector() {
+  a = Cg2563VH {};
+  a.cg_by = cg2563_h(2);
+  assert(len(a.cg_rows) == 2 && cg2563_val(a.cg_by[2]) == 20, "call: rows {len(a.cg_rows)} by[2] {cg2563_val(a.cg_by[2])}");
+  l = cg2563_h(2);
+  b = Cg2563VH {};
+  b.cg_by = l;
+  l += [Cg2563E { cg_k: 9, cg_v: 90 }];
+  assert(len(b.cg_rows) == 2 && cg2563_val(b.cg_by[9]) == -1 && cg2563_val(l[9]) == 90, "local: rows {len(b.cg_rows)} by[9] {cg2563_val(b.cg_by[9])}");
+  c = Cg2563VH {};
+  c.cg_by = a.cg_by;
+  assert(len(c.cg_rows) == 2 && cg2563_val(c.cg_by[1]) == 10 && len(a.cg_rows) == 2, "field: rows {len(c.cg_rows)}");
+  w = Cg2563W { cg_g: Cg2563VH {} };
+  w.cg_g.cg_by = cg2563_h(2);
+  assert(len(w.cg_g.cg_rows) == 2 && cg2563_val(w.cg_g.cg_by[2]) == 20, "nested: rows {len(w.cg_g.cg_rows)}");
+}
+
+fn test_cg2563_a_keyed_value_in_a_literal_reaches_the_vector() {
+  a = Cg2563VH { cg_rows: [], cg_by: cg2563_h(2) };
+  assert(len(a.cg_rows) == 2 && cg2563_val(a.cg_by[2]) == 20, "call: rows {len(a.cg_rows)}");
+  l = cg2563_h(3);
+  b = Cg2563VH { cg_rows: [], cg_by: l };
+  assert(len(b.cg_rows) == 3 && cg2563_val(b.cg_by[3]) == 30 && len(l) == 3, "local: rows {len(b.cg_rows)}");
+  h = Cg2563HS { cg_by: cg2563_h(2), cg_ord: [] };
+  assert(cg2563_so(h.cg_ord) == "1:10 2:20 ", "sibling: ord [{cg2563_so(h.cg_ord)}]");
+  n = 0;
+  for _i in 0..20 { f = Cg2563VH { cg_rows: [], cg_by: cg2563_h(30) }; n += len(f.cg_rows); }
+  assert(n == 600, "loop: {n}");
+}
+
+fn test_cg2563_the_replaced_records_leave_every_member() {
+  a = Cg2563VH {};
+  a.cg_rows += [Cg2563E { cg_k: 3, cg_v: 30 }];
+  a.cg_by = cg2563_h(2);
+  assert(len(a.cg_rows) == 2 && cg2563_val(a.cg_by[3]) == -1 && cg2563_val(a.cg_by[2]) == 20, "replace: rows {len(a.cg_rows)} by[3] {cg2563_val(a.cg_by[3])}");
+  a.cg_by = cg2563_h(1);
+  assert(len(a.cg_rows) == 1 && cg2563_val(a.cg_by[2]) == -1, "again: rows {len(a.cg_rows)}");
+  a.cg_rows = [];
+  assert(len(a.cg_rows) == 0 && cg2563_val(a.cg_by[1]) == -1, "cleared: rows {len(a.cg_rows)} by[1] {cg2563_val(a.cg_by[1])}");
+  b = Cg2563VH {};
+  for _i in 0..50 { b.cg_by = cg2563_h(40); }
+  assert(len(b.cg_rows) == 40 && cg2563_val(b.cg_by[40]) == 400, "loop: rows {len(b.cg_rows)}");
+}
+
+fn test_cg2563_every_member_kind_and_owner() {
+  a = Cg2563HS {};
+  a.cg_by = cg2563_h(2);
+  assert(cg2563_so(a.cg_ord) == "1:10 2:20 ", "owner written: ord [{cg2563_so(a.cg_ord)}]");
+  b = Cg2563HS {};
+  b.cg_ord = cg2563_s(2);
+  assert(cg2563_val(b.cg_by[2]) == 20 && cg2563_so(b.cg_ord) == "1:10 2:20 ", "view written: by[2] {cg2563_val(b.cg_by[2])}");
+  c = Cg2563VS {};
+  c.cg_ord = cg2563_s(2);
+  assert(len(c.cg_rows) == 2 && cg2563_so(c.cg_ord) == "1:10 2:20 ", "sorted: rows {len(c.cg_rows)}");
+  d = Cg2563VI {};
+  d.cg_ix = cg2563_i(3);
+  assert(len(d.cg_rows) == 3 && d.cg_rows[0].cg_v == 10 && d.cg_rows[2].cg_v == 30 && cg2563_val(d.cg_ix[2]) == 20, "index: rows {len(d.cg_rows)} first {d.cg_rows[0].cg_v}");
+  e = Cg2563VHS {};
+  e.cg_by = cg2563_h(2);
+  assert(len(e.cg_rows) == 2 && cg2563_val(e.cg_by[2]) == 20 && cg2563_so(e.cg_ord) == "1:10 2:20 ", "three: rows {len(e.cg_rows)} ord [{cg2563_so(e.cg_ord)}]");
+}
+
+fn test_cg2563_the_members_share_one_record_set() {
+  a = Cg2563VH {};
+  a.cg_by = cg2563_h(3);
+  a.cg_rows[1].cg_v = 99;
+  a.cg_rows += [Cg2563E { cg_k: 8, cg_v: 80 }];
+  assert(len(a.cg_rows) == 4 && cg2563_val(a.cg_by[2]) == 99 && cg2563_val(a.cg_by[8]) == 80, "shared: by[2] {cg2563_val(a.cg_by[2])} by[8] {cg2563_val(a.cg_by[8])}");
+}
+
+fn test_cg2563_source_reads_the_group() {
+  a = Cg2563VH {};
+  a.cg_rows += [Cg2563E { cg_k: 5, cg_v: 50 }, Cg2563E { cg_k: 6, cg_v: 60 }];
+  a.cg_by = cg2563_keep(a, 6);
+  assert(len(a.cg_rows) == 1 && cg2563_val(a.cg_by[5]) == -1 && cg2563_val(a.cg_by[6]) == 60, "keyed source: rows {len(a.cg_rows)} by[6] {cg2563_val(a.cg_by[6])}");
+  b = Cg2563VH {};
+  b.cg_rows += [Cg2563E { cg_k: 5, cg_v: 50 }, Cg2563E { cg_k: 6, cg_v: 60 }];
+  b.cg_by = cg2563_keepv(b, 6);
+  assert(len(b.cg_rows) == 1 && cg2563_val(b.cg_by[5]) == -1 && cg2563_val(b.cg_by[6]) == 60, "vector source: rows {len(b.cg_rows)} by[6] {cg2563_val(b.cg_by[6])}");
+  c = Cg2563VH {};
+  c.cg_rows += [Cg2563E { cg_k: 5, cg_v: 50 }];
+  c.cg_by = c.cg_by;
+  assert(len(c.cg_rows) == 1 && cg2563_val(c.cg_by[5]) == 50, "itself: rows {len(c.cg_rows)} by[5] {cg2563_val(c.cg_by[5])}");
+}

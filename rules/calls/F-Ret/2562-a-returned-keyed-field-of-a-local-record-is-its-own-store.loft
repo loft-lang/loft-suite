@@ -1,0 +1,117 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RETURNED KEYED FIELD OF A LOCAL RECORD IS ITS OWN STORE (`@FR-F-Ret`, loft#2562).
+// `fn mk() -> hash<E[k]> { b = Src {}; …; b.h }` returned a place INSIDE `b`'s store after `b`
+// was released: the caller copied out of a freed store and then released it a second time.  The
+// C backend counted the second release and stopped; the interpreter answered from whatever the
+// freed bytes still held.  A keyed collection built in a local of its own type was always
+// right — it owns the store it hands up — and a field of a record owns none.
+//
+// Axes this file MOVES:  the keyed kind (hash, sorted, index), the return's spelling (the tail,
+//                        `return`, an `if` arm at the tail, a `return` in mid-body), the place
+//                        (a field, a nested field, a field of a vector's element, a field of a
+//                        call's result), the root (a local, a PARAMETER — the control, which
+//                        stays a view of the caller's collection), what the caller does with
+//                        the result (a bind, a struct literal's field, a subscript), and one
+//                        call against fifty in a loop.
+// Axes it HOLDS FIXED:   an integer key; the record is built in the returning function.
+//
+// A use after free: under `LOFT_POISON=1` the control reads freed bytes on the interpreter, and
+// the C backend's free count shows it without one.
+//
+// @falsified-at: 6ee97714d — interpret exit 1 -> 0, native exit 1 -> 0  (`LOFT_POISON=1 make falsify`).
+//   The control ABORTS — the freed-twice report on the C backend, a read of poisoned bytes on
+//   the interpreter — so the exit channel is the one scored and no assert is reached; the
+//   values behind it are asserted HERE, where every cell runs.
+//   HOLDS: leak, panic, free-refusal and expectations are equal on both trees.
+
+struct Fr2562E { fr_k: integer, fr_v: integer }
+struct Fr2562In { fr_h: hash<Fr2562E[fr_k]> }
+struct Fr2562Src { fr_h: hash<Fr2562E[fr_k]>, fr_s: sorted<Fr2562E[fr_k]>, fr_in: Fr2562In }
+struct Fr2562Ix { fr_ix: index<Fr2562E[fr_k]> }
+struct Fr2562Out { fr_n: integer, fr_h: hash<Fr2562E[fr_k]> }
+
+fn fr2562_val(e: Fr2562E?) -> integer { if e == null { -1 } else { e.fr_v } }
+fn fr2562_so(s: sorted<Fr2562E[fr_k]>) -> text { t = ""; for e in s { t += "{e.fr_k}:{e.fr_v} "; } t }
+fn fr2562_tail(n: integer) -> hash<Fr2562E[fr_k]> {
+  b = Fr2562Src {};
+  b.fr_h += [Fr2562E { fr_k: 2, fr_v: n }, Fr2562E { fr_k: 3, fr_v: n + 1 }];
+  b.fr_h
+}
+fn fr2562_ret(n: integer) -> hash<Fr2562E[fr_k]> { b = Fr2562Src {}; b.fr_h += [Fr2562E { fr_k: 2, fr_v: n }]; return b.fr_h; }
+fn fr2562_arm(n: integer) -> hash<Fr2562E[fr_k]> {
+  b = Fr2562Src {};
+  b.fr_h += [Fr2562E { fr_k: 2, fr_v: n }];
+  if n > 5 { b.fr_h } else { [Fr2562E { fr_k: 2, fr_v: 1 }] }
+}
+fn fr2562_mid(n: integer) -> hash<Fr2562E[fr_k]> {
+  b = Fr2562Src {};
+  b.fr_h += [Fr2562E { fr_k: 2, fr_v: n }];
+  if n > 5 { return b.fr_h; }
+  b.fr_h += [Fr2562E { fr_k: 4, fr_v: 44 }];
+  b.fr_h
+}
+fn fr2562_sorted(n: integer) -> sorted<Fr2562E[fr_k]> {
+  b = Fr2562Src {};
+  b.fr_s += [Fr2562E { fr_k: 2, fr_v: n }, Fr2562E { fr_k: 1, fr_v: n + 1 }];
+  b.fr_s
+}
+fn fr2562_index(n: integer) -> index<Fr2562E[fr_k]> {
+  b = Fr2562Ix {};
+  b.fr_ix += [Fr2562E { fr_k: 2, fr_v: n }, Fr2562E { fr_k: 1, fr_v: n + 1 }];
+  b.fr_ix
+}
+fn fr2562_nested(n: integer) -> hash<Fr2562E[fr_k]> { b = Fr2562Src {}; b.fr_in.fr_h += [Fr2562E { fr_k: 2, fr_v: n }]; b.fr_in.fr_h }
+fn fr2562_elem(n: integer) -> hash<Fr2562E[fr_k]> { bs = [Fr2562Src {}]; bs[0].fr_h += [Fr2562E { fr_k: 2, fr_v: n }]; bs[0].fr_h }
+fn fr2562_rec(n: integer) -> Fr2562Src { b = Fr2562Src {}; b.fr_h += [Fr2562E { fr_k: 2, fr_v: n }]; b }
+fn fr2562_of_call(n: integer) -> hash<Fr2562E[fr_k]> { return fr2562_rec(n).fr_h; }
+fn fr2562_param(x: Fr2562Src) -> hash<Fr2562E[fr_k]> { x.fr_h }
+fn fr2562_alias(x: Fr2562Src) -> hash<Fr2562E[fr_k]> { b = x; b.fr_h }
+
+fn test_fr2562_each_return_spelling() {
+  a = fr2562_tail(3);
+  assert(fr2562_val(a[2]) == 3 && fr2562_val(a[3]) == 4 && fr2562_val(a[4]) == -1 && len(a) == 2, "tail: {fr2562_val(a[2])} {fr2562_val(a[3])}");
+  b = fr2562_ret(5);
+  assert(fr2562_val(b[2]) == 5 && len(b) == 1, "return: {fr2562_val(b[2])}");
+  c = fr2562_arm(6);
+  d = fr2562_arm(2);
+  assert(fr2562_val(c[2]) == 6 && fr2562_val(d[2]) == 1, "arms: {fr2562_val(c[2])} {fr2562_val(d[2])}");
+  e = fr2562_mid(6);
+  f = fr2562_mid(1);
+  assert(fr2562_val(e[2]) == 6 && fr2562_val(e[4]) == -1 && fr2562_val(f[4]) == 44, "mid: {fr2562_val(e[2])} {fr2562_val(e[4])} {fr2562_val(f[4])}");
+}
+
+fn test_fr2562_each_kind_and_place() {
+  s = fr2562_sorted(7);
+  assert(fr2562_so(s) == "1:8 2:7 ", "sorted: [{fr2562_so(s)}]");
+  i = fr2562_index(7);
+  assert(fr2562_val(i[2]) == 7 && fr2562_val(i[1]) == 8, "index: {fr2562_val(i[2])} {fr2562_val(i[1])}");
+  n = fr2562_nested(9);
+  assert(fr2562_val(n[2]) == 9, "nested: {fr2562_val(n[2])}");
+  e = fr2562_elem(4);
+  assert(fr2562_val(e[2]) == 4, "element: {fr2562_val(e[2])}");
+  c = fr2562_of_call(8);
+  assert(fr2562_val(c[2]) == 8, "of a call: {fr2562_val(c[2])}");
+}
+
+fn test_fr2562_a_parameters_field_stays_the_callers() {
+  a = Fr2562Src {};
+  a.fr_h += [Fr2562E { fr_k: 2, fr_v: 70 }];
+  p = fr2562_param(a);
+  q = fr2562_param(a);
+  r = fr2562_alias(a);
+  assert(fr2562_val(p[2]) == 70 && fr2562_val(q[2]) == 70 && fr2562_val(r[2]) == 70 && fr2562_val(a.fr_h[2]) == 70, "param: {fr2562_val(p[2])} {fr2562_val(q[2])} {fr2562_val(r[2])} {fr2562_val(a.fr_h[2])}");
+}
+
+fn test_fr2562_every_consumer_and_a_loop() {
+  t = 0;
+  for i in 0..50 {
+    h = fr2562_tail(i);
+    t += fr2562_val(h[3]);
+    o = Fr2562Out { fr_n: i, fr_h: fr2562_tail(i) };
+    t += fr2562_val(o.fr_h[2]);
+  }
+  assert(t == 2500, "loop: {t}");
+  assert(fr2562_val(fr2562_tail(11)[3]) == 12, "subscript: {fr2562_val(fr2562_tail(11)[3])}");
+}

@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL'S RESULT IS A WHOLE COLLECTION TOO (`@FR-Col-Insert`, loft#2563).  A keyed collection's
+// `+=` takes one element or a vector of them; a whole keyed collection is refused as the merge
+// it is (loft#1221).  The refusal asked whether the source NAMES a collection — a binding, a
+// field — and a call's result names none, so `d.h += mk()` passed it and then emitted no write
+// at all: the destination stayed as it was, in silence, and the call's store was never freed.
+//
+// Axes this file MOVES:  the destination's place kind (a field, a local).
+// Axes it HOLDS FIXED:   a hash; the source is a call.
+//
+// @falsified-at: 6ee97714d — interpret exit 1 -> 0, interpret expectations FAIL/2 -> 2/2, native exit 1 -> 0, native expectations FAIL/2 -> 2/2
+//   HOLDS: asserts, leak, panic and free-refusal are equal on both trees; the EXPECT channel is
+//   the measurement.
+
+struct Ci2563E { ci_k: integer, ci_v: integer }
+struct Ci2563D { ci_h: hash<Ci2563E[ci_k]> }
+fn ci2563_mk(n: integer) -> hash<Ci2563E[ci_k]> {
+  h: hash<Ci2563E[ci_k]> = [];
+  for i in 0..n { h += [Ci2563E { ci_k: i + 1, ci_v: (i + 1) * 10 }]; }
+  h
+}
+
+// @EXPECT_ERROR: cannot append a whole `hash<Ci2563E[ci_k]>` to another
+fn test_ci2563_a_call_result_into_a_field_is_refused() {
+  d = Ci2563D {};
+  d.ci_h += ci2563_mk(2);
+  assert(len(d.ci_h) == 2, "never runs");
+}
+
+// @EXPECT_ERROR: cannot append a whole `hash<Ci2563E[ci_k]>` to another
+fn test_ci2563_a_call_result_into_a_local_is_refused() {
+  d: hash<Ci2563E[ci_k]> = [];
+  d += ci2563_mk(2);
+  assert(len(d) == 2, "never runs");
+}
