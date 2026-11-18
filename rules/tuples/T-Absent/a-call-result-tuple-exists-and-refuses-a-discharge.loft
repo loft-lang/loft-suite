@@ -15,7 +15,7 @@
 // CHANNEL: the compile diagnostic (absent on 18594597b).
 // ARMED: no instrument.
 // WITNESS: the program runs and prints the tuple's member.
-// HOLDS: `an-element-read-of-a-tuple-discharges-and-a-held-one-does-not` beside it.
+// HOLDS: `the-operators-split-on-an-absent-tuple-and-one-that-is-there` beside it.
 
 fn ta_mk() -> (integer, text) { (1, "a") }
 
