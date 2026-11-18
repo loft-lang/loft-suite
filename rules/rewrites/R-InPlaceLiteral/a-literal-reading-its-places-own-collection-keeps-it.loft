@@ -46,7 +46,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument (the switches above, by hand).
 // WITNESS: each message prints the place's fields.
-// HOLDS: `1571-a-literal-written-in-place-reads-the-old-record-through-any-view` beside it.
+// HOLDS: `1571-a-literal-written-in-place-reads-the-old-value-through-any-view` beside it.
 
 struct S { a: integer, b: integer }
 struct C { n: integer, items: vector<integer>, t: text }
