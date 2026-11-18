@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RETURN NESTED IN A BIND'S VALUE RELEASES ITS LITERAL (`@FR-F-Return`, `@FR-H-Drop`,
+// loft#2555).  A `return []` that sits inside the value of a bind — `h = { if c { return []; } …
+// }`, `h = if c { return [] } else { … }`, inside a loop — exits the call with its vector exactly
+// as the statement `if c { return []; }` does: copied into the caller's buffer, and the store the
+// literal built released.  Before, the copy was made only for a return at statement level, and a
+// nested one went back as the frame's own store, which nothing released (one per call).
+//
+// Values by hand: the absent path answers [] (length 0); the present path [n / 2], and the loop
+// [1, 2].
+//
+// @falsified-by: tests/falsified/2555-a-return-nested-in-a-binds-value-releases-its-literal.patch — native exit 1 -> 0, native leaked kt=20 main_vector<integer>×1 -> clean; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   CHANNEL: the leak check the suite arms on every run — C's run fails on the store left at
+//   exit; the interpreter only warns there, so its lane is inert.
+//   ARMED: LOFT_LEAK_CHECK (the suite's own arming).
+//   WITNESS: "stores not freed at program exit: … main_vector<integer>".
+//   HOLDS: the statement form releases it on both trees, and every value is the same.
+
+fn s1(n: integer) -> vector<integer> { h = if n == 0 { return [] } else { n / 2 }; [h] }
+fn s2(n: integer) -> vector<integer> { h = 0; if n == 0 { return []; } h = n / 2; [h] }
+fn s3(n: integer) -> vector<integer> { h = { if n == 0 { return []; } n / 2 }; [h] }
+fn s4(n: integer) -> vector<integer> {
+  r: vector<integer> = [];
+  for i in 1..3 {
+    h = { if n == 0 { return []; } i };
+    r += [h];
+  }
+  r
+}
+fn show(v: vector<integer>) -> text { "{len(v)}:{v}" }
+
+fn test_a_branch_bind() {
+  a = s1(6);
+  b = s1(0);
+  r = "{show(a)} {show(b)}";
+  assert(r == "1:[3] 0:[]", "branch: {r}");
+}
+
+fn test_a_block_bind_and_the_statement_form() {
+  a = s3(6);
+  b = s3(0);
+  c = s2(0);
+  r = "{show(a)} {show(b)} {show(c)}";
+  assert(r == "1:[3] 0:[] 0:[]", "block: {r}");
+}
+
+fn test_a_block_bind_in_a_loop() {
+  a = s4(6);
+  b = s4(0);
+  r = "{show(a)} {show(b)}";
+  assert(r == "2:[1,2] 0:[]", "loop: {r}");
+}
