@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT CALL ANSWERS THROUGH A BUFFER OF ITS OWN SITE (`@FR-R-BufferReturn`).  A call of a
+// function that answers its `&text` work buffer is written as the twin that fills the buffer, and
+// the call's value is a view of it.  The view is read within its statement, and nothing else writes
+// that buffer there: each call site has a buffer of its own, a later operand cannot run the site
+// again, and a recursive call fills a buffer of its own frame.  Bound to a text target, the value
+// takes the site's buffer, and the next call at the site starts it empty.  Each test is one of those
+// clauses, read where a shared buffer would show.
+//
+// Values by hand: tag(n) is "<n>".  Two sites in one statement: "<1><2>".  One site in a loop,
+// bound each pass: ["<0>", "<1>", "<2>"].  chain(3) = chain(2) + "3" = "123".  maybe(0) answers the
+// null text ("none" through `??`), maybe(5) "<5>".  tag(7) + tag(8) = "<7><8>".
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native; it CAN fail: `LOFT_NO_SEVERAL_VARS=1` moves it (the
+//   `switches` census).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the texts.
+// HOLDS: the statement form `t = tag(n)` of each case.
+
+fn tag(n: integer) -> text { "<{n}>" }
+fn chain(n: integer) -> text { if n == 0 { return ""; } "{chain(n - 1)}{n}" }
+fn maybe(n: integer) -> text? { if n == 0 { return null; } "<{n}>" }
+
+fn test_two_sites_in_one_statement() {
+  r = "{tag(1)}{tag(2)}";
+  assert(r == "<1><2>", "two sites: {r}");
+}
+
+fn test_one_site_bound_on_every_pass() {
+  all: vector<text> = [];
+  for i in 0..3 {
+    t = tag(i);
+    all += [t];
+  }
+  r = "{all}";
+  assert(r == "[\"<0>\",\"<1>\",\"<2>\"]", "a loop: {r}");
+}
+
+fn test_a_recursive_call_fills_its_own_frames_buffer() {
+  r = chain(3);
+  assert(r == "123", "recursion: {r}");
+}
+
+fn test_the_null_text_is_an_answer() {
+  a = maybe(0) ?? "none";
+  b = maybe(5) ?? "none";
+  assert(a == "none" && b == "<5>", "null text: {a} {b}");
+}
+
+fn test_two_calls_in_one_concatenation() {
+  r = tag(7) + tag(8);
+  assert(r == "<7><8>", "concatenation: {r}");
+}
