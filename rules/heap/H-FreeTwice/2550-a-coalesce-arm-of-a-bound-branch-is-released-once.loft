@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COALESCE ARM OF A BOUND BRANCH IS RELEASED ONCE (`@FR-H-FreeTwice`, `@FR-I-Join`,
+// `@FR-H-Drop`, loft#2550).  `r = if c { f() ?? d } else { g() ?? d }` binds a record a `??` chain
+// hands back.  Written out per arm, the binding read as a COPY of the chain's own temp and lost
+// its dependency on it, so the binding and the temp each released the one record; the
+// `?? return` form kept its temp at an outer scope and released it there while the binding
+// released it again.  Each test binds such a branch — `?? default` on both arms, its fallback
+// taken, `?? return` on both arms, one chain beside a plain record, a `match`, a chain nested in
+// a chain, `?? return` / `?? continue` in a loop, and a chain bound by itself — and reads the record bound; the run's
+// own re-free and use-after-free checks catch a second release.
+// Values by hand: make(n) answers Res { id: n }, null below zero; a pass that continues adds
+// nothing; `Res` has one field.  The loops: 10 + 21 + 12 = 43; 31 + 1 + 33 = 65.
+//
+// @falsified-by: tests/falsified/2550-a-coalesce-arm-of-a-bound-branch-is-released-once.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the run's exit, its re-free report ("a store was freed twice") and the leak check
+//   ("stores not freed at exit") — the suite arms it on every run.
+//   ARMED: every run (the interpreter reports a second free of a store, C the same).
+//   WITNESS: the control frees the chain's record by the temp and again by `r`.
+//   HOLDS: a coalesce bound by a statement of its own (`r = f() ?? d`, `r = f()!`,
+//   `r = f() ?? return`), released once — and not left behind — on both trees.
+
+struct Res { id: integer }
+fn OpDrop(self: Res) { }
+fn make(id: integer) -> Res? { if id < 0 { return null; } Res { id: id } }
+
+fn p1(kind: text) -> integer { r = if kind == "a" { make(1) ?? Res { id: 9 } } else { make(2) ?? Res { id: 8 } }; r.id }
+fn p2(kind: text) -> integer { r = if kind == "a" { make(-1) ?? Res { id: 9 } } else { make(2) ?? Res { id: 8 } }; r.id }
+fn p3(kind: text) -> integer { r = if kind == "a" { make(1) ?? return -1 } else { make(2) ?? return -2 }; r.id }
+fn p4(kind: text) -> integer { r = if kind == "a" { make(1) ?? Res { id: 9 } } else { Res { id: 2 } }; r.id }
+fn p5(kind: text) -> integer { r = match kind { "a" => make(1) ?? Res { id: 9 }, _ => make(2) ?? Res { id: 8 } }; r.id }
+fn p6(k: integer) -> integer { x: Res? = null; b = x ?? (make(k) ?? Res { id: 7 }); b.id }
+
+fn q2() -> integer {
+  t = 0;
+  for i in 0..3 {
+    r = if i % 2 == 0 { make(i + 10) ?? return -1 } else { make(i + 20) ?? return -2 };
+    t += r.id;
+  }
+  t
+}
+
+fn q3() -> integer {
+  t = 0;
+  for i in 0..4 {
+    r = if i % 2 == 0 { make(i - 1) ?? continue } else { make(i + 30) ?? continue };
+    t += r.id;
+  }
+  t
+}
+
+fn control() -> integer { r = make(4) ?? Res { id: 9 }; r.id }
+fn s1() -> integer { r = make(5)!; r.id }
+fn s2() -> integer { r = make(6) ?? return -1; r.id }
+// A native answering a fresh store of its own, no caller buffer: the binding is its one release.
+fn s3() -> integer { t = type_named("Res")!; len(t.fields) }
+fn s4() -> integer { t = type_named("Res") ?? return -1; len(t.fields) }
+
+fn test_a_default_on_both_arms_either_path() {
+  assert(p1("a") == 1 && p1("b") == 2, "both arms: {p1("a")} {p1("b")}");
+}
+
+fn test_the_fallback_taken_in_an_arm() {
+  assert(p2("a") == 9, "fallback: {p2("a")}");
+}
+
+fn test_a_return_on_both_arms() {
+  assert(p3("a") == 1 && p3("b") == 2, "return arms: {p3("a")} {p3("b")}");
+}
+
+fn test_a_chain_beside_a_plain_record() {
+  assert(p4("a") == 1 && p4("b") == 2, "beside a plain record: {p4("a")} {p4("b")}");
+}
+
+fn test_a_match_and_a_nested_chain() {
+  assert(p5("a") == 1 && p6(3) == 3, "match and nested: {p5("a")} {p6(3)}");
+}
+
+fn test_return_and_continue_arms_in_a_loop() {
+  r = "{q2()} {q3()}";
+  assert(r == "43 65", "loops: {r}");
+}
+
+fn test_control_a_coalesce_bound_by_a_statement() {
+  assert(control() == 4, "statement: {control()}");
+}
+
+fn test_a_chain_bound_by_itself_hands_its_record_over() {
+  r = "{s1()} {s2()} {s3()} {s4()}";
+  assert(r == "5 6 1 1", "bound by itself: {r}");
+}
