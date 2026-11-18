@@ -1,0 +1,68 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A GENERIC ENUM NAMED ABOVE ITS DECLARATION IS LAID OUT (`@FR-G-Mono`, `@FR-L-Total`,
+// loft#2547).  An instance of a generic enum whose template is declared BELOW its first use is
+// a forward stub on the first pass and is first minted on the second, after the in-order
+// registration and layout ran.  Laid out as a record there, the end of the pass stamped its
+// variants onto a type that is no enum: "Adding a value to a non enum type", an internal
+// compiler error.  Every enum below is declared after the code that names its instance — as a
+// local, inside a generic, at two arguments, as a field, as a vector's element, as a
+// parameter, as a return type and a nullable one, and with a text field.
+// Values by hand: each match reads the field its variant was built with.
+//
+// @falsified-at: 39701d652 — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the compile (an internal compiler error on the control) and the asserts.
+//   ARMED: every run.
+//   WITNESS: the control panics "Adding a value to a non enum type".
+//   HOLDS: the same programs with the enums declared first (G-Regular's cells beside this rule).
+
+fn test_a_local_of_an_instance_declared_below() {
+  b: B<integer> = Bc { h: 1, t: 0 };
+  n: B<integer> = Bn;
+  x = match b { Bc { h, t: _ } => h, Bn => 0 };
+  y = match n { Bc { h, t: _ } => h, Bn => 0 };
+  assert(x == 1 && y == 0, "local: {x} {y}");
+}
+
+fn in_generic<T>(x: T) -> integer { b: B<T> = Bc { h: x, t: 0 }; match b { Bc { h: _, t } => t + 7, Bn => 0 } }
+
+fn test_inside_a_generic_and_at_two_arguments() {
+  a: B<integer> = Bc { h: 1, t: 0 };
+  b: B<text> = Bc { h: "a", t: 5 };
+  x = match a { Bc { h, t: _ } => h, Bn => 0 };
+  y = match b { Bc { h, t } => "{h}{t}", Bn => "" };
+  assert(in_generic(3) == 7 && x == 1 && y == "a5", "generic: {in_generic(3)} {x} {y}");
+}
+
+struct Holder { n: integer, b: B<integer> }
+
+fn test_as_a_field_and_a_vector_element() {
+  s = Holder { n: 2, b: Bc { h: 40, t: 0 } };
+  f = s.n + match s.b { Bc { h, t: _ } => h, Bn => 0 };
+  v: vector<B<integer>> = [Bc { h: 1, t: 0 }, Bn, Bc { h: 2, t: 0 }];
+  sum = 0;
+  for e in v { sum += match e { Bc { h, t: _ } => h, Bn => 10 }; }
+  assert(f == 42 && sum == 13, "field and element: {f} {sum}");
+}
+
+fn show(b: B<integer>) -> integer { match b { Bc { h, t: _ } => h, Bn => 0 } }
+fn mk() -> B<integer> { Bc { h: 4, t: 0 } }
+fn maybe(n: integer) -> B<integer>? { if n < 0 { return null; } Bc { h: n, t: 0 } }
+
+fn test_as_a_parameter_and_a_return_type() {
+  p = show(Bc { h: 6, t: 0 });
+  r = show(mk());
+  q = show(maybe(3) ?? Bn);
+  z = show(maybe(-1) ?? Bn);
+  assert(p == 6 && r == 4 && q == 3 && z == 0, "parameter and return: {p} {r} {q} {z}");
+}
+
+fn test_a_variant_with_a_text_field() {
+  b: N<integer> = Nc { h: 1, name: "xy" };
+  s = match b { Nc { h, name } => "{h}{name}", Nn => "" };
+  assert(s == "1xy", "text field: {s}");
+}
+
+enum B<T> { Bn, Bc { h: T, t: integer } }
+enum N<T> { Nn, Nc { h: T, name: text } }

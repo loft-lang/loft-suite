@@ -1,0 +1,135 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHAIN ARM BESIDE A PLAIN RECORD RUNS EACH HOOK ONCE (`@FR-H-Drop`, `@FR-H-FreeTwice`,
+// `@FR-O-Move`, loft#2552).  `r = if c { f() ?? return } else { S { .. } }` binds either the
+// chain's answer or a record of the arm's own.  The chain's answer MOVES to the binding: bound
+// as a copy of the chain's temp, the copy and the temp each ran the type's `OpDrop`.  And a
+// binding that only VIEWS the chain's temp (`r = f() ?? S { .. }` in a block or a loop body)
+// releases nothing itself, so the literal's buffer keeps its own hook: skipped there, the
+// literal's `OpDrop` ran nowhere.  Each function binds such a value — the other arm a literal,
+// a call, a local; at the function's scope, in a block, in a loop, returned — and the trace
+// holds every hook that ran.
+// Traces by hand: D<n> is the hook of the record with id n.  make(n) answers Res { id: n },
+// null below zero.  The loops: ids 0, 51, 2 -> value 53; the fallback loop binds 9, 0, 1.
+// A record the binding OWNS is released at the end of its pass; one a `?? default` chain's
+// temporaries hold (the chain's answer, its fallback literal) is released where the chain
+// runs again and at the function's exit — so those two loops read in that order.
+//
+// @falsified-at: 39701d652 — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+//   CHANNEL: the asserts (each compares the whole trace and the value).
+//   ARMED: no instrument — each hook writes this cell's trace file.
+//   WITNESS: the control's traces read "D1,D1" where one hook is owed and "" where one is.
+//   HOLDS: the chain not taken (`D5`), the local arm (`D1,D7`), `?? return` on both arms in a
+//   loop, and a fallback at the function's own scope, on both trees.
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_2552_chain_arm.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+struct Res { id: integer }
+fn OpDrop(self: Res) { note("D{self.id}"); }
+fn make(id: integer) -> Res? { if id < 0 { return null; } Res { id: id } }
+fn mk(id: integer) -> Res { Res { id: id } }
+
+fn lit(k: text, n: integer) -> integer { r = if k == "a" { make(n) ?? return -1 } else { Res { id: 5 } }; r.id }
+fn call(k: text) -> integer { r = if k == "a" { make(1) ?? return -1 } else { mk(5) }; r.id }
+fn local(k: text) -> integer { x = Res { id: 7 }; r = if k == "a" { make(1) ?? return -1 } else { x }; r.id }
+fn block(k: text) -> integer { t = 0; { r = if k == "a" { make(1) ?? return -1 } else { Res { id: 5 } }; t += r.id; } t }
+fn handed(k: text) -> Res { r = if k == "a" { make(1) ?? return Res { id: -9 } } else { Res { id: 5 } }; r }
+fn handed_id() -> integer { g = handed("a"); g.id }
+fn looped() -> integer { t = 0; for i in 0..3 { r = if i % 2 == 0 { make(i) ?? return -1 } else { Res { id: 50 + i } }; t += r.id; } t }
+fn looped_call() -> integer { t = 0; for i in 0..3 { r = if i % 2 == 0 { make(i) ?? return -1 } else { mk(50 + i) }; t += r.id; } t }
+fn looped_out() -> integer { t = 0; for i in 0..3 { r = if i % 2 == 0 { make(1 - i) ?? return -1 } else { Res { id: 50 + i } }; t += r.id; } t }
+fn both_in_a_loop() -> integer { t = 0; for i in 0..3 { r = if i % 2 == 0 { make(i) ?? return -1 } else { make(i + 10) ?? return -2 }; t += r.id; } t }
+
+fn fb_scope() -> integer { r = make(-1) ?? Res { id: 9 }; r.id }
+fn fb_block(n: integer) -> integer { t = 0; { r = make(n) ?? Res { id: 9 }; t += r.id; } t }
+fn fb_loop() -> integer { t = 0; for i in 0..3 { r = make(i - 1) ?? Res { id: 9 }; t += r.id; } t }
+fn fb_arm_block(i: integer) -> integer { t = 0; { r = if i % 2 == 0 { make(i) ?? Res { id: 9 } } else { Res { id: 50 + i } }; t += r.id; } t }
+fn fb_arm_loop() -> integer { t = 0; for i in 0..3 { r = if i % 2 == 0 { make(i) ?? Res { id: 9 } } else { Res { id: 50 + i } }; t += r.id; } t }
+
+fn test_the_chain_taken_beside_a_literal_or_a_call() {
+  drain();
+  a = lit("a", 1);
+  ta = drain();
+  b = call("a");
+  tb = drain();
+  assert(a == 1 && ta == "D1" && b == 1 && tb == "D1", "taken: {a} [{ta}] {b} [{tb}]");
+}
+
+fn test_the_other_arm_and_the_return_taken() {
+  drain();
+  a = lit("b", 1);
+  ta = drain();
+  b = lit("a", -1);
+  tb = drain();
+  c = local("a");
+  tc = drain();
+  assert(a == 5 && ta == "D5" && b == -1 && tb == "" && c == 1 && tc == "D1,D7", "paths: {a} [{ta}] {b} [{tb}] {c} [{tc}]");
+}
+
+fn test_in_a_block_and_handed_to_the_caller() {
+  drain();
+  a = block("a");
+  ta = drain();
+  b = handed_id();
+  tb = drain();
+  assert(a == 1 && ta == "D1" && b == 1 && tb == "D1", "block and handed: {a} [{ta}] {b} [{tb}]");
+}
+
+fn test_in_a_loop_body() {
+  drain();
+  a = looped();
+  ta = drain();
+  b = looped_call();
+  tb = drain();
+  c = looped_out();
+  tc = drain();
+  d = both_in_a_loop();
+  td = drain();
+  assert(a == 53 && ta == "D0,D51,D2", "literal arm: {a} [{ta}]");
+  assert(b == 53 && tb == "D0,D51,D2", "call arm: {b} [{tb}]");
+  assert(c == -1 && tc == "D1,D51", "left mid-loop: {c} [{tc}]");
+  assert(d == 13 && td == "D0,D11,D2", "both arms return: {d} [{td}]");
+}
+
+fn test_a_fallback_literal_keeps_its_hook_in_an_inner_scope() {
+  drain();
+  a = fb_scope();
+  ta = drain();
+  b = fb_block(-1);
+  tb = drain();
+  c = fb_block(3);
+  tc = drain();
+  d = fb_loop();
+  td = drain();
+  assert(a == 9 && ta == "D9" && b == 9 && tb == "D9" && c == 3 && tc == "D3", "fallback: {a} [{ta}] {b} [{tb}] {c} [{tc}]");
+  assert(d == 10 && td == "D0,D1,D9", "fallback in a loop: {d} [{td}]");
+}
+
+fn test_a_fallback_arm_beside_a_literal_in_an_inner_scope() {
+  drain();
+  a = fb_arm_block(1);
+  ta = drain();
+  b = fb_arm_loop();
+  tb = drain();
+  assert(a == 51 && ta == "D51", "arm in a block: {a} [{ta}]");
+  assert(b == 53 && tb == "D0,D2,D51", "arm in a loop: {b} [{tb}]");
+}
