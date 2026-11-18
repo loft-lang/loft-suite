@@ -4,7 +4,7 @@
 //
 // @FR-N-Match — the `null` arm of a plain enum match covers no variant: absence is not a
 // variant of anything, so a match without `_` still names every variant it leaves out
-// (loft#2230; the value cells are `2230-a-null-arm-matches-a-plain-enum-subject.loft`).
+// (loft#2230; the value cells are `a-null-arm-matches-a-null-subject-of-any-kind.loft`).
 //
 // @EXPECT_ERROR: missing: B
 //

@@ -1,0 +1,281 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULL ARM MATCHES A NULL SUBJECT OF ANY KIND (`@FR-N-Match`; loft#1417, loft#2230, loft#2427).  A `null`
+// arm matches a heap subject, a plain enum subject and a nullable collection, each as any nullable is
+// matched.  Each section keeps its own cases and receipt.
+//
+// ── 1417-a-null-arm-matches-a-heap-subject ──
+//
+// @FR-N-Match — `match e { null => …, x => … }` eliminates `t?` and binds the `t` arm.  The
+// rule is stated for every t, and it held for a SCALAR and for the synthetic inline element
+// only.  For a heap subject the arm-head parser reads a VARIANT name, `null` is a keyword and
+// not one, so the first pass broke out of the arm loop and the run died on a brace — three
+// "Expect token" errors naming nothing the author could act on (loft#1417).
+//
+// Absence is spelled differently in the two places, which is why one arm shape could not serve
+// both.  An inline `__nullable<S>` element carries it as discriminant 0 and the arm is a
+// discriminant test like any other; a HEAP subject — a local, a parameter, a return — carries
+// it in the store pointer (`@FR-L-Null-Which`), so its arm asks `OpRefIsNull` and names no
+// variant at all.  An arm may now carry its own test for exactly that reason.
+//
+// The `null` arm covers no VARIANT, so exhaustiveness is untouched: an absent subject is not a
+// variant of anything, and a match without a null arm still answers null for one — which is
+// what the last cell holds down.
+//
+// A BARE binding arm over a plain struct (`match s { null => -1, x => x.a }`) is refused with
+// *"'x' does not match struct type S"* BY DESIGN: at the arm root a bare lowercase name is a
+// refused misspelling on a struct or enum subject (`@FR-M-Unit`, matching-history D-match-22),
+// and `x: _ => x.a` is the spelling that binds (`@FR-P-Cap`).  The struct cells below use a
+// wildcard; the binding spelling is pinned in
+// `rules/collections/Col-Lookup/a-keyed-lookup-is-nullable-and-a-miss-discharges-and-propagates-at-every-kind.loft`.
+//
+// @falsified-at: 4ac66f6c — interpret exit 1 -> 0 and native exit 1 -> 0.  The control build
+//   does not compile the file at all (the arm loop breaks and the parse cascades), so no cell
+//   runs and the assertion column is 0 on both sides; the value assertions are what make a
+//   pass mean more than "it parsed".
+//   HOLDS: assertions, leak, panic, free-refusal, expectations are equal on both trees.
+//   Falsify prints only the channels that MOVE and requires HERE to be clean, so each of
+//   those is clean on both. The native side was not scored in this sweep.
+//
+// ── 2230-a-null-arm-matches-a-plain-enum-subject ──
+//
+// @FR-N-Match — `match e { null => …, … }` eliminates `t?` for every t.  loft#1417 gave the
+// `null` arm to a heap subject (`1417-a-null-arm-matches-a-heap-subject.loft`); a PLAIN enum
+// — a value enum, no payload variants — still went to the arm-head parser, which reads a
+// variant name, so `null` stopped the arm loop and the file was refused with
+// "Expect token }" (loft#2230).
+//
+// A plain enum is one discriminant byte, and its absence is that byte: 255 for a written
+// null, 0 for a field never set.  No variant takes either value, so the `null` arm asks the
+// one absence test (`null_test`, `OpConvBoolFromEnum`), and a variant arm, which compares
+// the byte against its own number, never matches a null.  Both encodings are cells below.
+//
+// Like the heap arm, the `null` arm covers no variant: a match without `_` must still name
+// every variant (`2230-a-null-arm-covers-no-variant.loft`, a file of its own because a refused
+// file runs none of its cells), and a match with no `null` arm still answers null for an
+// absent subject.
+//
+// @falsified-at: 6184655a5 — interpret exit 1 -> 0, native exit 1 -> 0.  The control refuses
+//   the file on the first `null` arm, so no cell runs there; the ten value assertions are what
+//   make a pass here mean more than "it parsed".
+//   HOLDS: assertions, leak, panic, refusals are equal on both trees.
+//
+// ── 2427-a-nullable-collection-is-matched-like-any-nullable ──
+//
+// `match e { null => …, x: _ => … }` eliminates `τ?` at EVERY τ (`@FR-N-Match`), and `x: _`
+// binds the whole subject (`@FR-P-Cap` at the arm root) — a nullable VECTOR and a nullable
+// KEYED collection included.  A vector's slice arms stand beside the null arm; a keyed
+// collection has no positions, so it is matched as a whole.
+//
+// Before loft#2427 neither parsed: a vector subject read only `[…]`, `_` or a bare name as an
+// arm head, so `null` and `x: _` broke out of the arm loop ("Expect token }"), and a keyed
+// subject had no match path at all.  The keyed capture is a view of the subject's store,
+// bound once ahead of the arms: bound inside its arm it was pre-inited to null there, and a
+// keyed null-init mints a store the view overwrote — the leak gate is that cell's channel.
+//
+// The cells that can FAIL:
+//   c1  a `vector<integer>?` with `null` and `x: _`
+//   c2  `null` beside slice arms that cover every length
+//   c3  `null` and a bare name over a `vector<text>?`
+//   c4  `null` over a call's `vector<S>?`, slice arm then `_`
+//   c5  a guard on the capture
+//   c6  a `hash<K[k]>?`                         — and its capture leaked one store per match
+//   c7  a `sorted<K[k]>?` field, bare name
+//   c8  an `index<K[k]>?` captured and looked up by key
+//
+// The control, which a too-wide fix would move: c9, a dense vector subject with a `null`
+// arm, which never matches.
+//
+// @falsified-at: 0e95172cd — interpret exit 1 -> 0, native exit 1 -> 0
+//   ARMED: the suite's leak gate (`LOFT_LEAK_CHECK=1`) for c6, which the runner arms on every
+//   run; the rest is ordinary assertions.
+//   WITNESS: the control does not parse the file ("Expect token }") on both backends; with
+//   the arm heads alone and not the keyed capture's binding, c6 leaks `hash<K[k]>×2`.
+//   HOLDS: panic and free-refusal are clean on both trees and both backends; HERE passes
+//   every assertion with no leak.
+//
+// CHANNEL: the compile (the file did not parse), the assertions, and the leak gate.
+
+enum Tok { Fn { x: integer }, Id { x: integer } }
+struct S { a: integer }
+
+fn a_null_arm_matches_an_absent_struct_enum() {
+  t: Tok? = null;
+  r = match t { null => -1, Id { x } => x, Fn { x } => 100 + x };
+  assert_eq("{r}", "-1", "the null arm is taken for an absent subject");
+}
+
+fn a_present_struct_enum_still_reaches_its_variant() {
+  u: Tok? = Id { x: 7 };
+  a = match u { null => -1, Id { x } => x, Fn { x } => 100 + x };
+  assert_eq("{a}", "7", "the Id arm is taken");
+
+  w: Tok? = Fn { x: 3 };
+  b = match w { null => -1, Id { x } => x, Fn { x } => 100 + x };
+  assert_eq("{b}", "103", "and the Fn arm for the other variant");
+}
+
+// A match with NO null arm is unchanged: an absent subject matches no variant and the match
+// answers null, which is how the value was reachable before this arm existed.
+fn a_match_without_a_null_arm_is_unchanged() {
+  v: Tok? = Id { x: 2 };
+  present = match v { Id { x } => x, Fn { x } => 100 + x };
+  assert_eq("{present}", "2", "a present subject still dispatches");
+
+  absent: Tok? = null;
+  m = match absent { Id { x } => x, Fn { x } => 100 + x };
+  assert_eq("{m ?? -1}", "-1", "and an absent one still answers null");
+}
+
+// A plain struct subject takes the null arm too; the other arm is a wildcard, because a
+// binding arm over a struct is a separate refusal (see the header).
+fn a_null_arm_matches_an_absent_struct() {
+  s: S? = null;
+  q = match s { null => -1, _ => 9 };
+  assert_eq("{q}", "-1", "an absent struct takes the null arm");
+
+  t: S? = S { a: 8 };
+  p = match t { null => -1, _ => 9 };
+  assert_eq("{p}", "9", "and a present one does not");
+}
+
+// The scalar spelling the rule always held for, as the control.
+fn the_scalar_spelling_is_unchanged() {
+  n: integer? = null;
+  assert_eq("{match n { null => -1, x => x }}", "-1", "an absent scalar takes the null arm");
+  m: integer? = 5;
+  assert_eq("{match m { null => -1, x => x }}", "5", "and a present one binds");
+}
+
+enum C { A, B, D }
+struct H { c: C?, k: integer }
+
+fn first(e: C?) -> text { match e { null => "n", A => "a", B => "b", D => "d" } }
+fn last(e: C?) -> text { match e { A => "a", B => "b", D => "d", null => "n" } }
+fn mk(i: integer) -> C? { if i == 0 { null } else if i == 1 { A } else { D } }
+
+fn a_null_arm_matches_an_absent_vector_element() {
+  v: vector<C?> = [null, B, null, A, D];
+  out = "";
+  for e in v {
+    out += match e { null => "n", A => "1", B => "2", D => "3" };
+  }
+  assert_eq(out, "n2n13", "each null element takes the null arm, each variant its own");
+}
+
+fn the_null_arm_may_come_last() {
+  assert_eq("{last(null)}{last(B)}{last(D)}", "nbd", "a null arm after the variants");
+}
+
+fn a_null_arm_beside_a_wildcard() {
+  r = "";
+  ev: vector<C?> = [null, B, A];
+  for x in ev {
+    r += match x { null => "n", B => "b", _ => "w" };
+  }
+  assert_eq(r, "nbw", "null is not swallowed by the wildcard");
+}
+
+// The two absent bytes: a field never written (0) and one written null (255).
+fn both_absent_encodings_take_the_null_arm() {
+  h = H { k: 7 };
+  assert_eq(first(h.c), "n", "a field never set");
+  h.c = null;
+  assert_eq(first(h.c), "n", "a field set to null");
+  h.c = B;
+  assert_eq(first(h.c), "b", "a field set to a variant");
+}
+
+fn a_call_result_subject() {
+  s = "";
+  for i in 0..3 {
+    s += match mk(i) { null => "n", A => "a", _ => "o" };
+  }
+  assert_eq(s, "nao", "null, A, then D through the wildcard");
+}
+
+fn a_binding_and_a_guard_beside_the_null_arm() {
+  b = "";
+  ev: vector<C?> = [null, B];
+  for x in ev {
+    b += match x { null => "n", y: _ => "x{y}" };
+  }
+  assert_eq(b, "nxB", "the binding arm binds the present value");
+  g = "";
+  ev: vector<C?> = [A, null, D];
+  for x in ev {
+    g += match x { null => "n", A if len(g) == 0 => "ag", A => "a", _ => "o" };
+  }
+  assert_eq(g, "agno", "the guard is asked only for a present A");
+}
+
+fn an_integer_result() {
+  t = 0;
+  ev: vector<C?> = [null, B];
+  for x in ev {
+    t += match x { null => 100, A => 1, B => 2, D => 3 };
+  }
+  assert_eq(t, 102, "null arm and a variant arm, summed");
+}
+
+fn a_statement_match() {
+  st = "";
+  e: C? = null;
+  match e { null => st += "S", A => st += "T", _ => st += "U" }
+  assert_eq(st, "S", "the null arm runs as a statement");
+}
+
+// A subject that cannot be absent accepts the arm and never takes it, as a scalar does.
+fn a_non_nullable_subject() {
+  r = "";
+  ev: vector<C> = [A, B];
+  for x in ev {
+    r += match x { null => "n", A => "a", B => "b", D => "d" };
+  }
+  assert_eq(r, "ab", "the null arm is never taken");
+}
+
+fn s2_a_match_without_a_null_arm_is_unchanged() {
+  absent: C? = null;
+  m = match absent { A => 1, B => 2, D => 3 };
+  assert_eq("{m ?? -1}", "-1", "an absent subject still answers null");
+}
+
+struct S3S { n: integer }
+struct K { k: integer }
+struct KV { k: integer, v: integer }
+struct O { s: sorted<K[k]>? }
+
+fn c1(s: vector<integer>?) -> integer { match s { null => -1, x: _ => len(x) } }
+fn c2(s: vector<integer>?) -> integer { match s { null => -1, [] => 0, [a, ..r] => a + len(r) } }
+fn c3(s: vector<text>?) -> text { match s { null => "none", x => "{len(x)}" } }
+fn s3_mk(b: boolean) -> vector<S3S>? { if b { [S3S { n: 9 }] } else { null } }
+fn c4(b: boolean) -> integer { match s3_mk(b) { null => -1, [h, .._] => h.n, _ => -2 } }
+fn c5(s: vector<integer>?) -> text { match s { null => "none", x: _ if len(x) > 2 => "big", _ => "small" } }
+fn c6(s: hash<K[k]>?) -> integer { match s { null => -1, x: _ => len(x) } }
+fn c7(o: O) -> text { match o.s { null => "none", x => "{len(x)}" } }
+fn c8(s: index<KV[k]>?) -> integer { match s { null => -1, x: _ => x[2].v ?? -2 } }
+fn c9(s: vector<integer>) -> integer { match s { null => -1, x: _ => len(x) } }
+
+fn test_a_nullable_vector() {
+  a: vector<integer>? = null;
+  e: vector<integer> = [];
+  assert(c1(a) == -1 && c1([1, 2, 3]) == 3, "c1");
+  assert(c2(a) == -1 && c2(e) == 0 && c2([5, 1, 1]) == 7, "c2");
+  t: vector<text>? = null;
+  assert(c3(t) == "none" && c3(["p", "q"]) == "2", "c3");
+  assert(c4(false) == -1 && c4(true) == 9, "c4");
+  assert(c5([1, 2, 3]) == "big" && c5([1]) == "small" && c5(a) == "none", "c5");
+  assert(c9([4, 5]) == 2, "c9");
+}
+
+fn test_a_nullable_keyed_collection() {
+  a: hash<K[k]>? = null;
+  h: hash<K[k]> = [K { k: 1 }, K { k: 2 }];
+  for i in 0..3 { assert(c6(a) == -1 && c6(h) == 2, "c6"); }
+  assert(c7(O { s: null }) == "none" && c7(O { s: [K { k: 3 }, K { k: 1 }, K { k: 2 }] }) == "3", "c7");
+  i: index<KV[k]> = [KV { k: 1, v: 10 }, KV { k: 2, v: 20 }];
+  n: index<KV[k]>? = null;
+  assert(c8(i) == 20 && c8(n) == -1, "c8");
+}
