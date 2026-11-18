@@ -8,6 +8,8 @@
 // text `+`) answers the same value while the source keeps its own.  The callee whose tail joins
 // two nullable FIELD views of its parameter is the case that fails (held back).
 //
+// @falsified-at: none — a conformance guard, interpret and native; it CAN fail: the `switches`
+//   census finds `LOFT_NO_NULLABLE_RETBUF=1` and `LOFT_NO_SEVERAL_VARS=1` each move it.
 // CHANNEL: the assertions and the leak gate.
 // Every cell held on both backends when written; the ledger rows are in
 // doc/claude/RULE_CROSSINGS-history.md.
