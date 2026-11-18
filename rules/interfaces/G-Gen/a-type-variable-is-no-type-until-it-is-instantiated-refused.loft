@@ -62,7 +62,7 @@ struct Box { w: integer }
 
 fn size(self: Box) -> integer { self.w }
 
-struct E { k: text }
+struct Entry { k: text }
 
 // @EXPECT_ERROR: parameter `h` is a keyed collection over the type variable T
 fn count<T>(h: hash<T[k]>) -> integer { len(h) }
