@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN APPENDED LOOP ELEMENT FROM A MINTING CALL ANSWERS WHAT THE COPY WOULD (`@FR-R-MoveAppend`).
+// `for f in call(…) { V += [f] }`, where the call mints its result and the loop variable's one use is
+// that append, may MOVE each element into V's own store instead of copying it; every shape the rule
+// declines keeps the copy.  Each test is one shape — the admitted one, a read after the append, a
+// second append, an append under a nested loop — and each must answer what the plain copy does, with
+// nothing left behind or freed twice.
+//
+// Values by hand: pts(3) mints P { x: 0, y: 0 }, P { x: 1, y: 10 }, P { x: 2, y: 20 }: x's are
+// [0, 1, 2], y's sum to 30.  Two appends per element: 6.  Under a nested loop of 2: 2 × 3 = 6.
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native, leak- and re-free-clean; it CAN fail:
+//   `LOFT_NO_SEVERAL_VARS=1` moves it (the `switches` census).
+// CHANNEL: the asserts and the leak gate.
+// ARMED: no instrument.
+// WITNESS: each message prints the vector.
+// HOLDS: the declined shapes answer as the admitted one does.
+
+struct P { x: integer, y: integer }
+fn pts(n: integer) -> vector<P> { r: vector<P> = []; for i in 0..n { r += [P { x: i, y: i * 10 }]; } r }
+fn xs(v: vector<P>) -> text { t = ""; for p in v { t += "{p.x}"; } t }
+
+fn test_the_admitted_shape() {
+  v: vector<P> = [];
+  for f in pts(3) { v += [f]; }
+  s = 0;
+  for p in v { s += p.y; }
+  assert(xs(v) == "012" && s == 30, "admitted: {xs(v)} {s}");
+}
+
+fn test_a_read_after_the_append_declines() {
+  v: vector<P> = [];
+  s = 0;
+  for f in pts(3) { v += [f]; s += f.y; }
+  assert(xs(v) == "012" && s == 30, "read after: {xs(v)} {s}");
+}
+
+fn test_a_second_append_declines() {
+  v: vector<P> = [];
+  for f in pts(3) { v += [f]; v += [f]; }
+  assert(len(v) == 6 && xs(v) == "001122", "two appends: {xs(v)}");
+}
+
+fn test_an_append_under_a_nested_loop_declines() {
+  v: vector<P> = [];
+  for f in pts(3) { for k in 0..2 { v += [f]; } }
+  assert(len(v) == 6 && xs(v) == "001122", "nested: {xs(v)}");
+}
