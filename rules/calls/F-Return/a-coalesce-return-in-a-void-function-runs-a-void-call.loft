@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COALESCE RETURN IN A VOID FUNCTION RUNS A VOID CALL (`@FR-F-Return`, `@FR-N-Coal`).
+// In a function with no value, `x ?? return f()` runs the void call `f()` and leaves when `x`
+// is null — the form published libraries write for a test that cannot start
+// (`dev = open(..) ?? return assert(false, "no device")`).  A parse that handed the exit to the
+// statement's `return` refused it ("Expect no expression after return"), and every such library
+// stopped compiling.  The trace holds what ran: the call on the null path, the rest otherwise.
+// Values by hand: seen(1) notes "v1"; seen(-1) notes "none" and nothing after it.
+//
+// @falsified-at: none — a conformance guard of a shipped form; main answers it as written here, and the build that refused it was never merged.
+// CHANNEL: the compile and the asserts.
+// ARMED: every run.
+// WITNESS: the refusing build reports "Expect no expression after return" at the call.
+// HOLDS: 2551-a-coalesce-return-answers-its-own-value.loft beside it (a value after `?? return`).
+
+fn trace_path() -> text { "{temp_dir() ?? "/tmp"}/loft_suite_void_coalesce_return.trace" }
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" { cur += ","; }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur { bytes += [c as u8 ?? 0]; }
+  if !write_bytes(trace_path(), bytes) { println("trace write failed"); }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) { println("trace clear failed"); }
+  cur
+}
+
+fn mk(n: integer) -> integer? { if n < 0 { return null; } n }
+fn seen(n: integer) { v = mk(n) ?? return note("none"); note("v{v}"); }
+fn in_a_loop() { for i in 0..3 { v = mk(1 - i) ?? return note("stop{i}"); note("v{v}"); } note("end"); }
+
+fn test_the_call_runs_on_the_null_path_only() {
+  drain();
+  seen(1);
+  a = drain();
+  seen(-1);
+  b = drain();
+  assert(a == "v1" && b == "none", "void call: [{a}] [{b}]");
+}
+
+fn test_it_leaves_the_function_from_inside_a_loop() {
+  drain();
+  in_a_loop();
+  t = drain();
+  assert(t == "v1,v0,stop2", "loop: [{t}]");
+}
