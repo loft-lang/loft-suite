@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FAST COPY OF A LOOP ANSWERS WHAT THE EXACT LOOP DOES (`@FR-R-FaultFlag`, @C80).  A `for` whose
+// recurrence holds a discharge runs a fast copy first, where a `??` sets a flag on a null instead of
+// branching and an operator's recoverable raise sets it instead of raising; a set flag restores the
+// locals and runs the statement as written.  So every fault form answers exactly the exact form's
+// value: a discharge that never meets a null, one that meets nulls mid-loop, a default that reads
+// the recurrence itself, an overflow (null and continue, @C80), and a small constant range the copy
+// unrolls.
+//
+// Values by hand: v = [1, 2, 3, 4, 5].  never_null: 1+2+3+4+5 = 15.  null_mid reads 8 of 5
+// elements with `?? 100`: 15 + 3 × 100 = 315.  default_reads_s over [10, 20, 30] from 1: 11, 21, 31,
+// then the absent elements take s: 32, 33, 34.  overflow: 1000^30 overflows, null (read as -1).
+// unrolled: 1 + 4 + 9 + 16 = 30.
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native; it CAN fail: `LOFT_NO_SEVERAL_VARS=1` moves it (the
+//   `switches` census; no fault-flag switch does — the fast and exact forms answer alike).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: the same loops written with an explicit `if v[i] == null` read alike.
+
+fn never_null(v: vector<integer>) -> integer { s = 0; for i in 0..len(v) { s = (v[i] ?? 0) + s; } s }
+fn null_mid(v: vector<integer>) -> integer { s = 0; for i in 0..8 { s = (v[i] ?? 100) + s; } s }
+fn default_reads_s(v: vector<integer>) -> integer { s = 1; for i in 0..6 { s = (v[i] ?? s) + 1; } s }
+fn overflow() -> integer? { s = 1; for i in 0..30 { s = s * 1000; } s }
+fn unrolled() -> integer { s = 0; for i in 1..5 { s += i * i; } s }
+
+fn test_a_discharge_that_never_meets_a_null() {
+  r = never_null([1, 2, 3, 4, 5]);
+  assert(r == 15, "never null: {r}");
+}
+
+fn test_a_discharge_that_meets_nulls_mid_loop() {
+  r = null_mid([1, 2, 3, 4, 5]);
+  assert(r == 315, "null mid-loop: {r}");
+}
+
+fn test_a_default_that_reads_the_recurrence() {
+  r = default_reads_s([10, 20, 30]);
+  assert(r == 34, "default reads s: {r}");
+}
+
+fn test_an_overflow_is_null_and_continues() {
+  r = overflow() ?? -1;
+  assert(r == -1, "overflow: {r}");
+}
+
+fn test_a_small_constant_range() {
+  r = unrolled();
+  assert(r == 30, "unrolled: {r}");
+}
