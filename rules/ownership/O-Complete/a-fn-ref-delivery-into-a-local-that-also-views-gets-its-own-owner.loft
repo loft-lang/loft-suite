@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Complete` × `@FR-H-FreeTwice` — a local that one assignment binds to a VIEW (a direct
+// call's answer, which the call's buffer owns; an empty literal, which its temporary owns) and
+// another assignment binds to a collection a FN-REF call delivers.  One binding serves every
+// path, so it cannot be declared the delivery's owner: its displaced free then released the
+// buffer's store, which the buffer freed again at the scope's end, and in a loop the next call
+// wrote into the freed store.  The delivery gets an owner of its own (a lift temporary), and the
+// local views it as it views the rest.
+//
+// Values by hand: mk(i) and m(i) both answer [i, i + 1].
+//   `x: vector<integer> = []; x = m(3)`               -> len 2, x[0] 3
+//   `x = mk(1); x = m(3)` and `x: [1]` then `x = m(3)` -> len 2
+//   a loop `x = m(i)` for i in 0..5 summing x[0]       -> 10, len 2
+//   per pass `x = mk(1)`, then `x = m(5)` only when c  -> 5 then 1: "51"
+//   per pass `x = mk(i); x = m(i + 10)`, i in 0..3      -> 33
+//   the order reversed, `x = m(1); x = mk(7)`          -> 7
+//   a nullable local, `x: vector<integer>? = mk(2); x = m(4)` -> 4
+//
+// @falsified-at: bf9efb552 — interpret and native-c: every case but the reversed order and the
+//   conditional re-frees one store (LOFT_REFREE_FAILS=1 fails the run); native-c reads a freed
+//   store in the conditional and the per-pass loop ("killed by the free in fn main").
+//   On the fix, LOFT_NO_CALLREF_LIFT=1 brings every one of them back.
+// CHANNEL: the re-free failure and the runtime's use-after-free, then the asserts.
+// ARMED: LOFT_REFREE_FAILS=1 on the interpreter; the C backend's own free checks.
+// HOLDS: values, leak gate and strict stores on both backends.
+
+fn mk(i: integer) -> vector<integer> { [i, i + 1] }
+
+fn test_a_view_then_a_delivery() {
+  m = fn(i: integer) -> vector<integer> { [i, i + 1] };
+  a: vector<integer> = [];
+  a = m(3);
+  assert(len(a) == 2 && a[0] == 3, "after an empty literal: {len(a)}");
+  b = mk(1);
+  b = m(3);
+  assert(len(b) == 2 && b[0] == 3, "after a direct call: {len(b)}");
+  c: vector<integer> = [1];
+  c = m(3);
+  assert(len(c) == 2, "after a literal: {len(c)}");
+  d = m(1);
+  d = mk(7);
+  assert(d[0] == 7, "the order reversed: {d[0]}");
+  e: vector<integer>? = mk(2);
+  e = m(4);
+  assert((e[0] ?? -1) == 4, "a nullable local: {e[0] ?? -1}");
+}
+
+fn test_a_delivery_in_a_loop() {
+  m = fn(i: integer) -> vector<integer> { [i, i + 1] };
+  x: vector<integer> = [];
+  s = 0;
+  for i in 0..5 { x = m(i); s += x[0]; }
+  assert(s == 10 && len(x) == 2, "a loop: {s} {len(x)}");
+  t = 0;
+  for c in [true, false] { y = mk(1); if c { y = m(5) } t = t * 10 + y[0]; }
+  assert(t == 51, "a conditional delivery: {t}");
+  u = 0;
+  for i in 0..3 { z = mk(i); z = m(i + 10); u += z[0]; }
+  assert(u == 33, "both binds per pass: {u}");
+}
