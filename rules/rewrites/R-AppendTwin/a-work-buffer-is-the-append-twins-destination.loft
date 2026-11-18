@@ -29,7 +29,7 @@
 // CHANNEL: the asserts.
 // ARMED: no instrument (the switches above, by hand).
 // WITNESS: each message prints the answer.
-// HOLDS: `a-call-result-appended-is-built-in-the-destination` beside it (local destinations).
+// HOLDS: `a-call-result-appended-is-built-in-the-destination-by-its-twin` beside it (local destinations).
 
 fn build(k: integer) -> vector<integer> {
   out: vector<integer> = [];
