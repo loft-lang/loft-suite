@@ -1,0 +1,50 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REGIME FILE NAMES 32 BITS, AND ASKS FOR 64 BY NAME (`@FR-W-Regime`, `@FR-W-Name`, `@FR-W-Count`,
+// `@FR-W-Lit`).
+// `#width 32` as the first line puts this file under the regime: `integer` is a 32-bit integer whose
+// out-of-range result reads null (@C80), `float` is `single`, and a count — `len` — is an i32; `i64`
+// and `f64` are the one way to ask for 64 bits, and they hold what the 32-bit names cannot.  The
+// crossings into a 64-bit file (W-Call, W-Store's field) are tests/width32.rs's, with libraries.
+//
+// Values by hand: 2147483647 + 1 as `integer` is out of range: null.  An `i64` holds 5000000000.
+// 16777217 as `float` (single, 24-bit mantissa) rounds to 16777216; written `16777217.0d` it is an
+// exact `f64`, while the plain literal is `single` even into an `f64` (W-Lit): 16777216.  The 64-bit
+// literals are spelled `5000000000l` and `16777217.0d` (W-Lit's cure).
+// len([1]) + 2147483647 is 2147483648, past i32: null; with the count widened to `i64`, a value.
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native; it CAN fail: `LOFT_NO_SEVERAL_VARS=1` moves it (the
+//   `switches` census).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: the same arithmetic in `i64` and `f64` answers the 64-bit value.
+
+fn test_integer_is_32_bits_and_i64_is_64() {
+  a = 2147483647;
+  one = 1;
+  b = a + one;
+  big: i64 = 5000000000;
+  assert(b == null && big == 5000000000l, "integer: {b} {big}");
+}
+
+fn test_float_is_single_and_f64_is_double() {
+  f: float = 16777217.0;
+  d: f64 = 16777217.0d;
+  s: f64 = 16777217.0;
+  r = "{f} {d} {s}";
+  // Compared as text: in `single` 16777216.0 and 16777217.0 are one value, so a float compare could not
+  // tell the rounding from its absence.
+  assert(r == "16777216 16777217 16777216", "float: {r}");
+}
+
+fn test_a_count_is_32_bits() {
+  v = [1];
+  n = len(v) + 2147483647;
+  w: i64 = len(v);
+  m = w + 2147483647;
+  assert(n == null && m == 2147483648l, "count: {n} {m}");
+}
