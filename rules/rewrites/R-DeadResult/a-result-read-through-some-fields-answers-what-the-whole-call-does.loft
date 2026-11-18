@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RESULT READ THROUGH SOME FIELDS ANSWERS WHAT THE WHOLE CALL DOES (`@FR-R-DeadResult`).  A call
+// whose record result the caller reads only through some fields may run a twin that drops every
+// computation only the other fields read — and nothing observable is lost: (1) a computation with an
+// effect is kept (an append to a vector the caller holds), (3) every test, loop and branch stays as
+// written, and a recursion closes over the twin with the same answer.  Each test reads a field set
+// beside the whole result, and they must agree.
+//
+// Values by hand: scan("a b") has ok true, count 2, words ["a","b"]; scan("") ok false, count 0;
+// scan("a b c") count 3.  depth(3) counts 3 levels.  note(log, 5) appends 5 to the caller's `log`
+// while building its dead `seen` field, so `log` is [5] after a call read only through `.ok`.
+//
+// @falsified-at: none — a conformance guard from the formal text (the rewrite's switch is
+//   planned); every value answered as hand-computed, interpret and native; it CAN fail:
+//   `LOFT_NO_RETBUF_WITNESS_GATE=1` and `LOFT_NO_SEVERAL_VARS=1` each move it (the `switches` census).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints both readings.
+// HOLDS: the whole-result reading of every call.
+
+struct R { ok: boolean, count: integer, words: vector<text> }
+struct D { count: integer, trail: text }
+struct N { ok: boolean, seen: vector<integer> }
+
+fn scan(t: text) -> R {
+  words: vector<text> = [];
+  for w in t.split(' ') { if len(w) > 0 { words += [w]; } }
+  R { ok: len(words) > 0, count: len(words), words: words }
+}
+fn depth(n: integer) -> D {
+  if n == 0 { return D { count: 0, trail: "" }; }
+  inner = depth(n - 1);
+  D { count: inner.count + 1, trail: "{inner.trail}{n}" }
+}
+fn note(log: vector<integer>, k: integer) -> N {
+  log += [k];
+  N { ok: true, seen: [k, k] }
+}
+
+fn test_only_a_status_field_is_read() {
+  a = scan("a b").ok;
+  b = scan("").ok;
+  whole = scan("a b");
+  assert(a && !b && whole.ok && whole.count == 2 && len(whole.words) == 2, "status: {a} {b} {whole.count}");
+}
+
+fn test_a_loop_decides_the_live_field() {
+  c = scan("a b c").count;
+  assert(c == 3 && scan("a b c").words[2] == "c", "loop: {c}");
+}
+
+fn test_a_recursion_read_through_one_field() {
+  c = depth(3).count;
+  whole = depth(3);
+  assert(c == 3 && whole.count == 3 && whole.trail == "123", "recursion: {c} {whole.trail}");
+}
+
+fn test_an_effect_is_kept_when_its_field_is_not_read() {
+  log: vector<integer> = [];
+  ok = note(log, 5).ok;
+  assert(ok && "{log}" == "[5]", "effect: {ok} {log}");
+}
