@@ -1,0 +1,286 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TUPLE MEMBER IS TYPED BY ITS DECLARATION, A VARIANT ONE INCLUDED (`@FR-C-Var`).  A tuple member is
+// parsed against the type its tuple declares; a member typed by a variant keeps its enum type as a
+// reference source and is a link target in every record home it is widened into.  Each section keeps
+// its own cases and receipt.
+//
+// ── a-declared-tuple-with-an-enum-member-keeps-its-type-as-a-reference-source ──
+//
+// A tuple local that is the source of a `&(…)` link and carries a heap member is built as the
+// `__tuple<…>` RECORD (formal/tuples.md `(T-Ref-Rep)`), and that record is the LOCAL's: its
+// members are the local's declared types, which a variant literal widens into (`@FR-C-Var`).
+// It was minted from the literal's own member types, so `w: (integer, Entity) = (1, IceWall
+// { … })` became a `__tuple<integer,IceWall>`: a `&(integer, Entity)` parameter refused it, a
+// later `w.1 = Fireball { … }` was refused as a write to a field of type `IceWall`, and
+// `r = &w` was refused as a type change (loft#1531).  An undeclared local keeps the literal's
+// type, the way a `&Entity` parameter refuses an `IceWall` local.
+// @falsified-at: 343bdf647 — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-by: tests/falsified/a-declared-tuple-with-an-enum-member-keeps-its-type-as-a-reference-source.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: exit — on the control the program never runs: every `&(integer, Entity)` call is
+//   refused (*"expected &__tuple<integer,Entity>, got __tuple<integer,IceWall>"*), as are the
+//   member write of the other variant and the `r = &w` link; here every cell passes.  Not
+//   assert and not leak: a program the control cannot compile.
+//   ARMED: no instrument — a plain run on either backend reads it.
+//   WITNESS: `test_a_declared_member_takes_the_link`: refused at `bump(w)` there, `2 wall 6` here.
+//   HOLDS: a declared member the literal does NOT convert into is still the bind's refusal
+//   (`tests/issues.rs::a_reference_source_tuple_whose_member_the_declaration_refuses_is_still_refused`),
+//   and an undeclared variant local is still refused by a `&(integer, Entity)`, on both trees;
+//   the leak channel is `none` on both, and the cells are clean under strict stores and poison.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// ── a-tuple-member-is-parsed-against-its-declared-type ──
+//
+// A tuple MEMBER is parsed against the type its declaration names, and the literal is
+// converted to that type before the variable adopts one.
+//
+// LOFT.md states the `⇐` rule as *the expected type wherever there is one*, and a tuple
+// member is one of those places: the element is CHECKED against the member type, so it is
+// parsed against it too.  Two separate mechanisms have to agree for that to hold in a
+// DECLARED local, and each one alone reads as the whole cure — which is why both halves
+// are here with cells that separate them:
+//
+//   * the `⇐` channel reaches the member.  It used to carry `fn(…)` alone, so a member
+//     whose parse NEEDS the expected type had nothing to resolve against: a bare variant
+//     name (`(Dot, 9)`) had no enum context, and an empty collection literal (`([], 9)`)
+//     had no element type — the second reaching codegen as *"Incorrect var `__ret_1[32]`
+//     versus 24"*, an ICE rather than a diagnostic.
+//   * the literal is CONVERTED before `change_var` retypes the variable.  The conversion
+//     ran after it, so a member needing a real coercion — a variant to its enum
+//     (@FR-C-Var), an integer to a float — was refused *"cannot change type from
+//     (Shape, integer) to (Circle, integer)"* while the RETURN and ARGUMENT positions
+//     accepted the identical program.
+//
+// The two are independent: with only the channel widened, the variant and float cells
+// still refuse; with only the conversion hoisted, the bare variant and the two `[]` cells
+// still fail (the latter as the ICE).  Every cell below was measured under both halves
+// separately before either landed.
+//
+// Every cell reads BOTH members.  The second member is what a broken first member takes
+// down with it — the same shape in a return position answers `t.1 == null` for a
+// declared `integer` — so a cell that only checks `t.0` cannot see half the defect.
+//
+// Axes this file MOVES:   member type (struct-enum / nullable struct-enum / float /
+//                         vector / nullable vector / nullable reference / narrow int /
+//                         nullable scalar / text), member expression (qualified variant /
+//                         bare variant / literal needing coercion / empty collection
+//                         literal / non-empty literal / `null`), member POSITION in the
+//                         tuple (first and second), collection contents (empty and not).
+// Axes it HOLDS FIXED:    arity — every tuple here is 2; the tuple's own position — every
+//                         cell is a DECLARED LOCAL, because that is the position the two
+//                         mechanisms meet in, and the return/argument positions answer
+//                         through different push sites.  Backend is moved by the harness.
+//                         Recorded because a matrix's blind spot is what it pinned; see
+//                         `python3 scripts/matrix_axes.py file <this file>`.
+//
+// @falsified-at: 76208654 — interpret exit 1 -> 0, native exit 1 -> 0.  The channel that
+// moved is EXIT, because the control refuses four of the cells outright and ICEs on two
+// more, which says nothing about whether the VALUE assertions are live.  So each was
+// mutated in turn on the fixed build (`tv.1 == 8`, `tb.1 == 8`, `tn.1 == 8`, `tf.0 == 6.0`,
+// `len(te.0) == 1`, `tk.1 == 8`) and each fails on the ASSERT channel here.
+//   ⚠ That control is on no public ref, so this receipt records a falsification that
+//   cannot be re-run — see GUARDS.md § The patch receipt for the form that can be.
+//   HOLDS: assertions, leak, panic, free-refusal, expectations are equal on both trees.
+//   Falsify prints only the channels that MOVE and requires HERE to be clean, so each of
+//   those is clean on both. The native side was not scored in this sweep.
+//
+// ── a-widened-tuple-member-is-a-link-target-in-every-record-home ──
+//
+// A WIDENED TUPLE MEMBER IS A LINK TARGET IN EVERY RECORD HOME (`@FR-C-Var` crossed with
+// `@FR-T-Ref-Rep`).  T-Ref-Rep: the tuple a `&(…)` names is a `__tuple<τ₁, …, τₙ>` RECORD — "the
+// same record a heap-tuple RETURN, the loop variable over a `vector<(…)>`, a `vector<(…)>`
+// element and a struct's tuple field already are" — and "the record's members are the LOCAL's
+// types, never the literal's … because a variant widens into its enum (types.md (C-Var))".  The
+// C-Var cell beside this one measures a tuple LOCAL; this one moves the record's home to the
+// other four, each filled from a variant literal, and links each to a `&(integer, Entity)`
+// parameter that writes both members — the other variant into the enum member.
+//
+// Axes it MOVES: the record home (a vector element, a struct's tuple field, a loop variable over
+// a vector of tuples, a heap-tuple return bound to a local), the write through the link (the
+// integer member, the enum member to the other variant).  Values hand-computed.
+//
+// Cross-backend; `main` runs every cell so the leak gate reads the file.
+//
+// @falsified-at: none — a conformance guard; every cell answered as hand-computed on 18594597b, interpret and native.
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the members.
+// HOLDS: `a-declared-tuple-with-an-enum-member-keeps-its-type-as-a-reference-source` beside it.
+
+enum Entity { Fireball { n: integer }, IceWall { n: integer } }
+
+struct Slot { n: integer }
+
+fn bump(t: &(integer, Entity)) { t.0 = t.0 + 1; }
+
+fn to_fire(t: &(integer, Entity)) { t.1 = Fireball { n: t.0 * 10 }; }
+
+fn bump_text(t: &(text, Entity)) { t.0 += "!"; }
+
+fn bump_slot(t: &(integer, Slot)) { t.0 = t.0 + 1; }
+
+fn name(e: Entity) -> text {
+  match e { Fireball { n } => "fire {n}", IceWall { n } => "wall {n}" }
+}
+
+fn test_a_declared_member_takes_the_link() {
+  w: (integer, Entity) = (1, IceWall { n: 6 });
+  bump(w);
+  assert(w.0 == 2 && name(w.1) == "wall 6", "the call reached the local: {w.0} {name(w.1)}");
+}
+
+fn test_the_callee_writes_the_other_variant_through_the_link() {
+  w: (integer, Entity) = (3, IceWall { n: 6 });
+  to_fire(w);
+  assert(w.0 == 3 && name(w.1) == "fire 30", "the member took the variant: {w.0} {name(w.1)}");
+}
+
+fn test_the_local_takes_the_other_variant_before_the_link() {
+  w: (integer, Entity) = (1, IceWall { n: 6 });
+  w.1 = Fireball { n: 3 };
+  bump(w);
+  assert(w.0 == 2 && name(w.1) == "fire 3", "a member write of the other variant: {w.0} {name(w.1)}");
+}
+
+fn test_a_rebind_to_the_other_variant_keeps_the_declaration() {
+  w: (integer, Entity) = (1, IceWall { n: 6 });
+  first = name(w.1);
+  w = (5, Fireball { n: 2 });
+  bump(w);
+  assert(first == "wall 6" && w.0 == 6 && name(w.1) == "fire 2", "the rebind: {first} {w.0} {name(w.1)}");
+}
+
+fn test_a_local_link_writes_either_member() {
+  w: (integer, Entity) = (1, IceWall { n: 6 });
+  r = &w;
+  r.0 += 10;
+  r.1 = Fireball { n: 8 };
+  assert(w.0 == 11 && name(w.1) == "fire 8", "through the local link: {w.0} {name(w.1)}");
+}
+
+fn test_repeated_calls_then_a_variant_match() {
+  w: (integer, Entity) = (1, IceWall { n: 6 });
+  for _ in 0..3 { bump(w); }
+  r = match w.1 { IceWall { n } => "wall {n}", Fireball { n } => "fire {n}" };
+  assert(w.0 == 4 && r == "wall 6", "three calls: {w.0} {r}");
+}
+
+fn test_a_text_member_beside_the_enum_member() {
+  w: (text, Entity) = ("a", IceWall { n: 6 });
+  bump_text(w);
+  assert(w.0 == "a!" && name(w.1) == "wall 6", "a second heap member: {w.0} {name(w.1)}");
+}
+
+fn test_a_member_that_does_not_widen_is_unchanged() {
+  w: (integer, Slot) = (1, Slot { n: 6 });
+  bump_slot(w);
+  assert(w.0 == 2 && w.1.n == 6, "a struct member, nothing to widen: {w.0} {w.1.n}");
+}
+
+
+enum TmShape { Dot, Circle { r: integer } }
+struct TmInner { n: integer = 0 }
+
+fn tm_pair() -> (integer, integer) { (4, 9) }
+
+fn test_a_tuple_member_is_parsed_against_its_declared_type() {
+  // a QUALIFIED variant widens to its enum — @FR-C-Var, the rule the refusal contradicted
+  tv: (TmShape, integer) = (TmShape::Circle { r: 7 }, 9);
+  assert(match tv.0 { Circle { r } => r, Dot => -1 } == 7, "a qualified variant member");
+  assert(tv.1 == 9, "the member beside a qualified variant, got {tv.1}");
+
+  // a BARE variant name resolves through the enum context the member type supplies
+  tb: (TmShape, integer) = (Dot, 9);
+  assert(match tb.0 { Circle { r } => r, Dot => -1 } == -1, "a bare variant member");
+  assert(tb.1 == 9, "the member beside a bare variant, got {tb.1}");
+
+  // whether the slot may be ABSENT says nothing about which variants it can hold
+  tn: (TmShape?, integer) = (TmShape::Circle { r: 4 }, 9);
+  assert(tn.0 != null, "a nullable variant member is present");
+  assert(tn.1 == 9, "the member beside a nullable variant, got {tn.1}");
+
+  // an ordinary numeric coercion, legal in every other position
+  tf: (float, integer) = (5, 9);
+  assert(tf.0 == 5.0, "an integer member coerced to float, got {tf.0}");
+  assert(tf.1 == 9, "the member beside a coerced float, got {tf.1}");
+
+  // an EMPTY collection literal takes its element type from the declaration
+  te: (vector<integer>, integer) = ([], 9);
+  assert(len(te.0) == 0, "an empty vector member, got {len(te.0)}");
+  assert(te.1 == 9, "the member beside an empty vector, got {te.1}");
+
+  // …and so does a nullable one, whose `[]` is a PRESENT empty collection, not absence
+  tq: (vector<integer>?, integer) = ([], 9);
+  assert(tq.0 != null, "an empty nullable vector member is present, not null");
+  assert(tq.1 == 9, "the member beside an empty nullable vector, got {tq.1}");
+
+  // a NON-empty collection member, so the empty cells above are not the only ones read
+  tk: (vector<integer>, integer) = ([3, 4, 5], 9);
+  assert(len(tk.0) == 3 && tk.0[1] == 4, "a filled vector member, got {len(tk.0)}");
+  assert(tk.1 == 9, "the member beside a filled vector, got {tk.1}");
+
+  // A tuple destination now seeds for EVERY member, so member 0's parse sees the member
+  // type even where the parens do not hold a tuple LITERAL at all.  The old bound made
+  // that unreachable — only a `fn(…)` member seeded — so these cells are what says the
+  // widening did not retype a parenthesised whole-tuple expression into its first member.
+  tp: (integer, integer) = (tm_pair());
+  assert(tp.0 == 4 && tp.1 == 9, "a parenthesised call filling the whole tuple, got {tp.1}");
+  tw: (integer, integer) = tm_pair();
+  assert(tw.0 == 4 && tw.1 == 9, "the same call without the parens, got {tw.1}");
+  tx: (integer, integer) = (2 + 2, 9);
+  assert(tx.0 == 4 && tx.1 == 9, "a member that is an operator expression, got {tx.0}");
+  ty: ((integer, integer), text) = ((4, 5), "z");
+  assert(ty.0.1 == 5 && ty.1 == "z", "a NESTED tuple member, got {ty.0.1}");
+
+  // the four cells that were ALREADY right, so the widening is not scored on its own
+  tr: (TmInner?, integer) = (null, 9);
+  assert(tr.0 == null && tr.1 == 9, "a null reference member, got {tr.1}");
+  ti: (i8, integer) = (5, 9);
+  assert(ti.0 == 5 && ti.1 == 9, "a narrow int member, got {ti.0}");
+  to: (integer?, integer) = (5, 9);
+  assert(to.0 == 5 && to.1 == 9, "a dense integer into a nullable member, got {to.0}");
+  tt: (text?, integer) = ("ab", 9);
+  assert(tt.0 == "ab" && tt.1 == 9, "a text into a nullable member, got {tt.0}");
+}
+
+enum TrEntity { TrFire { n: integer }, TrWall { n: integer } }
+struct TrHost { tag: integer, pair: (integer, TrEntity) }
+
+fn tr_bump(t: &(integer, TrEntity)) { t.0 = t.0 + 1; }
+fn tr_to_fire(t: &(integer, TrEntity)) { t.1 = TrFire { n: t.0 * 10 }; }
+fn tr_name(e: TrEntity) -> text {
+  match e { TrFire { n } => "fire {n}", TrWall { n } => "wall {n}" }
+}
+fn tr_mk(k: integer) -> (integer, TrEntity) { (k, TrWall { n: k + 5 }) }
+
+fn test_a_vector_element() {
+  v: vector<(integer, TrEntity)> = [(1, TrWall { n: 6 }), (2, TrFire { n: 7 })];
+  tr_bump(v[0]);
+  tr_to_fire(v[1]);
+  assert(len(v) == 2 && v[0].0 == 2 && tr_name(v[0].1) == "wall 6", "element 0: {v[0].0} {tr_name(v[0].1)}");
+  assert(v[1].0 == 2 && tr_name(v[1].1) == "fire 20", "element 1: {v[1].0} {tr_name(v[1].1)}");
+}
+
+fn test_a_struct_tuple_field() {
+  h = TrHost { tag: 9, pair: (3, TrWall { n: 4 }) };
+  tr_bump(h.pair);
+  tr_to_fire(h.pair);
+  assert(h.tag == 9 && h.pair.0 == 4 && tr_name(h.pair.1) == "fire 40", "field: {h.pair.0} {tr_name(h.pair.1)}");
+}
+
+fn test_a_loop_variable() {
+  v: vector<(integer, TrEntity)> = [(1, TrWall { n: 6 }), (5, TrWall { n: 8 })];
+  for t in v { tr_bump(t); }
+  assert(v[0].0 == 2 && v[1].0 == 6 && tr_name(v[1].1) == "wall 8", "loop: {v[0].0} {v[1].0}");
+}
+
+fn test_a_heap_tuple_return_bound_to_a_local() {
+  w = tr_mk(7);
+  tr_bump(w);
+  first = tr_name(w.1);
+  tr_to_fire(w);
+  assert(w.0 == 8 && first == "wall 12" && tr_name(w.1) == "fire 80", "return: {w.0} {first} {tr_name(w.1)}");
+}
+
