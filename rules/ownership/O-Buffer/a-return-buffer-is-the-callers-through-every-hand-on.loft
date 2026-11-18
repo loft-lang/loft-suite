@@ -1,0 +1,189 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RETURN BUFFER IS THE CALLER'S STORE THROUGH EVERY WAY THE FRAME HANDS IT ON (`@FR-O-Buffer`).
+// The hidden buffer a caller passes stays the caller's whether the callee answers null into a
+// local promoted onto it, refills it on every pass of a loop that rebinds the local it fills, or
+// forwards it unchanged through a self tail call: the frame frees nothing the caller owns, and
+// what the frame minted it frees once.  Each section keeps its own cases and receipt.
+//
+// ── a-null-answer-into-a-promoted-buffer-keeps-the-callers-store ──
+//
+// @catches: LOFT_C_NULL_FREES_ENTRY — the switch frees the store the caller handed in when a call copied into the promoted buffer answers null (C only)
+//
+// @FR-O-Buffer: a local promoted onto its function's return buffer holds the store its CALLER
+// handed in until it is rebound, and the function never releases that store.  A recursive
+// `rw` rebinds `r = rw(inner, …)` and answers `r` itself on one arm, so `r` is the buffer; where
+// the recursion answers null, the bind of null into `r` released what `r` held — the caller's
+// buffer — and the caller handed that freed store to its next call.  C only (the bytecode and
+// Rust writers declined there); the self-hosted elaborator's `rewrite_unknown`.
+//
+// answers right until it is reused, so the cell fails reliably under `LOFT_STRICT_STORES=1`
+// (on C, `-DLOFT_STRICT_STORES`); `LOFT_POISON=1` did not move it against main.
+// Axes this file MOVES:  the arm the null comes back through (a wrapping arm, the arm that
+//                        answers `r` itself); calls before and after it that reuse the buffer.
+// Axes it HOLDS FIXED:   one caller, its loop handing the same buffer to every call.
+//
+// @falsified-at: efbb7b00e (LOFT_STRICT_STORES=1) — native exit 1 -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / use-after-free gate.  The freed buffer
+//   HOLDS: every cell, on every backend.
+//
+// ── a-record-rebound-from-one-buffer-every-pass-frees-it-once ──
+//
+// @FR-O-Buffer: a call's hidden buffer is the frame's, refilled in place on every pass, and a
+// local bound from the call names that one store.  Rebinding the local on the next pass
+// displaces the store it is about to be refilled into, so nothing is freed there; the frame
+// frees the buffer once at its exit.  The store records follow this through the loop's passes:
+// the store the local holds from an earlier pass is the one the buffer names wherever it
+// exists (the self-hosted elaborator's `tuple_match`, whose `mc` the records read as freed by
+// its own rebind).
+//
+// sweep (`scripts/own_sweep.py --oracle check-records`: CLEAN; STATIC under
+// `LOFT_RECORDS_NO_LIVE_WITNESS`).
+// Axes this file MOVES:  how the inner loop leaves (to its end, a `continue`, an early
+//                        `return`); whether the record's field is null on a pass.
+// Axes it HOLDS FIXED:   one record local per outer pass; one join local built from it.
+//
+// @falsified-at: none — a conformance guard at run time (every value as hand-computed, leak- and
+//   re-free-clean, interpret and native); its falsifier is the store records: `own_sweep
+//   --oracle check-records` reads CLEAN, and STATIC (5 REDs) under `LOFT_RECORDS_NO_LIVE_WITNESS`.
+//   CHANNEL: the VALUES (hand-computed), the LEAK and double-free gates, and the store records'
+//   HOLDS: every cell, on every backend.
+//
+// ── a-self-tail-call-forwards-its-return-buffer ──
+//
+// @catches: LOFT_TAIL_JUMP_FREES_BUFFER — the switch keeps the buffer's return-time release on the tail jump and the entry snapshot inside the loop.
+//
+// `@FR-O-Buffer`: a self tail call becomes a loop, and its jump hands the function's own return
+// buffer to the next pass as that pass's buffer.  `proof` builds its fallback `none` in the
+// buffer (renamed to it), then tail-calls itself.  On a null buffer the first pass allocates
+// into it; the jump must neither release that store nor take the entry snapshot again, or the
+// next pass writes into a freed record and the final release declines a store nobody else
+// frees.
+//
+// @falsified-at: efbb7b00e — interpret exit 1 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: strict stores and the leak gate (the values read right either way).
+// ARMED: LOFT_STRICT_STORES=1 for the strict-store channel; the leak gate is the runner's default.
+
+enum T { TU { n: integer }, TV { inner: T, dep: vector<integer> }, TO { inner: T }, TI { k: integer } }
+
+fn kk(t: T) -> integer { match t { TI { k } => k, TU { n } => n, TV { inner } => 100 + kk(inner), TO { inner } => 1000 + kk(inner) } }
+
+fn rw(t: T, stub: integer, target: T) -> T? {
+  match t {
+    TU { n } => if n == stub { target } else { null },
+    TV { inner, dep } => { r = rw(inner, stub, target); if r == null { null } else { TV { inner: r!, dep: dep } } },
+    TO { inner } => { r = rw(inner, stub, target); if r == null { null } else if (r! is TO) { r } else { TO { inner: r! } } },
+    _ => null
+  }
+}
+
+fn sum_over(ts: vector<T>) -> integer {
+  target = TI { k: 9 };
+  c = 0;
+  for x in ts {
+    r = rw(x, 1, target);
+    if r != null { c += kk(r!); }
+  }
+  c * 10 + kk(target)
+}
+
+fn test_a_null_through_a_wrapping_arm() {
+  ts = [TV { inner: TU { n: 2 }, dep: [] }, TV { inner: TU { n: 1 }, dep: [] }, TU { n: 1 }];
+  assert(sum_over(ts) == 1189, "{sum_over(ts)}");
+}
+
+fn test_a_null_through_the_arm_that_answers_r() {
+  ts = [TO { inner: TU { n: 2 } }, TO { inner: TU { n: 1 } }, TV { inner: TU { n: 1 }, dep: [] }];
+  assert(sum_over(ts) == 11189, "{sum_over(ts)}");
+}
+
+enum N { NB { b: boolean }, NI { i: integer, s: text }, NIf { a: N, c: N } }
+struct MC { cond: N?, refused: boolean }
+
+fn member_cond(k: integer, stop: integer) -> MC { MC { cond: if k % 3 == 0 { null } else { NI { i: k, s: "c{k}" } }, refused: k == stop } }
+fn v_if(a: N, c: N) -> N { NIf { a: a, c: c } }
+fn sz(n: N) -> integer { match n { NI { i, s } => i * 10 + len(s), NIf { a, c } => 1000 + sz(a) + sz(c), NB { b } => if b { 1 } else { 0 } } }
+
+fn go(arms: integer, pes: integer, stop: integer) -> integer {
+  total = 0;
+  for an in 0..arms {
+    cond: N? = null;
+    for pe in 0..pes {
+      if pe == 1 { continue; }
+      mc = member_cond(an * 10 + pe, stop);
+      if mc.refused { return -1; }
+      if mc.cond != null {
+        cond = if cond == null { mc.cond } else { v_if(cond!, mc.cond!) };
+      }
+    }
+    total += if cond == null { 0 } else { sz(cond!) };
+  }
+  total
+}
+
+fn test_every_pass_runs() {
+  r = go(2, 4, -5);
+  assert(r == 1258, "{r}");
+}
+
+fn test_an_early_return() {
+  r = go(3, 3, 12);
+  assert(r == -1, "{r}");
+}
+
+fn test_a_pass_with_nothing_bound() {
+  r = go(1, 1, -5);
+  assert(r == 0, "{r}");
+}
+
+enum Nd {
+  NBool { b: boolean },
+  NVar { n: integer },
+  NSpan { inner: Nd },
+  S3NIf { cond: Nd, t: Nd, f: Nd }
+}
+
+struct DivProof {
+  v: integer,
+  then: boolean
+}
+
+fn is_true(t: Nd) -> boolean {
+  match t {
+    NBool { b } => b,
+    _ => false
+  }
+}
+
+fn proof(test: Nd) -> DivProof {
+  none = DivProof { v: -1, then: false };
+  match test {
+    NSpan { inner } => proof(inner),
+    NVar { n } => DivProof { v: n, then: true },
+    S3NIf { cond, t, f: _ } => if is_true(t) { proof(cond) } else { none },
+    _ => none
+  }
+}
+
+fn test_a_jump_then_a_fresh_answer() {
+  a = proof(NSpan { inner: S3NIf { cond: NVar { n: 4 }, t: NBool { b: true }, f: NBool { b: false } } });
+  assert(a.v == 4 && a.then, "a {a.v}");
+}
+
+fn test_the_buffer_itself_answered() {
+  b = proof(S3NIf { cond: NVar { n: 5 }, t: NBool { b: false }, f: NBool { b: false } });
+  assert(b.v == -1 && !b.then, "b {b.v}");
+}
+
+fn test_two_jumps() {
+  c = proof(NSpan { inner: NSpan { inner: NVar { n: 6 } } });
+  assert(c.v == 6 && c.then, "c {c.v}");
+}
+
+fn test_jumps_into_the_buffer_answer() {
+  d = proof(NSpan { inner: S3NIf { cond: NBool { b: true }, t: NBool { b: true }, f: NVar { n: 1 } } });
+  assert(d.v == -1 && !d.then, "d {d.v}");
+}
