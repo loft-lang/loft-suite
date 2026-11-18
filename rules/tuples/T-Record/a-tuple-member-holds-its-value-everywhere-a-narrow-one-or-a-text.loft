@@ -1,0 +1,108 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TUPLE MEMBER HOLDS ITS VALUE EVERYWHERE, A NARROW ONE OR A TEXT (`@FR-T-Record`).  A stored tuple is a
+// record packed like a struct, so a narrow member and a text member each hold the value written —
+// read back, copied, passed and returned.  Each section keeps its own cases and receipt.
+//
+// ── a-narrow-tuple-member-holds-its-value-everywhere ──
+//
+// @FR-T-Record — a tuple's narrow member is what a narrow field is: it holds its type's values
+// through construction, a member write, a compound step, a copy, a by-value argument, a return,
+// `==`, a stored element and its read back, a destructure, a destructuring loop, a pattern, and a
+// nullable member's null.  The safety net under a change of the member's representation (the
+// field encoding `(T-Record)` asks for): every cell must answer the same before and after.
+// @falsified-at: none — a regression net written ahead of the representation change; it holds today.
+//
+// ── a-text-tuple-member-holds-its-value-everywhere ──
+//
+// @FR-T-Record — a tuple's `text` member is the tuple's own text: it holds its value through
+// construction, a member write and an append, a loop, a copy, a swap, a by-value argument the
+// callee writes, a return, `==`, a destructure, a stored element read back, a nested tuple, a
+// closure capture, a pattern, a reassignment in a loop, a null member, and a narrow neighbour.
+// The safety net under a change of the member's interpreter representation (an owned text, as
+// `(T-Record)` asks for): every cell must answer the same before and after.  Each value is worked
+// out by hand in the comment beside it.
+// @falsified-at: none — a regression net written ahead of the representation change; it holds today.
+
+type Small = integer limit(-5, 5);
+fn pass(t: (i8, integer)) -> integer { t.0 * 100 + t.1 }
+fn ret(a: u8) -> (u8, i16) { (a, (0 - a) as i16 ?? 0) }
+
+fn test_a_narrow_tuple_member_holds_its_value_everywhere() {
+  a: (u8, integer) = (250, 3);
+  b: (i8, integer) = (-7, 4);
+  c: (i16, Small) = (-300, -5);
+  assert("{a.0} {a.1} {b.0} {c.0} {c.1}" == "250 3 -7 -300 -5", "construction");
+  a.0 = 200; b.0 = -128; c.1 = 5;
+  assert("{a.0} {b.0} {c.1}" == "200 -128 5", "a member write at each type's bound");
+  b.0 += 1; a.0 -= 50;
+  assert("{a.0} {b.0}" == "150 -127", "a compound step");
+  m = b; m.0 = 9;
+  assert("{b.0} {m.0}" == "-127 9", "a copy is independent");
+  assert(pass(b) == -12696 && pass((3, 2)) == 302, "a by-value argument");
+  r = ret(7);
+  assert("{r.0} {r.1}" == "7 -7", "a return");
+  assert(a == (150, 3) && b == (-127, 4), "==");
+  v: vector<(i8, integer)> = [b, (-2, 1)];
+  v += [(5, 6)];
+  w = v[1];
+  assert("{v[0].0} {w.0} {v[2].0} {len(v)}" == "-127 -2 5 3", "stored and read back");
+  (x, y) = b;
+  assert(x == -127 && y == 4, "a destructure");
+  s = 0; for (p, q) in v { s += p * 10 + q }
+  assert(s == -1229, "a destructuring loop: {s}");
+  k = match b { (-127, n) => n * 1000, _ => -1 };
+  assert(k == 4000, "a pattern on a narrow member");
+  n: (u8?, integer) = (null, 1);
+  assert(n.0 == null && n.1 == 1, "a nullable member's null");
+  n.0 = 254;
+  assert(n.0 == 254, "a nullable member's largest value");
+}
+
+fn bump_copy(t: (text, integer)) -> text { t.0 += "!"; t.0 }
+fn s2_ret(n: integer) -> (integer, text) { (n, "r{n}") }
+fn first(t: (text, text)) -> text { t.0 }
+
+fn test_a_text_tuple_member_holds_its_value_everywhere() {
+  t = ("ab", 1);
+  assert("{t.0} {t.1}" == "ab 1", "construction");
+  t.0 = "cd"; t.0 += "e";
+  assert(t.0 == "cde", "a write and an append");
+  for i in 0..3 { t.0 += "{i}"; }
+  assert(t.0 == "cde012", "appends in a loop");
+  u = t; u.0 += "Z";
+  assert(t.0 == "cde012" && u.0 == "cde012Z", "a copy is independent");
+  s = ("left", "right");
+  s = (s.1, s.0);
+  assert("{s.0}/{s.1}" == "right/left", "a swap");
+  assert(bump_copy(t) == "cde012!" && t.0 == "cde012", "a by-value argument the callee writes");
+  r = s2_ret(7);
+  assert("{r.0}{r.1}" == "7r7", "a return");
+  assert(t == ("cde012", 1) && t != ("cde012", 2) && t != ("x", 1), "==");
+  (a, b) = t;
+  assert(a == "cde012" && b == 1, "a destructure");
+  v: vector<(text, integer)> = [t, ("w", 2)];
+  v += [("q", 3)];
+  w = v[1];
+  w.0 += "W";
+  assert("{v[0].0} {v[1].0} {w.0} {v[2].0} {len(v)}" == "cde012 w wW q 3", "stored and read back");
+  n = (("in", 4), "out");
+  n.0.0 += "+";
+  assert("{n.0.0} {n.0.1} {n.1}" == "in+ 4 out", "a nested tuple");
+  f = fn(k: text) -> text { k + t.0 };
+  assert(f(">") == ">cde012", "a closure capture");
+  k = match t { ("cde012", m) => m * 10, _ => -1 };
+  assert(k == 10, "a pattern on a text member");
+  acc = "";
+  for i in 0..3 { p = ("p{i}", i); acc += p.0; }
+  assert(acc == "p0p1p2", "a reassignment in a loop");
+  z: (text?, integer) = (null, 5);
+  assert(z.0 == null && z.1 == 5, "a null member");
+  z.0 = "set";
+  assert(z.0 == "set", "a null member set");
+  x: (u8, text) = (250, "nb");
+  x.1 += "!"; x.0 += 1;
+  assert("{x.0} {x.1}" == "251 nb!", "a narrow neighbour");
+  assert(first(("one", "two")) == "one", "a literal argument");
+}
