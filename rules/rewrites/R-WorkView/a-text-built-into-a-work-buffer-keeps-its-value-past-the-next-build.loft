@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT BUILT INTO A WORK BUFFER KEEPS ITS VALUE PAST THE NEXT BUILD (`@FR-R-WorkView`).  A text local
+// bound from a format may be a VIEW of the work buffer the format built into — only where nothing
+// writes that buffer on any path between the bind and a read.  Each test reads the local where a
+// view of a written buffer would show: after a second format (the parser may build it into the same
+// buffer), after a format on some paths only, across a loop that rebinds it every pass, and after a
+// call that formats in between.
+//
+// Values by hand: a = 1, b = 2.  "{a}-" then "{b}+": "1-" and "2+".  "<1>" whether or not the branch
+// builds "[2]".  The loop: ["i0", "i1", "i2"].  "1!" beside tag(9) = "<9>".
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native; it CAN fail: `LOFT_NO_SEVERAL_VARS=1` moves it (the
+//   `switches` census).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the texts.
+// HOLDS: each local read before the next build answers alike.
+
+fn tag(n: integer) -> text { "<{n}>" }
+
+fn test_a_second_format_after_the_bind() {
+  a = 1;
+  b = 2;
+  x = "{a}-";
+  y = "{b}+";
+  assert(x == "1-" && y == "2+", "second format: {x} {y}");
+}
+
+fn test_a_format_on_some_paths_only() {
+  for c in [true, false] {
+    a = 1;
+    b = 2;
+    x = "<{a}>";
+    y = "";
+    if c { y = "[{b}]"; }
+    assert(x == "<1>" && (y == "[2]") == c, "some paths: {x} {y}");
+  }
+}
+
+fn test_a_local_rebound_every_pass() {
+  all: vector<text> = [];
+  for i in 0..3 {
+    x = "i{i}";
+    all += [x];
+  }
+  r = "{all}";
+  assert(r == "[\"i0\",\"i1\",\"i2\"]", "loop: {r}");
+}
+
+fn test_a_call_that_formats_in_between() {
+  a = 1;
+  x = "{a}!";
+  t = tag(9);
+  assert(x == "1!" && t == "<9>", "call between: {x} {t}");
+}
