@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PEELED LOOP KEEPS EVERY EXIT A LOOP HAS (`@FR-R-Peel`).  A counted loop of one to eight constant
+// trips may be written as one block per trip, the counter a constant in each.  A `continue` ends its
+// block, a `break` leaves after the last, an exit of an enclosing scope leaves as from the loop, and
+// a start seeded by the statement before the loop counts from that seed.  Each test is one of those,
+// beside a peeled inner loop under an outer one that is not peeled.
+//
+// Values by hand: continue skips 2 of 0..5: 0+1+3+4 = 8.  break at 3 over 0..6 adding i*10: 0+10+20
+// = 30.  a = 2, then t*t over 2..6: 4+9+16+25 = 54.  The first i of 0..4 with i*i > 3 is 2: 200.
+// The sum of o*i over 3 × 4: (0+1+2) × (0+1+2+3) = 18.
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native; it CAN fail: `LOFT_NO_SEVERAL_VARS=1` moves it (the
+//   `switches` census).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints the value.
+// HOLDS: the same loops over a range read from a parameter (not peeled) answer alike.
+
+fn first_square_over(limit: integer) -> integer { for i in 0..4 { if i * i > limit { return i * 100; } } -1 }
+
+fn test_a_continue_ends_its_block() {
+  t = 0;
+  for i in 0..5 { if i == 2 { continue; } t += i; }
+  assert(t == 8, "continue: {t}");
+}
+
+fn test_a_break_leaves_after_the_last_block() {
+  t = 0;
+  for i in 0..6 { if i == 3 { break; } t += i * 10; }
+  assert(t == 30, "break: {t}");
+}
+
+fn test_a_seeded_start() {
+  a = 2;
+  s = 0;
+  for t in a..6 { s += t * t; }
+  assert(s == 54, "seeded: {s}");
+}
+
+fn test_a_return_from_inside() {
+  r = first_square_over(3);
+  assert(r == 200, "return: {r}");
+}
+
+fn test_a_peeled_inner_loop_under_an_outer_one() {
+  s = 0;
+  for o in 0..3 { for i in 0..4 { s += o * i; } }
+  assert(s == 18, "nested: {s}");
+}
