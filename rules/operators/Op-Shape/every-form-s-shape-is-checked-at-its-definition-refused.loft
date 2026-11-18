@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// EVERY FORM'S SHAPE IS CHECKED AT ITS DEFINITION (`@FR-Op-Shape`, with `@FR-Op-Def`).  `compare`
+// takes `self` and one more and answers `Ordering`; the arithmetic forms take `self` and one more;
+// `negate` and `next` take `self` alone, `next` answering the item or null; `to_text` takes `self`,
+// or `self` and `spec: text`, and answers `text`.  Each definition below breaks one of those on a
+// type of its own, and each is refused where it is written with the shape the form wants — no
+// use of any form is needed.  Op-Def's cell holds a wrong `compare` answer and a first parameter
+// that is not `self`; these are the arities and the `to_text` and `next` shapes.
+//
+// Axes it MOVES: the form (`plus`, `remainder`, `negate`, `next`, `to_text`, `compare`), the fault
+//   (an operand missing, one too many, a spec of the wrong type, an answer of the wrong type).
+//
+// @EXPECT_ERROR: `operator plus` takes `self` and the right operand of `+`, and answers the result
+// @EXPECT_ERROR: `operator remainder` takes `self` and the right operand of `%`, and answers the result
+// @EXPECT_ERROR: `operator negate` takes `self` alone and answers the result of `-x`
+// @EXPECT_ERROR: `operator next` has the wrong shape: `operator next(self: T) -> E?`, answering null when the walk is done
+// @EXPECT_ERROR: `operator compare` takes `self` and the value it is compared with, and answers an `Ordering`
+// @EXPECT_ERROR: `operator to_text` has the wrong shape
+// @EXPECT_ERROR: `operator to_text` has the wrong shape
+// @EXPECT_ERROR: `operator to_text` has the wrong shape
+//
+// @falsified-at: none — a conformance guard; every refusal fired as expected, interpret and native.
+// CHANNEL: the compile diagnostics.
+// ARMED: no instrument.
+// WITNESS: each diagnostic names the shape its form wants.
+// HOLDS: every definition of the right shape compiles (Op-Back's every-form cell).
+
+struct S1 { x: integer }
+struct S2 { x: integer }
+struct S3 { x: integer }
+struct S4 { x: integer }
+struct S5 { x: integer }
+struct S6 { x: integer }
+struct S7 { x: integer }
+struct S8 { x: integer }
+
+// An operand missing, and one too many.
+operator plus(self: S1) -> S1 { self }
+operator remainder(self: S2, a: S2, b: S2) -> S2 { a }
+// `self` alone, given more.
+operator negate(self: S3, o: S3) -> S3 { o }
+operator next(self: S4, k: integer) -> integer? { k }
+// `compare` with nothing to compare with.
+operator compare(self: S5) -> Ordering { Equal }
+// `to_text`: a spec that is not text, an answer that is not text, a third parameter.
+operator to_text(self: S6, spec: integer) -> text { "s6" }
+operator to_text(self: S7) -> integer { 7 }
+operator to_text(self: S8, spec: text, extra: text) -> text { "s8" }
+
+fn test_the_definitions_are_refused() {
+  s = S1 { x: 1 };
+  assert(s.x == 1, "unreachable");
+}

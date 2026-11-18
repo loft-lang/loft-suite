@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FORM BACKED ONLY BY A RETIRED NAME IS REFUSED (`@FR-Op-Std`, @C132).  The internal names back
+// an operator only as the stdlib's own definitions, so a program's `fn OpAdd` leaves `+` undefined
+// for its type and the use is refused naming the `operator` to write; `[…]` belongs to the
+// built-in collections, so a type is not subscripted whatever `fn OpIndex` it has; and a FREE function under a name the stdlib defines (`OpNot`) is refused
+// as a reserved name.  Each refusal is at its own site; one file holds them because none masks
+// another (an interface's `op []` would be masked here: it is its own file).
+//
+// @EXPECT_ERROR: No matching operator '+' on 'D' and 'D'; declare `operator plus(self: D, other: D) -> …`
+// @EXPECT_ERROR: `E` cannot be indexed: `[…]` belongs to the built-in collections
+// @EXPECT_ERROR: `OpNot` is a standard-library function, and its name is reserved for it
+//
+// @falsified-at: none — a conformance guard for the first three; the fourth's wording is
+//   loft#2554's (the control said "Cannot redefine 'OpNot'"), interpret and native.
+// CHANNEL: the compile diagnostics.
+// ARMED: no instrument.
+// WITNESS: each diagnostic names its cure.
+// HOLDS: a `self` method named `OpNot` is admitted with a warning (the 2554 cell beside it).
+
+struct D { ms: integer }
+fn OpAdd(self: D, o: D) -> D { D { ms: self.ms + o.ms } }
+struct E { v: vector<integer> }
+fn OpIndex(self: E, i: integer) -> integer { self.v[i] }
+struct G { ms: integer }
+fn OpNot(g: G) -> boolean { true }
+
+fn test_plus_of_d() {
+  a = D { ms: 1 };
+  b = a + a;
+  assert(b.ms == 0, "never runs");
+}
+
+fn test_index_of_e() {
+  e = E { v: [5, 6] };
+  assert(e[1] == 0, "never runs");
+}

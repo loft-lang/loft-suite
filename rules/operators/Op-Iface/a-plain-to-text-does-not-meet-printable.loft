@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLAIN `to_text` DOES NOT MEET `Printable` (`@FR-Op-Iface`): an interface member written
+// `operator` (`Printable`'s `operator to_text`) is met only by an `operator` definition, so a type
+// whose `to_text` is a plain `fn` is refused at the bound, with the one diagnostic that names it —
+// not the generic body's format, which is that same mistake read a second time.  One refusal per
+// file; a member written `fn`, met by a plain method, is G-Iface's.
+//
+// @falsified-by: tests/falsified/2553-a-plain-to-text-does-not-meet-printable.patch — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/1 -> 1/1 (the suite's verdict, not a count of matches)
+//   CHANNEL: the compile (the expected diagnostic, and only it).
+//   ARMED: no instrument.
+//   WITNESS: the control printed the generic body's format refusal first; this tree, the
+//   bound's alone.  The diagnostic names the member and the form the interface asks for.
+//   HOLDS: the same type with `operator to_text` meets `Printable` (Op-Fold's core cell).
+
+struct M { c: integer }
+fn to_text(self: M) -> text { "m{self.c}" }
+fn show<T: Printable>(x: T) -> text { "[{x}]" }
+
+// @EXPECT_ERROR: 'M' does not satisfy interface 'Printable': `to_text` is a plain `fn`, and the interface asks for `operator to_text`
+fn test_show_an_m() {
+  assert(show(M { c: 7 }) == "", "never runs");
+}

@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A FORMAT OF A TYPE WITH ONLY A PLAIN `to_text` IS REFUSED, NAMING THE OPERATOR (`@FR-Op-Fold`):
+// `"{x}"` reaches only an `operator to_text`; a plain `fn to_text` is an ordinary method, and the
+// format of a type that has only such a method is refused naming the declaration it wants.  One
+// refusal per file; the `for` twin is Op-Mark's 1950 cell.
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the cure.
+// HOLDS: `m.to_text()` calls the method by name (Op-Name's cell).
+
+struct M { c: integer }
+fn to_text(self: M) -> text { "m{self.c}" }
+
+// @EXPECT_ERROR: `M` has a method `to_text`, but `"{…}"` reaches only one written with `operator`: declare it `operator to_text(self: M) -> text`
+fn test_a_format_of_m() {
+  m = M { c: 7 };
+  assert("{m}" == "", "never runs");
+}

@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `fn OpNot` OR `fn OpNe` IS AN ORDINARY METHOD THAT WARNS (`@FR-Op-Std`, @C132, loft#2554).  A
+// program's function spelled for an operator backs no form: `!x` stays the presence test and `!=`
+// compares the fields, and each definition is said where it is written by a warning, while the
+// method answers when it is called by name, in both spellings (`a.OpNot()`, `OpNot(a)`).
+// `OpNot` is the one such name the stdlib also defines bare, for `boolean`; the program's method
+// lives under its own key beside it, so `!` on a boolean is the stdlib's still.
+//
+// Values by hand: a = D { ms: 1 } is present, so `!a` is false; n is null, `!n` true; the methods
+// answer their bodies (true, false); a and b differ in `ms`, so `a != b` is true; `!t` is false.
+//
+// @EXPECT_WARNING: `fn OpNot` is an ordinary function and is not called by `!x`, which asks whether the value is present
+// @EXPECT_WARNING: `fn OpNe` is an ordinary function and is not called by `==` or `!=`
+//
+// @falsified-by: tests/falsified/2554-a-fn-op-not-or-op-ne-is-an-ordinary-method-that-warns.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the compile — the control refuses the `OpNot` definition, so no test runs.
+//   ARMED: no instrument.
+//   WITNESS: the control's "Cannot redefine 'OpNot'".
+//   HOLDS: `fn OpNe` warns and is ordinary on both trees.
+
+struct D { ms: integer }
+fn OpNot(self: D) -> boolean { self.ms > 0 }
+fn OpNe(self: D, o: D) -> boolean { self.ms < 0 && o.ms < 0 }
+
+fn test_not_stays_the_presence_test() {
+  a = D { ms: 1 };
+  n: D? = null;
+  t = true;
+  r = "{!a} {!n} {!t}";
+  assert(r == "false true false", "presence: {r}");
+}
+
+fn test_the_methods_answer_by_name() {
+  a = D { ms: 1 };
+  b = D { ms: 2 };
+  r = "{a.OpNot()} {OpNot(a)} {a.OpNe(b)} {OpNe(a, b)}";
+  assert(r == "true true false false", "by name: {r}");
+}
+
+fn test_not_equal_compares_the_fields() {
+  a = D { ms: 1 };
+  b = D { ms: 2 };
+  assert(a != b && !(a != D { ms: 1 }), "fields: {a != b}");
+}

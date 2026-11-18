@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INTERFACE CANNOT REQUIRE A SUBSCRIPT (`@FR-Op-Std`): `[…]` belongs to the built-in
+// collections and no type defines it, so an interface member `op []` is refused where it is
+// written, naming the method to require instead.  One refusal per file.
+//
+// @EXPECT_ERROR: an interface cannot require `[…]`: it belongs to the built-in collections, and no type defines it
+//
+// @falsified-at: none — a conformance guard; the refusal fired as expected, interpret and native.
+// CHANNEL: the compile (the expected diagnostic).
+// ARMED: no instrument.
+// WITNESS: the diagnostic names the method to require.
+// HOLDS: an interface requiring `fn at(self: Self, i: integer) -> integer` is met by a method.
+
+interface Idx { op [](self: Self, i: integer) -> integer }
+
+fn test_nothing_runs() {
+  assert(true, "never runs");
+}
