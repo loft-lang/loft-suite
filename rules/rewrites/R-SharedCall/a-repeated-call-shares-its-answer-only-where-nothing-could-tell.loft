@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A REPEATED CALL SHARES ITS ANSWER ONLY WHERE NOTHING COULD TELL (`@FR-R-SharedCall`).  Two calls
+// with the same arguments, the first reaching the second on every path, may answer the second from
+// the first — only when the call has no effect (1) and nothing an argument reaches is written between
+// them (4).  Each test is a pair where sharing would show: a pure call (shared or not, the same
+// answer), a call with an effect (both effects happen), and an argument — a scalar, a record's field
+// — written between the two.
+//
+// Values by hand: sq(7) + sq(7) = 98.  note(v, 3) + note(v, 3) = 6, with v = [3, 3].  sq(4) then
+// sq(5) after x = 5: 16 and 25.  area of 2 × 3 is 6, then 30 after r.w = 10.
+//
+// @falsified-at: none — a conformance guard from the formal text; every value answered as
+//   hand-computed, interpret and native; it CAN fail: `LOFT_NO_SEVERAL_VARS=1` moves it (the
+//   `switches` census).
+// CHANNEL: the asserts.
+// ARMED: no instrument.
+// WITNESS: each message prints both answers.
+// HOLDS: each pair written as two separate statements answers alike.
+
+struct Rect { w: integer, h: integer }
+fn sq(x: integer) -> integer { x * x }
+fn note(v: vector<integer>, k: integer) -> integer { v += [k]; k }
+fn area(r: const Rect) -> integer { r.w * r.h }
+
+fn test_a_pure_call_twice() {
+  r = sq(7) + sq(7);
+  assert(r == 98, "pure: {r}");
+}
+
+fn test_a_call_with_an_effect_runs_twice() {
+  v: vector<integer> = [];
+  r = note(v, 3) + note(v, 3);
+  assert(r == 6 && "{v}" == "[3,3]", "effect: {r} {v}");
+}
+
+fn test_an_argument_written_between() {
+  x = 4;
+  a = sq(x);
+  x = 5;
+  b = sq(x);
+  assert(a == 16 && b == 25, "argument: {a} {b}");
+}
+
+fn test_a_records_field_written_between() {
+  r = Rect { w: 2, h: 3 };
+  a = area(r);
+  r.w = 10;
+  b = area(r);
+  assert(a == 6 && b == 30, "field: {a} {b}");
+}
