@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A SLICE OF A CALL'S FIELD IS A VIEW FREED BY ITS CONTAINER (`@FR-H-FreeTwice`, `@FR-I-For`).
+// A slice names its subject once; a subject that is a CALL with no deps is a fresh store the
+// name owns, but a FIELD of a call's result is a projection: the call's `inline_container`
+// keeps the release, and owning the field as well freed that store twice.  Each test iterates
+// a slice of a field of a call — one answering its argument and one answering a fresh record —
+// as a `for`, an open-ended slice and a comprehension, and reads the sum and the call count.
+// Values by hand: v = [10, 20, 30, 40]; [1..3] sums 50, [1..] sums 90.
+// Axes it HOLDS FIXED: a `vector<integer>` field, a plain call, the interpreter's and C's run
+// checks (the suite arms the re-free and the leak check on every run).
+// @falsified-by: tests/falsified/a-slice-of-a-calls-field-is-a-view-freed-by-its-container.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   RECORDS: own_sweep --oracle check-records reads CAUGHT on the control, CLEAN here.
+// CHANNEL: the run's re-free report ("a store was freed twice") and the leak check.
+
+struct Hold { v: vector<integer>, ones: vector<integer> }
+struct Ctr { calls: integer = 0 }
+
+fn held(c: Ctr, h: Hold) -> Hold { c.calls += 1; h }
+fn fresh(c: Ctr) -> Hold { c.calls += 1; Hold { v: [10, 20, 30, 40], ones: [] } }
+
+fn test_a_slice_of_a_field_of_a_call_answering_its_argument() {
+  c = Ctr {};
+  h = Hold { v: [10, 20, 30, 40], ones: [1, 1] };
+  s = 0;
+  for n in held(c, h).v[1..3] { s += n; }
+  assert(s == 50 && c.calls == 1 && len(h.v) == 4 && h.v[3] == 40, "held {s} {c.calls}");
+}
+
+fn test_a_slice_of_a_field_of_a_fresh_record() {
+  c = Ctr {};
+  s = 0;
+  for n in fresh(c).v[1..3] { s += n; }
+  t = 0;
+  for n in fresh(c).v[1..] { t += n; }
+  assert(s == 50 && t == 90 && c.calls == 2, "fresh {s} {t} {c.calls}");
+}
+
+fn test_a_comprehension_over_the_slice() {
+  c = Ctr {};
+  h = Hold { v: [10, 20, 30, 40], ones: [] };
+  q = [for n in held(c, h).v[1..3] { n + 1 }];
+  assert("{q}" == "[21,31]" && c.calls == 1 && len(h.v) == 4, "comp {q} {c.calls}");
+}
+
+fn test_in_a_loop() {
+  c = Ctr {};
+  s = 0;
+  for _r in 0..3 { for n in fresh(c).v[2..] { s += n; } }
+  assert(s == 210 && c.calls == 3, "loop {s} {c.calls}");
+}

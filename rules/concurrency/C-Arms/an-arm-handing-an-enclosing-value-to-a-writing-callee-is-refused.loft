@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @EXPECT_ERROR: cannot write or mutate enclosing-scope variable 'c' inside a parallel arm
+// @EXPECT_ERROR: cannot write or mutate enclosing-scope variable 'v' inside a parallel arm
+// @EXPECT_ERROR: cannot write or mutate enclosing-scope variable 'h' inside a parallel arm
+//
+// `@FR-C-Arms` — an arm of a `parallel` block reads the enclosing frame and writes none of it,
+// and a write is a COMPILE error.  The direct write (`c.calls += 1`) was refused; the same write
+// made by a CALLEE was not: an enclosing record handed to a function that writes its field,
+// a vector to one that pushes, a keyed collection to one that inserts.  Those compiled, and then
+// the interpreter's worker panicked on its read-only store while C let the write land.  Each is
+// now refused at the call.  The control arm hands the same record to a callee that only reads
+// it, which stays legal (it raises no error of its own).
+// @falsified-by: tests/falsified/an-arm-handing-an-enclosing-value-to-a-writing-callee-is-refused.patch — interpret exit 1 -> 0, interpret expectations FAIL/3 -> 0/3 (the suite's verdict, not a count of matches), native exit 1 -> 0, native expectations FAIL/3 -> 0/3 (the suite's verdict, not a count of matches)
+// CHANNEL: the expectations — the control build compiles the three writes, so none of the
+// three refusals appears.
+
+struct Ctr { calls: integer = 0 }
+struct P { k: integer }
+
+fn at(c: Ctr, n: integer) -> integer { c.calls += 1; n }
+fn peek(c: Ctr) -> integer { c.calls }
+fn grow(v: vector<integer>) -> integer { v += [9]; 0 }
+fn put(h: hash<P[k]>) -> integer { h += [P { k: 4 }]; 0 }
+fn add2(a: integer, b: integer) -> integer { a * 10 + b }
+
+fn main() {
+  c = Ctr {};
+  v = [1, 2];
+  h: hash<P[k]> = [P { k: 1 }];
+  j = 3;
+  parallel { add2(at(c, 1), j); add2(peek(c), j); }
+  parallel { add2(grow(v), j); add2(len(v), j); }
+  parallel { add2(put(h), j); add2(j, j); }
+  println("{c.calls} {len(v)} {len(h)}");
+}

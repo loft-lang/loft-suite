@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEYED DEFAULT OF A LOOP SOURCE IS OWNED ON ITS PATH (`@FR-O-Complete`, `@FR-I-Join`).  A
+// join whose result is a VIEW — one arm projects a field, the other calls — gives the calling
+// arm an owner of its own, so the store the call minted is released on the path that took it.
+// A record's call arm had one; a KEYED collection's did not, and a `for` over
+// `h.ws[9].items ?? mk(c)` or over `if b { mk(c) } else { h.ws[0].items }` left the default's
+// store behind on every run that took it.  Each test walks such a source for `sorted`, `index`
+// and `hash`, with the default taken and not taken, once and in a loop; the vector kind is the
+// control (its call delivers into the caller's buffer).
+// Values by hand: the keys are 1, 2 and 3, so one walk sums 6.
+// @falsified-by: tests/falsified/a-keyed-default-of-a-loop-source-is-owned-on-its-path.patch — native exit 1 -> 0, native leaked kt=102 ordered<P[k]>×5 -> clean; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   RECORDS: own_sweep --oracle check-records reads CAUGHT on the control, CLEAN here.
+// CHANNEL: the leak check ("stores not freed at exit"), armed by the suite on every run.
+
+struct P { k: integer, t: text }
+struct WS { n: integer, items: sorted<P[k]> }
+struct WI { n: integer, items: index<P[k]> }
+struct WH { n: integer, items: hash<P[k]> }
+struct WV { n: integer, items: vector<P> }
+struct Ctr { calls: integer = 0 }
+
+fn mks(c: Ctr) -> sorted<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mki(c: Ctr) -> index<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mkh(c: Ctr) -> hash<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mkv(c: Ctr) -> vector<P> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+
+fn test_sorted() {
+  c = Ctr {};
+  ws = [WS { n: 1, items: [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }];
+  b = true;
+  s = 0;
+  for p in ws[9].items ?? mks(c) { s += p.k; }
+  for p in ws[0].items ?? mks(c) { s += p.k; }
+  for p in (if b { mks(c) } else { ws[0].items }) { s += p.k; }
+  for _r in 0..3 { for p in ws[9].items ?? mks(c) { s += p.k; } }
+  assert(s == 36 && c.calls == 5, "sorted {s} {c.calls}");
+}
+
+fn test_index() {
+  c = Ctr {};
+  ws = [WI { n: 1, items: [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }];
+  b = true;
+  s = 0;
+  for p in ws[9].items ?? mki(c) { s += p.k; }
+  for p in ws[0].items ?? mki(c) { s += p.k; }
+  for p in (if b { mki(c) } else { ws[0].items }) { s += p.k; }
+  for _r in 0..3 { for p in ws[9].items ?? mki(c) { s += p.k; } }
+  assert(s == 36 && c.calls == 5, "index {s} {c.calls}");
+}
+
+fn test_hash() {
+  c = Ctr {};
+  ws = [WH { n: 1, items: [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }];
+  b = true;
+  s = 0;
+  for p in ws[9].items ?? mkh(c) { s += p.k; }
+  for p in ws[0].items ?? mkh(c) { s += p.k; }
+  for p in (if b { mkh(c) } else { ws[0].items }) { s += p.k; }
+  for _r in 0..3 { for p in ws[9].items ?? mkh(c) { s += p.k; } }
+  assert(s == 36 && c.calls == 5, "hash {s} {c.calls}");
+}
+
+fn test_vector_control() {
+  c = Ctr {};
+  ws = [WV { n: 1, items: [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }];
+  b = true;
+  s = 0;
+  for p in ws[9].items ?? mkv(c) { s += p.k; }
+  for p in (if b { mkv(c) } else { ws[0].items }) { s += p.k; }
+  assert(s == 12 && c.calls == 2, "vector {s} {c.calls}");
+}

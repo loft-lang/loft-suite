@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A KEYED LOOP SOURCE IN A BRANCH MINTS NO STORE BEFORE ITS BIND (`@FR-O-Derived`, `@FR-I-For`).
+// A `for` over an ordered keyed collection (`sorted`, `index`) that a call reaches holds the
+// source in a temp, evaluated once.  Standing in an `if` or `else` arm, the temp is declared
+// ahead of the branch, and its null init minted a store: where the source is a VIEW (a field
+// of a call's record) no binding's fact names that store, so it had no derivable free and was
+// left behind once per run.  The temp is written before its one read, so it mints nothing.
+// Each test walks a keyed field of a call inside a branch arm — a `for`, a filtered `for`, an
+// `else` arm, a `??` default — for both kinds, and a fresh source as the control.
+// Values by hand: the keys are 1, 2 and 3 (one walk sums 6, the filter `k > 1` sums 5).
+// @falsified-by: tests/falsified/a-keyed-loop-source-in-a-branch-mints-no-store-before-its-bind.patch — native exit 1 -> 0, native leaked kt=102 ordered<P[k]>×4 -> clean; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+//   RECORDS: own_sweep --oracle check-records reads CAUGHT on the control, CLEAN here.
+// CHANNEL: the leak check ("stores not freed at exit"), armed by the suite on every run.
+
+struct P { k: integer, t: text }
+struct WS { n: integer, items: sorted<P[k]> }
+struct WI { n: integer, items: index<P[k]> }
+struct HS { ws: vector<WS> }
+struct HI { ws: vector<WI> }
+struct Ctr { calls: integer = 0 }
+
+fn boxs(c: Ctr, h: HS) -> WS { c.calls += 1; h.ws[0] }
+fn boxi(c: Ctr, h: HI) -> WI { c.calls += 1; h.ws[0] }
+fn mks(c: Ctr) -> sorted<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+
+fn test_sorted() {
+  c = Ctr {};
+  h = HS { ws: [WS { n: 1, items: [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }] };
+  b = true;
+  nb = false;
+  s = 0;
+  if b { for p in boxs(c, h).items { s += p.k; } }
+  if nb { s = 100; } else { for p in boxs(c, h).items { s += p.k; } }
+  if b { for p in boxs(c, h).items if p.k > 1 { s += p.k; } }
+  if b { for p in h.ws[9].items ?? mks(c) { s += p.k; } }
+  if b { for p in mks(c) { s += p.k; } }
+  assert(s == 29 && c.calls == 5, "sorted {s} {c.calls}");
+}
+
+fn test_index() {
+  c = Ctr {};
+  h = HI { ws: [WI { n: 1, items: [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }] };
+  b = true;
+  s = 0;
+  for _r in 0..3 { if b { for p in boxi(c, h).items { s += p.k; } } }
+  assert(s == 18 && c.calls == 3, "index {s} {c.calls}");
+}

@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @EXPECT_WARNING: a nullable `integer?` is stored into the index of the non-null type `integer`
+//
+// `@FR-E-Left` crossed with `@FR-F-Args`: a NULL-TRANSPARENT call — one whose answer is null
+// when a nullable argument is null (a text slice `t[a..b]`, `min`, `max`, `clamp`, `abs`) —
+// evaluates its arguments left to right like any other.  It binds a nullable argument to a temp
+// so it can test it before the call; an argument ahead of it with an effect stayed in the call
+// and ran after it: `ox(c)[h.ones[at(c, 0)]..]` read the bound before the text, and
+// `min(a1(c), v[at(c, 7)])` skipped `a1` when the element was absent.  Each case logs the order
+// its operands ran in, and each answer is hand-computed beside it.
+// Axes it HOLDS FIXED: one nullable argument per call, an element read as that argument.
+// @falsified-by: tests/falsified/a-null-transparent-call-evaluates-its-arguments-in-order.patch — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+// CHANNEL: the assertions.
+
+struct Hold { ones: vector<integer> }
+struct Ctr { log: text = "" }
+
+fn at(c: Ctr, n: integer) -> integer { c.log += "I"; n }
+fn ox(c: Ctr, k: integer) -> text { c.log += "x"; "abcdef{k}" }
+fn a1(c: Ctr) -> integer { c.log += "a"; 4 }
+
+fn test_a_text_slice_reads_its_text_first() {
+  h = Hold { ones: [1, 2] };
+  c = Ctr {};
+  t = ox(c, 0)[h.ones[at(c, 0)]..];
+  d = Ctr {};
+  u = ox(d, 0)[..h.ones[at(d, 1)]];
+  assert(t == "bcdef0" && c.log == "xI" && u == "ab" && d.log == "xI", "{t} {c.log} {u} {d.log}");
+}
+
+fn test_in_a_loop() {
+  h = Hold { ones: [1, 2] };
+  c = Ctr {};
+  out = "";
+  for k in 0..3 { out += ox(c, k)[h.ones[at(c, k % 2)]..]; out += ","; }
+  assert(out == "bcdef0,cdef1,bcdef2," && c.log == "xIxIxI", "{out} {c.log}");
+}
+
+fn test_min_runs_every_argument_in_order() {
+  h = Hold { ones: [1, 2] };
+  d = Ctr {};
+  m = min(a1(d), h.ones[at(d, 1)]);
+  e = Ctr {};
+  n = min(a1(e), h.ones[at(e, 7)]);
+  assert(m == 2 && d.log == "aI" && !n && e.log == "aI", "{m} {d.log} {n} {e.log}");
+}
