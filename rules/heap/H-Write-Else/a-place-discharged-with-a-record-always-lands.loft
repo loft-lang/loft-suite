@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A PLACE DISCHARGED WITH A RECORD ALWAYS LANDS (`@FR-H-Write-Else` × `@FR-N-Default`).  `k[5]?`
+// is `k[5] ?? Mark {}` (N-Default), so a write through it always names a record: the element
+// when it is there, the fallback the discharge builds when it is not.  The write lands, and an
+// `else` arm on it never runs, which the compiler says (`else-never-runs`).  A fallback that is
+// itself an element (`k[5] ?? k[6]`) may be absent too, so its arm runs, and no warning is given.
+// These statements used to be an internal compiler error (loft#2570).
+//
+// Cells: a record append (w1), a field set (w2) and a compound set (w3) through `?` on an absent
+// element, all three with the arm silent; the controls, the same append without `?` (w4) and a
+// fallback that is another absent element (w5), both of which run the arm; a present element
+// through `?`, where the write lands in the element (w6); and an explicit record fallback (w7).
+// Every value is hand-computed beside its assert.
+//
+// @EXPECT_WARNING: this `else` never runs
+// @falsified-at: hand-measured (2026-11-19) — on main @5f8426dee every `?` cell is an internal
+//   compiler error ("Unknown definition"); w4 and w5 hold.
+
+struct Pt { px: integer = 0 }
+struct Mark { mpts: vector<Pt>, n: integer = 0 }
+
+fn w1() -> text { k: vector<Mark> = []; e = 0; k[5]?.mpts += [Pt { px: 7 }] else { e = 1 }; "{e} {len(k)}" }
+fn w2() -> text { k: vector<Mark> = []; e = 0; k[5]?.n = 3 else { e = 1 }; "{e}" }
+fn w3() -> text { k: vector<Mark> = []; e = 0; k[5]?.n += 3 else { e = 1 }; "{e}" }
+fn w4() -> text { k: vector<Mark> = []; e = 0; k[5].mpts += [Pt { px: 7 }] else { e = 1 }; "{e}" }
+fn w5() -> text { k: vector<Mark> = []; e = 0; (k[5] ?? k[6]).n = 3 else { e = 1 }; "{e}" }
+fn w6() -> text {
+  k: vector<Mark> = [Mark {}, Mark {}, Mark {}, Mark {}, Mark {}, Mark {}];
+  e = 0;
+  k[5]?.n = 3 else { e = 1 };
+  "{k[5].n} {e}"
+}
+fn w7() -> text { k: vector<Mark> = []; e = 0; (k[5] ?? Mark { n: 9 }).n = 3 else { e = 1 }; "{e}" }
+
+fn main() {
+  // w1: the append lands in the fallback record, which is dropped; `k` stays empty.
+  assert(w1() == "0 0", "w1 an append through `?`: {w1()}");
+  assert(w2() == "0", "w2 a field set through `?`: {w2()}");
+  assert(w3() == "0", "w3 a compound set through `?`: {w3()}");
+  // w4, w5: the place names nothing, the write does not take, the arm runs.
+  assert(w4() == "1", "w4 control, no discharge: {w4()}");
+  assert(w5() == "1", "w5 control, an element as the fallback: {w5()}");
+  // w6: the element is there, so the write lands in it: n = 3.
+  assert(w6() == "3 0", "w6 a present element through `?`: {w6()}");
+  assert(w7() == "0", "w7 an explicit record fallback: {w7()}");
+}
