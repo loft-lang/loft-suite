@@ -14,7 +14,7 @@
 //   interpreter (--native-c and --native fail the same first assertion): the one- and two-item
 //   literals 5 and 7, the call and the local 6 each, the keyed field 7, the empty literal 3; the
 //   scalar write and the append 1.
-// @falsified-by: tests/falsified/2580-a-whole-collection-written-through-a-called-place-addresses-it-once.patch
+// @falsified-by: tests/falsified/2580-a-whole-collection-written-through-a-called-place-addresses-it-once.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 struct P { k: integer, t: text }
 struct W { n: integer, items: vector<P>, keyed: sorted<P[k]> }
 struct H { ws: vector<W> }
