@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2587, `@FR-P-Point` — a literal sub-pattern is a point: it matches the value it names.  A boolean literal
+// as a field's or a slice element's sub-pattern was taken as the arm's TEST itself, so
+// `S { ok: true }` and `[x: true, ..]` matched every value and `S { ok: false }` and
+// `[x: false, ..]` none, on both backends.  Over a boolean subject the literal is now a value
+// compared with the field (`OpEqBool`); a boolean-typed test over another subject (a range)
+// stays the test.
+//
+// Each cell matches both values against both literals and asserts which arm each takes.  The
+// spellings: a struct field, a struct field beside a capture, two arms, a slice element, two
+// slice elements, alternatives.  The controls: an integer literal, a range, a plain `match` on
+// a boolean, which were right already.
+// @falsified-at: 2026-11-19 on loft30-gate 84df63872 (before loft#2587's fix) — every `true`
+//   literal matched both values and every `false` literal neither, on the interpreter and
+//   --native-c; the controls passed.
+// @falsified-by: tests/falsified/2587-a-boolean-literal-sub-pattern-matches-the-value-it-names.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+struct S { ok: boolean, n: integer }
+fn field_t(s: S) -> integer { match s { S { ok: true, n } => n, _ => 0 } }
+fn field_f(s: S) -> integer { match s { S { ok: false, n } => n, _ => 0 } }
+fn two_arms(s: S) -> integer { match s { S { ok: true, n } => n, S { ok: false, n } => n * 10 } }
+fn elem_t(v: vector<boolean>) -> integer { match v { [x: true, ..] => 1, _ => 0 } }
+fn elem_f(v: vector<boolean>) -> integer { match v { [x: false, ..] => 1, _ => 0 } }
+fn pair(v: vector<boolean>) -> text { match v { [x: true, y: false] => "tf", [x: false, y: true] => "ft", _ => "-" } }
+fn either(v: vector<boolean>) -> integer { match v { [x: true | false, ..] => 1, _ => 0 } }
+fn int_lit(s: S) -> integer { match s { S { ok: _, n: 5 } => 1, _ => 0 } }
+fn in_range(v: vector<integer>) -> integer { match v { [x: 1..5, ..] => 1, _ => 0 } }
+fn plain(b: boolean) -> integer { match b { true => 1, false => 0 } }
+
+fn main() {
+  t = S { ok: true, n: 5 };
+  f = S { ok: false, n: 5 };
+  assert("{field_t(t)}{field_t(f)} {field_f(t)}{field_f(f)}" == "50 05", "struct field: {field_t(t)}{field_t(f)} {field_f(t)}{field_f(f)}");
+  assert(two_arms(t) == 5 && two_arms(f) == 50, "two arms: {two_arms(t)} {two_arms(f)}");
+  assert("{elem_t([true])}{elem_t([false])} {elem_f([true])}{elem_f([false])}" == "10 01", "slice element: {elem_t([true])}{elem_t([false])} {elem_f([true])}{elem_f([false])}");
+  assert("{pair([true, false])}{pair([false, true])}{pair([true, true])}" == "tfft-", "two elements");
+  assert(either([true]) + either([false]) == 2, "alternatives");
+  assert("{int_lit(t)}{int_lit(S { ok: true, n: 4 })} {in_range([3])}{in_range([7])} {plain(true)}{plain(false)}" == "10 10 10", "controls");
+}
