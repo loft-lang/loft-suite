@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Asgn` crossed with `@FR-E-Left` (loft#2578): the PLACE of a write is a location in
+// the live vector.  `(E-Left)` reads an indexed vector's CONTENTS first when the index may
+// write it, taking a copy; that copy belongs to a read of the element, never to a place.  Each
+// case writes through an element whose index the compiler cannot prove leaves the vector
+// alone — a call through a function value, or a call that pushes onto the vector — and each
+// answer is hand-computed beside it.
+//
+// Cases, one per way a place reaches the element:
+//   plain_write    — `vi[f(1)] = j`, and the `+=` `-=` `*=` `/=` `%=` forms (a compound
+//                    binds its place to a temp once, `(E-Asgn-Compound)`).
+//   pushing_index  — `vi[grow(vi)] = j`, an index that pushes onto the vector it indexes.
+//   field_place    — `ws[f(1)].n = j`, a field of a record element.
+//   nested_place   — `ws[f(0)].v[1] = j` and `ws[f(0)].v += [j]`: the element is the first
+//                    argument of a projection that is itself the place.
+// Axes it HOLDS FIXED: a local vector (not a field or a parameter), integer and record
+// elements, one write per statement.  NOT here: an element BOUND to a view (`r = ws[f(0)]`, the
+// `!` of an argument) — a bind is a read under `(E-Left)` and takes the copy, which the
+// loft#2503 cell pins for an index that does write the vector.
+// @falsified-by: tests/falsified/2578-a-write-through-an-element-addresses-the-live-vector.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions and the leak gate.
+
+struct W { n: integer, v: vector<integer> }
+
+fn one(x: integer) -> integer { x }
+fn grow(a: &vector<integer>) -> integer { a += [9]; 0 }
+
+fn test_plain_write() {
+  f = one;
+  v = [10, 20, 30];
+  v[f(1)] = 21;
+  assert("{v}" == "[10,21,30]", "= {v}");
+  v[f(1)] += 4;
+  assert("{v}" == "[10,25,30]", "+= {v}");
+  v[f(2)] -= 5;
+  assert("{v}" == "[10,25,25]", "-= {v}");
+  v[f(0)] *= 3;
+  assert("{v}" == "[30,25,25]", "*= {v}");
+  v[f(0)] /= 2;
+  assert("{v}" == "[15,25,25]", "/= {v}");
+  v[f(1)] %= 7;
+  assert("{v}" == "[15,4,25]" && len(v) == 3, "%= {v}");
+}
+
+fn test_pushing_index() {
+  v = [1, 2, 3];
+  v[grow(v)] = 30;
+  // grow pushes 9 and answers 0: the write lands in element 0 of the grown vector.
+  assert("{v}" == "[30,2,3,9]" && len(v) == 4, "push {v}");
+}
+
+fn test_field_place() {
+  f = one;
+  ws = [W { n: 1, v: [] }, W { n: 2, v: [] }];
+  ws[f(1)].n = 50;
+  ws[f(0)].n += 6;
+  assert(ws[0].n == 7 && ws[1].n == 50 && len(ws) == 2, "field {ws[0].n} {ws[1].n}");
+}
+
+fn test_nested_place() {
+  f = one;
+  ws = [W { n: 1, v: [4, 5] }];
+  ws[f(0)].v[1] = 8;
+  ws[f(0)].v += [6];
+  assert("{ws[0].v}" == "[4,8,6]" && len(ws) == 1, "nested {ws[0].v}");
+}
+
+fn main() {
+  test_plain_write();
+  test_pushing_index();
+  test_field_place();
+  test_nested_place();
+  println("ok");
+}
