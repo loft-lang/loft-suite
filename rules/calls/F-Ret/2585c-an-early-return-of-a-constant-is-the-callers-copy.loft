@@ -1,0 +1,47 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2585, `@FR-F-Ret` — a function's result is a fresh, owned value, an early `return`
+// included.  `return NUMS` of a top-level vector constant delivered the constant's write-locked
+// store itself, so a caller that wrote its result stopped ("write to a constant", "write to a
+// locked store"); the tail spelling `{ NUMS }` copied into the return buffer.  The return now
+// copies a constant's view into the buffer as it does any value the frame does not own.
+//
+// Each cell writes the result and asserts the constant is unchanged.  The spellings: an early
+// return of `vector<integer>` and of `vector<text>`, inside a loop, in a match arm, as the last
+// statement, two calls with one written, and per call in a loop.  The controls: the tail
+// spellings and a `text` constant, which were right already.
+// @falsified-at: 2026-11-19 on loft30-gate 3d90c97ca (before loft#2585's fix) — every early
+//   `return` of a vector constant stopped with a write to the constant on the interpreter and
+//   --native-c; the controls passed.
+// @falsified-by: tests/falsified/2585c-an-early-return-of-a-constant-is-the-callers-copy.patch — interpret exit 1 -> 0, native exit 1 -> 0
+NUMS = [1, 2, 3];
+WORDS = ["x", "y"];
+NAME = "ab";
+fn early(k: integer) -> vector<integer> { if k < 0 { return NUMS; } [k] }
+fn early_text(k: integer) -> vector<text> { if k < 0 { return WORDS; } [] }
+fn in_loop(k: integer) -> vector<integer> { for i in 0..3 { if i == k { return NUMS; } } [] }
+fn in_arm(k: integer) -> vector<integer> { match k { 0 => { return NUMS; }, _ => {} } [k] }
+fn last() -> vector<integer> { return NUMS; }
+fn tail_if(k: integer) -> vector<integer> { if k < 0 { NUMS } else { [k] } }
+fn name(k: integer) -> text { if k < 0 { return NAME; } "" }
+
+fn main() {
+  a = early(-1); a += [9];
+  assert("{a}" == "[1,2,3,9]", "early: {a}");
+  w = early_text(-1); w += ["z"];
+  assert("{w}" == "[\"x\",\"y\",\"z\"]", "early, text elements: {w}");
+  l = in_loop(1); l += [9];
+  m = in_arm(0); m += [9];
+  z = last(); z += [9];
+  assert("{l} {m} {z}" == "[1,2,3,9] [1,2,3,9] [1,2,3,9]", "loop, arm, last: {l} {m} {z}");
+  p = early(-1); q = early(-1); p += [8];
+  assert("{p} {q}" == "[1,2,3,8] [1,2,3]", "two calls: {p} {q}");
+  t = 0;
+  for i in 0..100 { b = early(i % 2 - 1); b += [i]; t += len(b); }
+  assert(t == 300, "per call in a loop: {t}");
+  c = tail_if(-1); c += [9];
+  n = name(-1); n += "!";
+  assert("{c} {n}" == "[1,2,3,9] ab!", "controls: {c} {n}");
+  assert("{NUMS} {WORDS} {NAME}" == "[1,2,3] [\"x\",\"y\"] ab", "the constants: {NUMS} {WORDS} {NAME}");
+}
