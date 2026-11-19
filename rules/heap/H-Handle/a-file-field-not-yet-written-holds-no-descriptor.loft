@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-Handle` — a `File` releases the descriptor it holds, and only that one.  A record
+// literal with a `File` field (`Holder { h: file(p), tag: 1 }`) allocates the record zeroed and
+// releases the field's old value before the file is copied in; on the C backend a zeroed handle
+// read as descriptor 0, so building the record closed the program's stdin, and the next file
+// opened was handed descriptor 0 — which the next such literal then closed under it.  The
+// second write to that file was lost, silently (`1` where `12` is right), and MSVC's C runtime
+// stopped the program (0xC0000409).  Each case builds records with a `File` field between two
+// writes to a file opened on its own, and reads every file back.
+// Values by hand: a.txt gets "1" and "2"; each held file gets the one letter written to it.
+// @falsified-by: tests/falsified/a-file-field-not-yet-written-holds-no-descriptor.patch — native exit 1 -> 0, native 2 assertion failures -> 0; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: the assertions (C); the interpreter answers right on both builds.
+
+struct Holder { h: File, tag: integer }
+
+fn scratch(tag: text) -> text {
+  d = "{temp_dir() ?? "/tmp"}/loft_file_field_{tag}_{now()}_{ticks()}";
+  mkdir_all(d);
+  d
+}
+
+fn test_a_file_opened_between_two_file_fields_keeps_its_writes() {
+  d = scratch("between");
+  h1 = Holder { h: file("{d}/one.txt"), tag: 1 };
+  a = file("{d}/a.txt");
+  a += "1";
+  h2 = Holder { h: file("{d}/two.txt"), tag: 2 };
+  a += "2";
+  h1.h += "x";
+  h2.h += "y";
+  ra = file("{d}/a.txt").content();
+  r1 = file("{d}/one.txt").content();
+  r2 = file("{d}/two.txt").content();
+  assert(ra == "12" && r1 == "x" && r2 == "y" && h1.tag + h2.tag == 3, "{ra} {r1} {r2}");
+  delete("{d}/a.txt"); delete("{d}/one.txt"); delete("{d}/two.txt"); delete(d);
+}
+
+fn test_a_field_built_in_a_loop() {
+  d = scratch("loop");
+  a = file("{d}/a.txt");
+  for k in 0..3 {
+    hk = Holder { h: file("{d}/k{k}.txt"), tag: k };
+    hk.h += "{k}";
+    a += "{k}";
+  }
+  ra = file("{d}/a.txt").content();
+  r2 = file("{d}/k2.txt").content();
+  assert(ra == "012" && r2 == "2", "{ra} {r2}");
+  for k in 0..3 { delete("{d}/k{k}.txt"); }
+  delete("{d}/a.txt"); delete(d);
+}

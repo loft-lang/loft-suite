@@ -6,18 +6,21 @@
 // read wrapped with that preamble.  The interpreter sized the yield by the wrapper, which
 // answers nothing, so it handed over no bytes and the value stayed on the generator's stack —
 // the next instruction read garbage (SIGSEGV in `OpAppendText`, an abort in `OpFormatInt`).
-// The C backend was right.  Each generator yields such a read: an integer field and a text
+// A yielded BLOCK that builds a text before its value read as void the same way (its last
+// statement is the text's release).  The C backend was right.  Each generator yields such a read: an integer field and a text
 // field of a call answering its argument, a field of a fresh record, a whole record, and a
 // yield inside a loop.
 // Values by hand: gt yields "x" then "e"; gw 4; gl 5 + 6 + 7 = 18; gf 7 + 8 = 15; 37 in all,
 // and box runs once per yield: 1 + 1 + 3 + 2 = 7 calls.
 // @falsified-by: tests/falsified/a-yielded-field-of-a-call-hands-over-the-field.patch — interpret exit 134 -> 0; native INERT (expected for a
 //   backend-divergence guard — only one side can move)
+// @falsified-by: tests/falsified/a-yielded-block-that-builds-a-temporary-hands-over-its-value.patch — interpret exit 139 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
 // CHANNEL: the run's exit (the crash) and the assertions.
 
 struct W { n: integer, t: text }
 struct Hold { ws: vector<W> }
-struct Ctr { calls: integer = 0 }
+struct Ctr { calls: integer = 0, log: text = "" }
 
 fn box(c: Ctr, h: Hold) -> W { c.calls += 1; h.ws[0] }
 fn mkw(c: Ctr, n: integer) -> W { c.calls += 1; W { n: n, t: "w{n}" } }
@@ -26,6 +29,7 @@ fn gw(c: Ctr) -> iterator<W> { yield mkw(c, 4); }
 fn gl(c: Ctr, h: Hold) -> iterator<integer> { for k in 0..3 { yield box(c, h).n + k; } }
 fn gf(c: Ctr) -> iterator<integer> { yield mkw(c, 7).n; yield mkw(c, 8).n; }
 fn gi(c: Ctr, h: Hold) -> iterator<integer> { yield box(c, h).n; }
+fn gb(c: Ctr) -> iterator<integer> { yield { c.calls += 1; c.log += "S"; 1 }; yield 3; }
 
 fn test_each_yield_hands_over_the_field() {
   c = Ctr {};
@@ -45,4 +49,13 @@ fn test_the_only_yield() {
   n = 0;
   for k in gi(c, h) { n += k; }
   assert(n == 5 && c.calls == 1, "{n} {c.calls}");
+}
+
+fn test_a_yielded_block_that_builds_a_text() {
+  // The block's last statement is the release of its text temporary; the yield still hands
+  // over the integer it computed: 1 then 3.
+  c = Ctr {};
+  n = 0;
+  for k in gb(c) { n += k; }
+  assert(n == 4 && c.calls == 1 && c.log == "S", "{n} {c.calls} {c.log}");
 }
