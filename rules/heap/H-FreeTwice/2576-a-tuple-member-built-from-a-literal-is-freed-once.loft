@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2576, `@FR-H-FreeTwice` — a store two names hold is freed once.  A tuple's keyed member
+// built from a vector LITERAL is built in its accumulator, which the member then shares; the
+// member's release disarms the accumulator, so the accumulator's own scope-end free is sound
+// only after the tuple's.  A record `??` over the member's lookup put the accumulator's free
+// first, and the store was freed twice.
+//
+// Every keyed kind, both tuple positions, a present and an absent key; the controls take the
+// member from a call, bind the lookup to a local first, and read no lookup.  Each runs fifty
+// times so a leak or a second free shows; every value is computed by hand.
+// @falsified-at: 2026-11-19 on loft30-gate b5d9250ce (before loft#2576's fix) — every keyed cell
+//   failed `a store was freed twice` on the interpreter and --native-c; the controls passed.
+// @falsified-by: tests/falsified/2576-a-tuple-member-built-from-a-literal-is-freed-once.patch — interpret exit 1 -> 0, native exit 1 -> 0
+struct H { k: text, n: integer }
+fn mkc() -> hash<H[k]> { [H { k: "a", n: 1 }, H { k: "b", n: 2 }] }
+fn h0() -> integer { t: (hash<H[k]>, integer) = ([H { k: "a", n: 1 }, H { k: "b", n: 2 }], 3); (t.0["b"] ?? H { k: "", n: 0 }).n + t.1 }
+fn h1() -> integer { t: (integer, hash<H[k]>) = (3, [H { k: "a", n: 1 }, H { k: "b", n: 2 }]); (t.1["b"] ?? H { k: "", n: 0 }).n + t.0 }
+fn s0() -> integer { t: (sorted<H[k]>, integer) = ([H { k: "a", n: 1 }, H { k: "b", n: 2 }], 3); (t.0["b"] ?? H { k: "", n: 0 }).n + t.1 }
+fn i0() -> integer { t: (index<H[k]>, integer) = ([H { k: "a", n: 1 }, H { k: "b", n: 2 }], 3); (t.0["b"] ?? H { k: "", n: 0 }).n + t.1 }
+fn absent() -> integer { t: (hash<H[k]>, integer) = ([H { k: "a", n: 1 }], 3); (t.0["z"] ?? H { k: "", n: 7 }).n + t.1 }
+fn from_call() -> integer { t: (hash<H[k]>, integer) = (mkc(), 3); (t.0["b"] ?? H { k: "", n: 0 }).n + t.1 }
+fn bound() -> integer { t: (hash<H[k]>, integer) = ([H { k: "a", n: 1 }, H { k: "b", n: 2 }], 3); r = t.0["b"]; (r.n ?? 0) + t.1 }
+fn no_lookup() -> integer { t: (hash<H[k]>, integer) = ([H { k: "a", n: 1 }, H { k: "b", n: 2 }], 3); len(t.0) + t.1 }
+
+fn main() {
+  a = 0; b = 0; c = 0; d = 0; e = 0;
+  for i in 0..50 { a += h0() + h1(); b += s0() + i0(); c += absent(); d += from_call() + bound(); e += no_lookup(); }
+  // h0, h1, s0, i0, from_call, bound: 2 + 3 = 5 each; absent: 7 + 3 = 10; no_lookup: 2 + 3 = 5.
+  assert(a == 500 && b == 500, "a keyed member's lookup under ??: {a} {b}");
+  assert(c == 500, "an absent key: {c}");
+  assert(d == 500 && e == 250, "the controls: {d} {e}");
+}
