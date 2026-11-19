@@ -10,8 +10,7 @@
 // The controls: a plain `=`, a read and an append through a block index, once before the fix.
 // @falsified-at: 2026-11-19 on loft30-gate 137f6e92b (before loft#2581's fix) — every compound
 //   cell counted 2 on the interpreter, --native-c and --native; the controls counted 1.
-// @falsified-by: tests/falsified/2581-a-compound-write-through-a-block-index-evaluates-the-block-once.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 
-- ../loft-suite/rules/operational/E-Asgn/2582-a-place-keeps-its-turn-before-a-lifted-right-side.loft: recorded 
+// @falsified-by: tests/falsified/2581-a-compound-write-through-a-block-index-evaluates-the-block-once.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 struct Ctr { calls: integer = 0 }
 struct H { vs: vector<integer>, ws: vector<vector<integer>> }
 
