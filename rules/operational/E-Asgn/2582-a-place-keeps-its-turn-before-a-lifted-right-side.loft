@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#2582, `@FR-E-Left` / `(E-Asgn)` — an assignment reduces its place first, then its right
+// loft#2582, `@FR-E-Asgn` crossed with `@FR-E-Left` — an assignment reduces its place first, then its right
 // side.  A right side reading a field of a record-returning call (`vi[at(l, 2)] = box(l, h).n`)
 // had its call lifted into a statement ahead of the write, while the place's index stayed inline
 // after it: the value ran first.  The place now keeps its turn: its effectful indices are
