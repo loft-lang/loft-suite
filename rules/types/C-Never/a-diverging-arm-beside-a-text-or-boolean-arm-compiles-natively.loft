@@ -6,10 +6,10 @@
 // a-null-can-leave-the-loop-through-a-coalesce.loft's `skip_text`.
 // @falsified-at: d84ebf7bb — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-diverging-arm-beside-a-text-or-boolean-arm-compiles-natively.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
-//   ARMED: FALSIFY_NATIVE=rust — the defect is the rustc writer's (`src/generation/emit.rs`);
-//     the default C leg emits these arms correctly on both trees and reads INERT.
+// No patch receipt: reverting the rustc writer's arm wrappers (`src/generation/emit.rs`) no
+//   longer plants the defect — scored with FALSIFY_NATIVE=rust it reads INERT on main 5f8426dee
+//   and on loft PR #2574, the arms reaching the writer already in the shape it emits.  The
+//   cells still hold the property on both backends; the C leg never had the defect.
 // HOLDS: the interpreter answers every cell on both trees; leak and panic are clean.
 // CHANNEL: the native exit — rustc refuses the control's emission.
 
