@@ -12,6 +12,8 @@
 // element, all three with the arm silent; the controls, the same append without `?` (w4) and a
 // fallback that is another absent element (w5), both of which run the arm; a present element
 // through `?`, where the write lands in the element (w6); and an explicit record fallback (w7).
+// w8 and w9 append records at a COMPUTED place, which the statement binds once (loft#2571): the
+// index runs once, and the arm runs for an absent element (w8) and not for a present one (w9).
 // Every value is hand-computed beside its assert.
 //
 // @EXPECT_WARNING: this `else` never runs
@@ -33,6 +35,22 @@ fn w6() -> text {
   "{k[5].n} {e}"
 }
 fn w7() -> text { k: vector<Mark> = []; e = 0; (k[5] ?? Mark { n: 9 }).n = 3 else { e = 1 }; "{e}" }
+struct Count { c: integer = 0 }
+fn bump(t: Count, i: integer) -> integer { t.c += 1; i }
+fn w8() -> text {
+  t = Count {};
+  k: vector<Mark> = [];
+  e = 0;
+  k[bump(t, 5)].mpts += [Pt { px: 7 }, Pt { px: 8 }] else { e = 1 };
+  "{t.c} {e} {len(k)}"
+}
+fn w9() -> text {
+  t = Count {};
+  k: vector<Mark> = [Mark {}, Mark {}];
+  e = 0;
+  k[bump(t, 1)].mpts += [Pt { px: 7 }, Pt { px: 8 }] else { e = 1 };
+  "{t.c} {e} {len(k[1].mpts)} {k[1].mpts[1].px}"
+}
 
 fn main() {
   // w1: the append lands in the fallback record, which is dropped; `k` stays empty.
@@ -45,4 +63,8 @@ fn main() {
   // w6: the element is there, so the write lands in it: n = 3.
   assert(w6() == "3 0", "w6 a present element through `?`: {w6()}");
   assert(w7() == "0", "w7 an explicit record fallback: {w7()}");
+  // w8: bump once; element 5 is absent, so the append does not take and the arm runs.
+  assert(w8() == "1 1 0", "w8 a computed absent place: {w8()}");
+  // w9: bump once; element 1 is there, both points land in it, the arm stays silent.
+  assert(w9() == "1 0 2 8", "w9 a computed present place: {w9()}");
 }

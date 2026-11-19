@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-E-Asgn-Compound` step 1 — a compound assignment reduces its place's ADDRESSING (an index
+// expression, a container-producing call) EXACTLY ONCE, however many writes the assignment
+// makes through it.  An append of record items to a collection FIELD writes through the place
+// twice per item (`OpNewRecord`, `OpFinishRecord`), and a scalar-item append once per item; with
+// the field's place left inline, an index with an effect ran once per write (loft#2571).
+//
+// Every cell's index is `bump(c, at)`, which counts its calls; each cell asserts the count beside
+// the value the append made.  The cells walk the item count, the `?` discharge present and
+// absent, a nested field, and a loop; the controls are a scalar field and a literal index.
+// @falsified-at: 2026-11-19 on loft30-gate 016ee24c9 (before loft#2571's fix) — a, c and d
+//   counted 2, e 3, b and f 4, h 6 (g, the control, 1), on the interpreter, --native-c and
+//   --native.
+struct Pt { px: integer = 0 }
+struct In { qs: vector<Pt> }
+struct Mark { matched: boolean = false, mpts: vector<Pt>, inner: In, ns: vector<integer> }
+struct Ctr { calls: integer = 0 }
+fn bump(c: Ctr, at: integer) -> integer { c.calls += 1; at }
+fn tot(v: vector<Pt>) -> integer { t = 0; for p in v { t += p.px; } t }
+fn fresh() -> vector<Mark> { [Mark { mpts: [Pt { px: 1 }], inner: In { qs: [] }, ns: [] }] }
+
+fn main() {
+  k = fresh();
+  a = Ctr {}; k[bump(a, 0)].mpts += [Pt { px: 2 }];
+  assert(a.calls == 1 && tot(k[0].mpts) == 3, "a one record item: calls {a.calls}, total {tot(k[0].mpts)}");
+  b = Ctr {}; k[bump(b, 0)].mpts += [Pt { px: 3 }, Pt { px: 4 }];
+  assert(b.calls == 1 && len(k[0].mpts) == 4, "b two record items: calls {b.calls}, len {len(k[0].mpts)}");
+  c = Ctr {}; k[bump(c, 0)]?.mpts += [Pt { px: 5 }];
+  assert(c.calls == 1 && tot(k[0].mpts) == 15, "c through `?`, present: calls {c.calls}, total {tot(k[0].mpts)}");
+  d = Ctr {}; k[bump(d, 7)]?.mpts += [Pt { px: 99 }];
+  assert(d.calls == 1 && len(k) == 1 && tot(k[0].mpts) == 15, "d through `?`, absent: calls {d.calls}");
+  e = Ctr {}; k[bump(e, 0)].ns += [1, 2, 3];
+  assert(e.calls == 1 && len(k[0].ns) == 3, "e scalar items: calls {e.calls}, len {len(k[0].ns)}");
+  f = Ctr {}; k[bump(f, 0)].inner.qs += [Pt { px: 6 }, Pt { px: 7 }];
+  assert(f.calls == 1 && tot(k[0].inner.qs) == 13, "f a nested field: calls {f.calls}, total {tot(k[0].inner.qs)}");
+  h = Ctr {}; for i in 0..3 { k[bump(h, 0)].mpts += [Pt { px: i }]; }
+  assert(h.calls == 3 && len(k[0].mpts) == 8, "h once per pass: calls {h.calls}, len {len(k[0].mpts)}");
+  g = Ctr {}; k[bump(g, 0)].mpts[0].px += 10;
+  assert(g.calls == 1 && k[0].mpts[0].px == 11, "g control, a scalar field: calls {g.calls}");
+  i0 = 0; k[i0].mpts += [Pt { px: 20 }];
+  assert(len(k[0].mpts) == 9, "control, a literal-free plain index: len {len(k[0].mpts)}");
+}
