@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-L-Null-Which` — a nullable record field is stored in a tagged slot, and a value leaving the
+// slot is the pointer: `null` where the field is absent.  A join of such a field with a `null` arm
+// leaves the slot in the join: the field is read through its tag there, so an absent field is
+// null and not a record of defaults (loft#2572).
+//
+// Each function joins `h.a` or `h.b` (`R?` fields) with `null`, in every spelling a join takes:
+// an `if` with the `null` arm last or first, a `match`, an `else if` chain ending or starting in
+// `null`, and a bind.  Every call is made with the field absent and present.  The controls join
+// two fields, or return the field alone; they were right before the fix.
+// @falsified-at: 2026-11-19 on loft30-gate 93cf84852 (before loft#2572's fix) — every absent
+//   field read through a `null` join answered `0` (a default record) on the interpreter,
+//   --native-c and --native, and the bind was refused.
+struct R { n: integer, t: text }
+struct H { a: R?, b: R? }
+fn null_last(h: H, k: integer) -> R? { if k == 0 { h.a } else { null } }
+fn null_first(h: H, k: integer) -> R? { if k != 0 { null } else { h.a } }
+fn by_match(h: H, k: integer) -> R? { match k { 0 => h.a, 1 => h.b, _ => null } }
+fn match_null_first(h: H, k: integer) -> R? { match k { 0 => null, 1 => h.a, _ => h.b } }
+fn chain_end(h: H, k: integer) -> R? { if k == 0 { h.a } else if k == 1 { h.b } else { null } }
+fn chain_start(h: H, k: integer) -> R? { if k == 0 { null } else if k == 1 { h.a } else { h.b } }
+fn two_fields(h: H, k: integer) -> R? { if k == 0 { h.a } else { h.b } }
+fn alone(h: H) -> R? { h.a }
+fn show(r: R?) -> text { if r == null { "null" } else { "{r.n ?? -1}{r.t ?? "-"}" } }
+
+fn main() {
+  e = H { a: null, b: R { n: 2, t: "b" } };
+  f = H { a: R { n: 7, t: "a" }, b: null };
+  assert(show(null_last(e, 0)) == "null" && show(null_last(f, 0)) == "7a", "null last: {show(null_last(e, 0))}");
+  assert(show(null_first(e, 0)) == "null" && show(null_first(f, 0)) == "7a", "null first: {show(null_first(e, 0))}");
+  assert(show(by_match(e, 0)) == "null" && show(by_match(e, 1)) == "2b" && show(by_match(f, 1)) == "null", "match: {show(by_match(e, 0))}");
+  assert(show(match_null_first(e, 1)) == "null" && show(match_null_first(f, 2)) == "null", "match, null first: {show(match_null_first(e, 1))}");
+  assert(show(chain_end(e, 0)) == "null" && show(chain_end(e, 1)) == "2b" && show(chain_end(f, 1)) == "null", "chain end: {show(chain_end(e, 0))}/{show(chain_end(e, 1))}");
+  assert(show(chain_start(e, 1)) == "null" && show(chain_start(e, 2)) == "2b" && show(chain_start(f, 2)) == "null", "chain start: {show(chain_start(e, 1))}");
+  x = if 1 == 1 { e.a } else { null };
+  assert(show(x) == "null", "bind: {show(x)}");
+  r = null_last(e, 0);
+  assert(r == null && (r.n ?? -1) == -1, "a read through the absent answer: {r.n ?? -1}");
+  assert(show(two_fields(e, 0)) == "null" && show(alone(e)) == "null", "controls");
+}

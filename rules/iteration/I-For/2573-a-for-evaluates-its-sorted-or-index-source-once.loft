@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-For` — a `for` evaluates its SOURCE once, before the first round, whatever collection
+// it walks.  An ordered keyed walk (a `sorted` or an `index`) hands the source to the walk's
+// start and to every step, so a source that runs a call ran once per step: three records walked
+// from a call answering them called it five times (loft#2573).
+//
+// Each source counts its runs in a `Ctr`; each cell asserts the count beside the sum the walk
+// made.  The sources: a call answering each collection kind, a keyed point lookup with a computed
+// key and a `?? []` discharge (present and absent), and a call's field.  The controls bind the
+// source to a local first.
+// @falsified-at: 2026-11-19 on loft30-gate 15c6d34c5 (before loft#2573's fix) — the sorted and
+//   index calls ran 5 times, the keyed lookup 4 (present) and 2 (absent), the call's field 4, on
+//   the interpreter, --native-c and --native; the hash, vector and bound sources ran once.
+struct P { k: integer, t: text }
+struct Ctr { calls: integer = 0 }
+struct Possible { length: integer, token: text }
+struct SToken { start: character, possible: sorted<Possible[-length, token]> }
+struct Lx { tokens: hash<SToken[start]> }
+struct Bag { s: sorted<Possible[-length, token]> }
+fn mk_sorted(c: Ctr) -> sorted<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mk_index(c: Ctr) -> index<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mk_hash(c: Ctr) -> hash<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mk_vec(c: Ctr) -> vector<P> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn pick(c: Ctr, ch: character) -> character { c.calls += 1; ch }
+fn bag(c: Ctr) -> Bag { c.calls += 1; Bag { s: [Possible { length: 1, token: "q" }, Possible { length: 2, token: "qq" }] } }
+
+fn main() {
+  a = Ctr {}; s = 0; for p in mk_sorted(a) { s += p.k; }
+  assert(a.calls == 1 && s == 6, "sorted from a call: {a.calls} runs, sum {s}");
+  b = Ctr {}; i = 0; for p in mk_index(b) { i += p.k; }
+  assert(b.calls == 1 && i == 6, "index from a call: {b.calls} runs, sum {i}");
+  x = Lx { tokens: [] };
+  x.tokens += [SToken { start: 'a', possible: [Possible { length: 2, token: "ab" }, Possible { length: 1, token: "a" }] }];
+  c = Ctr {}; n = 0; for pt in x.tokens[pick(c, 'a')].possible ?? [] { n += pt.length; }
+  assert(c.calls == 1 && n == 3, "a keyed lookup's field, present: {c.calls} runs, sum {n}");
+  d = Ctr {}; m = 0; for pt in x.tokens[pick(d, 'z')].possible ?? [] { m += pt.length; }
+  assert(d.calls == 1 && m == 0, "a keyed lookup's field, absent: {d.calls} runs");
+  e = Ctr {}; q = 0; for pt in bag(e).s { q += pt.length; }
+  assert(e.calls == 1 && q == 3, "a call's field: {e.calls} runs, sum {q}");
+  f = Ctr {}; h = 0; for p in mk_hash(f) { h += p.k; }
+  g = Ctr {}; v = 0; for p in mk_vec(g) { v += p.k; }
+  w = Ctr {}; src = mk_sorted(w); u = 0; for p in src { u += p.k; }
+  assert(f.calls == 1 && g.calls == 1 && w.calls == 1 && h + v + u == 18, "controls: {f.calls} {g.calls} {w.calls}");
+}
