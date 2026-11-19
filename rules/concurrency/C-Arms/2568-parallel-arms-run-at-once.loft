@@ -1,0 +1,121 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2568, `@FR-C-Arms` — the arms of a `parallel { }` block run AT ONCE, each on its own
+// thread, and the block ends when every arm has.  The C backend wrote the arms one after
+// another, so an arm that waits for a later arm (a server arm and its client) never saw it
+// start: the `server` guide hung in `accept`.  Each arm now is a C function of its own, run on a
+// thread of its own with its own copy of the store table, as the rustc writer's closures are.
+//
+// Axes it MOVES: which arm waits (the first, a chain of three); what the arms touch at once
+// (files opened, written and read in every arm, many rounds); what an arm builds of its own (a
+// `vector<text>`, a text, a `par` loop, a nested `parallel` block); what it reads of the
+// enclosing frame (an integer, a text, a record, a vector).
+// Axes it HOLDS FIXED: arms write no enclosing state (the language refuses it); a result
+// leaves an arm only through a file, since the block discards it.
+//
+// A wait is bounded (5 s), so an arm run after the one it waits for fails by value, not by
+// hanging.  Values hand-computed beside each assert.  Cross-backend; `main` runs every cell.
+#cwd
+
+fn mark2568(path: text, payload: text) {
+  f = file(path);
+  f += payload;
+  f.sync();
+}
+
+fn take2568(path: text) -> text {
+  f = file(path);
+  r = "";
+  if f#size != null { r = f#read(f#size) as text; }
+  delete(path);
+  r
+}
+
+fn wait2568(path: text) -> boolean {
+  start = ticks();
+  while ticks() - start < 5000000 {
+    if exists(path) { return true; }
+  }
+  false
+}
+
+fn answer2568(wait: text, out: text, payload: text) {
+  if wait2568(wait) { mark2568(out, payload); }
+}
+
+fn test_the_first_arm_waits_for_the_second() {
+  delete("c2568_go.txt");
+  delete("c2568_seen.txt");
+  parallel {
+    answer2568("c2568_go.txt", "c2568_seen.txt", "seen");
+    mark2568("c2568_go.txt", "go");
+  }
+  assert(take2568("c2568_seen.txt") == "seen", "the waiting arm never saw the second arm");
+  delete("c2568_go.txt");
+}
+
+fn test_a_chain_of_three_arms() {
+  delete("c2568_a.txt");
+  delete("c2568_b.txt");
+  delete("c2568_c.txt");
+  parallel {
+    answer2568("c2568_a.txt", "c2568_c.txt", "C");
+    answer2568("c2568_b.txt", "c2568_a.txt", "A");
+    mark2568("c2568_b.txt", "B");
+  }
+  assert(take2568("c2568_a.txt") == "A", "the middle arm did not answer");
+  assert(take2568("c2568_c.txt") == "C", "the first arm did not answer");
+  delete("c2568_b.txt");
+}
+
+fn round2568(path: text, word: text) -> text {
+  mark2568(path, word);
+  mark2568(path, "+{word}");
+  take2568(path)
+}
+
+fn test_arms_open_files_at_once() {
+  for round in 0..20 {
+    parallel {
+      mark2568("c2568_r0.txt", round2568("c2568_w0.txt", "zero{round}"));
+      mark2568("c2568_r1.txt", round2568("c2568_w1.txt", "one{round}"));
+      mark2568("c2568_r2.txt", round2568("c2568_w2.txt", "two{round}"));
+      mark2568("c2568_r3.txt", round2568("c2568_w3.txt", "three{round}"));
+    }
+    got = "{take2568("c2568_r0.txt")} {take2568("c2568_r1.txt")} {take2568("c2568_r2.txt")} {take2568("c2568_r3.txt")}";
+    assert(got == "zero{round}+zero{round} one{round}+one{round} two{round}+two{round} three{round}+three{round}", "round {round}: {got}");
+  }
+}
+
+struct Pt2568 { x: integer, y: integer, name: text }
+
+fn double2568(x: integer) -> integer { x * 2 }
+
+fn arms2568(tag: text, p0: Pt2568, v0: vector<integer>) {
+  s = "{tag}-{p0.name}";
+  p = p0;
+  v = v0;
+  parallel {
+    { t = "{s}:{p.x + p.y}"; w: vector<text> = []; for i in v { w += ["{i}"]; } mark2568("c2568_m0.txt", "{t}/{w.len()}/{w[2]}"); }
+    { tot = 0; for r in v par(d = double2568(r), 2) { tot += d; } mark2568("c2568_m1.txt", "{tot}"); }
+    parallel { mark2568("c2568_m2.txt", "C{v[0]}"); mark2568("c2568_m3.txt", "D{len(s)}"); }
+  }
+}
+
+fn test_what_an_arm_builds_and_reads() {
+  for round in 0..3 {
+    arms2568("r{round}", Pt2568 { x: 30 + round, y: 7, name: "pq" }, [11, 22, 33 + round]);
+    got = "{take2568("c2568_m0.txt")} {take2568("c2568_m1.txt")} {take2568("c2568_m2.txt")} {take2568("c2568_m3.txt")}";
+    // r0: "r0-pq" + ":" + (30 + 7); three words, the third "33"; 2 * (11 + 22 + 33) = 132.
+    want = ["r0-pq:37/3/33 132 C11 D5", "r1-pq:38/3/34 134 C11 D5", "r2-pq:39/3/35 136 C11 D5"];
+    assert(got == want[round], "round {round}: {got}");
+  }
+}
+
+fn main() {
+  test_the_first_arm_waits_for_the_second();
+  test_a_chain_of_three_arms();
+  test_arms_open_files_at_once();
+  test_what_an_arm_builds_and_reads();
+}
