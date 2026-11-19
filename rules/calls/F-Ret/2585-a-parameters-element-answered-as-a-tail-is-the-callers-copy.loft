@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2585 (the element half), `@FR-F-Ret` / `@FR-B-Copy` — a function's result is the
+// caller's own value: a whole-value bind of a call copies.  A parameter's ELEMENT answered as
+// the tail (`fn first(h) -> vector<integer> { h[0] }`) was handed back uncopied under the
+// one-buffer marker the caller adopts, so `r = first(h); r += [9]` wrote the caller's `h[0]`.
+// The tail copies it into the return buffer now, as it does a parameter's field and the
+// parameter itself.  A plain element BIND stays a view (`@C77`), and a NULLABLE answer stays the
+// element so an absent one stays absent.
+//
+// Each cell writes the result and asserts the argument is unchanged.  The spellings: bound,
+// rebound, an element of a field, per call in a loop, into a record field, text elements.  The
+// controls: a parameter's field tail, a plain element bind (a view, which writes through), an
+// absent nullable element.
+// @falsified-at: 2026-11-19 on loft30-gate 8814d21c4 (before this fix) — every element tail
+//   wrote the caller's element (`[[1,2,9],[3]]`) on the interpreter and --native-c; the
+//   controls passed.
+struct G { rows: vector<vector<integer>> }
+struct B { v: vector<integer> }
+struct S { v: vector<integer> }
+fn first(h: vector<vector<integer>>) -> vector<integer> { h[0] }
+fn row0(g: G) -> vector<integer> { g.rows[0] }
+fn first_text(h: vector<vector<text>>) -> vector<text> { h[0] }
+fn field(s: S) -> vector<integer> { s.v }
+fn pick(v: vector<vector<integer>>, i: integer) -> vector<integer>? { v[i] }
+
+fn main() {
+  h = [[1, 2], [3]];
+  r = first(h); r += [9];
+  q = [0]; q = first(h); q += [8];
+  assert("{r} {q} {h}" == "[1,2,9] [1,2,8] [[1,2],[3]]", "bound and rebound: {r} {q} {h}");
+  g = G { rows: [[4], [5]] };
+  e = row0(g); e += [9];
+  assert("{e} {g.rows}" == "[4,9] [[4],[5]]", "an element of a field: {e} {g.rows}");
+  t = 0;
+  for i in 0..100 { x = first(h); x += [i]; t += len(x); }
+  assert(t == 300 && "{h}" == "[[1,2],[3]]", "per call in a loop: {t} {h}");
+  b = B { v: first(h) }; b.v += [7];
+  assert("{b.v} {h}" == "[1,2,7] [[1,2],[3]]", "into a field: {b.v} {h}");
+  w = [["a"], ["b"]];
+  z = first_text(w); z += ["z"];
+  assert("{z} {w}" == "[\"a\",\"z\"] [[\"a\"],[\"b\"]]", "text elements: {z} {w}");
+  s = S { v: [1, 2] }; f = field(s); f += [9];
+  a = h[0]; a += [6];
+  p = pick(h, 7);
+  assert("{f} {s.v} {h} {p == null}" == "[1,2,9] [1,2] [[1,2,6],[3]] true", "controls: {f} {s.v} {h} {p == null}");
+}

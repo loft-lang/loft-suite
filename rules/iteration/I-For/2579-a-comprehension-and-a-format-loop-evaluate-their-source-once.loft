@@ -12,6 +12,8 @@
 // @falsified-at: 2026-11-19 on loft30-gate 06d02f19c (before loft#2579's fix) — every
 //   comprehension cell counted 5 and the format loop's vector 8, on the interpreter and
 //   --native-c; the controls counted 1.
+// @falsified-by: tests/falsified/2579-a-comprehension-and-a-format-loop-evaluate-their-source-once.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion fai
+- ../loft-suite/rules/operational/E-Asgn/2580-a-whole-collection-written-through-a-called-place-addresses-it-once.loft: recorded 
 struct P { k: integer, t: text }
 struct Ctr { calls: integer = 0 }
 fn mk_sorted(c: Ctr) -> sorted<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }

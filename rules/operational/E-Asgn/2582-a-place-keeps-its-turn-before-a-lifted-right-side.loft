@@ -13,6 +13,7 @@
 // @falsified-at: 2026-11-19 on loft30-gate 560c23007 (before loft#2582's fix) — every
 //   field-of-a-call cell logged the value first (`vi`, `vii` for the two-level index) on the
 //   interpreter, --native-c and --native; the controls logged `iv`.
+// @falsified-by: tests/falsified/2582-a-place-keeps-its-turn-before-a-lifted-right-side.patch
 struct Log { s: text = "" }
 struct W { n: integer }
 struct H { ws: vector<W>, vi: vector<integer> }
