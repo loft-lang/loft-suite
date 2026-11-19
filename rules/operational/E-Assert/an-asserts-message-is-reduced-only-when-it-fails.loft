@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN `assert`'S MESSAGE IS REDUCED ONLY WHEN THE ASSERTION FAILS (`@FR-E-Assert`).  The
+// condition is reduced once; when it holds the message is not reduced at all, so a call written
+// in it does not run.  It is not an ordinary call under `(F-Args)`.
+//
+// Axes this file MOVES:  the message's form (a call, a format string holding a call).
+// Axes it HOLDS FIXED:   the assertion holds — a failing one halts the cell, so its message
+//                        running is seen only in the report of a real failure.
+//
+// @falsified-at: a80e26737 (v2026.10.0) — the cell fails on the interpreter (that release has no C
+//   backend): the message ran once for an assertion that held.
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: "a call as the message ran 1".
+// HOLDS: the condition's own count, 1, on both trees.
+
+struct Ca { calls: integer = 0 }
+
+fn msg_a(c: Ca) -> text { c.calls += 1; "m" }
+fn ok_a(c: Ca) -> boolean { c.calls += 1; true }
+
+fn test_a_message_does_not_run_for_an_assertion_that_holds() {
+  a = Ca {}; b = Ca {}; c = Ca {};
+  assert(ok_a(c), msg_a(a));
+  assert(1 == 1, "got {msg_a(b)}");
+  assert(c.calls == 1, "the condition ran {c.calls}");
+  assert(a.calls == 0, "a call as the message ran {a.calls}");
+  assert(b.calls == 0, "a call in a formatted message ran {b.calls}");
+}

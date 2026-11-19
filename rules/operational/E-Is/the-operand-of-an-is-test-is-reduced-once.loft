@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE OPERAND OF AN `is` TEST IS REDUCED ONCE (`@FR-E-Is`).  `e is V` reduces `e` once and
+// answers whether its variant is `V`; the variant is a name, not an operand.
+//
+// Axes this file MOVES:  the answer (the variant held, another one); where the test stands.
+// Axes it HOLDS FIXED:   the operand is a call returning a plain enum.
+//
+// @falsified-at: none — a conformance guard for a rule written down after the fact; every
+//   cell answered as hand-computed on both backends on the tree it landed on, and loft's slot
+//   matrix (scripts/slot_matrix.py) holds the same rule over every form of operand.
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: each assert's message names the count or the order that moved.
+// HOLDS: every cell on both backends.
+
+enum Si { Dot, Line, Box }
+struct Cs { calls: integer = 0 }
+
+fn shape_s(c: Cs, s: Si) -> Si { c.calls += 1; s }
+
+fn test_a_call_under_is_runs_once() {
+  a = Cs {}; b = Cs {}; c = Cs {}; s = 0;
+  yes = shape_s(a, Line) is Line;
+  no = shape_s(b, Line) is Box;
+  if shape_s(c, Dot) is Dot { s = 1; } else { s = 2; }
+  assert(yes && a.calls == 1, "the variant held: {yes}, operand ran {a.calls}");
+  assert(!no && b.calls == 1, "another variant: {no}, operand ran {b.calls}");
+  assert(s == 1 && c.calls == 1, "as a condition: {s}, operand ran {c.calls}");
+}

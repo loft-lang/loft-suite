@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT IS REDUCED BEFORE ITS INDEX AND ITS BOUNDS, EACH ONCE (`@FR-E-Index`, `@FR-E-Left`).
+// In `e[i]` and `e[a..b]` over a text, `e` runs first, then the index or the bounds left to
+// right.  Each operand writes its letter into a log, so the cell reads the ORDER as well as the
+// count.
+//
+// Axes this file MOVES:  index, closed slice, open slice at either end.
+// Axes it HOLDS FIXED:   every operand is a call; the text is "abcd".
+//
+// @falsified-at: none — a conformance guard for a rule written down after the fact; every
+//   cell answered as hand-computed on both backends on the tree it landed on, and loft's slot
+//   matrix (scripts/slot_matrix.py) holds the same rule over every form of operand.
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: each assert's message names the count or the order that moved.
+// HOLDS: every cell on both backends.
+
+struct Li { log: text = "" }
+
+fn tx_i(l: Li) -> text { l.log += "t"; "abcd" }
+fn at_i(l: Li, tag: text, i: integer) -> integer { l.log += tag; i }
+
+fn test_the_text_then_the_bounds_left_to_right() {
+  a = Li {}; b = Li {}; c = Li {}; d = Li {};
+  one = "{tx_i(a)[at_i(a, "i", 1)]}";
+  mid = tx_i(b)[at_i(b, "a", 1)..at_i(b, "b", 3)];
+  tail = tx_i(c)[at_i(c, "a", 2)..];
+  head = tx_i(d)[..at_i(d, "b", 2)];
+  assert(one == "b" && a.log == "ti", "index: {one}, order {a.log}");
+  assert(mid == "bc" && b.log == "tab", "slice: {mid}, order {b.log}");
+  assert(tail == "cd" && c.log == "ta", "open end: {tail}, order {c.log}");
+  assert(head == "ab" && d.log == "tb", "open start: {head}, order {d.log}");
+}

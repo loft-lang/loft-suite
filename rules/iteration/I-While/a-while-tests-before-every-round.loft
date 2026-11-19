@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `while` TESTS BEFORE EVERY ROUND (`@FR-I-While`).  The condition is reduced before every
+// round, the last one included: a body that runs N times means N + 1 reductions, and a
+// condition false at once is reduced once and the body does not run.
+//
+// Axes this file MOVES:  the number of rounds (none, two, ended by a break).
+// Axes it HOLDS FIXED:   the condition is a call that counts itself.
+//
+// @falsified-at: none — a conformance guard for a rule written down after the fact; every
+//   cell answered as hand-computed on both backends on the tree it landed on, and loft's slot
+//   matrix (scripts/slot_matrix.py) holds the same rule over every form of operand.
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: each assert's message names the count or the order that moved.
+// HOLDS: every cell on both backends.
+
+struct Cw { calls: integer = 0 }
+
+fn below_w(c: Cw, n: integer, end: integer) -> boolean { c.calls += 1; n < end }
+
+fn test_the_condition_runs_once_more_than_the_body() {
+  a = Cw {}; b = Cw {}; c = Cw {};
+  n = 0; while below_w(a, n, 2) { n += 1; }
+  m = 0; while below_w(b, m, 0) { m += 1; }
+  k = 0; while below_w(c, k, 9) { k += 1; if k == 3 { break; } }
+  assert(n == 2 && a.calls == 3, "two rounds, three tests: {n}, {a.calls}");
+  assert(m == 0 && b.calls == 1, "no round, one test: {m}, {b.calls}");
+  assert(k == 3 && c.calls == 3, "left by a break after the third round: {k}, {c.calls}");
+}
