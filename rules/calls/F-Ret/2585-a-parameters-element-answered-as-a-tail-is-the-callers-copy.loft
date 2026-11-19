@@ -16,6 +16,7 @@
 // @falsified-at: 2026-11-19 on loft30-gate 8814d21c4 (before this fix) — every element tail
 //   wrote the caller's element (`[[1,2,9],[3]]`) on the interpreter and --native-c; the
 //   controls passed.
+// @falsified-by: tests/falsified/2585-a-parameters-element-answered-as-a-tail-is-the-callers-copy.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
 struct G { rows: vector<vector<integer>> }
 struct B { v: vector<integer> }
 struct S { v: vector<integer> }
