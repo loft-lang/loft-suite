@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// THE RECEIVER OF A FIELD READ IS REDUCED ONCE (`@FR-E-Field`).  `e.f` reduces `e` to a record
+// once and reads the field of it: a call as the receiver runs once for a scalar field, a text
+// field and a field read twice in one expression is two reads of two receivers.
+//
+// Axes this file MOVES:  the field's type (integer, text, a vector); how the read is used.
+// Axes it HOLDS FIXED:   the receiver is a call returning a record of the caller's store.
+//
+// @falsified-at: none — a conformance guard for a rule written down after the fact; every
+//   cell answered as hand-computed on both backends on the tree it landed on, and loft's slot
+//   matrix (scripts/slot_matrix.py) holds the same rule over every form of operand.
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: each assert's message names the count or the order that moved.
+// HOLDS: every cell on both backends.
+
+struct Rf { n: integer, t: text, v: vector<integer> }
+struct Hf { r: Rf }
+struct Cf { calls: integer = 0 }
+
+fn rec_f(c: Cf, h: Hf) -> Rf { c.calls += 1; h.r }
+
+fn test_a_call_receiver_runs_once_per_read() {
+  h = Hf { r: Rf { n: 4, t: "ab", v: [1, 2, 3] } };
+  a = Cf {}; b = Cf {}; c = Cf {}; d = Cf {};
+  n = rec_f(a, h).n;
+  t = rec_f(b, h).t;
+  l = len(rec_f(c, h).v);
+  two = rec_f(d, h).n + rec_f(d, h).n;
+  assert(n == 4 && a.calls == 1, "integer field: {n}, receiver ran {a.calls}");
+  assert(t == "ab" && b.calls == 1, "text field: {t}, receiver ran {b.calls}");
+  assert(l == 3 && c.calls == 1, "vector field: {l}, receiver ran {c.calls}");
+  assert(two == 8 && d.calls == 2, "two reads, two receivers: {two}, {d.calls}");
+}
