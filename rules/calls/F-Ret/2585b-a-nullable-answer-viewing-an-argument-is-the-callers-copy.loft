@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2585 (the nullable half), `@FR-F-Ret` / `@FR-L-Null` — a function's result is the
+// caller's own value, and a copy of an absent value is absent.  A NULLABLE answer that views an
+// argument — an element (`fn pick(v, i) -> vector<integer>? { v[i] }`) or a nullable record
+// parameter's field (`fn f(s: S?) -> vector<integer>? { s.v }`) — was handed back uncopied, so
+// a caller's `p += [9]` wrote the argument.  The tail now copies into the return buffer where
+// the value is present and answers absence as it is where it is not.
+//
+// Each cell writes the present result and asserts the argument is unchanged, and asserts an
+// absent result is null (not an empty vector).  The controls: the dense twins, which copied
+// already, and a `??` fallback over an absent answer.
+// @falsified-at: 2026-11-19 on loft30-gate 6a41058e1 (before this fix) — every present nullable
+//   answer wrote the caller's argument (`[[1,2,9],[3]]`, `[1,2,9]`) on the interpreter and
+//   --native-c; the absent cells and the controls passed.
+// @falsified-by: tests/falsified/2585b-a-nullable-answer-viewing-an-argument-is-the-callers-copy.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+struct S { v: vector<integer> }
+fn pick(v: vector<vector<integer>>, i: integer) -> vector<integer>? { v[i] }
+fn field(s: S?) -> vector<integer>? { s.v }
+fn dense_field(s: S) -> vector<integer>? { s.v }
+fn first(h: vector<vector<integer>>) -> vector<integer> { h[0] }
+
+fn main() {
+  h = [[1, 2], [3]];
+  p = pick(h, 0); p += [9];
+  assert("{p} {h}" == "[1,2,9] [[1,2],[3]]", "a present element: {p} {h}");
+  assert(pick(h, 7) == null, "an absent element stays absent");
+  t = 0;
+  for i in 0..100 { e = pick(h, i % 3); if e != null { e += [i]; t += len(e); } }
+  assert(t == 168 && "{h}" == "[[1,2],[3]]", "per call in a loop: {t} {h}");
+  s = S { v: [1, 2] };
+  a = field(s); a += [9];
+  n: S? = null;
+  assert("{a} {s.v}" == "[1,2,9] [1,2]" && field(n) == null, "a nullable record's field: {a} {s.v}");
+  b = dense_field(s); b += [8];
+  r = first(h); r += [7];
+  d = [5];
+  c = pick(h, 9) ?? d;
+  assert("{b} {r} {c} {s.v} {h}" == "[1,2,8] [1,2,7] [5] [1,2] [[1,2],[3]]", "controls: {b} {r} {c}");
+}
