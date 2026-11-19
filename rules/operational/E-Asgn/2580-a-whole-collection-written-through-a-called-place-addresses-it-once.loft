@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2580, `@FR-E-Asgn` — an assignment addresses its PLACE once.  A whole collection written
+// to a field through a place whose addressing calls a function re-addressed it for every op that
+// rebuilt the field: the clear, then each literal item's mint and finish on the parent record
+// (or the append of a call's or a local's vector).  `h.ws[at(c, 1)].items = [P {…}]` called
+// `at` three times on a two-field record and five on this three-field one.
+//
+// Each place counts its addressing in a `Ctr`; each cell asserts the count beside the value
+// written.  The controls are a scalar field and an append through the same path, addressed
+// once before the fix too; the empty literal beside them was not (3).
+// @falsified-at: 2026-11-19 on loft30-gate 722ea9050 (before loft#2580's fix), counts on the
+//   interpreter (--native-c and --native fail the same first assertion): the one- and two-item
+//   literals 5 and 7, the call and the local 6 each, the keyed field 7, the empty literal 3; the
+//   scalar write and the append 1.
+struct P { k: integer, t: text }
+struct W { n: integer, items: vector<P>, keyed: sorted<P[k]> }
+struct H { ws: vector<W> }
+struct Ctr { calls: integer = 0 }
+fn at(c: Ctr, n: integer) -> integer { c.calls += 1; n }
+fn mkv() -> vector<P> { [P { k: 4, t: "m" }, P { k: 5, t: "n" }] }
+
+fn main() {
+  h = H { ws: [W { n: 1, items: [], keyed: [] }, W { n: 2, items: [], keyed: [] }] };
+  a = Ctr {}; h.ws[at(a, 1)].items = [P { k: 7, t: "q" }];
+  b = Ctr {}; h.ws[at(b, 0)].items = [P { k: 8, t: "r" }, P { k: 9, t: "s" }];
+  assert(a.calls == 1 && b.calls == 1 && h.ws[1].items[0].k == 7 && len(h.ws[0].items) == 2,
+    "a literal: {a.calls} {b.calls}");
+  c = Ctr {}; h.ws[at(c, 1)].items = mkv();
+  v = [P { k: 6, t: "o" }];
+  d = Ctr {}; h.ws[at(d, 0)].items = v;
+  assert(c.calls == 1 && d.calls == 1 && len(h.ws[1].items) == 2 && h.ws[0].items[0].k == 6,
+    "a call and a local: {c.calls} {d.calls}");
+  e = Ctr {}; h.ws[at(e, 1)].keyed = [P { k: 3, t: "c" }, P { k: 1, t: "a" }];
+  assert(e.calls == 1 && len(h.ws[1].keyed) == 2, "a keyed field: {e.calls}");
+  f = Ctr {}; h.ws[at(f, 1)].n = 5;
+  g = Ctr {}; h.ws[at(g, 0)].items += [P { k: 3, t: "t" }];
+  k = Ctr {}; h.ws[at(k, 1)].items = [];
+  assert(f.calls == 1 && g.calls == 1 && k.calls == 1 && h.ws[1].n == 5 && len(h.ws[0].items) == 2 && len(h.ws[1].items) == 0,
+    "controls: {f.calls} {g.calls} {k.calls}");
+}

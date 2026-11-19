@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2582, `@FR-E-Left` / `(E-Asgn)` — an assignment reduces its place first, then its right
+// side.  A right side reading a field of a record-returning call (`vi[at(l, 2)] = box(l, h).n`)
+// had its call lifted into a statement ahead of the write, while the place's index stayed inline
+// after it: the value ran first.  The place now keeps its turn: its effectful indices are
+// evaluated into temps before the lifted call.
+//
+// Each place and value logs its turn (`i` an index, `v` the value) into a `Log`; each cell
+// asserts the order beside the value written.  The controls: a call or a plain value on the
+// right side, which ran in order before the fix too.
+// @falsified-at: 2026-11-19 on loft30-gate 560c23007 (before loft#2582's fix) — every
+//   field-of-a-call cell logged the value first (`vi`, `vii` for the two-level index) on the
+//   interpreter, --native-c and --native; the controls logged `iv`.
+struct Log { s: text = "" }
+struct W { n: integer }
+struct H { ws: vector<W>, vi: vector<integer> }
+struct V { vv: vector<vector<integer>> }
+fn at(l: Log, n: integer) -> integer { l.s += "i"; n }
+fn val(l: Log, n: integer) -> integer { l.s += "v"; n }
+fn box(l: Log, h: H) -> W { l.s += "v"; h.ws[0] }
+
+fn main() {
+  h = H { ws: [W { n: 5 }, W { n: 6 }], vi: [0, 0] };
+  vi = [0, 0, 0];
+  a = Log {}; vi[at(a, 2)] = box(a, h).n;
+  b = Log {}; h.vi[at(b, 1)] = box(b, h).n;
+  c = Log {}; h.ws[at(c, 1)].n = box(c, h).n;
+  v = V { vv: [[0, 0], [0, 0]] };
+  d = Log {}; v.vv[at(d, 1)][at(d, 0)] = box(d, h).n;
+  assert(a.s == "iv" && b.s == "iv" && c.s == "iv" && d.s == "iiv", "the place before the value: {a.s} {b.s} {c.s} {d.s}");
+  assert("{vi}" == "[0,0,5]" && "{h.vi}" == "[0,5]" && h.ws[1].n == 5 && "{v.vv}" == "[[0,0],[5,0]]", "the values written");
+  e = Log {}; vi[at(e, 0)] = val(e, 7);
+  f = Log {}; vi[at(f, 1)] += val(f, 4);
+  assert(e.s == "iv" && f.s == "iv" && "{vi}" == "[7,4,5]", "controls: {e.s} {f.s} {vi}");
+}

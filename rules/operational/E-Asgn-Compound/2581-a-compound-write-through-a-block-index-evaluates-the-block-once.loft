@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2581, `@FR-E-Asgn-Compound` — a compound write addresses its place exactly once, whatever
+// computes the index.  A block index (`vi[{ c.calls += 1; 1 }] += 5`) ran twice: the once-only
+// hoist fired for a place whose addressing holds a user CALL, and a block whose statement writes
+// a field is an `OpSet…`, not one.
+//
+// Each index counts its runs in a `Ctr`; each cell asserts the count beside the value written.
+// The controls: a plain `=`, a read and an append through a block index, once before the fix.
+// @falsified-at: 2026-11-19 on loft30-gate 137f6e92b (before loft#2581's fix) — every compound
+//   cell counted 2 on the interpreter, --native-c and --native; the controls counted 1.
+struct Ctr { calls: integer = 0 }
+struct H { vs: vector<integer>, ws: vector<vector<integer>> }
+
+fn main() {
+  vi = [10, 20, 30];
+  a = Ctr {}; vi[{ a.calls += 1; 1 }] += 5;
+  b = Ctr {}; vi[{ b.calls += 1; b.calls += 0; 0 }] -= 4;
+  h = H { vs: [1, 2, 3], ws: [[1], [2]] };
+  c = Ctr {}; h.vs[{ c.calls += 1; 2 }] *= 3;
+  assert(a.calls == 1 && b.calls == 1 && c.calls == 1 && "{vi}" == "[6,25,30]" && "{h.vs}" == "[1,2,9]",
+    "compound writes: {a.calls} {b.calls} {c.calls} {vi} {h.vs}");
+  d = Ctr {}; vi[{ d.calls += 1; 2 }] = 7;
+  e = Ctr {}; x = vi[{ e.calls += 1; 0 }];
+  f = Ctr {}; h.ws[{ f.calls += 1; 1 }] += [9];
+  assert(d.calls == 1 && e.calls == 1 && f.calls == 1 && vi[2] == 7 && x == 6 && "{h.ws}" == "[[1],[2,9]]",
+    "controls: {d.calls} {e.calls} {f.calls}");
+}

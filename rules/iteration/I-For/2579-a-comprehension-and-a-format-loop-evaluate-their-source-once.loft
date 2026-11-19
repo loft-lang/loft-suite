@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2579, `@FR-I-For` — a loop evaluates its SOURCE once, whichever spelling walks it.  A
+// comprehension over a `sorted` or `index` collection, and a loop inside a format string over
+// a vector, a `sorted` or an `index`, handed the source to every step: three records walked
+// from a call called it five times (eight for the format loop's vector).  loft#2573 held the
+// `for` statement's; the three spellings now share one hold (`hold_loop_source`).
+//
+// Each source counts its runs in a `Ctr`; each cell asserts the count beside what the walk
+// built.  The controls: a `hash` source (walked through its snapshot) and a `for` statement.
+// @falsified-at: 2026-11-19 on loft30-gate 06d02f19c (before loft#2579's fix) — every
+//   comprehension cell counted 5 and the format loop's vector 8, on the interpreter and
+//   --native-c; the controls counted 1.
+struct P { k: integer, t: text }
+struct Ctr { calls: integer = 0 }
+fn mk_sorted(c: Ctr) -> sorted<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mk_index(c: Ctr) -> index<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mk_hash(c: Ctr) -> hash<P[k]> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+fn mk_vec(c: Ctr) -> vector<P> { c.calls += 1; [P { k: 1, t: "a" }, P { k: 2, t: "b" }, P { k: 3, t: "c" }] }
+
+fn main() {
+  a = Ctr {}; q = [for p in mk_sorted(a) { p.k }];
+  assert(a.calls == 1 && "{q}" == "[1,2,3]", "a sorted comprehension: {a.calls} runs, {q}");
+  b = Ctr {}; r = [for p in mk_index(b) if p.k > 1 { p.k * 10 }];
+  assert(b.calls == 1 && "{r}" == "[20,30]", "a filtered index comprehension: {b.calls} runs, {r}");
+  c = Ctr {}; x = "{for p in mk_sorted(c) { p.t }}";
+  assert(c.calls == 1 && x == "[a,b,c]", "a format loop over sorted: {c.calls} runs, {x}");
+  d = Ctr {}; y = "{for p in mk_vec(d) { p.k }}";
+  assert(d.calls == 1 && y == "[1,2,3]", "a format loop over a vector: {d.calls} runs, {y}");
+  e = Ctr {}; w = [for p in mk_hash(e) { p.k }];
+  f = Ctr {}; n = 0; for p in mk_index(f) { n += p.k; }
+  assert(e.calls == 1 && len(w) == 3 && f.calls == 1 && n == 6, "controls: {e.calls} {f.calls} {n}");
+}
