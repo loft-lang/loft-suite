@@ -9,7 +9,9 @@
 //
 // Cells: the member present and absent, a literal default and one held in a local, alternating
 // presence in one loop, two plain calls, the result kept in a local; the controls bind the
-// tuple first and coalesce the member's field.  Every value is computed by hand.
+// tuple first and coalesce the member's field.  The member bound to a local (`u = f().0`) is the
+// same view: its binding is guarded by the answer's holder, so the answer is freed once, after
+// the binding's last read.  Every value is computed by hand.
 // @falsified-at: 2026-11-19 on loft30-gate b5d9250ce (before loft#2577's fix) — every call cell
 //   failed (`a store was freed twice`, or a garbage sum on the interpreter); the controls passed.
 struct T9 { a: integer }
@@ -32,9 +34,15 @@ fn main() {
   r = t9_present().0 ?? T9 { a: 5 };
   r.a = 9;
   q = t9_present().0 ?? T9 { a: 5 };
+  // The member BOUND to a local, used after its statement, once and once a pass.
+  u = t9_present().0;
+  w = 0;
+  for i in 0..10 { v = mkp(i).0; w += (v ?? T9 { a: 100 }).a; }
   // a 50 x 5; b 50 x 1; c 50 x 5 and d untouched; m: the even i (0..98) sum 2450, the 50 odd ones 1000 each.
   assert(a == 250 && b == 50 && c == 250 && d.a == 5, "the member under ??: {a} {b} {c} {d.a}");
   assert(m == 52450, "alternating presence: {m}");
   assert(x == 6 && r.a == 9 && q.a == 1, "plain calls and a kept result: {x} {r.a} {q.a}");
   assert(ctl == 300, "the controls: {ctl}");
+  // w: the even i (0..8) sum 20, the five odd ones 100 each.
+  assert(u.a == 1 && w == 520, "a bound member: {u.a} {w}");
 }
