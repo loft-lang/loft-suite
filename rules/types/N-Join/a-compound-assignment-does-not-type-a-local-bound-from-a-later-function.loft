@@ -1,8 +1,10 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// @C168 — a compound assignment does not say what KIND of thing its target is.  A local bound
-// from a function declared FURTHER DOWN the file has no type on the first pass; the `+=` or
+// `@FR-N-Join` × @C168 — an inferred local's type is the join of its BINDS, and a compound
+// assignment is no bind: it does not say what KIND of thing its target is (loft#2564).  A
+// local bound from a function declared FURTHER DOWN the file has no type on the first pass; the
+// `+=` or
 // `*=` that follows typed it from its operand — a list literal made it a `vector<R>`, an
 // integer literal an `integer` — and the second pass then refused the function's own result
 // as a type change: "Variable 'h' cannot change type from vector<R> to hash<R[k]>", "from
