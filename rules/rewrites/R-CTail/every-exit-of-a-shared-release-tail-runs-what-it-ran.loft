@@ -16,8 +16,9 @@
 //   void_loop     — exits inside a loop the C unrolls, each freeing the loop's record, share
 //                   with the exits after the loop.
 //   text_exits    — text results share the releases after the result is handed over.
-//   other_names   — each exit returns another name, read at the end of its tail: they share
-//                   too little, every exit is written whole, and each still answers its own.
+//   other_names   — each exit returns another name, which no release names: the read moves
+//                   ahead of the tail, the exits share every release, and each still answers
+//                   its own value.
 // Not reachable from a program, so guarded by `src/c/tail.rs`'s unit tests: a tail naming a C
 // block's own declaration (premise a; the writer declares every loft local at the top), a
 // brace-less statement before a tail (premise b), and tails that differ only in the middle.
