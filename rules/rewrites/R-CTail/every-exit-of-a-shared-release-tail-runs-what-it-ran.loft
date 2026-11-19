@@ -1,0 +1,138 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-R-CTail` — the C of a function writes each release tail two of its exits share once,
+// and every exit still runs the statements it ran, in their order, and returns the value it
+// read.  Each function owns eight records, so its exits' tails are long enough to share;
+// every exit is called, and each answer is hand-computed beside it.  The suite's leak check is
+// the other half: a jump into the wrong statement of a shared tail skips a release.
+//
+// Cases, one per clause, each checked in the emitted C to reach it (LOFT_TRACE_C_TAIL=1):
+//   void_exits    — exits of a function with no result share their tail.
+//   same_name     — every exit returns the same name, read at the same place: shared.
+//   void_middle   — a later exit owns one more record: its free opens that exit's tail and its
+//                   buffer's release closes it, so the two tails differ at both ends, share too
+//                   little, and each exit frees exactly what it owns.
+//   void_loop     — exits inside a loop the C unrolls, each freeing the loop's record, share
+//                   with the exits after the loop.
+//   text_exits    — text results share the releases after the result is handed over.
+//   other_names   — each exit returns another name, read at the end of its tail: they share
+//                   too little, every exit is written whole, and each still answers its own.
+// Not reachable from a program, so guarded by `src/c/tail.rs`'s unit tests: a tail naming a C
+// block's own declaration (premise a; the writer declares every loft local at the top), a
+// brace-less statement before a tail (premise b), and tails that differ only in the middle.
+// Axes it HOLDS FIXED: the record type, eight owned records, the C tier the suite runs.
+// @falsified-by: tests/falsified/every-exit-of-a-shared-release-tail-runs-what-it-ran.patch — native leaked kt=100 P×5 -> clean; interpret INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// CHANNEL: the native leak — a shared end's label one statement late, so every jump into it
+//   skips the end's first release.
+// HOLDS: the interpreter answers every case on both trees; the rule is the C writer's.
+
+struct P { x: integer, name: text }
+
+fn mk(n: integer) -> P { P { x: n, name: "p{n}" } }
+
+fn void_exits(k: integer, out: &vector<integer>) {
+  a = mk(1); b = mk(2); c = mk(3); d = mk(4); e = mk(5); f = mk(6); g = mk(7); h = mk(8);
+  if k == 1 { out += [a.x]; return; }
+  if k == 2 { out += [b.x + c.x]; return; }
+  if k == 3 { return; }
+  out += [d.x + e.x + f.x + g.x + h.x];
+}
+
+fn same_name(k: integer) -> integer {
+  a = mk(1); b = mk(2); c = mk(3); d = mk(4); e = mk(5); f = mk(6); g = mk(7); h = mk(8);
+  r = a.x + h.x;
+  if k == 1 { return r; }
+  r = r * 10;
+  if k == 2 { return r; }
+  r = r + b.x + c.x + d.x + e.x + f.x + g.x;
+  r
+}
+
+fn void_middle(k: integer, out: &vector<integer>) {
+  a = mk(1); b = mk(2); c = mk(3); d = mk(4); e = mk(5); f = mk(6); g = mk(7); h = mk(8);
+  if k == 1 { out += [a.x]; return; }
+  extra = mk(100);
+  if k == 2 { out += [extra.x + b.x]; return; }
+  out += [c.x + d.x + e.x + f.x + g.x + h.x];
+}
+
+fn void_loop(k: integer, out: &vector<integer>) {
+  a = mk(1); b = mk(2); c = mk(3); d = mk(4); e = mk(5); f = mk(6); g = mk(7); h = mk(8);
+  for i in 0..3 {
+    w = mk(10 + i);
+    if i == k { out += [w.x]; return; }
+  }
+  if k == 7 { out += [a.x + b.x]; return; }
+  out += [c.x + d.x + e.x + f.x + g.x + h.x];
+}
+
+fn text_exits(k: integer) -> text {
+  a = mk(1); b = mk(2); c = mk(3); d = mk(4); e = mk(5); f = mk(6); g = mk(7); h = mk(8);
+  for i in 0..3 {
+    w = mk(10 + i);
+    if i == k { return "w{w.x}"; }
+  }
+  s = "n{a.x + b.x}";
+  if k == 7 { return s; }
+  "z{c.x + d.x + e.x + f.x + g.x + h.x}"
+}
+
+fn other_names(k: integer) -> integer {
+  a = mk(1); b = mk(2); c = mk(3); d = mk(4); e = mk(5); f = mk(6); g = mk(7); h = mk(8);
+  n = a.x + h.x;
+  if k == 1 { return n; }
+  m = b.x * 2;
+  if k == 2 { return m; }
+  c.x + d.x + e.x + f.x + g.x
+}
+
+fn test_void_exits() {
+  o: vector<integer> = [];
+  for k in 1..5 { void_exits(k, o); }
+  // k 1: [1]; k 2: [2 + 3]; k 3: nothing; k 4: [4 + 5 + 6 + 7 + 8].
+  assert("{o}" == "[1,5,30]" && len(o) == 3, "void exits {o}");
+}
+
+fn test_same_name() {
+  // k 1: 1 + 8 = 9; k 2: 90; k 3: 90 + 2 + 3 + 4 + 5 + 6 + 7 = 117.
+  assert(same_name(1) == 9 && same_name(2) == 90 && same_name(3) == 117,
+    "same name {same_name(1)} {same_name(2)} {same_name(3)}");
+}
+
+fn test_void_middle() {
+  o: vector<integer> = [];
+  for k in 1..4 { void_middle(k, o); }
+  // k 1: [1]; k 2: [100 + 2]; k 3: [3 + 4 + 5 + 6 + 7 + 8].
+  assert("{o}" == "[1,102,33]" && len(o) == 3, "middle {o}");
+}
+
+fn test_void_loop() {
+  o: vector<integer> = [];
+  for k in [0, 2, 7, 9] { void_loop(k, o); }
+  // k 0: [10]; k 2: [12]; k 7: [1 + 2]; k 9: [33].
+  assert("{o}" == "[10,12,3,33]" && len(o) == 4, "loop {o}");
+}
+
+fn test_text_exits() {
+  // k 0..2: the loop's own record, 10 + k; k 7: 1 + 2 = 3; else 33.
+  assert(text_exits(0) == "w10" && text_exits(2) == "w12", "loop exits {text_exits(0)} {text_exits(2)}");
+  assert(text_exits(7) == "n3" && text_exits(9) == "z33", "after it {text_exits(7)} {text_exits(9)}");
+}
+
+fn test_other_names() {
+  // k 1: 1 + 8 = 9; k 2: 2 * 2 = 4; k 3: 3 + 4 + 5 + 6 + 7 = 25.
+  assert(other_names(1) == 9 && other_names(2) == 4 && other_names(3) == 25,
+    "other names {other_names(1)} {other_names(2)} {other_names(3)}");
+}
+
+fn main() {
+  test_void_exits();
+  test_same_name();
+  test_void_middle();
+  test_void_loop();
+  test_text_exits();
+  test_other_names();
+  println("ok");
+}
