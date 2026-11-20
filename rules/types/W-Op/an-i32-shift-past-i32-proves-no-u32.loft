@@ -6,7 +6,9 @@
 // is a 32-bit operation that reads null past i32, so its range proves nothing and a `u32` slot
 // refuses it.  The cure the refusal names is a mask a regime file can write: the `l` literal,
 // which makes the `&` 64-bit (a plain `4294967295` is refused under the regime).
-// @falsified-at: none — the refusal held before; the cure's spelling is new with this guard.
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
+//   native exit 1 -> 0, native expectations FAIL/1 -> 0/1
+//   CHANNEL: the expectation — the refusal named `& 4294967295`, which the regime refuses.
 
 fn main() {
   a = 200;

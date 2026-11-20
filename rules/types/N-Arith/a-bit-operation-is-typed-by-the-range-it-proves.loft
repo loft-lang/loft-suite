@@ -11,8 +11,8 @@
 // values at the top of the u32 range.  The refusals the rule keeps are in
 // a-bit-operation-past-its-slot-is-refused.loft.  Values hand-computed.
 //
-// @falsified-at: none — the shapes were refused before the rule named them; the guard keeps
-//   them admitted.  CHANNEL: the EXIT — every function here was a compile error.
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the EXIT — every function here was a compile error.
 //   WITNESS: `cannot implicitly narrow integer to u32` at `fn rgba_na(...)`.
 
 struct Px { c: u32 }

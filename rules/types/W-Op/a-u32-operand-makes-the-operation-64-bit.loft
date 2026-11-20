@@ -8,8 +8,8 @@
 // proves a `u32` slot only while it stays inside i32.  A wide mask (`l`) folds a negative i32
 // to its low 32 bits.  Values hand-computed.
 //
-// @falsified-at: none — the u32 widening held before the rule said so; the i32-range shapes
-//   were refused before the bit operations proved ranges.  CHANNEL: the EXIT and the values.
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the EXIT — the i32-range and wide-mask shapes were refused; the u32 widening held.
 
 fn top_wo(a: integer) -> u32 { ((a & 255) as u32) << 24 }
 fn mid_wo(a: integer) -> u32 { (a & 255) << 16 }
