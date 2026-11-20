@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Scope` — a `match` arm's PATTERN binds its names into that arm, and they end with it
+// "whatever a later arm or `match` binds under the same name".  A name an ALTERNATION in a slice
+// pattern captured (`[(Num { x } | Sep)]`, a single-element group; `[(Num { x } Sep | Sep)]`, a
+// multi-element one; `[(Num { x })?, Sep]`, an optional group) kept naming the capture after the
+// arm (loft#2591): a local of the same name read after the `match` answered the capture, a
+// whole-element capture leaked its `Tok?` type, and a capture named like the matched SUBJECT made
+// the second pass read the capture as the subject, which looped in the arm parser until memory ran
+// out.  Each case binds `x = 5` (or `w = "outer"`) before the match and reads it after; the
+// matched element carries 7.
+// Axes it HOLDS FIXED: one element enum, a vector subject, a scalar or text capture.
+// @falsified-at: 203d1bf6c (loft30-gate, the parent of the fix f406c3312) — interpret and native:
+//   `a_outer` 707, `f_whole` does not compile, `b_param` runs out of memory parsing
+//   (the tester's measurement, loft#2591)
+//   CHANNEL: the assertions (and, for `b_param`, that the program compiles at all).
+//   WITNESS: on loft 2026.11.20261118 (main) and loft30-gate 203d1bf6c, `a_outer` answers 707,
+//     `i_loop` 42, `l_text` "in/in", `f_whole` does not compile, `b_param` never finishes
+//     parsing (`memory allocation of … failed`); the same on `--interpret` and `--native-c`.
+//   HOLDS: `control_plain` (a plain `[Num { x }]`, which always restored) and `c_next_arm` answer
+//     the same on both trees.
+
+enum Tok { Word { w: text }, Num { x: integer }, Sep }
+
+fn a_outer(xs: vector<Tok>) -> integer { x = 5; r = match xs { [(Num { x } | Sep)] => x ?? -1, _ => 0 }; r * 100 + x }
+fn b_param(x: vector<Tok>) -> integer { match x { [(Num { x } | Sep)] => x ?? -1, _ => 0 } }
+fn c_next_arm(xs: vector<Tok>) -> integer { x = 5; match xs { [(Num { x } | Sep)] => x ?? -1, [Word { w }] => x * 10 + len(w), _ => 0 } }
+fn d_rest(xs: vector<Tok>) -> integer { x = 5; r = match xs { [(Num { x } | Sep), ..rs] => (x ?? -1) * 10 + len(rs), _ => 0 }; r * 100 + x }
+fn e_guard(xs: vector<Tok>) -> integer { x = 5; r = match xs { [(Num { x } | Sep)] if (x ?? 0) > 3 => x ?? -1, _ => 0 }; r * 100 + x }
+fn f_whole(xs: vector<Tok>) -> integer { x = 5; r = match xs { [(x: Num | Sep)] => if x == null { 1 } else { 2 }, _ => 0 }; r * 100 + x }
+fn g_head(xs: vector<Tok>) -> integer { x = 5; r = match xs { [_h, (Num { x } | Sep)] => x ?? -1, _ => 0 }; r * 100 + x }
+fn h_multi(xs: vector<Tok>) -> integer { x = 5; r = match xs { [(Num { x } Sep | Sep)] => x ?? -1, _ => 0 }; r * 100 + x }
+fn o_group(xs: vector<Tok>) -> integer { x = 5; r = match xs { [(Num { x })?, Sep] => x ?? -1, _ => 0 }; r * 100 + x }
+fn i_loop(xs: vector<Tok>) -> integer { x = 5; t = 0; for _ in 0..3 { r = match xs { [(Num { x } | Sep)] => x ?? -1, _ => 0 }; t += r + x; } t }
+fn l_text(xs: vector<Tok>) -> text { w = "outer"; r = match xs { [(Word { w } | Sep)] => w ?? "-", _ => "?" }; "{r}/{w}" }
+fn control_plain(xs: vector<Tok>) -> integer { x = 5; r = match xs { [Num { x }] => x, _ => 0 }; r * 100 + x }
+
+fn main() {
+  assert(a_outer([Num { x: 7 }]) == 705, "a_outer {a_outer([Num { x: 7 }])}");
+  assert(b_param([Num { x: 7 }]) == 7, "b_param {b_param([Num { x: 7 }])}");
+  assert(c_next_arm([Word { w: "ab" }]) == 52, "c_next_arm {c_next_arm([Word { w: \"ab\" }])}");
+  assert(d_rest([Num { x: 7 }, Sep, Sep]) == 7205, "d_rest {d_rest([Num { x: 7 }, Sep, Sep])}");
+  assert(e_guard([Num { x: 7 }]) == 705, "e_guard {e_guard([Num { x: 7 }])}");
+  assert(f_whole([Num { x: 7 }]) == 205, "f_whole {f_whole([Num { x: 7 }])}");
+  assert(g_head([Sep, Num { x: 7 }]) == 705, "g_head {g_head([Sep, Num { x: 7 }])}");
+  assert(h_multi([Num { x: 7 }, Sep]) == 705, "h_multi {h_multi([Num { x: 7 }, Sep])}");
+  assert(o_group([Num { x: 7 }, Sep]) == 705, "o_group {o_group([Num { x: 7 }, Sep])}");
+  assert(i_loop([Num { x: 7 }]) == 36, "i_loop {i_loop([Num { x: 7 }])}");
+  assert(l_text([Word { w: "in" }]) == "in/outer", "l_text {l_text([Word { w: \"in\" }])}");
+  assert(control_plain([Num { x: 7 }]) == 705, "control_plain {control_plain([Num { x: 7 }])}");
+}
