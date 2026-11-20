@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-E-Left, @FR-E-And: an operand kept ahead of a later operand's hoisted call
+// (`member(form(b), base(t))`: `form(b)`'s text is evaluated into a temporary first, so it
+// keeps its turn) is released on every path its scope ends on, whether or not the operand ran.
+// The interpreter released the temporary at every exit but set it up only where it was bound —
+// inside an `&&` that stopped early its slot still held what an earlier frame left there, and
+// the release freed that (`free(): invalid pointer`; loft#2600, main — it stopped the loft
+// runner's operator table from being regenerated).  The C backend declares every local at its
+// function's top and was right.
+//
+// Axes this file MOVES:  where the hoisting operand stands (an `&&` that stops early, an
+//                        `||` that stops early, an `if` arm, a loop pass); what is kept ahead
+//                        (a text, a record sub-place); the slot's history (an earlier block's
+//                        text, another frame's bytes from `noise`).
+// Axes it HOLDS FIXED:   one hoisting operand per call.
+// Hand-computed: each test's expected value is in its assertion.
+// @falsified-at: d268b48cc — interpret: the run aborts with free(): invalid pointer in OpFreeText; --native-c passes on both builds.
+struct In { k: integer }
+struct T { n: integer, inner: In }
+fn form(b: text) -> text { "{b}x" }
+fn base(t: T) -> T { T { n: t.n + 1, inner: In { k: t.inner.k } } }
+fn member(s: text, t: T) -> integer { len(s) + t.n }
+fn use2(i: In, t: T) -> integer { i.k * 100 + t.n }
+fn noise(k: integer) -> integer { a = "noise{k}"; b = [k, k + 1, k + 2]; a += "z"; len(a) + b[0] }
+// 1: the crash shape — a text lift inside an `&&` that stops early, its slot an earlier block's
+fn and_text(c: boolean, d: boolean, b: text, t: T) -> integer {
+  if d { snm = "a{b}"; snm += "q"; if len(snm) > 100 { return 0; } }
+  if c && member(form(b), base(t)) >= 0 { return 1; }
+  2
+}
+// 2: the same in a loop: the lift's scope is the pass
+fn loop_text(b: text, t: T) -> integer {
+  s = 0;
+  for i in 0..6 { if i % 2 == 0 && member(form(b), base(t)) >= 0 { s += 1; } else { s += 10; } }
+  s
+}
+// 3: a record operand kept ahead of a hoisted call
+fn and_record(c: boolean, t: T) -> integer {
+  if c && use2(t.inner, base(t)) >= 0 { return use2(t.inner, base(t)); }
+  -1
+}
+// 4: in an `if` arm
+fn arm_text(c: boolean, b: text, t: T) -> integer { if c { member(form(b), base(t)) } else { 0 } }
+// 5: on the right of an `||` that stops early
+fn or_text(c: boolean, b: text, t: T) -> integer { if c || member(form(b), base(t)) > 1000 { 1 } else { 2 } }
+fn sweep() -> integer {
+  r = 0;
+  for i in 0..30 {
+    r += noise(i) * 0;
+    r += and_text(i % 2 == 0, i % 3 == 0, "k", T { n: i, inner: In { k: 1 } });
+    r += arm_text(i % 2 == 0, "ab", T { n: 1, inner: In { k: 1 } });
+    r += or_text(i % 2 == 0, "ab", T { n: 1, inner: In { k: 1 } });
+    r += and_record(i % 2 == 0, T { n: 1, inner: In { k: 3 } });
+  }
+  r
+}
+fn test_and_text() { r = 0; for i in 0..30 { r += noise(i) * 0; r += and_text(i % 2 == 0, i % 3 == 0, "k", T { n: i, inner: In { k: 1 } }); } assert(r == 45, "and_text {r}"); }
+fn test_loop_text() { r = loop_text("k", T { n: 1, inner: In { k: 1 } }); assert(r == 33, "loop_text {r}"); }
+fn test_and_record() { assert(and_record(true, T { n: 1, inner: In { k: 3 } }) == 302 && and_record(false, T { n: 1, inner: In { k: 3 } }) == -1, "and_record"); }
+fn test_arm_text() { assert(arm_text(true, "ab", T { n: 1, inner: In { k: 1 } }) == 5 && arm_text(false, "ab", T { n: 1, inner: In { k: 1 } }) == 0, "arm_text"); }
+fn test_or_text() { assert(or_text(true, "ab", T { n: 1, inner: In { k: 1 } }) == 1 && or_text(false, "ab", T { n: 1, inner: In { k: 1 } }) == 2, "or_text"); }
+fn test_sweep() { s = sweep(); assert(s == 45 + 75 + 45 + 4515, "sweep {s}"); }
