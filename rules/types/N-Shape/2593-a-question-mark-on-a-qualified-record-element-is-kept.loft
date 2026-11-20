@@ -1,0 +1,89 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `?` ON A QUALIFIED RECORD ELEMENT IS KEPT (`@FR-N-Shape`): `vector<lib::S?>` holds
+// elements that may be absent, exactly as `vector<S?>` does when `S` is imported by name.
+// The element's `?` was looked for directly after the first identifier, which for `lib::S?`
+// is the qualifier; the `?` after `::S` was read as a plain optional and the vector was built
+// DENSE, so a stored null read back as a present record with every field at its zero
+// (loft#2593).  Each position a vector type is written in keeps the `?`:
+// - l1: a local — null, present, null → "n41n";
+// - l2: a parameter counts the present elements of that vector → 1;
+// - l3: a return type — the absent element takes the `??` fallback → -7;
+// - l4: a struct field, written null and overwritten → "5n";
+// - l5: the dense spelling beside it is still dense → 3.
+//
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the asserts — the control reads every absent element as present ("041" + "0").
+// HOLDS: leak, panic, free-refusal are equal on both trees, on both backends.
+// WITNESS: each assert's message prints the value it read.
+
+use nshape_2593_lib;
+
+struct Rack2593 { pins: vector<nshape_2593_lib::Pin?> }
+
+fn show(v: const vector<nshape_2593_lib::Pin?>) -> text {
+  out = "";
+  for p in v {
+    if p == null { out += "n"; } else { out += "{p.at}"; }
+  }
+  out
+}
+
+fn present(v: const vector<nshape_2593_lib::Pin?>) -> integer {
+  n = 0;
+  for p in v { if p != null { n += 1; } }
+  n
+}
+
+fn mixed() -> vector<nshape_2593_lib::Pin?> {
+  v: vector<nshape_2593_lib::Pin?> = [];
+  v += [null];
+  v += [nshape_2593_lib::pin(41)];
+  v += [null];
+  v
+}
+
+fn l1() -> text {
+  v: vector<nshape_2593_lib::Pin?> = [];
+  v += [null];
+  v += [nshape_2593_lib::pin(41)];
+  v += [null];
+  show(v)
+}
+
+fn l2() -> integer { present(mixed()) }
+
+fn l3() -> integer {
+  v = mixed();
+  first = v[0] ?? nshape_2593_lib::pin(-7);
+  first.at
+}
+
+fn l4() -> text {
+  r = Rack2593 { pins: [] };
+  r.pins += [null];
+  r.pins += [nshape_2593_lib::pin(9)];
+  r.pins[0] = nshape_2593_lib::pin(5);
+  r.pins[1] = null;
+  show(r.pins)
+}
+
+fn l5() -> integer {
+  d: vector<nshape_2593_lib::Pin> = [];
+  d += [nshape_2593_lib::pin(3)];
+  d[0].at
+}
+
+fn test_a_question_mark_on_a_qualified_record_element_is_kept() {
+  a = l1();
+  assert(a == "n41n", "l1 a local keeps its absent elements: {a}");
+  b = l2();
+  assert(b == 1, "l2 a parameter sees one present element: {b}");
+  c = l3();
+  assert(c == -7, "l3 a returned vector's absent element takes the fallback: {c}");
+  d = l4();
+  assert(d == "5n", "l4 a struct field is written null and present: {d}");
+  e = l5();
+  assert(e == 3, "l5 the dense spelling stays dense: {e}");
+}
