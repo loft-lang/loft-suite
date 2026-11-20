@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-R-ValueLocal, @FR-H-RefSet: a by-value record parameter is a view of the caller's
+// record, and a `&` to one of its sub-records names the caller's record too.  A local bound
+// from a function that answers a small record is carried as its fields' tuple
+// (`(R-ValueLocal)`); handed to a function whose parameter it LENDS a temporary record to, a
+// reference into that parameter named the temporary, so a write through it never reached the
+// caller's record (the interpreter answered 0 for 5; loft#2596, main).  A parameter is lent
+// only when the callee READS it, and a `&` to a sub-record of it, kept in a local or stored in
+// a reference field, is no read.
+//
+// Axes this file MOVES:  where the reference goes (a field of the callee's answer, a field of
+//                        an existing record argument, an element of a vector argument, a
+//                        local written through, a local stored later); how deep the
+//                        sub-record is (one field, two); how often it is written (once, a
+//                        loop); the call depth (one, two).
+// Axes it HOLDS FIXED:   the record holds no heap; the caller's record is answered by a
+//                        function.
+// Controls: literal (the caller's record built by a literal, never a tuple), direct (a field
+// write of the parameter), handed (the sub-record handed to a writing function), reads (a
+// callee that only reads, which may still take the tuple).
+// @falsified-at: d268b48cc — interpret: the eight shapes that keep a `&` to the lent parameter answer 0 (or 0 for 50); the four controls pass on both builds.
+struct Frame { draws: integer, depth: boolean }
+struct Win { frame: Frame, h: integer }
+struct Deep { win: Win, k: integer }
+struct Mesh { frame: reference<Frame>, verts: integer }
+struct FRef { r: reference<Frame> }
+struct Holder { refs: vector<FRef> }
+
+fn open(h: integer) -> Win { Win { frame: Frame { draws: 0, depth: false }, h: h } }
+fn open_deep() -> Deep { Deep { win: Win { frame: Frame { draws: 0, depth: false }, h: 2 }, k: 3 } }
+fn spare() -> Win { Win { frame: Frame { draws: 0, depth: false }, h: 9 } }
+fn draw(m: Mesh) { m.frame.draws += m.verts; }
+
+fn upload(w: Win, verts: integer) -> Mesh { Mesh { frame: &w.frame, verts: verts } }
+fn build(w: Win) -> Mesh { upload(w, 5) }
+fn upload_deep(d: Deep) -> Mesh { Mesh { frame: &d.win.frame, verts: 5 } }
+fn link(w: Win, m: Mesh) { m.frame = &w.frame; }
+fn collect(w: Win, hs: Holder) { hs.refs += [FRef { r: &w.frame }]; }
+fn through(w: Win) { f = &w.frame; f.draws += 5; }
+fn link_later(w: Win, m: Mesh) { f = &w.frame; m.frame = f; }
+fn direct(w: Win) { w.frame.draws += 5; }
+fn bump(f: Frame) { f.draws += 5; }
+fn handed(w: Win) { bump(w.frame); }
+fn reads(w: Win) -> integer { w.frame.draws + w.h }
+
+fn answer_field() -> integer { c = open(1); m = upload(c, 5); draw(m); c.frame.draws }
+fn answer_two_deep() -> integer { c = open(1); m = build(c); draw(m); c.frame.draws }
+fn answer_sub_sub() -> integer { d = open_deep(); m = upload_deep(d); draw(m); d.win.frame.draws }
+fn answer_loop() -> integer { c = open(1); m = upload(c, 5); for _ in 0..3 { draw(m); } c.frame.draws }
+fn argument_field() -> integer {
+  c = open(1); s = spare(); m = Mesh { frame: &s.frame, verts: 5 };
+  link(c, m); draw(m); c.frame.draws * 10 + s.frame.draws
+}
+fn vector_element() -> integer {
+  c = open(1); hs = Holder { refs: [] }; collect(c, hs);
+  for x in hs.refs { x.r.draws += 5; }
+  c.frame.draws
+}
+fn local_written() -> integer { c = open(1); through(c); c.frame.draws }
+fn local_stored() -> integer {
+  c = open(1); s = spare(); m = Mesh { frame: &s.frame, verts: 5 };
+  link_later(c, m); draw(m); c.frame.draws * 10 + s.frame.draws
+}
+fn literal() -> integer {
+  c = Win { frame: Frame { draws: 0, depth: false }, h: 1 };
+  m = upload(c, 5); draw(m); c.frame.draws
+}
+fn direct_write() -> integer { c = open(1); direct(c); c.frame.draws }
+fn handed_on() -> integer { c = open(1); handed(c); c.frame.draws }
+fn read_only() -> integer { c = open(4); reads(c) }
+
+fn test_answer_field() { assert(answer_field() == 5, "answer_field {answer_field()}"); }
+fn test_answer_two_deep() { assert(answer_two_deep() == 5, "answer_two_deep {answer_two_deep()}"); }
+fn test_answer_sub_sub() { assert(answer_sub_sub() == 5, "answer_sub_sub {answer_sub_sub()}"); }
+fn test_answer_loop() { assert(answer_loop() == 15, "answer_loop {answer_loop()}"); }
+fn test_argument_field() { assert(argument_field() == 50, "argument_field {argument_field()}"); }
+fn test_vector_element() { assert(vector_element() == 5, "vector_element {vector_element()}"); }
+fn test_local_written() { assert(local_written() == 5, "local_written {local_written()}"); }
+fn test_local_stored() { assert(local_stored() == 50, "local_stored {local_stored()}"); }
+fn test_literal() { assert(literal() == 5, "literal {literal()}"); }
+fn test_direct_write() { assert(direct_write() == 5, "direct_write {direct_write()}"); }
+fn test_handed_on() { assert(handed_on() == 5, "handed_on {handed_on()}"); }
+fn test_read_only() { assert(read_only() == 4, "read_only {read_only()}"); }
