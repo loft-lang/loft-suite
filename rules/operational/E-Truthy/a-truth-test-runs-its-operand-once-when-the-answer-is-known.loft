@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-E-Truthy, @FR-E-Once: an integer tested for truth is true unless it is null, and the
+// test runs its operand once even where the compiler already knows the answer.  An `if`
+// whose two arms are non-null integers is never null, so a writer may skip the null test
+// (the rustc writer's non-sentinel fast path does); it may not skip the operand, whose
+// condition calls a function with an effect.  The rustc writer wrote the test as `true` and
+// dropped the operand: the call never ran (found by the slot matrix's rustc leg,
+// `ct-truthy-int.int-if`, `op-not-int.int-if`).
+//
+// Axes this file MOVES:  the test (plain, negated, in a `while`'s first test, an `&&`
+//                        operand); the operand (an `if`, a `match`, a call, a block).
+// Axes it HOLDS FIXED:   the operand is a non-null integer; the effect is one counter bump.
+// Hand-computed: each test bumps once; plain and `&&` answer true, negated answers false.
+// @falsified-at: d268b48cc — on --native-rust plain_if, negated_if, a_call and in_and fail (the operand never ran: calls 0); the interpreter and --native-c pass on both builds.
+struct Ctr { calls: integer = 0 }
+fn yes(c: Ctr, b: boolean) -> boolean { c.calls += 1; b }
+fn one(c: Ctr) -> integer { c.calls += 1; 1 }
+
+fn plain_if() -> integer { c = Ctr {}; s = 0; if if yes(c, true) { 1 } else { 2 } { s = 1; } else { s = 2; } s * 10 + c.calls }
+fn negated_if() -> integer { c = Ctr {}; s = 0; if !if yes(c, true) { 1 } else { 2 } { s = 1; } else { s = 2; } s * 10 + c.calls }
+fn a_match() -> integer { c = Ctr {}; s = 0; if match yes(c, false) { true => 1, false => 2 } { s = 1; } else { s = 2; } s * 10 + c.calls }
+fn a_call() -> integer { c = Ctr {}; s = 0; if one(c) { s = 1; } else { s = 2; } s * 10 + c.calls }
+fn a_block() -> integer { c = Ctr {}; s = 0; if { c.calls += 1; 7 } { s = 1; } else { s = 2; } s * 10 + c.calls }
+fn in_and() -> integer { c = Ctr {}; s = 0; if true && if yes(c, true) { 1 } else { 2 } { s = 1; } else { s = 2; } s * 10 + c.calls }
+fn in_while() -> integer { c = Ctr {}; n = 0; while if yes(c, true) { 1 } else { 2 } { n += 1; if n == 3 { break; } } n * 10 + c.calls }
+
+fn test_plain_if() { assert(plain_if() == 11, "plain_if {plain_if()}"); }
+fn test_negated_if() { assert(negated_if() == 21, "negated_if {negated_if()}"); }
+fn test_a_match() { assert(a_match() == 11, "a_match {a_match()}"); }
+fn test_a_call() { assert(a_call() == 11, "a_call {a_call()}"); }
+fn test_a_block() { assert(a_block() == 11, "a_block {a_block()}"); }
+fn test_in_and() { assert(in_and() == 11, "in_and {in_and()}"); }
+fn test_in_while() { assert(in_while() == 33, "in_while {in_while()}"); }
