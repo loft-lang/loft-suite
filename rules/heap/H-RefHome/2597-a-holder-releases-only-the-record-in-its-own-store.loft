@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-H-RefHome, @FR-H-Drop: a record holding a stored `reference<T>` releases the record it
+// names only when that record lies in the holder's own store — a literal or a call result
+// built there, or a record evacuated into it when its home ended first.  A record of another
+// store has an owner of its own, whose end runs `T`'s `OpDrop` once.  The holder's cascade
+// ran it for every reference, so a texture a material named was released when the material
+// ended and again when its owner did (loft#2597, main); and a local evacuated into a holder
+// was released at its scope's end and again at the holder's.
+//
+// Axes this file MOVES:  how many holders name the record (one, two); the field's type
+//                        (`reference<T>`, `reference<T>?`); where the holder is built (a
+//                        literal, a function from a `const` parameter, inside another
+//                        record); a copy of the holder.  A record in the HOLDER's store
+//                        (built there, or evacuated into it) is tests/double_move.rs's
+//                        `a_holder_releases_*`: a record that holds a reference of its own,
+//                        as the log does here, is never evacuated.
+// Axes it HOLDS FIXED:   the drop writes its id into a log the test owns, read after the
+//                        scenario's function returned, so every end in it has run (the scope
+//                        pass may move a holder's record home out to the function, which
+//                        changes when it is released, never how often).
+// Controls: inline (a `Tex` field held inline drops with its record).
+// Hand-computed: the log lists each id once, in the order its owner ends.
+// @falsified-at: d268b48cc — interpret: every holder case but the inline control fails, its id logged twice (the holder released the record before its owner did).
+struct Log { s: text }
+struct Tex { id: integer, log: reference<Log> }
+fn OpDrop(self: Tex) { self.log.s += "{self.id} "; }
+struct Shared { name: text, tex: reference<Tex> }
+struct Maybe { tex: reference<Tex>? }
+struct Owns { tex: Tex }
+struct Outer { s: Shared }
+fn build(t: const Tex) -> Shared { Shared { name: "f", tex: t } }
+
+fn one_holder(l: Log) {
+  { t = Tex { id: 1, log: l }; { m = Shared { name: "a", tex: t }; l.s += "in{m.tex.id} "; } l.s += "after "; }
+}
+fn two_holders(l: Log) {
+  { t = Tex { id: 2, log: l }; { m = Shared { name: "a", tex: t }; n = Shared { name: "b", tex: t }; l.s += "in{m.tex.id}{n.tex.id} "; } l.s += "after "; }
+}
+fn nullable_field(l: Log) {
+  { t = Tex { id: 3, log: l }; { q = Maybe { tex: t }; l.s += "in{q.tex.id ?? -1} "; } l.s += "after "; }
+}
+fn from_a_function(l: Log) {
+  { t = Tex { id: 4, log: l }; { f = build(t); l.s += "in{f.tex.id} "; } l.s += "after "; }
+}
+fn in_another_record(l: Log) {
+  { t = Tex { id: 5, log: l }; { o = Outer { s: Shared { name: "o", tex: t } }; l.s += "in{o.s.tex.id} "; } l.s += "after "; }
+}
+fn a_copied_holder(l: Log) {
+  { t = Tex { id: 7, log: l }; { a = Shared { name: "x", tex: t }; b = a; l.s += "in{b.tex.id} "; } l.s += "after "; }
+}
+fn inline(l: Log) {
+  { w = Owns { tex: Tex { id: 6, log: l } }; l.s += "in{w.tex.id} "; }
+  l.s += "after ";
+}
+
+fn test_one_holder() { l = Log { s: "" }; one_holder(l); assert(l.s == "in1 after 1 ", "one_holder: {l.s}"); }
+fn test_two_holders() { l = Log { s: "" }; two_holders(l); assert(l.s == "in22 after 2 ", "two_holders: {l.s}"); }
+fn test_nullable_field() { l = Log { s: "" }; nullable_field(l); assert(l.s == "in3 after 3 ", "nullable_field: {l.s}"); }
+fn test_from_a_function() { l = Log { s: "" }; from_a_function(l); assert(l.s == "in4 after 4 ", "from_a_function: {l.s}"); }
+fn test_in_another_record() { l = Log { s: "" }; in_another_record(l); assert(l.s == "in5 after 5 ", "in_another_record: {l.s}"); }
+fn test_a_copied_holder() { l = Log { s: "" }; a_copied_holder(l); assert(l.s == "in7 after 7 ", "a_copied_holder: {l.s}"); }
+fn test_inline() { l = Log { s: "" }; inline(l); assert(l.s == "in6 6 after ", "inline: {l.s}"); }
