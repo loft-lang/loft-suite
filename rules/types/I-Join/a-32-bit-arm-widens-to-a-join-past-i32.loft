@@ -7,10 +7,17 @@
 // arm — converts it to the join, so the `u32` arm keeps its value on every backend.  The C
 // backend held the join in the first arm's `int32_t` and answered 0 for 0xFFFF0000.  The `if`,
 // the `match` and the `else if` chain, each with the narrow arm first; two `i32` arms keep their
-// 32-bit join.  Values hand-computed.
+// 32-bit join.  Values hand-computed.  Run under `--width 32` (`@ARGS`): that is where the C
+// backend holds a 32-bit body's integers in `int32_t`; under the `#width 32` line alone it
+// keeps them 64-bit and the cut never shows.
+// @ARGS: --width 32
 //
-// @falsified-at: none — the joins were refused before `@FR-I-Narrow-U32`, which admitted them
-//   and exposed the C width; the guard keeps the arms widened.  CHANNEL: the assertions on C.
+// @falsified-by: tests/falsified/a-32-bit-arm-widens-to-a-join-past-i32.patch — native exit 1 -> 0,
+//   native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard —
+//   only one side can move)
+//   CHANNEL: the assertions on C — `if 0`: the `u32` arm read 0 through the `int32_t` join.
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
 
 fn pick_ij(v: const vector<u32>, t: boolean) -> u32 { if t { 0 } else { v[0] ?? 0 } }
 fn last_ij(v: const vector<u32>, t: boolean) -> u32 { if t { v[0] ?? 0 } else { 0 } }
