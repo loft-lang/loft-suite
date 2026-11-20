@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-H-DropOnce: a value is released once.  A second release of a value that is the root
+// record of its own store ends a development run with "a value was released twice", on every
+// backend; a value released once, whatever holds it, runs to its end.  The program here
+// releases twice by calling `OpDrop` itself, the one way a program can; the compiler's own
+// double releases (loft#2597's holder) end the same way.
+//
+// Axes this file MOVES:  who releases twice (the program's own call, then the scope end;
+//                        two calls); what holds the value (a local, a local in a block, a
+//                        struct with a droppable field, a stored reference to it).
+// Axes it HOLDS FIXED:   the value is the root record of a store of its own type.
+// Controls: once_local, once_holder, once_field (released once each: they pass).
+// @falsified-at: d268b48cc — interpret: the four @EXPECT_FAIL tests pass instead of failing (no release is checked); the three controls pass on both builds.
+//   CHANNEL: the @EXPECT_FAIL expectations — a second release must end the run.
+//   WITNESS: on the control the four @EXPECT_FAIL tests pass (nothing checks a release).
+//   ARMED: no instrument — the check is on in every development build.
+//   HOLDS: the three controls pass on BOTH trees.
+struct Tex { id: integer }
+fn OpDrop(self: Tex) { }
+struct Shared { name: text, tex: reference<Tex> }
+struct Owns { tex: Tex, n: integer }
+
+// @EXPECT_FAIL: a value was released twice
+fn test_a_call_then_the_scope_end() { t = Tex { id: 1 }; t.OpDrop(); }
+// @EXPECT_FAIL: a value was released twice
+fn test_two_calls() { t = Tex { id: 2 }; t.OpDrop(); t.OpDrop(); }
+// @EXPECT_FAIL: a value was released twice
+fn test_in_a_block() { { t = Tex { id: 3 }; t.OpDrop(); } }
+// @EXPECT_FAIL: a value was released twice
+fn test_named_by_a_holder() { t = Tex { id: 4 }; m = Shared { name: "a", tex: t }; t.OpDrop(); assert(m.name == "a", "holder"); }
+
+fn test_once_local() { t = Tex { id: 5 }; assert(t.id == 5, "local"); }
+fn test_once_holder() { t = Tex { id: 6 }; { m = Shared { name: "b", tex: t }; assert(m.tex.id == 6, "holder"); } assert(t.id == 6, "after"); }
+fn test_once_field() { o = Owns { tex: Tex { id: 7 }, n: 1 }; assert(o.tex.id == 7 && o.n == 1, "field"); }
