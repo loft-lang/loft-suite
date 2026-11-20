@@ -23,6 +23,10 @@
 // Controls: inline (a `Tex` field held inline drops with its record).
 // Hand-computed: the log lists each id once, in the order its owner ends.
 // @falsified-at: d268b48cc — interpret: every holder case but the inline control fails, its id logged twice (the holder released the record before its owner did).
+//   CHANNEL: the asserts on the drop log.
+//   WITNESS: one_holder logs `in1 1 after 1 ` where the file says `in1 after 1 `.
+//   ARMED: no instrument.
+//   HOLDS: the inline control passes on BOTH trees, and no leak or panic moves.
 struct Log { s: text }
 struct Tex { id: integer, log: reference<Log> }
 fn OpDrop(self: Tex) { self.log.s += "{self.id} "; }

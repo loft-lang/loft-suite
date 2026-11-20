@@ -16,6 +16,10 @@
 // Axes it HOLDS FIXED:   the literal is the local's first bind; the calls are user functions.
 // Controls: fn_scope (the same rebinds at function scope), first_bind (no rebind of the local).
 // @falsified-at: d268b48cc — interpret exit 1 -> 0, interpret leaked kt=103 TyInteger×1 -> clean, native exit 1 -> 0, native leaked kt=103 TyInteger×1 -> clean
+//   CHANNEL: the leak check — the rebound local's old record is never released.
+//   WITNESS: leaked kt=103 TyInteger×1 on both backends of the control.
+//   ARMED: no instrument — the test run's leak check is on by default.
+//   HOLDS: panic and the assertions are equal on BOTH trees; only the leak moves.
 pub struct Spec { pub min: integer, pub max: integer }
 pub enum Ty { TyVoid, TyInteger { spec: Spec }, TyText { dep: vector<integer> } }
 pub struct Cap { pub name: text, pub ft: Ty }

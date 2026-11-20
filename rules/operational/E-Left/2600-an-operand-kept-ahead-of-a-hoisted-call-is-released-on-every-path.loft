@@ -17,6 +17,10 @@
 // Axes it HOLDS FIXED:   one hoisting operand per call.
 // Hand-computed: each test's expected value is in its assertion.
 // @falsified-at: d268b48cc — interpret: the run aborts with free(): invalid pointer in OpFreeText; --native-c passes on both builds.
+//   CHANNEL: a crash — the interpreter frees a text slot that path never bound.
+//   WITNESS: free(): invalid pointer in OpFreeText on the interpreter of the control.
+//   ARMED: no instrument.
+//   HOLDS: --native-c passes on both trees, and every assertion the interpreter reaches.
 struct In { k: integer }
 struct T { n: integer, inner: In }
 fn form(b: text) -> text { "{b}x" }

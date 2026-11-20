@@ -21,6 +21,10 @@
 // write of the parameter), handed (the sub-record handed to a writing function), reads (a
 // callee that only reads, which may still take the tuple).
 // @falsified-at: d268b48cc — interpret: the eight shapes that keep a `&` to the lent parameter answer 0 (or 0 for 50); the four controls pass on both builds.
+//   CHANNEL: the asserts — a write through the `&` misses the caller's record.
+//   WITNESS: answer_field answers 0 where the file says 5; argument_field 0 for 50.
+//   ARMED: no instrument.
+//   HOLDS: the four controls (literal, direct_write, handed_on, read_only) pass on BOTH trees.
 struct Frame { draws: integer, depth: boolean }
 struct Win { frame: Frame, h: integer }
 struct Deep { win: Win, k: integer }

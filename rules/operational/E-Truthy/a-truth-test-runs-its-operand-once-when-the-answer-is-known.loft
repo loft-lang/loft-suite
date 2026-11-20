@@ -14,6 +14,10 @@
 // Axes it HOLDS FIXED:   the operand is a non-null integer; the effect is one counter bump.
 // Hand-computed: each test bumps once; plain and `&&` answer true, negated answers false.
 // @falsified-at: d268b48cc — on --native-rust plain_if, negated_if, a_call and in_and fail (the operand never ran: calls 0); the interpreter and --native-c pass on both builds.
+//   CHANNEL: the asserts on the call count.
+//   WITNESS: calls 0 in plain_if, negated_if, a_call and in_and on --native-rust of the control.
+//   ARMED: FALSIFY_NATIVE=rust — the defect is in the rustc writer only.
+//   HOLDS: the interpreter and --native-c pass on BOTH trees.
 struct Ctr { calls: integer = 0 }
 fn yes(c: Ctr, b: boolean) -> boolean { c.calls += 1; b }
 fn one(c: Ctr) -> integer { c.calls += 1; 1 }
