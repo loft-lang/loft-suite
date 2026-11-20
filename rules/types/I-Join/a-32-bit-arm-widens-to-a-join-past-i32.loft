@@ -1,0 +1,39 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Join` crossed with `@FR-W-Op`: under the 32-bit regime an arm whose range lies inside
+// i32 is a 32-bit value, and a join that reaches past i32 — an `i32` literal arm beside a `u32`
+// arm — converts it to the join, so the `u32` arm keeps its value on every backend.  The C
+// backend held the join in the first arm's `int32_t` and answered 0 for 0xFFFF0000.  The `if`,
+// the `match` and the `else if` chain, each with the narrow arm first; two `i32` arms keep their
+// 32-bit join.  Values hand-computed.
+//
+// @falsified-at: none — the joins were refused before `@FR-I-Narrow-U32`, which admitted them
+//   and exposed the C width; the guard keeps the arms widened.  CHANNEL: the assertions on C.
+
+fn pick_ij(v: const vector<u32>, t: boolean) -> u32 { if t { 0 } else { v[0] ?? 0 } }
+fn last_ij(v: const vector<u32>, t: boolean) -> u32 { if t { v[0] ?? 0 } else { 0 } }
+fn match_ij(v: const vector<u32>, k: integer) -> u32 { match k { 1 => 0, _ => v[0] ?? 0 } }
+fn chain_ij(v: const vector<u32>, k: integer) -> u32 {
+  if k == 1 { 0 } else if k == 2 { 7 } else { v[0] ?? 0 }
+}
+fn small_ij(a: integer, b: integer, t: boolean) -> integer { if t { a } else { b } }
+
+fn test_the_u32_arm_keeps_its_value() {
+  v: vector<u32> = [0xFFFF0000];
+  assert(pick_ij(v, false) == 4294901760l && pick_ij(v, true) == 0, "if {pick_ij(v, false)}");
+  assert(last_ij(v, true) == 4294901760l && last_ij(v, false) == 0, "if, u32 first");
+  assert(match_ij(v, 2) == 4294901760l && match_ij(v, 1) == 0, "match {match_ij(v, 2)}");
+  assert(chain_ij(v, 3) == 4294901760l && chain_ij(v, 2) == 7 && chain_ij(v, 1) == 0,
+    "chain {chain_ij(v, 3)}");
+}
+
+fn test_two_i32_arms_stay_32_bit() {
+  assert(small_ij(-5, 9, true) == -5 && small_ij(-5, 9, false) == 9, "small");
+}
+
+fn main() {
+  test_the_u32_arm_keeps_its_value();
+  test_two_i32_arms_stay_32_bit();
+}

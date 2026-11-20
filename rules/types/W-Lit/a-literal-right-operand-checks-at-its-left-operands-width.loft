@@ -1,0 +1,33 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-W-Lit` — under the 32-bit regime a binary operator's right operand is expected at its
+// left operand's width when that type reaches past i32, so a literal there checks at that width
+// without a suffix: a `u32` colour masked, compared, or-ed, xor-ed and ordered against a colour
+// literal, and an `i64` added to and compared with a literal past i32.  Values hand-computed.
+//
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the EXIT — every literal here was refused before the rule said so.
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
+
+fn opaque_wl(v: const vector<u32>, i: integer) -> u32 { (v[i] ?? 0) | 0xFF000000 }
+
+fn test_a_u32_operand_sets_the_literals_width() {
+  v: vector<u32> = [0x112233];
+  c = opaque_wl(v, 0);
+  assert(c == 0xFF112233 && !(c != 0xFF112233), "or, eq: {c}");
+  assert(c > 0xF0000000 && (c & 0xFF00FF00) == 0xFF002200, "order, and: {c & 0xFF00FF00}");
+  assert((c ^ 0xFFFFFFFF) == 15654348, "xor: {c ^ 0xFFFFFFFF}");
+}
+
+fn test_an_i64_operand_sets_the_literals_width() {
+  w: i64 = 5000000000l;
+  assert(w + 3000000000 == 8000000000l && w > 4000000000, "{w + 3000000000}");
+}
+
+fn main() {
+  test_a_u32_operand_sets_the_literals_width();
+  test_an_i64_operand_sets_the_literals_width();
+}
