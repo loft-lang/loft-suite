@@ -34,7 +34,18 @@ fn test_a_wide_mask_folds_a_negative_i32() {
   assert(fold_wo(-16776961) == 4278190335l, "fold {fold_wo(-16776961)}");
 }
 
+// The same shift on an i32 operand stays 32-bit: past i32 it reads null, and a `u32` slot takes
+// that as 0 (`@FR-I-Narrow-U32`) — so a colour's alpha byte is shifted from a `u32`.
+fn test_an_i32_shift_past_i32_reads_0_in_a_u32() {
+  a = 200;
+  b = 100;
+  t: u32 = (a & 255) << 24;
+  s: u32 = (b & 255) << 24;
+  assert(t == 0 && s == 1677721600, "{t} {s}");
+}
+
 fn main() {
+  test_an_i32_shift_past_i32_reads_0_in_a_u32();
   test_a_u32_operand_widens();
   test_an_i32_operation_inside_i32_proves_its_range();
   test_a_wide_mask_folds_a_negative_i32();

@@ -1,0 +1,46 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Narrow-U32` crossed with `@FR-W-Op` and `@FR-N-Arith`: under the 32-bit regime a colour
+// is a `u32` — its literal fits without a suffix, its alpha byte is read back as a value, and it
+// is built from its bytes with the alpha shift cast to `u32` first, which makes that shift
+// 64-bit.  An `i32` narrowed into a `u32` is checked (a negative one takes 0), and so is an `i64`.
+// Values hand-computed.
+//
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the EXIT — the narrowings were refused before the rule.
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
+
+struct Pw { c: u32 }
+
+fn take_nw(c: u32) -> u32 { c }
+fn rgba_nw(r: integer, g: integer, b: integer, a: integer) -> u32 {
+  (((a & 255) as u32) << 24) | ((r & 255) << 16) | ((g & 255) << 8) | (b & 255)
+}
+fn alpha_nw(c: u32) -> integer { (c >> 24) & 255 }
+
+fn test_a_colour_round_trips() {
+  white: u32 = 0xFFFFFFFF;
+  c = rgba_nw(1, 2, 3, 200);
+  px: vector<u32> = [white, c];
+  assert(c == 3355509251l && alpha_nw(c) == 200 && alpha_nw(px[0]) == 255 && px[1] == c,
+    "{c} {alpha_nw(c)}");
+}
+
+fn test_an_i32_and_an_i64_narrow_checked() {
+  x = 7;
+  neg = -1;
+  wide: i64 = 4294967296l;
+  top: i64 = 4294967295l;
+  a: u32 = x;
+  p = Pw { c: neg };
+  assert(a == 7 && p.c == 0 && take_nw(neg) == 0 && (neg as u32) == 0, "{a} {p.c}");
+  assert(take_nw(wide) == 0 && take_nw(top) == 4294967295l, "{take_nw(wide)} {take_nw(top)}");
+}
+
+fn main() {
+  test_a_colour_round_trips();
+  test_an_i32_and_an_i64_narrow_checked();
+}

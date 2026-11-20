@@ -52,12 +52,8 @@ fn test_an_i16() {
   assert(c == 0, "unreached");
 }
 
-// @EXPECT_ERROR: (here 0..=4294967305) to u32
-fn test_a_u32() {
-  u: u32 = 4294967290; t = true;
-  w: u32 = if t { u + 10 } else { u };
-  assert(w == 0, "unreached");
-}
+// A `u32` slot is no refusal: `@FR-I-Narrow-U32` makes its narrowing checked, 0 where the value
+// does not fit — the same `if` is a value cell in rules/types/I-Narrow-U32.
 
 // @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
 fn test_an_argument() {

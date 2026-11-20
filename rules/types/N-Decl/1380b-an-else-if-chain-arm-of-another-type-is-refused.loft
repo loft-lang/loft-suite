@@ -53,8 +53,8 @@ fn test_an_overflowing_chain_arm_as_an_argument() {
   assert(take1380b(if k == 1 { a } else if k == 2 { a + b } else { b }) == 0, "unreached");
 }
 
-// @EXPECT_ERROR: (here 0..=4294967305) to u32
-fn give1380b(u: u32, k: integer) -> u32 { if k == 1 { u } else if k == 2 { u + 10 } else { u } }
+// A `u32` return is no refusal: `@FR-I-Narrow-U32` makes its narrowing checked — the same chain
+// is a value cell in rules/types/I-Narrow-U32.
 
 // @EXPECT_ERROR: expected text, got integer on if
 fn test_an_integer_chain_behind_a_text_then_arm() {

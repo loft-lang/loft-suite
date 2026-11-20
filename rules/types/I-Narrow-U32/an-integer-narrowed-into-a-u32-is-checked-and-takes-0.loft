@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Narrow-U32` — an `integer` narrowed into a non-null `u32`, implicitly or by `as u32`,
+// is checked rather than refused: the value where it fits, 0 where it does not (a `u32` has no
+// null, and 0 is its default).  So a library can take colours as `u32` and a caller that holds
+// them as `integer` passes them unchanged.
+//
+// Axes it MOVES: the destination (a declared local, an argument, a struct literal field, a field
+// write, an element write, a vector literal element, a return, `as u32`, the arm of a value
+// `if` and of an `else if` chain — the shapes rules/types/N-Decl/1379b and 1380b refused before
+// this rule), and the value (inside the range, its top 4294967295, -1, 2³²).  The nullable `u32?`
+// and the `as u32? ?? d` fallback keep their own answers.  Values hand-computed.
+//
+// @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the EXIT — every function here was a compile error before the rule.
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
+
+struct Pu { c: u32 }
+
+fn take_nu(c: u32) -> u32 { c }
+fn back_nu(x: integer) -> u32 { x }
+fn chain_nu(u: u32, k: integer) -> u32 { if k == 1 { u } else if k == 2 { u + 10 } else { u } }
+
+fn row_nu(x: integer) -> text {
+  a: u32 = x;
+  p = Pu { c: x };
+  q = Pu { c: 1 };
+  q.c = x;
+  v: vector<u32> = [1, 2];
+  v[1] = x;
+  w: vector<u32> = [x];
+  "{a} {take_nu(x)} {p.c} {q.c} {v[1]} {w[0]} {back_nu(x)} {x as u32} {len(v)}"
+}
+
+fn test_a_value_that_fits_is_itself() {
+  assert(row_nu(7) == "7 7 7 7 7 7 7 7 2", row_nu(7));
+  top = 4294967295;
+  assert(row_nu(top) == "4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 2", row_nu(top));
+}
+
+fn test_a_value_that_does_not_fit_is_0() {
+  neg = -1;
+  big = 4294967296;
+  assert(row_nu(neg) == "0 0 0 0 0 0 0 0 2", row_nu(neg));
+  assert(row_nu(big) == "0 0 0 0 0 0 0 0 2", row_nu(big));
+}
+
+fn test_an_if_arm_past_the_range_is_0() {
+  u: u32 = 4294967290;
+  t = true;
+  w: u32 = if t { u + 10 } else { u };
+  assert(w == 0 && chain_nu(u, 2) == 0 && chain_nu(u, 1) == 4294967290, "{w} {chain_nu(u, 2)}");
+}
+
+fn test_a_nullable_u32_keeps_its_null() {
+  neg = -1;
+  y: u32? = neg;
+  z = (neg as u32?) ?? 9;
+  assert(y == null && z == 9, "{y} {z}");
+}
+
+fn main() {
+  test_a_value_that_fits_is_itself();
+  test_a_value_that_does_not_fit_is_0();
+  test_an_if_arm_past_the_range_is_0();
+  test_a_nullable_u32_keeps_its_null();
+}

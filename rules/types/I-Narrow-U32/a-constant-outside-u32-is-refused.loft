@@ -1,0 +1,12 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Narrow-U32` — the checked narrowing is for values a run computes.  A CONSTANT outside
+// 0..=4294967295 is a value the author can see does not fit, and it stays refused.
+// @falsified-at: none — the refusal held before the rule; the guard keeps it held beside it.
+
+fn main() {
+  // @EXPECT_ERROR: cannot implicitly narrow integer to u32
+  a: u32 = -1;
+  println("{a}");
+}

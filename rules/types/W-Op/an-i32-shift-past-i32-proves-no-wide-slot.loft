@@ -3,18 +3,22 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
 // `@FR-W-Op` crossed with `@FR-N-Arith` and `@FR-W-Lit`: on two i32 operands `(a & 255) << 24`
-// is a 32-bit operation that reads null past i32, so its range proves nothing and a `u32` slot
-// refuses it.  The cure the refusal names is a mask a regime file can write: the `l` literal,
-// which makes the `&` 64-bit (a plain `4294967295` is refused under the regime).
+// is a 32-bit operation that reads null past i32, so its range proves nothing and a slot whose
+// range reaches past i32 refuses it.  The cure the refusal names is a mask a regime file can
+// write: the `l` literal, which makes the `&` 64-bit (a plain `4294967295` is refused under the
+// regime).  A `u32` slot takes the same value checked instead (`@FR-I-Narrow-U32`, the value
+// cell beside this one), so the slot here is a `limit` range of the same width.
 // @falsified-at: d268b48cc — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
 //   native exit 1 -> 0, native expectations FAIL/1 -> 0/1
 //   CHANNEL: the expectation — the refusal named `& 4294967295`, which the regime refuses.
 //   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
 //   `falsify` requires HERE to be clean, so all are clean on both.
 
+type WideWo = integer limit(0, 4294967295);
+
 fn main() {
   a = 200;
   // @EXPECT_ERROR: make the value provably fit with a mask (`& 4294967295l`)
-  t: u32 = (a & 255) << 24;
+  t: WideWo = (a & 255) << 24;
   println("{t}");
 }

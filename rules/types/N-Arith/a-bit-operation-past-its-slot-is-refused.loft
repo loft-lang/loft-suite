@@ -3,22 +3,23 @@
 //
 // `@FR-N-Arith` — the bit operations prove a range only from what their shape shows, so each of
 // these stays refused: a shift past the slot, an operand that can be negative, a shift by a
-// variable, and a shift of an unbounded value.
+// variable, and a shift of an unbounded value.  The slots are `u8` and `u16`: a `u32` slot takes
+// an unproven value checked, 0 where it does not fit (`@FR-I-Narrow-U32`).
 // @falsified-at: none — the refusals held before the bit operations proved ranges; the guard
 //   keeps them held now that they do.
 
 fn main() {
   a = 7;
   k = 2;
-  y: u32 = 5;
+  y: u16 = 5;
   // @EXPECT_ERROR: cannot implicitly narrow integer (here 0..=510) to u8
   b: u8 = (a & 255) << 1;
-  // @EXPECT_ERROR: cannot implicitly narrow integer to u32
-  c: u32 = a | y;
-  // @EXPECT_ERROR: cannot implicitly narrow integer to u32
-  d: u32 = (a & 255) << k;
-  // @EXPECT_ERROR: cannot implicitly narrow integer to u32
-  e: u32 = a << 24;
+  // @EXPECT_ERROR: cannot implicitly narrow integer to u16
+  c: u16 = a | y;
+  // @EXPECT_ERROR: cannot implicitly narrow integer to u16
+  d: u16 = (a & 255) << k;
+  // @EXPECT_ERROR: cannot implicitly narrow integer to u16
+  e: u16 = a << 24;
   // @EXPECT_ERROR: cannot implicitly narrow integer to u8
   f: u8 = a >> 56;
   println("{b} {c} {d} {e} {f}");
