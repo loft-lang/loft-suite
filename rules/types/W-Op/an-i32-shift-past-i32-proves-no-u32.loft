@@ -1,0 +1,16 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-W-Op` crossed with `@FR-N-Arith` and `@FR-W-Lit`: on two i32 operands `(a & 255) << 24`
+// is a 32-bit operation that reads null past i32, so its range proves nothing and a `u32` slot
+// refuses it.  The cure the refusal names is a mask a regime file can write: the `l` literal,
+// which makes the `&` 64-bit (a plain `4294967295` is refused under the regime).
+// @falsified-at: none — the refusal held before; the cure's spelling is new with this guard.
+
+fn main() {
+  a = 200;
+  // @EXPECT_ERROR: make the value provably fit with a mask (`& 4294967295l`)
+  t: u32 = (a & 255) << 24;
+  println("{t}");
+}

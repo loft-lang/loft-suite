@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-N-Arith` — `a | b` and `a ^ b` of two non-negative operands prove [0, 2ᵏ-1], k the
+// larger operand's bit length; `a << c` by a constant proves the operand's range times 2ᶜ and
+// `a >> c` (a non-negative) divided by it.  So a colour assembled from its four bytes is a
+// `u32` with no mask after it, and the byte read back out of one is a `u8`.
+//
+// Axes it MOVES: the operator (`|`, `^`, `<<`, `>>`), the operand (a masked integer, a `u32`
+// parameter), the destination (a return, a declared local, a field, a vector element), and the
+// values at the top of the u32 range.  The refusals the rule keeps are in
+// a-bit-operation-past-its-slot-is-refused.loft.  Values hand-computed.
+//
+// @falsified-at: none — the shapes were refused before the rule named them; the guard keeps
+//   them admitted.  CHANNEL: the EXIT — every function here was a compile error.
+//   WITNESS: `cannot implicitly narrow integer to u32` at `fn rgba_na(...)`.
+
+struct Px { c: u32 }
+
+fn rgba_na(r: integer, g: integer, b: integer, a: integer) -> u32 {
+  ((a & 255) << 24) | ((r & 255) << 16) | ((g & 255) << 8) | (b & 255)
+}
+fn or_na(x: u32, y: u32) -> u32 { x | y }
+fn xor_na(x: u32, y: u32) -> u32 { x ^ y }
+fn alpha_na(c: u32) -> u8 { c >> 24 }
+fn half_na(n: integer) -> u8 { (n & 511) >> 1 }
+
+fn test_a_colour_from_its_bytes() {
+  // 200·2²⁴ + 1·2¹⁶ + 2·2⁸ + 3
+  assert(rgba_na(1, 2, 3, 200) == 3355509251, "rgba {rgba_na(1, 2, 3, 200)}");
+  assert(rgba_na(255, 255, 255, 255) == 4294967295, "white {rgba_na(255, 255, 255, 255)}");
+  assert(rgba_na(-1, 0, 0, 0) == 16711680, "a byte is masked: {rgba_na(-1, 0, 0, 0)}");
+}
+
+fn test_or_and_xor_stay_inside_u32() {
+  assert(or_na(0xFF000000, 0xFF) == 4278190335, "or {or_na(0xFF000000, 0xFF)}");
+  assert(xor_na(0xFF00FF00, 0x00FFFF00) == 4294901760, "xor {xor_na(0xFF00FF00, 0x00FFFF00)}");
+}
+
+fn test_a_shift_down_reads_a_byte() {
+  assert(alpha_na(0x80FF0000) == 128, "alpha {alpha_na(0x80FF0000)}");
+  assert(half_na(511) == 255 && half_na(-1) == 255, "half {half_na(511)} {half_na(-1)}");
+}
+
+fn test_every_destination() {
+  a = 7;
+  top: u32 = (a & 255) << 24;
+  p = Px { c: (a & 15) | 0xF0 };
+  v: vector<u32> = [(a & 255) << 24, top ^ 0xFF];
+  assert(top == 117440512 && p.c == 247, "local {top}, field {p.c}");
+  assert(len(v) == 2 && v[0] == 117440512 && v[1] == 117440767, "elements {v[0]} {v[1]}");
+}
+
+fn main() {
+  test_a_colour_from_its_bytes();
+  test_or_and_xor_stay_inside_u32();
+  test_a_shift_down_reads_a_byte();
+  test_every_destination();
+}

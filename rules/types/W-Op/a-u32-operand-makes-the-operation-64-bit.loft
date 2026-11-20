@@ -1,0 +1,39 @@
+#width 32
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-W-Op` crossed with `@FR-N-Arith`: an operation is 32-bit only when both operands' types
+// lie inside i32.  A `u32` operand, like an `i64`, makes it 64-bit, so a colour's alpha byte
+// shifted up keeps its value; on two `i32` operands the same shift is 32-bit and its range
+// proves a `u32` slot only while it stays inside i32.  A wide mask (`l`) folds a negative i32
+// to its low 32 bits.  Values hand-computed.
+//
+// @falsified-at: none — the u32 widening held before the rule said so; the i32-range shapes
+//   were refused before the bit operations proved ranges.  CHANNEL: the EXIT and the values.
+
+fn top_wo(a: integer) -> u32 { ((a & 255) as u32) << 24 }
+fn mid_wo(a: integer) -> u32 { (a & 255) << 16 }
+fn fold_wo(c: integer) -> u32 { c & 4294967295l }
+fn or_wo(x: u32, y: u32) -> u32 { x | y }
+
+fn test_a_u32_operand_widens() {
+  x: u32 = 200;
+  q = x << 24;
+  assert(q == 3355443200l, "u32 << 24: {q}");
+  assert(top_wo(200) == 3355443200l && or_wo(0xFF000000, 0xFF) == 4278190335l,
+    "{top_wo(200)} {or_wo(0xFF000000, 0xFF)}");
+}
+
+fn test_an_i32_operation_inside_i32_proves_its_range() {
+  assert(mid_wo(200) == 13107200, "mid {mid_wo(200)}");
+}
+
+fn test_a_wide_mask_folds_a_negative_i32() {
+  assert(fold_wo(-16776961) == 4278190335l, "fold {fold_wo(-16776961)}");
+}
+
+fn main() {
+  test_a_u32_operand_widens();
+  test_an_i32_operation_inside_i32_proves_its_range();
+  test_a_wide_mask_folds_a_negative_i32();
+}
