@@ -13,6 +13,8 @@
 //
 // @falsified-at: d268b48cc — interpret exit 1 -> 0, native exit 1 -> 0
 //   CHANNEL: the EXIT — every function here was a compile error.
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
 //   WITNESS: `cannot implicitly narrow integer to u32` at `fn rgba_na(...)`.
 
 struct Px { c: u32 }

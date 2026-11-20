@@ -9,6 +9,8 @@
 // @falsified-at: d268b48cc — interpret exit 1 -> 0, interpret expectations FAIL/1 -> 0/1,
 //   native exit 1 -> 0, native expectations FAIL/1 -> 0/1
 //   CHANNEL: the expectation — the refusal named `& 4294967295`, which the regime refuses.
+//   HOLDS: leak, panic, free-refusal and the other cells are equal on BOTH trees, and
+//   `falsify` requires HERE to be clean, so all are clean on both.
 
 fn main() {
   a = 200;
