@@ -1,0 +1,97 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @ARMED: LOFT_MEMORY_LIMIT=16M
+//
+// `@FR-H-Removed` — an insert whose key is already in a hash DISPLACES the entry that held it,
+// and a displaced entry is removed like any other: a stored reference to it reads null, and
+// its position is not claimed again.  The removal by key (`h[k] = null`) already did this; the
+// displacement released the entry through the table's arena, which declines a record it does
+// not own, so the reference kept reading it (its text freed, its number left) and the record
+// was never freed at all.  Each cell sets up a reference, inserts the same key again and reads
+// through the reference:
+//
+// - a text key, displaced by `+=`, then 200 inserts of other keys (the claims that would reuse
+//   the space) — null, the table 201 long, the new entry 202, the last other one 1199;
+// - an integer key (the typed insert path) — null, the new entry `second41`;
+// - displaced twice, the reference set again between the two — null after the second;
+// - a table nothing references keeps one entry per key, last insert winning: keys y0..y9
+//   over i = 0..50 hold i = 40..49, sum 445;
+// - churn: 300 000 displacements beside one referenced entry run inside a 16 MiB store heap
+//   (`@ARMED` sets the ceiling; they leaked one record each, past it) and the referenced entry
+//   still reads 0.
+//
+// @falsified-at: be7e3fb49 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// @falsified-by: tests/falsified/a-reference-to-a-displaced-hash-entry-reads-null.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the asserts — the first failing cell ends the run, on both backends.
+//   WITNESS: the displaced entry read through the reference: not null, its number 101 left
+//   and its text freed.
+//   HOLDS: on both trees, a table nothing references keeps the last insert of each key (445).
+
+struct Tag { name: text, n: integer }
+struct Num { id: integer, label: text }
+struct Bag { by: hash<Tag[name]>, pick: reference<Tag>? }
+struct Ids { by: hash<Num[id]>, pick: reference<Num>? }
+struct Plain { by: hash<Tag[name]> }
+
+fn text_key_displaced_then_refilled() {
+  b = Bag { };
+  b.by += [Tag { name: "k", n: 101 }];
+  b.pick = b.by["k"];
+  b.by += [Tag { name: "k", n: 202 }];
+  for i in 0..200 { b.by += [Tag { name: "x{i}", n: 1000 + i }]; }
+  p = b.pick;
+  assert(p == null, "a displaced entry reads null, got {p?.n}");
+  assert(len(b.by) == 201, "201 entries, got {len(b.by)}");
+  assert(b.by["k"]?.n == 202, "the new entry holds the key");
+  assert(b.by["x199"]?.n == 1199, "the last other entry reads its own value");
+}
+
+fn integer_key_displaced() {
+  a = Ids { };
+  a.by += [Num { id: 41, label: "first41" }];
+  a.pick = a.by[41];
+  a.by += [Num { id: 41, label: "second41" }];
+  p = a.pick;
+  assert(p == null, "a displaced integer-keyed entry reads null, got {p?.label}");
+  assert(a.by[41]?.label == "second41", "the new entry holds the key");
+}
+
+fn displaced_twice() {
+  c = Bag { };
+  c.by += [Tag { name: "z", n: 1 }];
+  c.pick = c.by["z"];
+  c.by += [Tag { name: "z", n: 2 }];
+  c.pick = c.by["z"];
+  assert(c.pick?.n == 2, "the reference set again reads the second entry");
+  c.by += [Tag { name: "z", n: 3 }];
+  p = c.pick;
+  assert(p == null, "and null once that one is displaced, got {p?.n}");
+  assert(c.by["z"]?.n == 3, "the third holds the key");
+}
+
+fn unreferenced_table_keeps_last_insert() {
+  d = Plain { };
+  for i in 0..50 { d.by += [Tag { name: "y{i % 10}", n: i }]; }
+  s = 0;
+  for t in d.by { s += t.n; }
+  assert(len(d.by) == 10, "one entry per key, got {len(d.by)}");
+  assert(s == 445, "the last insert of each key wins: 40..49, got {s}");
+}
+
+fn churn_stays_inside_the_heap() {
+  b = Bag { };
+  b.by += [Tag { name: "anchor", n: 0 }];
+  b.pick = b.by["anchor"];
+  for i in 0..300000 { b.by += [Tag { name: "k{i % 16}", n: i }]; }
+  assert(len(b.by) == 17, "16 churned keys and the anchor, got {len(b.by)}");
+  assert(b.by["k15"]?.n == 299999, "the last churned value");
+  assert(b.pick?.n == 0, "the referenced entry was never displaced");
+}
+
+fn main() {
+  text_key_displaced_then_refilled();
+  integer_key_displaced();
+  displaced_twice();
+  unreferenced_table_keeps_last_insert();
+  churn_stays_inside_the_heap();
+}
