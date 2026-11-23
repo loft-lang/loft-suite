@@ -1,0 +1,104 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Scope` — A LATER BIND IS A NEW BINDING ALSO WHERE PASS 1 CANNOT TYPE THE ENDED ONE.
+// The ended binding's value comes from a function declared FURTHER DOWN, so pass 1 has no type
+// for it, while the later bind's value is typed on pass 1.  The split asked only "would this
+// retype be refused?", which an untyped binding never refuses, so pass 1 bound the new value
+// onto the ended variable and gave it the NEW binding's type; pass 2's first bind of the ended
+// binding then failed as `cannot change type from vector<integer>? to R`.  The split is now the
+// statement's on both passes (`rebind_split_unforced`): pass 1 splits where the ended binding
+// is still untyped, pass 2 wherever pass 1 did.  Shapes: an `if`, a nested `if`, a loop, a
+// declared later bind, a value read after both; and the same-type and typed-first controls.
+//
+// @falsified-at: 4d57ec009 — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the exit — the unfixed compiler refuses this file ("cannot change type").
+// ARMED: every run.
+// WITNESS: `Variable 'b1' cannot change type from vector<integer>? to R`.
+// HOLDS: each function's answer, by hand, on both branches of its condition.
+
+struct R { a: integer }
+
+fn early_v() -> vector<integer>? { [1, 2, 3] }
+fn early_r(n: integer) -> R { R { a: n } }
+
+fn in_if(c: boolean) -> integer {
+  if c {
+    b1 = late_r(7);
+    return b1.a;
+  }
+  b1 = early_v();
+  len(b1!)
+}
+
+fn in_nested_if(c: boolean) -> integer {
+  if c {
+    if c {
+      b2 = late_r(11);
+      return b2.a;
+    }
+  }
+  b2 = early_v();
+  len(b2!)
+}
+
+fn in_loop() -> integer {
+  t = 0;
+  for i in 0..2 {
+    b3 = late_r(7 + i);
+    t += b3.a;
+  }
+  b3 = early_v();
+  t * 10 + len(b3!)
+}
+
+fn declared_later(c: boolean) -> integer {
+  if c {
+    b4 = late_r(5);
+    return b4.a;
+  }
+  b4: vector<integer>? = early_v();
+  len(b4!)
+}
+
+fn read_after_both(c: boolean) -> integer {
+  s = 0;
+  if c {
+    b5 = late_r(5);
+    s = b5.a;
+  }
+  b5 = early_v();
+  s * 100 + len(b5!) * 10 + b5![0]
+}
+
+// Controls: the same type twice (one binding is enough), and a first binding pass 1 types.
+fn same_type(c: boolean) -> integer {
+  if c {
+    b6 = late_r(4);
+    return b6.a;
+  }
+  b6 = early_r(9);
+  b6.a
+}
+
+fn typed_first(c: boolean) -> integer {
+  if c {
+    b7 = early_r(6);
+    return b7.a;
+  }
+  b7 = late_v();
+  len(b7!)
+}
+
+fn late_r(n: integer) -> R { R { a: n } }
+fn late_v() -> vector<integer>? { [4, 5] }
+
+fn main() {
+  assert(in_if(true) == 7 && in_if(false) == 3, "in_if {in_if(true)} {in_if(false)}");
+  assert(in_nested_if(true) == 11 && in_nested_if(false) == 3, "nested {in_nested_if(true)} {in_nested_if(false)}");
+  assert(in_loop() == 153, "loop {in_loop()}");
+  assert(declared_later(true) == 5 && declared_later(false) == 3, "declared {declared_later(true)} {declared_later(false)}");
+  assert(read_after_both(true) == 531 && read_after_both(false) == 31, "reread {read_after_both(true)} {read_after_both(false)}");
+  assert(same_type(true) == 4 && same_type(false) == 9, "same {same_type(true)} {same_type(false)}");
+  assert(typed_first(true) == 6 && typed_first(false) == 2, "typed first {typed_first(true)} {typed_first(false)}");
+}
