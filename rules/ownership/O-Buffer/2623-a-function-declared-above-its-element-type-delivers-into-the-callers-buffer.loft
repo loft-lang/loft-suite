@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-O-Buffer`, `@C168` — a function that returns a collection delivers it into the buffer
+// its caller passes, wherever the type its result names is declared.  `copy_of` below stands
+// ABOVE `struct Fyle`: on the first pass its return cannot be resolved, so nothing decides how
+// its result reaches the buffer there.  The second pass then renamed the local `w` onto the
+// buffer after the body had already minted `w` a store of its own: the caller's buffer was
+// dropped, `w`'s store came back in its place, and nothing freed it — one store per call, on
+// both backends, with every value right (loft#2623).  A local the first pass never offered is
+// now copied into the buffer, as the first pass would have had it.
+//
+// Axes this file MOVES:  a vector bound by copy (c1), one in a loop (c5), a nested vector (c6),
+//                        a vector built from a literal and appended to (c4), a record (c3); the
+//                        result type declared after (`Fyle`) or before (`Gyle`, the control) the
+//                        function.
+// Axes it HOLDS FIXED:   every result is returned as the function's tail through a named local.
+// Controls: `g_copy_of` over `Gyle`, declared before it.
+// Hand-computed: each assert's values follow from the literals; the runner's leak check
+//   (`LOFT_LEAK_CHECK=1`) reads every store freed.
+// @falsified-at: hand-measured (control: the installed main build 2026.11.20261123, 6ac5b7917)
+//   — interpret and native leak one `main_vector<Fyle>` store per call of c1, c5 and c6;
+//   values right.
+//   CHANNEL: the leak check.
+//   HOLDS: c3, c4 and the `Gyle` control are clean on both trees.
+struct Gyle { name: text, size: integer }
+fn g_copy_of(v: vector<Gyle>) -> vector<Gyle> { w = v; w }
+
+fn copy_of(v: vector<Fyle>) -> vector<Fyle> { w = v; w }
+fn copy_nested(v: vector<vector<Fyle>>) -> vector<vector<Fyle>> { w = v; w }
+fn build(n: integer) -> vector<Fyle> {
+  w = [Fyle { name: "x", size: n }];
+  w += [Fyle { name: "y", size: n + 1 }];
+  w
+}
+fn mk(n: integer) -> Fyle { q = Fyle { name: "r{n}", size: n }; q }
+
+fn main() {
+  a = [Fyle { name: "a", size: 1 }, Fyle { name: "b", size: 2 }];
+  c = copy_of(a);
+  assert(len(c) == 2 && c[1].name == "b", "c1: {len(c)}");
+  r = mk(7);
+  assert(r.size == 7 && r.name == "r7", "c3: {r.size} {r.name}");
+  b = build(3);
+  assert(len(b) == 2 && b[1].size == 4, "c4: {len(b)}");
+  t = 0;
+  for _ in 0..5 {
+    d = copy_of(a);
+    t += len(d) + d[0].size;
+  }
+  assert(t == 15, "c5: {t}");
+  n = [[Fyle { name: "a", size: 1 }], [Fyle { name: "b", size: 2 }, Fyle { name: "c", size: 3 }]];
+  m = copy_nested(n);
+  assert(len(m) == 2 && len(m[1]) == 2 && m[1][1].size == 3, "c6: {len(m)}");
+  g = g_copy_of([Gyle { name: "g", size: 9 }]);
+  assert(len(g) == 1 && g[0].size == 9, "control: {len(g)}");
+}
+
+struct Fyle { name: text, size: integer }
