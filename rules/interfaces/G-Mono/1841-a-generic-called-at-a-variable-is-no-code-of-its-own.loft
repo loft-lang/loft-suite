@@ -21,7 +21,8 @@
 // @falsified-at: a80e26737 — native exit 101 -> 0, native panicked -> clean; interpret INERT (expected for a backend-divergence guard — only one side can move)
 // @falsified-by: tests/falsified/1841-a-generic-called-at-a-variable-is-no-code-of-its-own.patch — native exit 101 -> 0, native panicked -> clean; interpret INERT (expected for a backend-divergence guard — only one side can move)
 //   CHANNEL: panic on --native — the control's generator stops at src/generation/text.rs.
-//   ARMED: nothing.
+//   ARMED: FALSIFY_NATIVE=rust — the defect is the rustc writer's alone, which the default C leg
+//   cannot see.
 //   WITNESS: on the control "Could not parse [Var(1), Var(0), Int(0), …]" from `format_text`.
 //   HOLDS: every cell's answer on both backends; the interpreter already gave them.
 
