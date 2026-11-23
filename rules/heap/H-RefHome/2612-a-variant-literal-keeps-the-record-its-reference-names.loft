@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-H-RefHome: a struct enum's variant literal is a holder like a struct literal.  A local
+// record its `reference<T>` field names is kept for as long as the variant lives: copied into
+// the store the variant is delivered in before the local's store is freed, or built there.
+// The place a variant literal writes into is typed as the enum, not as the variant, so the
+// analysis did not see the write: the local's store was freed on return, the variant still
+// named it, and the next call's record took its place (loft#2612, main).
+//
+// Axes this file MOVES:  where the record comes from (a named local, a literal in the field);
+//                        the field's type (`reference<T>`, `reference<T>?`); where the
+//                        variant lives (returned, inline in a returned struct, copied into a
+//                        parameter's field, a `par` row's result); two variants naming
+//                        different types at one byte offset.
+// Axes it HOLDS FIXED:   the variant is read after the function that built it returned, and
+//                        after a second call built another one, so a freed store is reused.
+//                        A loop refilling the record between a re-minted holder's passes is
+//                        not here: that is a placement question of its own.
+// Controls: a_struct_literal (the struct literal of the same shape, kept before the fix too).
+// Hand-computed: call i builds `name: "doc{i}"` with `n: i * 7`, so the reads are doc1 7,
+//   doc2 14, and the `par` rows doc1 7 to doc4 28.
+// @falsified-at: e6d995a7a — interpret: refused at compile time (`out.s = s`: "the `doc` field
+//   inside `out` (copied from `s`) would outlive the record it names"); with the copy case cut,
+//   five functions fail and, under LOFT_POISON=1, the par rows too; native under LOFT_POISON=1
+//   fails at the first assert.  Scored by hand against the installed loft (main e6d995a7a):
+//   `make falsify` could not check out its control tree.
+//   CHANNEL: the assert_eq messages (and the compile refusal for the copy case).
+//   WITNESS: test_a_named_local reads `p1 doc2 14` where the file says `p1 doc1 7`.
+//   ARMED: LOFT_POISON=1 for the par rows only; every other function fails without it.
+//   HOLDS: the a_struct_literal control passes on BOTH trees.
+struct Doc { name: text, n: integer }
+struct Tag { word: text }
+enum Shape { Dot { at: integer }, Pin { label: text, doc: reference<Doc> } }
+enum Maybe { Off { at: integer }, On { label: text, doc: reference<Doc>? } }
+enum Two { A { a: reference<Doc> }, B { b: reference<Tag> } }
+struct Box { tag: integer, s: Shape }
+struct Held { label: text, doc: reference<Doc> }
+
+fn pin(i: integer) -> Shape {
+  d = Doc { name: "doc{i}", n: i * 7 };
+  Pin { label: "p{i}", doc: d }
+}
+fn pin_literal(i: integer) -> Shape {
+  Pin { label: "p{i}", doc: Doc { name: "doc{i}", n: i * 7 } }
+}
+fn on(i: integer) -> Maybe {
+  d = Doc { name: "doc{i}", n: i * 7 };
+  On { label: "p{i}", doc: d }
+}
+fn boxed(i: integer) -> Box {
+  d = Doc { name: "doc{i}", n: i * 7 };
+  Box { tag: i * 100, s: Pin { label: "p{i}", doc: d } }
+}
+fn fill(out: Box, i: integer) {
+  d = Doc { name: "doc{i}", n: i * 7 };
+  s = Pin { label: "p{i}", doc: d };
+  out.s = s;
+}
+fn two_a(i: integer) -> Two {
+  d = Doc { name: "doc{i}", n: i * 7 };
+  A { a: d }
+}
+fn two_b(i: integer) -> Two {
+  t = Tag { word: "tag{i}" };
+  B { b: t }
+}
+fn held(i: integer) -> Held {
+  d = Doc { name: "doc{i}", n: i * 7 };
+  Held { label: "p{i}", doc: d }
+}
+
+fn show(s: Shape) -> text {
+  match s { Pin { label, doc } => "{label} {doc.name} {doc.n}", Dot { at } => "dot {at}" }
+}
+fn show_maybe(m: Maybe) -> text {
+  match m { On { label, doc } => "{label} {doc.name ?? \"none\"} {doc.n ?? -1}", Off { at } => "off {at}" }
+}
+fn show_two(t: Two) -> text {
+  match t { A { a } => "A {a.name} {a.n}", B { b } => "B {b.word}" }
+}
+
+fn test_a_named_local() {
+  a = pin(1);
+  b = pin(2);
+  assert_eq(show(a), "p1 doc1 7", "a named local");
+  assert_eq(show(b), "p2 doc2 14", "a named local, second call");
+}
+fn test_a_literal_in_the_field() {
+  a = pin_literal(1);
+  b = pin_literal(2);
+  assert_eq(show(a), "p1 doc1 7", "a literal in the field");
+  assert_eq(show(b), "p2 doc2 14", "a literal in the field, second call");
+}
+fn test_a_nullable_field() {
+  a = on(1);
+  b = on(2);
+  assert_eq(show_maybe(a), "p1 doc1 7", "a nullable field");
+  assert_eq(show_maybe(b), "p2 doc2 14", "a nullable field, second call");
+}
+fn test_inline_in_a_struct() {
+  a = boxed(1);
+  b = boxed(2);
+  assert_eq("{a.tag} {show(a.s)}", "100 p1 doc1 7", "inline in a struct");
+  assert_eq("{b.tag} {show(b.s)}", "200 p2 doc2 14", "inline in a struct, second call");
+}
+fn test_copied_into_a_parameter() {
+  a = Box { tag: 1, s: Dot { at: 5 } };
+  b = Box { tag: 2, s: Dot { at: 6 } };
+  fill(a, 1);
+  fill(b, 2);
+  assert_eq(show(a.s), "p1 doc1 7", "copied into a parameter");
+  assert_eq(show(b.s), "p2 doc2 14", "copied into a parameter, second call");
+}
+fn test_two_variants_one_offset() {
+  x = two_a(1);
+  y = two_b(2);
+  z = two_a(3);
+  assert_eq(show_two(x), "A doc1 7", "variant A");
+  assert_eq(show_two(y), "B tag2", "variant B");
+  assert_eq(show_two(z), "A doc3 21", "variant A, second call");
+}
+fn test_par_rows() {
+  xs = [1, 2, 3, 4];
+  seen = "";
+  for x in xs par(r = pin(x), 2) {
+    seen += "{show(r)};";
+  }
+  assert_eq(seen, "p1 doc1 7;p2 doc2 14;p3 doc3 21;p4 doc4 28;", "par rows");
+}
+fn test_a_struct_literal() {
+  a = held(1);
+  b = held(2);
+  assert_eq("{a.label} {a.doc.name} {a.doc.n}", "p1 doc1 7", "a struct literal");
+  assert_eq("{b.label} {b.doc.name} {b.doc.n}", "p2 doc2 14", "a struct literal, second call");
+}
