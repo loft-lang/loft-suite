@@ -11,7 +11,7 @@
 // is still untyped, pass 2 wherever pass 1 did.  Shapes: an `if`, a nested `if`, a loop, a
 // declared later bind, a value read after both; and the same-type and typed-first controls.
 //
-// @falsified-at: 4d57ec009 — interpret exit 1 -> 0, native exit 1 -> 0
+// @falsified-at: 2e7b305c7 — interpret exit 1 -> 0, native exit 1 -> 0
 // CHANNEL: the exit — the unfixed compiler refuses this file ("cannot change type").
 // ARMED: every run.
 // WITNESS: `Variable 'b1' cannot change type from vector<integer>? to R`.

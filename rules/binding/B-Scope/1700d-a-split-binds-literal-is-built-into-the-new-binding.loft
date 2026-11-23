@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-B-Scope` — A SPLIT BIND'S LITERAL IS BUILT INTO THE NEW BINDING.
+// A bind after its name's block ended starts a new binding; where its type differs (here
+// `R` after an `R?`), the parser gives it a variable of its own.  That split is decided after
+// the value is parsed, and a record literal builds in place into the variable its bind named:
+// the ENDED one.  The read after the bind then named the new variable, which nothing set: an
+// internal compiler error ("Incorrect var jt#…[65535]") on both backends.  The value cannot
+// read the ended binding, so the split now renames every mention of it in the value to the new
+// binding.  Shapes: the first binding's call declared later or earlier, the later bind nested
+// or not, a third block binding the name again.
+//
+// @falsified-at: 3246a192a — interpret exit 101 -> 0, native exit 101 -> 0
+// CHANNEL: the exit — the unfixed compiler aborts with an internal compiler error.
+// ARMED: every run.
+// WITNESS: `Incorrect var jt#…[65535] versus …`.
+// HOLDS: each function's answer, by hand, for every branch.
+
+struct R { a: integer }
+
+fn early() -> R? { R { a: 10 } }
+
+fn forward_nested(c: integer) -> integer {
+  if c == 1 { j1 = later(); if j1 == null { return 0; } return j1!.a; }
+  if c == 2 { if c > 0 { j1 = R { a: 20 }; return j1.a; } }
+  9
+}
+
+fn early_nested_third(c: integer) -> integer {
+  if c == 1 { j2 = early(); if j2 == null { return 0; } return j2!.a; }
+  if c == 2 { if c > 0 { j2 = R { a: 20 }; return j2.a; } }
+  if c == 3 { j2 = R { a: 30 }; s = j2.a + 1; return s; }
+  9
+}
+
+fn forward_flat_third(c: integer) -> integer {
+  if c == 1 { j3 = later(); if j3 == null { return 0; } return j3!.a; }
+  if c == 2 { j3 = R { a: 20 }; return j3.a; }
+  if c == 3 { j3 = R { a: 30 }; s = j3.a + 1; return s; }
+  9
+}
+
+fn later() -> R? { R { a: 10 } }
+
+fn main() {
+  for c in 1..5 {
+    want = if c == 1 { 10 } else if c == 2 { 20 } else { 9 };
+    assert(forward_nested(c) == want, "forward_nested({c}) = {forward_nested(c)}");
+    want3 = if c == 3 { 31 } else { want };
+    assert(early_nested_third(c) == want3, "early_nested_third({c}) = {early_nested_third(c)}");
+    assert(forward_flat_third(c) == want3, "forward_flat_third({c}) = {forward_flat_third(c)}");
+  }
+}
