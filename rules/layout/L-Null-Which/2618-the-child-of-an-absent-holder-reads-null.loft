@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2618 — a read that names no record answers `nullref` AT THE READ (`@FR-L-Null-Which`,
+// `formal/layout.md`), and an out-of-line child (`@FR-L-OutOfLine`) of an ABSENT holder names
+// none: `t.left` with `t: Node?` null is null, so `t.left.key ?? -1` is `-1`.  The C backend's
+// `loft_ref_from_child_rec` tested the holder; the interpreter's `Stores::ref_from_child_rec`
+// read the field word through the null reference and stopped with an internal error.
+//
+// Values, hand-computed: every absent path answers the `??` default, the write through an
+// absent holder is dropped (the same clause, read from the destination end), and the present
+// controls read their keys.
+//
+// @falsified-at: e6d995a7a (the installed main, hand-measured): --interpret panics in
+//   `pointer` with "a NULL DbRef reached a store accessor"; --native passes (the C twin
+//   already tested the holder), so this guard moves the interpreter only.
+//   CHANNEL: the exit channel and the panic channel, --interpret.
+//   WITNESS: `pointer`'s first `assert_eq` never returns on the tree before the fix.
+//   HOLDS: values on both backends; `present` passes on both trees.
+struct Node { key: integer, left: Node? }
+struct Holder { root: Node? }
+
+fn pointer() {
+  t: Node? = null;
+  assert_eq(t.left.key ?? -1, -1, "pointer: the child of an absent local");
+  assert_eq(t.left.left.key ?? -2, -2, "pointer: two levels down");
+}
+
+fn tagged() {
+  h = Holder { root: null };
+  assert_eq(h.root.left.key ?? -1, -1, "tagged: the child of an absent root");
+}
+
+fn dropped_write() {
+  h = Holder { root: null };
+  n = Node { key: 30 };
+  h.root.left = n;
+  assert_eq(h.root.key ?? -1, -1, "dropped_write: the root stays absent");
+  assert_eq(h.root.left.key ?? -1, -1, "dropped_write: and so does its child");
+}
+
+fn present() {
+  h = Holder { root: Node { key: 3, left: Node { key: 30 } } };
+  assert_eq(h.root.left.key ?? -1, 30, "present: the child");
+  assert_eq(h.root.left.left.key ?? -1, -1, "present: an absent grandchild");
+}
+
+fn main() {
+  pointer();
+  tagged();
+  dropped_write();
+  present();
+  println("ok");
+}

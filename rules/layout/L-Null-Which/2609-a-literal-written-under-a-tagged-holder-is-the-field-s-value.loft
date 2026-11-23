@@ -1,0 +1,109 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2609 — the HOLDER of a field reached through a tagged slot is the pointer `S?`
+// (`@FR-L-Null-Which`, `formal/layout.md`): the base of a field read or write is not a slot,
+// so `h.root.left` under `root: Node?` is the field `left` of the record the tag points at.
+// A record literal on the right of that write is the FIELD's value — here the out-of-line
+// child `Node` (`@FR-L-OutOfLine`, `@FR-B-OutOfLine`) — whatever spelling its holder has.
+// The parser recorded the holder in the SLOT's spelling, `__nullable<Node>`, and the right
+// side took it for its expected type: the literal was built as a tagged `Some` record and
+// copied raw into the child, so `key` read the tag word (`2`) and `left` read the payload's
+// first word as a record number — a store-access fault on the interpreter, a silent exit 1
+// natively.
+//
+// Values, hand-computed.  Every cell writes a literal whose struct is the holder's own (the
+// only shape the slot spelling could hijack: the transparent-construction path keys on the
+// literal's name matching `__nullable<S>`), and reads back every key on the path and, for a
+// vector, its length.  `deep` and `nested` cross depth with the literal's own nesting; `second`
+// overwrites a present child; `elem` is the vector-element slot; `plain` and `local` are the
+// controls (a dense holder, a value that is no literal) that were already right.
+//
+// @falsified-at: e6d995a7a (the installed main, hand-measured; `falsify.sh --installed` could
+//   not check the control tree out on this box): --native fails `first: child: got 2, want 30`;
+//   --interpret panics in `first` with "Store access out of bounds … the reference is corrupt".
+//   CHANNEL: the exit channel and the assertion channel, on both backends.
+//   WITNESS: `first`'s `assert_eq(h.root.left.key, 30)` answers 2 (the tag word).
+//   HOLDS: values and lengths on both backends; the controls `plain` and `local` pass on both
+//   trees (measured cell by cell in the issue's matrix).
+struct Node { key: integer, left: Node? }
+struct Holder { root: Node? }
+struct Plain { root: Node }
+
+fn mk(k: integer) -> Node { Node { key: k } }
+
+fn first() {
+  h = Holder { root: Node { key: 3 } };
+  h.root.left = Node { key: 30 };
+  assert_eq(h.root.key, 3, "first: root");
+  assert_eq(h.root.left.key, 30, "first: child");
+  assert_eq(h.root.left.left.key ?? -1, -1, "first: grandchild absent");
+}
+
+fn second() {
+  h = Holder { root: Node { key: 3 } };
+  h.root.left = Node { key: 30 };
+  h.root.left = Node { key: 31 };
+  assert_eq(h.root.left.key, 31, "second: the overwrite");
+}
+
+fn deep() {
+  h = Holder { root: Node { key: 3 } };
+  h.root.left = Node { key: 30 };
+  h.root.left.left = Node { key: 300 };
+  assert_eq(h.root.key, 3, "deep: root");
+  assert_eq(h.root.left.key, 30, "deep: child");
+  assert_eq(h.root.left.left.key, 300, "deep: grandchild");
+}
+
+fn nested() {
+  h = Holder { root: Node { key: 3 } };
+  h.root.left = Node { key: 30, left: Node { key: 300 } };
+  assert_eq(h.root.left.key, 30, "nested: child");
+  assert_eq(h.root.left.left.key, 300, "nested: grandchild");
+}
+
+fn local_view() {
+  h = Holder { root: Node { key: 3 } };
+  h.root.left = Node { key: 30 };
+  h.root.key = 4;
+  r = h.root;
+  assert_eq(r.key ?? -1, 4, "local_view: root");
+  assert_eq(r.left.key ?? -1, 30, "local_view: child");
+}
+
+fn elem() {
+  v: vector<Node?> = [Node { key: 3 }, Node { key: 4 }];
+  v[1].left = Node { key: 40 };
+  assert_eq(len(v), 2, "elem: length");
+  assert_eq(v[0].key ?? -1, 3, "elem: first");
+  assert_eq(v[0].left.key ?? -1, -1, "elem: first has no child");
+  assert_eq(v[1].left.key ?? -1, 40, "elem: child");
+}
+
+fn plain() {
+  h = Plain { root: Node { key: 3 } };
+  h.root.left = Node { key: 30 };
+  assert_eq(h.root.left.key, 30, "plain: child");
+}
+
+fn local() {
+  h = Holder { root: Node { key: 3 } };
+  n = Node { key: 30 };
+  h.root.left = n;
+  h.root.left.left = mk(300);
+  assert_eq(h.root.left.key, 30, "local: child");
+  assert_eq(h.root.left.left.key, 300, "local: grandchild");
+}
+
+fn main() {
+  first();
+  second();
+  deep();
+  nested();
+  local_view();
+  elem();
+  plain();
+  local();
+  println("ok");
+}
