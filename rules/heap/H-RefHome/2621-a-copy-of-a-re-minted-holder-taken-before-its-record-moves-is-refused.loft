@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-RefHome` — a holder minted again by its own literal in a loop pass keeps the record
+// its field names by a copy into its store when the record's pass ends
+// (`2621-a-holder-re-minted-in-a-loop-keeps-the-record-its-field-names.loft`).  A copy of the
+// holder taken BEFORE that, in the same pass, still names the record where it was built: here
+// a vector element, which has no fixed place to copy into, so nothing keeps the record for it
+// and the copy is refused.  Before, it compiled and read null for every element but the last
+// on both backends (loft#2621); a copy-out that re-pointed only the holder left the element
+// reading the freed store.
+//
+// Hand-computed: the copy `v += [a]` is refused; nothing runs.
+// @falsified-at: hand-measured (control: the installed main build 2026.11.20261121) — interpret
+//   and native compile it and print `null null 9 9` for `3 6 9 9`.
+//   CHANNEL: the refusal.
+//   HOLDS: the same program with `v` holding records minted once (`a.doc = d` on one `a`) is
+//   the place_own shape, kept and right on both trees.
+// @EXPECT_ERROR: the `doc` field inside `v` (copied from `a`) would outlive the record it names
+struct Doc { name: text, n: integer }
+struct Pin { label: text, doc: reference<Doc>? }
+
+fn main() {
+  a = Pin { label: "none" };
+  v: vector<Pin> = [];
+  for i in 1..4 {
+    d = Doc { name: "pin{i}", n: i * 3 };
+    a = Pin { label: "p{i}", doc: d };
+    v += [a];
+  }
+  println("{v[0].doc.n} {v[1].doc.n} {v[2].doc.n} {a.doc.n}");
+}

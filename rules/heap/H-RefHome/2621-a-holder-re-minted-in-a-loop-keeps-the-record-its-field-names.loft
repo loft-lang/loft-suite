@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-H-RefHome` — a record a stored `reference<T>` names lives as long as the store of its
+// holder, also when the holder is minted again by its own literal in the same loop pass,
+// after the record (`for … { d = Doc {…}; a = Pin { doc: d } }`).  Building `d` in `a`'s store
+// cannot keep it: `a`'s literal clears that store a statement later, so the field read null
+// on both backends (loft#2621).  The record is copied into the holder's store when `d`'s pass
+// ends instead, the way a parameter holder's is.
+//
+// Axes this file MOVES:  a read of the holder between the record's mint and the holder's
+//                        (r2); a second holder minted once outside the loop, and a write
+//                        through one holder read through the other (r3); a `break` in the
+//                        middle pass (r5); the holder re-minted in an inner loop of two (r6).
+// Axes it HOLDS FIXED:   the record is a plain struct of a text and an integer; the field is
+//                        `reference<Doc>?`; every holder is a local of the function.
+// Controls: none — every function reads the field through the holder that was re-minted.
+// Hand-computed: r1 the last pass, i = 2: `p2 pin2 6`.  r2 reads the previous pass's record
+// before each re-mint: null, then 3, then 6.  r3: both holders name one record, so 99 shows
+// through both.  r5 stops at i = 2.  r6's last pass is j = 1, i = 2: `q12`, 12.
+// @falsified-at: hand-measured (control: the installed main build 2026.11.20261121) — interpret
+//   r1 prints `p2 null null`, r2 `null,6,null,`, r3 `null null`, r5 `p2 null null`, r6
+//   `null null`: every assert fails, on --native the same.
+//   CHANNEL: the asserts on the field's reads.
+//   HOLDS: the holder's own label is right on both trees.
+struct Doc { name: text, n: integer }
+struct Pin { label: text, doc: reference<Doc>? }
+
+fn r1() -> text {
+  a = Pin { label: "none" };
+  for i in 1..3 {
+    d = Doc { name: "pin{i}", n: i * 3 };
+    a = Pin { label: "p{i}", doc: d };
+  }
+  "{a.label} {a.doc.name} {a.doc.n}"
+}
+
+fn r2() -> text {
+  a = Pin { label: "none" };
+  s = "";
+  for i in 1..4 {
+    d = Doc { name: "pin{i}", n: i * 3 };
+    s += "{a.doc.n},";
+    a = Pin { label: "p{i}", doc: d };
+  }
+  "{s} {a.label} {a.doc.name} {a.doc.n}"
+}
+
+fn r3() -> text {
+  a = Pin { label: "none" };
+  b = Pin { label: "b" };
+  for i in 1..3 {
+    d = Doc { name: "pin{i}", n: i * 3 };
+    a = Pin { label: "p{i}", doc: d };
+    b.doc = d;
+  }
+  a.doc.n = 99;
+  "{a.doc.n} {b.doc.n}"
+}
+
+fn r5() -> text {
+  a = Pin { label: "none" };
+  for i in 1..4 {
+    d = Doc { name: "pin{i}", n: i * 3 };
+    a = Pin { label: "p{i}", doc: d };
+    if i == 2 { break; }
+  }
+  "{a.label} {a.doc.name} {a.doc.n}"
+}
+
+fn r6() -> text {
+  a = Pin { label: "none" };
+  for j in 0..2 {
+    for i in 1..3 {
+      d = Doc { name: "q{j}{i}", n: j * 10 + i };
+      a = Pin { label: "x", doc: d };
+    }
+  }
+  "{a.doc.name} {a.doc.n}"
+}
+
+fn main() {
+  assert(r1() == "p2 pin2 6", "r1: {r1()}");
+  assert(r2() == "null,3,6, p3 pin3 9", "r2: {r2()}");
+  assert(r3() == "99 99", "r3: {r3()}");
+  assert(r5() == "p2 pin2 6", "r5: {r5()}");
+  assert(r6() == "q12 12", "r6: {r6()}");
+}
