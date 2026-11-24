@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // `--native` skips the null test on arithmetic over a local it has PROVEN can never hold the
-// sentinel (@PLN157 P3c, `generation::non_sentinel`): every `Set` to it assigns a non-null
+// sentinel (@PLN157 P3c): every `Set` to it assigns a non-null
 // value, and nothing else can write it.  A local whose ADDRESS is taken can be written by
 // whoever holds the reference — a callee through a `&integer` parameter, or a local link
 // `p = &k` — and an overflow or a division by zero there leaves the sentinel (C85).  The proof
@@ -9,6 +9,7 @@
 // both spellings to `OpCreateStack(k)`, so `k + 1` took the unchecked form and answered
 // `-9223372036854775807` where the interpreter answers null (loft#1534).
 // @falsified-at: 14d50b42f — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard — only one side can move)
+//   ARMED: none needed — the defect moves the value and the asserts, not a leak.
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 
