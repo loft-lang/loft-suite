@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a local that both owns and views is what this program checks.
 //
 // A NULLABLE RETURN HANDS OUT A FRESH, OWNED VALUE, AS ITS DENSE TWIN DOES (`@FR-F-Ret` crossed with
 // `@FR-N-Road` and `@FR-B-Copy`).  A returned whole heap value is owned, never a view of a local or

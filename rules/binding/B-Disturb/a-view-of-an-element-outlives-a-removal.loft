@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_CALLEE_DISTURB — the switch reads only this frame's disturbances again, so a view across a call that removes from its container reads the element that moved into its place, which is what this program checks.
 //
 // `@FR-B-Disturb` crossed with `@FR-Col-Remove`: a removal renumbers every later position
 // (`@FR-Col-RemoveDense`), so it ends the place a view of a later element names, and the view

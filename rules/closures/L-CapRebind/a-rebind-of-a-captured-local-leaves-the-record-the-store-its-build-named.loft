@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LAZY_BUFFER — the switch mints the hidden buffer at entry again, so a call rebound in a loop answers the record of an earlier pass, which is what this program checks.
 //
 // A REBIND OF A CAPTURED LOCAL LEAVES THE CLOSURE RECORD THE STORE ITS BUILD NAMED, RELEASED ONCE
 // (`@FR-L-CapRebind`, with `@FR-O-Detach` and `@FR-H-FreeTwice`).  A whole-value rebind is not a

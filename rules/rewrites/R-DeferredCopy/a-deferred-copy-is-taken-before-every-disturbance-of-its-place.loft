@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a local that both owns and views is what this program checks.
 //
 // `@FR-R-DeferredCopy` crossed with `@FR-B-Disturb`: a record local bound by B-Copy's copy of
 // an element view, and only read after, is bound by a MOVE and copied where its place could

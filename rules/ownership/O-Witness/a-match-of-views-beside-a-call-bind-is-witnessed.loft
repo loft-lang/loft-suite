@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @catches: LOFT_NO_CHOICE_VIEW — the switch reads a `match` or `if` of views as no view, so the local is never mixed and is freed as an owner of the record it views.
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a local that both owns and views is what this program checks.
 //
 // `@FR-O-Witness`: a local whose assignments mix ownership releases through its owner witness,
 // and a CHOICE whose arms view storage is a view like a plain field read.

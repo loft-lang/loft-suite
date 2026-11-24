@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a local that both owns and views is what this program checks.
 //
 // `x = if c { a } else { b }` on a heap-record local that ALREADY holds a value copies the
 // chosen arm (`formal/binding.md` @FR-B-Copy; `formal/ownership.md` @FR-O-Complete: every

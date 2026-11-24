@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_JOIN_BUFFER_WITNESS — the switch restores the unpaired form, in which the binding and the temp its arm answered each release the one record, which is what this program checks.
 //
 // A COALESCE RETURN ANSWERS ITS OWN VALUE (`@FR-F-Return`, `@FR-C-Never`, loft#2551).  `x ?? return
 // e` is the statement `return e` on the absent path, so the call answers `e` — typed against the

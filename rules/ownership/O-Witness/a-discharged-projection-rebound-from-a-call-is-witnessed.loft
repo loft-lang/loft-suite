@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @catches: LOFT_NO_NCR_TEMP_VIEW — the switch reads the discharged projection as a mint, so the local takes no witness and frees the store it only viewed
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a local that both owns and views is what this program checks.
 //
 // @FR-O-Witness: a local that VIEWS on one bind and MINTS on another releases only what it
 // minted.  A discharged projection (`def_of(ds, 0).attrs[i]!.typedef[0]`) is a view of the

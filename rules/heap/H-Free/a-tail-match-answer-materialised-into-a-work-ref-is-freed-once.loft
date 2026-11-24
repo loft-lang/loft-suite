@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_JOIN_BUFFER_WITNESS — the switch restores the unpaired form, in which the binding and the temp its arm answered each release the one record, which is what this program checks.
 //
 // @FR-H-Free — a store is freed once, wherever it dies.  A `-> T?` function whose tail is a
 // `match` hands up the arm's answer; an arm that answers a VIEW (an element of a vector the frame

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_APPEND_STAGING — the switch runs an appended literal's fields between the element's mint and its finish again, so a field that reads its own container reads the half-built element, which is what this program checks.
 //
 // A vector literal assigned to a FIELD reads what the field held when the statement began,
 // whatever NAME the read reaches it by (loft#2397).

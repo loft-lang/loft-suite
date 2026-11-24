@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_OWNER_WITNESS — the switch emits the pre-witness form, whose release of a local that both owns and views is what this program checks.
+// @catches: LOFT_NO_JOIN_BUFFER_WITNESS — the switch restores the unpaired form, in which the binding and the temp its arm answered each release the one record, which is what this program checks.
 //
 // A COALESCE ARM OF A BOUND BRANCH IS RELEASED ONCE (`@FR-H-FreeTwice`, `@FR-I-Join`,
 // `@FR-H-Drop`, loft#2550).  `r = if c { f() ?? d } else { g() ?? d }` binds a record a `??` chain
