@@ -19,11 +19,6 @@
 //
 // @falsified-at: none — written before the rewrite it guards; the planted defects are recorded
 //   with `@falsified-by:` below.
-// @falsified-by: tests/falsified/a-kept-buffers-elements-are-refilled-in-their-slots-close.patch
-//   — the exit releasing nothing: the kept slots a shorter result did not reuse keep their texts.
-//   CHANNEL: an assertion, on --native.
-//   WITNESS: `m1 runs grow: 15 -> 1170 records` — which also shows the kept path runs.
-//   HOLDS: --interpret green, --native under LOFT_NO_REFILL_ELEMENTS=1 green, every value cell.
 // @falsified-by: tests/falsified/a-kept-buffers-elements-are-refilled-in-their-slots-past-keep.patch
 //   — every appended slot refilled, past the kept length too, where the slot holds no block.
 //   CHANNEL: a panic, on --native (plain and LOFT_POISON_CLAIM=1).
