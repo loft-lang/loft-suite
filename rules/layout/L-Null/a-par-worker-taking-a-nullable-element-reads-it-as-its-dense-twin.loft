@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// @FR-L-Null — `t?` has the same storage as `t`, so a `par` worker taking `t?` reads a row of
+// `vector<t?>` exactly as one taking `t` reads a row of `vector<t>`.  The interpreter chose
+// how to hand a row to its worker from the worker's DECLARED first parameter type, and
+// `text?` is `Optional(Text)`, not `Text`: it fell to the record arm, and the worker read the
+// row's pointer bits as a text — a SIGSEGV on the first row, for any value.  `integer?` and
+// `boolean?` workers went the same way.  The C backend chose by the base type and was right.
+//
+// Axes this file MOVES:  the element type (text, integer, boolean, each nullable), the row
+//                        (present, null), the worker count (1, 2).
+// Axes it HOLDS FIXED:   the worker is a plain function of its element alone.
+//
+// CHANNEL: the asserts, and the exit status (the interpreter faulted before any assert).
+// ARMED: no instrument.
+// WITNESS: each message names the element type and the joined answers.
+// HOLDS: the dense-twin control (`vector<text>` into a `text` worker) answers the same.
+// @falsified-at: 4637cb9a5 — interpret exit 138 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+// @falsified-by: tests/falsified/a-par-worker-taking-a-nullable-element-reads-it-as-its-dense-twin.patch — interpret exit 138 -> 0; native INERT (expected for a
+//   backend-divergence guard — only one side can move)
+
+fn tw(t: text?) -> text { "<{t ?? "-"}>" }
+
+fn iw(i: integer?) -> integer { (i ?? -1) * 10 }
+
+fn bw(b: boolean?) -> integer { if b ?? false { 1 } else { 0 } }
+
+fn dense(t: text) -> text { "<{t}>" }
+
+fn test_a_nullable_text_worker() {
+  v: vector<text?> = ["ab", null, "c"];
+  one = "";
+  for e in v par(r = tw(e), 1) { one += r; }
+  two = "";
+  for e in v par(r = tw(e), 2) { two += r; }
+  assert(one == "<ab><-><c>", "text? on one worker: {one}");
+  assert(two == "<ab><-><c>", "text? on two workers: {two}");
+}
+
+fn test_a_nullable_integer_worker() {
+  v: vector<integer?> = [1, null, 3];
+  sum = 0;
+  for e in v par(r = iw(e), 2) { sum += r; }
+  assert(sum == 30, "integer?: 10 - 10 + 30, got {sum}");
+}
+
+fn test_a_nullable_boolean_worker() {
+  v: vector<boolean?> = [true, null, false];
+  sum = 0;
+  for e in v par(r = bw(e), 2) { sum += r; }
+  assert(sum == 1, "boolean?: one true row, got {sum}");
+}
+
+fn test_the_dense_twin_answers_the_same() {
+  v: vector<text> = ["ab", "c"];
+  out = "";
+  for e in v par(r = dense(e), 2) { out += r; }
+  assert(out == "<ab><c>", "text: {out}");
+}
