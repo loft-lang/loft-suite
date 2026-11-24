@@ -9,7 +9,6 @@
 //   recorded with `@falsified-by:` below (every result treated as owned: the view's store is
 //   freed, a panic), and were measured both ways (every result treated as a view: c5's record
 //   count grows by the misses).
-// @falsified-by: tests/falsified/a-found-entry-is-read-where-it-lies.patch — native exit 1 -> 0, native panicked -> clean; interpret INERT (expected for a backend-divergence guard — only one side can move)
 
 enum Val {
   VNone,

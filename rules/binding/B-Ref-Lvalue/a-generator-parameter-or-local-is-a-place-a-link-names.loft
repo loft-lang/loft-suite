@@ -6,8 +6,6 @@
 // field did not hold (E0308) (loft#1899).  Each value is worked out by hand beside it.
 // @falsified-at: 58c7b3c80 — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-generator-parameter-or-local-is-a-place-a-link-names.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
 // CHANNEL: the native exit — rustc refuses the control (E0596, E0425, E0308).
 // HOLDS: asserts 0, leak none, panic none and free-refusals 0 on both trees and both backends;
 //   the interpreter answers every cell on both, as measured by `make falsify` at 58c7b3c80.

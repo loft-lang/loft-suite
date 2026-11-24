@@ -24,8 +24,6 @@
 //   `___clos_*` record, named in states that never declared them).
 //   WITNESS: `cannot find value var_f in this scope` on the control.
 //   HOLDS: assertions, leak, panic and free-refusal are equal on both trees on the interpreter.
-// @falsified-by: tests/falsified/1587-a-generator-holds-a-lambda-across-a-yield.patch — the same
-//   channels.
 
 struct Log { n: integer }
 

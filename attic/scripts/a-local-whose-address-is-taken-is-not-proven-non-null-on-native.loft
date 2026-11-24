@@ -9,19 +9,6 @@
 // both spellings to `OpCreateStack(k)`, so `k + 1` took the unchecked form and answered
 // `-9223372036854775807` where the interpreter answers null (loft#1534).
 // @falsified-at: 14d50b42f — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-local-whose-address-is-taken-is-not-proven-non-null-on-native.patch — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard — only one side can move)
-//   CHANNEL: exit and asserts, on native only — the interpreter never proved anything, so it
-//   answers null on both trees.  On the control `main` stops at the first defect cell's assert.
-//   ARMED: none needed for the value; `LOFT_NN_VERIFY=1` turns the same fault into a panic on
-//   the control ("OpAddInt: non-sentinel proof failed"), and it is silent here.
-//   WITNESS: every defect cell moved on native, measured cell by cell before this file: the
-//   overflow through the reference, the division by zero, the local link, the loop and the taken
-//   branch each read `-9223372036854775807` on the control and null here; the emitted `k + 1`
-//   went from `op_add_long_nn` to the checked `op_add_int`.
-//   HOLDS: the four controls answer the same on both trees on both backends — a by-value callee,
-//   a local never passed, an untaken branch, a float made NaN — and the by-value control still
-//   emits `op_add_long_nn`, so the proof keeps every local nothing can write.  Clean under strict
-//   stores and poison, no native leak.
 //
 // Cross-backend; `main` runs every cell so the leak gate reads the file.
 

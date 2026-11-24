@@ -12,12 +12,6 @@
 // copy moved the handle; c12 reads text; c13 writes through the copy; c14 copies a structure
 // that holds the file.
 //
-// @falsified-by: tests/falsified/a-copied-file-reads-at-its-own-cursor.patch — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard — only one side can move)
-//   CHANNEL: the VALUE channel, native only — the patch reads at the handle's position once
-//   it is open, so c1's read through the copy answers the next value after `f`'s.
-//   WITNESS: under the patch native reads `-44` through `g` in c1 where this file says `-47`.
-//   HOLDS: the interpreter is exact on both trees; leak, panic and free-refusal are clean on
-//   both — only native's values move.
 
 fn path(tag: text) -> text { "{temp_dir() ?? "/tmp"}/loft_copied_file_{tag}.bin" }
 

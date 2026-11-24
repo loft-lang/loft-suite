@@ -27,8 +27,6 @@
 //   the second yield, declared only in the first state).
 //   WITNESS: `cannot find value var___lift_2 in this scope` on the control.
 //   HOLDS: assertions, leak, panic and free-refusal are equal on both trees on the interpreter.
-// @falsified-by: tests/falsified/a-generator-keeps-its-heap-temps-across-a-yield.patch — the same
-//   channels.
 
 struct H { id: integer }
 enum E { A { h: H }, B }

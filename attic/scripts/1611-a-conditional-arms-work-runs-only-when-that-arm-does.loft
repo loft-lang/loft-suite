@@ -16,12 +16,6 @@
 //
 // @falsified-at: 9a52ab949 — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/1611-a-conditional-arms-work-runs-only-when-that-arm-does.patch — native exit 1 -> 0, native 1 assertion failures -> 0
-//   CHANNEL: the first assertion, on `--native` alone.
-//   ARMED: nothing.
-//   EXPECTED INERT: `--interpret`, which has always evaluated an arm only when it runs —
-//     a backend-divergence guard cannot move both sides.
-//   HOLDS: the `both` cell (the hoist an arm still needs) on both trees.
 
 fn bump(v: &vector<integer>) -> integer { v += [4]; len(v) }
 fn joined(x: text, y: text) -> text { "{x}/{y}" }

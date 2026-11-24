@@ -9,7 +9,6 @@
 // used to write the place's reference into the caller's variable and fail to compile.
 //
 // @falsified-at: cee2b1702 — native exit 1 -> 0; interpret INERT (expected: the interpreter already re-pointed a parameter, native did not compile it)
-// @falsified-by: tests/falsified/a-reference-parameter-re-points-to-an-element-a-field-or-a-local.patch — native exit 1 -> 0; interpret INERT (expected: the interpreter already re-pointed a parameter, native did not compile it)
 // HOLDS: leak, panic and free-refusal are clean on both trees and both backends.
 //
 // CHANNEL: the assertions — the caller's variable after the call, and what the callee read through

@@ -30,8 +30,6 @@
 //   `kt=87 A×12, kt=88 B×6` on this tree, which `make falsify` scores as unclean: those are the
 //   yielded records the stream consumer never releases — loft#1589's native half, present
 //   before the generator's temps became fields — and not this guard's channel.
-// @falsified-by: tests/falsified/a-match-over-a-generator-of-dropped-records-reads-them.patch —
-//   the same channels.
 
 struct H { id: integer }
 fn OpDrop(self: H) { }

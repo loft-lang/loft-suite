@@ -6,8 +6,6 @@
 // spelled through the capture's own Rust place (`var_place`).
 // @falsified-at: 4aa94359f — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-pattern-capture-takes-the-type-its-pattern-matched.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
 // HOLDS: every type and value agrees on the interpreter on both trees; leak and panic are clean.
 // CHANNEL: the native exit — rustc refuses the control's member list over the raw name.
 

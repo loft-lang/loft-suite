@@ -8,8 +8,6 @@
 // worked out by hand in the comment beside it.
 // @falsified-at: 2e3ef1057 — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-text-member-write-copies-its-source.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
 // CHANNEL: the native exit — rustc refuses the control (E0382 on a moved work text, E0308 on
 //   `&*var_x.clone()`); the interpreter answers every cell on both trees.
 // HOLDS: asserts 0, leak none, panic none and free-refusals 0 on both trees and both backends,

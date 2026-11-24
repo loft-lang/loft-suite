@@ -16,9 +16,6 @@
 //
 // @falsified-at: 04da090bf — native exit 1 -> 0, native 1 assertion failures -> 0; interpret
 //   INERT, expected for a backend-divergence guard.
-// @falsified-by: tests/falsified/a-yielded-null-boolean-reaches-the-consumer.patch — the same
-//   channels.  Score it with `scripts/falsify.sh <this file> --patch <that patch>` once
-//   04da090bf is out of reach.
 // HOLDS: leak, panic and refusals are clean on both trees and both backends.
 
 fn flags(m: boolean?) -> iterator<boolean> {

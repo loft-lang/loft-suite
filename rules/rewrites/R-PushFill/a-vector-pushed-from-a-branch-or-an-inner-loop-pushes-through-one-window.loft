@@ -23,7 +23,6 @@
 // regrow     even rows r < 20 push r + c, c < 50: 50*90 + 10*1225 = 16750, 500 elements
 //            → 500*100000 + 16750 = 50016750.
 //
-// @falsified-by: tests/falsified/a-vector-pushed-from-a-branch-or-an-inner-loop-pushes-through-one-window.patch — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a backend-divergence guard — only one side can move)
 // CHANNEL: native assertions — with an inner counted loop reserving under the outer window,
 // the reservation moves the record and the window writes where it was.
 // HOLDS: the interpreter takes no window and answers the same on both trees.

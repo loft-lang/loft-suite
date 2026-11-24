@@ -5,8 +5,6 @@
 // arguments) and the absent arm as `()`, so none of these compiled; the interpreter ran them.
 // @falsified-at: df902ad64 — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-function-value-that-returns-a-function-compiles-natively.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
 // HOLDS: the interpreter answers every cell on both trees; leak and panic are clean.
 // CHANNEL: the native exit — rustc refuses the control's argument and absent arm.
 

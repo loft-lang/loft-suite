@@ -32,8 +32,6 @@
 //   assertion, `a while ending in its yield interleaves: 1122 / 3` — the eager signature.
 //   WITNESS: `1122` where the fix answers `1212`.
 //   HOLDS: leak, panic and free-refusal are equal on both trees on the interpreter.
-// @falsified-by: tests/falsified/1586-a-while-loop-generator-yields-before-its-next-iteration.patch —
-//   the same channels.
 
 struct Log { n: integer }
 struct Pt1586 { x: integer, y: integer }

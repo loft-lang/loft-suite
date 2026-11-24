@@ -6,8 +6,6 @@
 // worked out by hand beside it.
 // @falsified-at: fbee3ae5e — native exit 1 -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/a-formatted-append-through-a-text-link.patch — native exit 1 -> 0; interpret INERT (expected for a
-//   backend-divergence guard — only one side can move)
 // CHANNEL: the native exit — rustc refuses the control (E0308, `*mut String` where a
 //   `&mut String` is due).
 // HOLDS: asserts 0, leak none, panic none and free-refusals 0 on both trees and both backends;

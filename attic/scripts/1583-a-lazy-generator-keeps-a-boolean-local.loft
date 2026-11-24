@@ -19,8 +19,6 @@
 //   CHANNEL: exit, native — rustc refused the control (E0308, `expected u8, found bool`).
 //   WITNESS: `self.var_flag = false;` in the generated state machine, on the control.
 //   HOLDS: assertions, leak, panic and free-refusal are equal on both trees on the interpreter.
-// @falsified-by: tests/falsified/1583-a-lazy-generator-keeps-a-boolean-local.patch — the same
-//   channels.
 
 fn signs1583() -> iterator<integer> {
   flag = false;

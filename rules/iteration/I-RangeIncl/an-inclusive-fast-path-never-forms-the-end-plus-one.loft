@@ -24,14 +24,6 @@
 //
 // @falsified-at: 838779752 — native exit 1 -> 0, native panicked -> clean; interpret INERT
 //   (expected for a backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/an-inclusive-fast-path-never-forms-the-end-plus-one.patch —
-//   the same channels.
-// ARMED: FALSIFY_NATIVE=rust — the patch reverts the rustc writer (`src/generation/`), which
-//   the default C leg does not run.
-// CHANNEL: the exit code — the panic ends the run, identically for every to-maximum cell.
-// WITNESS: `attempt to add with overflow` from the generated fill tail, on the rustc leg only.
-// HOLDS: the interpreter answers every cell on both trees; the controls answer on both
-//   backends on both trees.
 
 struct Cv { data: vector<integer> }
 

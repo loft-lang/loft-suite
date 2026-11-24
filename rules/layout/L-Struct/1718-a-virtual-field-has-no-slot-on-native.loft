@@ -12,7 +12,6 @@
 //
 // @falsified-at: 9a76922 — native exit 1 -> 0, native 1 assertion failures -> 0; interpret INERT (expected for a
 //   backend-divergence guard — only one side can move)
-// @falsified-by: tests/falsified/1718-a-virtual-field-has-no-slot-on-native.patch — the same channels.
 // CHANNEL: the asserts on both backends (native exit 101 on the panic cell before the fix).
 // HOLDS: the control (a stored default beside the vector, no virtual field) passes on both.
 
