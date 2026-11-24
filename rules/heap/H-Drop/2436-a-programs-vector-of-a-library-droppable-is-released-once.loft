@@ -41,6 +41,13 @@ fn d3() -> integer {
   return hdrop_2436_lib::pairs_len(b.ps);
 }
 
+fn test_the_library_releases_its_own_vector_once() {
+  _ = hdrop_2436_lib::drain();
+  assert(hdrop_2436_lib::lib_pair() == 2, "the library's vector holds two");
+  got = hdrop_2436_lib::drain();
+  assert(got == "4,5", "the library's vector releases each once: {got}");
+}
+
 fn test_a_programs_vector_of_a_library_droppable_is_released_once() {
   _ = hdrop_2436_lib::drain();
   assert(d1() == 1, "d1 holds one element");
