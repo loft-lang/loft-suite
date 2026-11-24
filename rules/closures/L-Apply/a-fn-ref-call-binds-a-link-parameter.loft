@@ -22,10 +22,6 @@
 //
 // @falsified-at: c8cfeb402 — native exit 1 -> 0 (the control's crate did not build: `let _farg_0 = ;`);
 //   interpret INERT, expected — the interpreter bound these cells right.
-// @falsified-by: tests/falsified/a-fn-ref-call-binds-a-link-parameter.patch — the same
-//   channels, scored with `scripts/falsify.sh <this file> --patch <that patch>`.
-//   ARMED: FALSIFY_NATIVE=rust — the defect is the rustc writer's alone, which the default C leg
-//   cannot see.
 // HOLDS: leak, panic and refusals are clean on both trees and both backends.
 
 struct P { x: integer, y: integer }
