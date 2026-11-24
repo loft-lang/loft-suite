@@ -11,8 +11,9 @@
 //
 // Cells, every trace worked out by hand: both arms move `v` in (b1 true, b2 false), both arms
 // build a literal (b3), one arm moves and the other builds (b4 each way), inside a loop body
-// (b5), an `if` nested in an arm (b6), an arm that binds twice — declined, the release stays
-// after the `if` (b7, a CONTROL for the admission's own limit), and a `match` (b8).  The drop
+// (b5), an `if` nested in an arm (b6), an arm that binds twice (b7 — each arm's `w` a binding
+// of its own, `@FR-B-Scope` with loft#2627, so it too is released at its arm's end), and a
+// `match` (b8).  The drop
 // hook writes a trace FILE, as `1600-…` does.
 //
 // @falsified-at: 8735b507e — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
@@ -105,7 +106,7 @@ fn main() {
   b6(true);
   ok("b6 nested if          ", drain(), "m90,r1,d90,b,x");
   b7(true);
-  ok("b7 CONTROL bound twice", drain(), "m95,r1,m96,d95,s1,x,d96");
+  ok("b7 bound twice", drain(), "m95,r1,m96,d95,s1,d96,x");
   b8(1);
   ok("b8 match arm          ", drain(), "m99,r1,d99,x");
   delete(trace_path());
