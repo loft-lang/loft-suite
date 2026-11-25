@@ -3,10 +3,9 @@
 //
 // AN INLINE `??` CHAIN THROUGH A FIELD FREES ITS CALL'S STORE (`@FR-H-Free`: every exit releases
 // what the frame owns).  `ch(maybe(c) ?? ob.m ?? d)` may answer the call's fresh store, the field
-// `ob.m` — which lives in `ob`'s store — or `d`.  Handed to a loft function, which only borrows
-// it, the lift owns the value and is freed only where it is neither `ob`'s store nor `d`'s.  Not
-// lifted, the call's store was owned by nothing (loft#2649).  A `for` over the same chain owns
-// what it iterates and is left to the `for` (its own release of the chain is loft#2650).
+// `ob.m` — which lives in `ob`'s store — or `d`.  The lift owns the value and is freed only where
+// it is neither `ob`'s store nor `d`'s.  Not lifted, the call's store was owned by nothing
+// (loft#2649); the same chain under a `for` is heap/H-Free/2650.
 //
 // @catches: LOFT_NO_NCC_SUBJECT_ROOT — the switch declines a chain whose middle arm is a field, and the store the call answered leaks
 //

@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A `for` OVER A `??` CHAIN FREES ITS CALL'S STORE (`@FR-H-Free`: every exit releases what the
+// frame owns).  `for r in maybe(c) ?? ob.m ?? mk(2)` iterates the call's fresh store, the field
+// `ob.m`, or a default the parser gave its own buffer (a `join-arm-owner`, which frees itself).
+// The lift that owns the iterated value compares with every one of those before it frees: the
+// call's store is freed where it was taken, the field and the default buffer are left to their
+// owners.  Read as owned, the default buffer was freed twice; declined, the call's store leaked
+// (loft#2650).
+//
+// @catches: LOFT_NO_NCC_ARM_OWNER_BASE — the switch reads the default buffer as a store the lift owns, and frees it a second time
+//
+// Axes this file MOVES:  the consumer (a `for`, a loft function's argument); the chain's middle
+//                        arm (a field, nothing); an absent field as the subject; which arm each
+//                        pass takes.
+// Axes it HOLDS FIXED:   the keyed kind (hash); the last arm is a call the parser buffers.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   HOLDS: every cell, on every backend.
+
+struct H { k: integer, v: integer }
+struct O { m: hash<H[k]> }
+struct On { m: hash<H[k]>? }
+
+fn mk(k: integer) -> hash<H[k]> { [H { k: k, v: k * 11 }] }
+fn maybe(c: boolean) -> hash<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn ch(x: hash<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+
+fn test_a_for_over_a_chain_frees_only_its_call() {
+  ob = O { m: mk(3) };
+  s = 0;
+  t = 0;
+  for i in 0..3 {
+    for r in maybe(i == 1) ?? ob.m ?? mk(2) { s += r.v; }
+    for r in maybe(i == 1) ?? mk(2) { t += r.v; }
+  }
+  assert(s == 33 + 11 + 33, "{s}");
+  assert(t == 22 + 11 + 22, "{t}");
+  assert(ch(ob.m) == 33, "the field is intact");
+}
+
+fn test_an_absent_field_takes_the_buffered_default() {
+  on = On { m: null };
+  s = 0;
+  for i in 0..3 { for r in on.m ?? mk(2) { s += r.v; } }
+  assert(s == 66, "{s}");
+  a = "";
+  for i in 0..3 { a += "{ch(on.m ?? mk(2))} "; }
+  assert(a == "22 22 22 ", a);
+}
+
+fn test_a_call_over_a_chain_with_a_buffered_default() {
+  ob = O { m: mk(3) };
+  a = "";
+  for i in 0..3 { a += "{ch(maybe(i == 1) ?? ob.m ?? mk(2))} {ch(maybe(i == 1) ?? mk(2))}|"; }
+  assert(a == "33 22|11 11|33 22|", a);
+}
