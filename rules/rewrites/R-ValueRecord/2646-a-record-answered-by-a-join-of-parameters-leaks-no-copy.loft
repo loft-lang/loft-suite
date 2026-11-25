@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD ANSWERED BY A JOIN OF PARAMETERS LEAKS NO COPY (`@FR-R-ValueRecord`: a rewrite is free
+// exactly where its conditions hold).  `fn pick(o: Vo?, s: Vo) -> Vo { o ?? s }` binds each arm of
+// the join by a copy of a parameter, which the record form hands to the caller as its answer.
+// The value-record rewrite read it field-wise into a tuple, and that copy then had no owner: one
+// record per call, on the interpreter (loft#2646, the shape loft#2641 refused in the other pass).
+// A function whose answer names a visible parameter keeps its record form.
+//
+// @catches: LOFT_NO_VALUE_PARAM_DECLINE — the switch admits the rewrite, and the copy each call binds leaks
+//
+// Axes this file MOVES:  which arm the join takes (the nullable parameter present, absent); a
+//                        record of one field, a record of two; a bare parameter answered whole.
+// Axes it HOLDS FIXED:   the records hold integers only.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate (interpreter).
+//   HOLDS: every cell, on every backend.
+
+struct Vo { x: integer }
+struct Vp { x: integer, y: integer }
+
+fn pick(o: Vo?, s: Vo) -> Vo { o ?? s }
+fn pick2(o: Vp?, s: Vp) -> Vp { o ?? s }
+fn whole(p: Vo) -> Vo { p }
+
+fn test_a_join_of_parameters_answers_either_arm() {
+  a = Vo { x: 1 };
+  b = Vo { x: 2 };
+  c = Vp { x: 3, y: 4 };
+  d = Vp { x: 5, y: 6 };
+  t = "";
+  for i in 0..3 {
+    t += "{pick(null, a).x}{pick(b, a).x}{pick2(null, c).y}{pick2(d, c).y}{whole(b).x} ";
+  }
+  assert(t == "12462 12462 12462 ", t);
+  assert(a.x == 1 && b.x == 2 && c.y == 4 && d.y == 6, "the arguments are untouched");
+}
