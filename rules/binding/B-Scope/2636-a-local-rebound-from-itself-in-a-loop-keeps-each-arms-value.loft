@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LOCAL DECLARED FROM A BRANCH BELONGS TO ITS STATEMENT (`@FR-B-Scope`), whichever arm gave
+// it its value.  A vector declared from an `if` is bound in each arm, and the statement's own
+// scope is where it lives: a `for` loop after it that rebinds it from itself (`v = keep(v)`,
+// `v = v + [3]`) reads the value the arm that ran gave it.  The rebind gives the local a
+// dependency on itself, and that alone kept it from being declared at the statement: it was
+// homed in an arm, its slot was taken by the loop's own locals, and the first arm's value read
+// back empty — or null — on both backends (loft#2636).  Every value is hand-computed.
+//
+// @falsified-at: 02c3cf75d — interpret exit 1 -> 0, native exit 1 -> 0 (4 of 4 tests fail without the fix)
+// CHANNEL: the values — each assertion names the arm and the rebind.
+// HOLDS: every assertion passes on both backends.
+
+fn by_call(first: boolean, start: vector<integer>) -> text {
+  v: vector<integer> = if first { [1, 2] } else { start };
+  for _r in 0..2 {
+    v = keep(v);
+  }
+  "{v}"
+}
+
+fn by_append(first: boolean, start: vector<integer>) -> text {
+  v: vector<integer> = if first { [1, 2] } else { start };
+  for _r in 0..1 {
+    v = v + [3];
+  }
+  "{v}"
+}
+
+fn from_comprehension(first: boolean, start: vector<integer>) -> text {
+  v: vector<integer> = if first { [for x in 1..3 { x * 10 }] } else { start };
+  for _r in 0..1 {
+    v = keep(v);
+  }
+  "{v}"
+}
+
+fn untyped(first: boolean, start: vector<integer>) -> text {
+  v = if first { start } else { [7, 8] };
+  for _r in 0..1 {
+    v = keep(v);
+  }
+  "{v}"
+}
+
+fn three_arms(k: integer, start: vector<integer>) -> text {
+  v: vector<integer> = if k == 0 { [1] } else if k == 1 { start + [9] } else { start };
+  for _r in 0..1 {
+    v = keep(v);
+  }
+  "{v}"
+}
+
+fn test_a_rebind_by_call_reads_each_arm() {
+  assert(by_call(true, [5]) == "[1,2]", "literal arm, by call: {by_call(true, [5])}");
+  assert(by_call(false, [5]) == "[5]", "parameter arm, by call: {by_call(false, [5])}");
+}
+
+fn test_a_rebind_by_append_reads_each_arm() {
+  assert(by_append(true, [5]) == "[1,2,3]", "literal arm, appended: {by_append(true, [5])}");
+  assert(by_append(false, [5]) == "[5,3]", "parameter arm, appended: {by_append(false, [5])}");
+}
+
+fn test_a_comprehension_arm_and_an_untyped_local() {
+  assert(from_comprehension(true, [5]) == "[10,20]", "comprehension arm: {from_comprehension(true, [5])}");
+  assert(from_comprehension(false, [5]) == "[5]", "parameter arm beside it: {from_comprehension(false, [5])}");
+  assert(untyped(true, [4]) == "[4]", "untyped, parameter arm first: {untyped(true, [4])}");
+  assert(untyped(false, [4]) == "[7,8]", "untyped, literal arm second: {untyped(false, [4])}");
+}
+
+fn test_an_else_if_chain() {
+  assert(three_arms(0, [5]) == "[1]", "first of three: {three_arms(0, [5])}");
+  assert(three_arms(1, [5]) == "[5,9]", "second of three: {three_arms(1, [5])}");
+  assert(three_arms(2, [5]) == "[5]", "third of three: {three_arms(2, [5])}");
+}
+
+// (Defined after its callers: their first pass meets the call before its result's deps.)
+fn keep(v: vector<integer>) -> vector<integer> {
+  if len(v) > 99 {
+    return [0];
+  }
+  v
+}
