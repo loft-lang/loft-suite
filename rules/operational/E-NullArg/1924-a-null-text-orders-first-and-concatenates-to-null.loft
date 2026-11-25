@@ -15,7 +15,7 @@
 // middle and both sides; a `+=`; a `text` parameter holding null; a null accumulator; and
 // the non-null controls.
 //
-// @falsified-by: tests/falsified/1924-a-null-text-orders-first-and-concatenates-to-null.patch — interpret exit 1 -> 0, interpret 3 assertion failures -> 0, native exit 1 -> 0, native 6 assertion failures -> 0
+// @falsified-by: tests/falsified/1924-a-null-text-orders-first-and-concatenates-to-null.patch — interpret exit 1 -> 0, interpret 4 assertion failures -> 0, native exit 1 -> 0, native 4 assertion failures -> 0
 //   CHANNEL: value — the cells assert the order and the concatenation, on both backends.
 //   WITNESS: on the control `{nt() < ""} {"" < nt()}` reads `false true`, `"a" + n` is
 //   `"anull"`, and `"a" + t` for a `text` holding null is the two-byte `"a\0"`.

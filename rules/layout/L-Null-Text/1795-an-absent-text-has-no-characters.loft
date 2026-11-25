@@ -19,7 +19,8 @@
 //   native exit 1 -> 0, native 2 assertion failures -> 0
 // HOLDS: the present-text cells ("", "héllo,x", "a,") answer the same on both trees, so
 //   the fix moved only the absent text; leak, panic and refusals are clean on both.
-// @falsified-by: tests/falsified/1795-an-absent-text-has-no-characters.patch — the same channels
+// No patch receipt: the null text is an address since @C171, and a null view holds no byte a
+// count could include, so the fault has no code to come back through.
 
 struct R { t: text? }
 
