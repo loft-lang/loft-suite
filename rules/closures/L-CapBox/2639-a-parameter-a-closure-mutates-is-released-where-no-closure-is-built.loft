@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_SHADOW_CELL_OWNER — the switch stops naming the closure record that takes a parameter's cell, so a run that builds no closure releases the cell nowhere, which is what this program checks.
+//
+// A PARAMETER A CLOSURE MUTATES IS RELEASED WHERE NO CLOSURE IS BUILT (`@FR-L-CapOwn`,
+// `@FR-H-Free`, loft#2639).  A scalar argument a closure writes lives in a cell of its own,
+// seeded at the function's entry; the closure record that captures it releases it by its
+// cascade.  On a run where the closure is not built, the frame releases the cell itself.  Each
+// test runs the closure on some calls only: built in one arm, built in a loop that may not run,
+// and built only on the path that returns it.
+// Values by hand: param_cell over n = -2..1 -> -2, -1, 0, 1 + 5 = 6, sum 3; loop_param(10, m) over
+// m = 0..3 -> 10, 10, 10 + 1, 10 + 1 + 2, sum 44; ret_param(n)(1) over n = -1..2 -> 1, 1, 1 + 1,
+// 2 + 1, sum 7.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the leak gate.
+//   HOLDS: every cell, on every backend.
+
+fn param_cell(n: integer) -> integer {
+  if n > 0 { b = fn(k: integer) { n = n + k; }; b(5); }
+  n
+}
+fn loop_param(n: integer, m: integer) -> integer {
+  for i in 0..m { b = fn(k: integer) { n = n + k; }; b(i); }
+  n
+}
+fn ret_param(n: integer) -> fn(integer) -> integer {
+  if n > 0 { return fn(k: integer) -> integer { n = n + k; n }; }
+  fn(k: integer) -> integer { k }
+}
+
+fn test_a_closure_built_in_one_arm() {
+  s = 0;
+  for i in 0..4 { s += param_cell(i - 2); }
+  assert(s == 3, "{s}");
+}
+
+fn test_a_closure_built_in_a_loop_that_may_not_run() {
+  s = 0;
+  for m in 0..4 { s += loop_param(10, m); }
+  assert(s == 44, "{s}");
+}
+
+fn test_a_closure_built_on_the_path_that_returns_it() {
+  s = 0;
+  for i in 0..4 { f = ret_param(i - 1); s += f(1); }
+  assert(s == 7, "{s}");
+}
