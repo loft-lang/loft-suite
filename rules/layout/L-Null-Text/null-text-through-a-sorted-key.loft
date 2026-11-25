@@ -11,12 +11,12 @@
 //                        byte buffer, two NULs, a trailing NUL) and every reader.
 // Axes it HOLDS FIXED:   the place (a sorted key).
 //
+// @falsified-at: c138d6feb — interpret exit 1 -> 0, native exit 1 -> 0; each place's four
+//   rows holding a lone NUL piece (nul, slice, bytes0, nulnul's first byte) answered null
 // CHANNEL: the asserts.
 // ARMED: no instrument.
 // WITNESS: each message names the value, the place and every reader's answer.
 // HOLDS: the null, "", "x" and trailing-NUL rows, which answer the same in every place.
-// @falsified-at: c138d6feb — interpret exit 1 -> 0, native exit 1 -> 0; each place's four
-//   rows holding a lone NUL piece (nul, slice, bytes0, nulnul's first byte) answered null
 
 struct K { k: text, n: integer }
 fn nothing() -> text? { null }
