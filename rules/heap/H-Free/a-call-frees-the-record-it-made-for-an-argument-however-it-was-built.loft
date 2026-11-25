@@ -68,6 +68,24 @@
 // @falsified-at: pending
 //   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
 //   HOLDS: every cell, on every backend.
+//
+// ── a-call-taking-a-call-result-in-its-buffer-frees-the-record-it-made ──
+//
+// @catches: LOFT_NO_RETBUF_ARG_LIFT — the switch leaves a call result delivered into the caller's buffer unnamed, the copy of the answer loses its source-free, and the record the callee made leaks (loft#2637)
+//
+// @FR-H-Free: every exit releases what the frame owns.  `a = first(none())` passes a call whose
+// answer lies in the hidden buffer the caller handed it, so the buffer names its store.  The
+// copy of `first`'s answer frees the store it came in unless an argument holds it; read as
+// unnameable, the copy kept the default record `first` made for an empty vector, once per call.
+// An answer that IS an element of the argument stays protected.
+//
+// Axes this file MOVES:  what the callee answers (an element, the `?` default, a `??` default,
+//                        an `if` arm's literal); a first bind and a rebind.
+// Axes it HOLDS FIXED:   the argument is a vector of records built by a call into its buffer.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   HOLDS: every cell, on every backend.
 
 enum Node { NdNull, NdInt { n: integer }, NdSpan { pos: integer, inner: Node }, NdBlock { block: vector<Bl> } }
 struct Bl { operators: vector<Node>, k: integer }
@@ -232,4 +250,31 @@ fn test_what_the_callee_hands_back() {
     s += r.n * 1000;
   }
   assert(s == 12784 && t == "abnonenone" && "{b.ks}" == "[9]", "{s} {t}");
+}
+
+fn s4_first(rs: const vector<R>) -> R { rs[0]? }
+fn s4_or(rs: const vector<R>, k: integer) -> R { rs[0] ?? R { n: -k, tag: "dflt" } }
+fn s4_arm(rs: const vector<R>, k: integer) -> R { if k > 1 { rs[0] } else { R { n: 7, tag: "arm" } } }
+fn s4_none() -> vector<R> { [] }
+fn s4_two(k: integer) -> vector<R> { [R { n: k, tag: "t{k}" }, R { n: k + 1, tag: "u" }] }
+fn s4_sum(k: integer) -> integer {
+  a = s4_first(s4_none());
+  b = s4_first(s4_two(k));
+  c = s4_or(s4_none(), k);
+  d = s4_arm(s4_two(k), k);
+  a.n + b.n * 10 + c.n * 100 + d.n * 1000 + len(a.tag) + len(c.tag) * 10000
+}
+fn s4_rebind(k: integer) -> integer { a = s4_first(s4_two(k)); x = a.n; a = s4_first(s4_none()); x * 10 + a.n + len(a.tag) }
+
+fn test_a_call_result_in_its_buffer() {
+  s = 0;
+  for k in 0..4 { s += s4_sum(k); }
+  // k = 0..3: 47000 + 46910 + 41820 + 42730.
+  assert(s == 178460, "{s}");
+}
+
+fn test_a_rebind_from_a_call_result_in_its_buffer() {
+  s = 0;
+  for k in 0..4 { s += s4_rebind(k); }
+  assert(s == 60, "{s}");
 }
