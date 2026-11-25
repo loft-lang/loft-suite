@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INLINE `??` FREES THE STORE ITS CALL ANSWERED (`@FR-H-Free`: every exit releases what the
+// frame owns).  `ch(maybe(c) ?? d)` passes a keyed collection that is the call's fresh store on
+// one arm and `d` on the other.  The value is lifted into a temporary whose base is `d`'s own
+// variable, and the scope frees it only where its store is not `d`'s (`@FR-O-Oracle`'s identity
+// reading of a join): the call's store where that arm was taken, nothing where `d` was.  Not
+// lifted, the call's store was owned by nothing, one per evaluation (loft#2643).  A default
+// that is a projection (`o.m`, `p.o.m`, `vs[1].m`) lives in its root's store, which is then
+// the base; a subject that hands back its argument (`pick(c, d) ?? e`) is a borrow and is
+// never freed.
+//
+// @catches: LOFT_NO_NCC_LOCAL_ARM_WITNESS — the switch declines the lift, and the store each present arm answered is owned by nothing
+//
+// Axes this file MOVES:  the keyed kind (hash, sorted, index); the default (a local, a
+//                        parameter, a field, a nested field, a field of a vector element);
+//                        the subject (a call that mints, a call that answers its argument);
+//                        which arm each pass takes.
+// Axes it HOLDS FIXED:   the coalesce is an argument of a call, inside a loop.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   HOLDS: every cell, on every backend.
+
+struct H { k: integer, v: integer }
+struct O { m: hash<H[k]> }
+struct P { o: O }
+
+fn mk(k: integer) -> hash<H[k]> { [H { k: k, v: k * 11 }] }
+fn mks(k: integer) -> sorted<H[k]> { [H { k: k, v: k * 11 }] }
+fn mki(k: integer) -> index<H[k]> { [H { k: k, v: k * 11 }] }
+fn maybe(c: boolean) -> hash<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn maybes(c: boolean) -> sorted<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn maybei(c: boolean) -> index<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn pick(c: boolean, x: hash<H[k]>) -> hash<H[k]>? { if c { x } else { null } }
+fn ch(x: hash<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+fn cs(x: sorted<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+fn ci(x: index<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+
+fn test_a_local_default_of_each_keyed_kind() {
+  d = mk(9);
+  s = mks(9);
+  x = mki(9);
+  a = "";
+  for i in 0..4 {
+    c = i % 2 == 0;
+    a += "{ch(maybe(c) ?? d)}/{ch(d)} {cs(maybes(c) ?? s)}/{cs(s)} {ci(maybei(c) ?? x)}/{ci(x)}|";
+  }
+  assert(a == "11/99 11/99 11/99|99/99 99/99 99/99|11/99 11/99 11/99|99/99 99/99 99/99|", a);
+}
+
+fn param_default(d: hash<H[k]>) -> text {
+  o = "";
+  for i in 0..4 { o += "{ch(maybe(i % 2 == 0) ?? d)}"; }
+  "{o}/{ch(d)}"
+}
+
+fn test_a_parameter_default() {
+  assert(param_default(mk(9)) == "11991199/99", param_default(mk(9)));
+}
+
+fn test_a_projection_default() {
+  ob = O { m: mk(3) };
+  p = P { o: O { m: mk(4) } };
+  vs: vector<O> = [O { m: mk(5) }, O { m: mk(6) }];
+  a = "";
+  for i in 0..4 {
+    c = i % 2 == 0;
+    a += "{ch(maybe(c) ?? ob.m)}/{ch(ob.m)} {ch(maybe(c) ?? p.o.m)}/{ch(p.o.m)} {ch(maybe(c) ?? vs[1].m)}/{ch(vs[1].m)}|";
+  }
+  assert(a == "11/33 11/44 11/66|33/33 44/44 66/66|11/33 11/44 11/66|33/33 44/44 66/66|", a);
+}
+
+fn test_a_subject_that_answers_its_argument_is_not_freed() {
+  d = mk(9);
+  e = mk(5);
+  a = "";
+  for i in 0..4 { a += "{ch(pick(i % 2 == 0, d) ?? e)}/{ch(d)}/{ch(e)} "; }
+  assert(a == "99/99/55 55/99/55 99/99/55 55/99/55 ", a);
+}
