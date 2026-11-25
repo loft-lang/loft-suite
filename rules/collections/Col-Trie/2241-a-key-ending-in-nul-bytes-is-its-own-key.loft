@@ -109,7 +109,9 @@ fn test_an_image_read_whole_and_by_page() {
   assert(walk2241(whole) == "1,2,3,4,5," && show2241(whole, nt) == "1" && show2241(whole, "a") == "3", "whole: {walk2241(whole)}");
   for k in [nt, "", "a", "a\0", "ab"] {
     one: trie<W2241[w]> = [];
-    assert(store_load_key_text(one, path, k ?? "\0"), "paged key loads");
+    // The null key is asked for by null: a text of one NUL byte is a key of its own
+    // (`@FR-L-Null-Text`).
+    assert(store_load_key_text(one, path, k), "paged key loads");
     assert(len(one) == 1 && show2241(one, k) == show2241(src, k), "paged key: {show2241(one, k)}");
   }
   pre: trie<W2241[w]> = [];

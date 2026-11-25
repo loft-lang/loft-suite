@@ -61,14 +61,17 @@ fn main() {
   for c in "hello" { n += 1; }
   assert(n == 5, "for over a multi-byte literal yields 5 characters, got {n}");
 
-  // The one text that is NOT covered by the rule above: loft's null text IS
-  // the one-byte NUL string, so `size` answers 1 for it while it holds no
-  // characters at all.  It must yield nothing — the fix has to know a null
-  // text apart from a text whose first character is a NUL.
+  // A lone NUL is a text like any other (`@FR-L-Null-Text`): one character.
   lone = text_from_bytes([0]);
   z = 0;
   for c in lone { z += 1; }
-  assert(z == 0, "a null text holds no characters, got {z}");
+  assert(z == 1 && len(lone) == 1 && lone != null, "a lone NUL is one character, got {z}");
+
+  // The null text holds no characters.
+  nothing: text = null;
+  w = 0;
+  for c in nothing { w += 1; }
+  assert(w == 0, "a null text holds no characters, got {w}");
 
   // Both iteration sites agree.
   p = visited_par([65, 0, 66]);

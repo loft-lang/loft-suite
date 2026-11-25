@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// loft#1795 — @FR-L-Null-Text: an absent text is one value, and a reader tests its CONTENT.
+// loft#1795 — @FR-L-Null-Text: an absent text is one value, told apart by identity.
 // It has no characters: `for c in t` over it makes no trips, and `len` / `size` answer 0.
 // They answered 1, counting the `STRING_NULL` byte the absence is stored as, so the same
 // value had no characters to a loop and one to `len` — silently, on both backends.  `split`

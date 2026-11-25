@@ -24,9 +24,9 @@
 // The rules already settled both.  `@FR-F-Render` lists the text null as `STRING_NULL` and
 // says a null of ANY type renders as the word `null`; `native.rs` had carried the total
 // test for its own reader all along ("text-null is CONTENT-based ... not a 0 pointer").
-// The content test is the total one because `Store::get_str` maps an unset handle onto
-// `STRING_NULL` as well, so it subsumes the pointer test instead of sitting beside it, and
-// `Store::text_is_null` is now the one home all three readers ask.  `@FR-L-Null-Text`.
+// The fix put `Store::text_is_null` as the one home all three readers ask.  That home now
+// asks the handle: a null text is stored only as the unset handle, and a record of one NUL
+// byte is a present text (`@FR-L-Null-Text`), so the readers still cannot disagree.
 //
 // ⚠ The `""` cells are @P375 and they are what keeps the fix honest: an ALLOCATED empty
 // string is a present value that must serialise as `""` and must not read as null.  A fix
