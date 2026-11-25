@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NULLABLE VECTOR RESULT ANSWERING AN ELEMENT OF A LOCAL IS A COPY (`@FR-F-Ret`: the returned
+// whole value is owned by the caller, never a view).  `fn f(k) -> vector<integer>? { vv = …; vv[k] }`
+// answers an element of a vector of vectors the frame owns.  The element is bound first and
+// copied into the caller's buffer where present, the null sentinel where the read is out of
+// range — as `e = vv[k]; e` always was.  Answered raw, it was a view into `vv`'s store, which
+// the frame freed before the caller read it (loft#2644).  The same read of a PARAMETER's
+// vector, and the dense result, stay copies.
+//
+// @catches: LOFT_NO_VIEW_TAIL_BIND — the switch answers the element raw, a view into a store the frame frees before the caller reads it
+//
+// Axes this file MOVES:  the index (a constant, a parameter, out of range); the vector
+//                        (a local, a parameter); the result (`vector<integer>?`, dense);
+//                        the spelling (the read at the tail, bound to a local first).
+// Axes it HOLDS FIXED:   the element is a `vector<integer>`.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the strict-store use-after-free gate.
+//   HOLDS: every cell, on every backend.
+
+fn first_of_local(k: integer) -> vector<integer>? { vv = [[11, 22, 33], [44, 55]]; vv[0] }
+fn nth_of_local(k: integer) -> vector<integer>? { vv = [[11, 22, 33], [44, 55]]; vv[k] }
+fn nth_of_param(vv: vector<vector<integer>>, k: integer) -> vector<integer>? { vv[k] }
+fn dense_of_local(k: integer) -> vector<integer> { vv = [[11, 22, 33], [44, 55]]; vv[k] }
+fn bound_of_local(k: integer) -> vector<integer>? { vv = [[11, 22, 33], [44, 55]]; e = vv[k]; e }
+
+fn test_an_element_of_a_local_is_copied_out() {
+  a = "";
+  for k in 0..3 { a += "{first_of_local(k)} {nth_of_local(k)} {bound_of_local(k)}|"; }
+  assert(a == "[11,22,33] [11,22,33] [11,22,33]|[11,22,33] [44,55] [44,55]|[11,22,33] null null|", a);
+}
+
+fn test_a_parameter_and_a_dense_result_stay_copies() {
+  p = [[7], [8, 9]];
+  a = "";
+  for k in 0..2 { a += "{nth_of_param(p, k)} {dense_of_local(k)}|"; }
+  assert(a == "[7] [11,22,33]|[8,9] [44,55]|", a);
+  assert("{p}" == "[[7],[8,9]]", "{p}");
+}
