@@ -15,6 +15,8 @@
 // ARMED: no instrument.
 // WITNESS: each message names the value, the place and every reader's answer.
 // HOLDS: the null, "", "x" and trailing-NUL rows, which answer the same in every place.
+// @falsified-at: c138d6feb — interpret exit 1 -> 0, native exit 1 -> 0; each place's four
+//   rows holding a lone NUL piece (nul, slice, bytes0, nulnul's first byte) answered null
 
 struct R { k: integer, t: text? }
 fn nothing() -> text? { null }
@@ -90,19 +92,16 @@ fn test_x() {
   assert(got == "isnull=false not=false co='x' len=1 size=1 loop=1 cat='<x>' addc='xx' addt='xyz' eqe=false lta=false lte=false fmt='[x]' trim='x' low='x' rep='x' split=1 sw=true find=0 i0=x sub='x'", "x through a saved image: {got}");
 }
 
-// @EXPECT_FAIL: nul through a saved image
 fn test_nul() {
   got = sig(through("\0"));
   assert(got == "isnull=false not=false co='~0' len=1 size=1 loop=1 cat='<~0>' addc='~0x' addt='~0yz' eqe=false lta=true lte=false fmt='[~0]' trim='~0' low='~0' rep='~0' split=1 sw=true find=null i0= sub='~0'", "nul through a saved image: {got}");
 }
 
-// @EXPECT_FAIL: slice through a saved image
 fn test_slice() {
   got = sig(through("a\0b"[1..2]));
   assert(got == "isnull=false not=false co='~0' len=1 size=1 loop=1 cat='<~0>' addc='~0x' addt='~0yz' eqe=false lta=true lte=false fmt='[~0]' trim='~0' low='~0' rep='~0' split=1 sw=true find=null i0= sub='~0'", "slice through a saved image: {got}");
 }
 
-// @EXPECT_FAIL: nulnul through a saved image
 fn test_nulnul() {
   got = sig(through("\0\0"));
   assert(got == "isnull=false not=false co='~0~0' len=2 size=2 loop=2 cat='<~0~0>' addc='~0~0x' addt='~0~0yz' eqe=false lta=true lte=false fmt='[~0~0]' trim='~0~0' low='~0~0' rep='~0~0' split=1 sw=true find=null i0= sub='~0'", "nulnul through a saved image: {got}");
@@ -113,7 +112,6 @@ fn test_anul() {
   assert(got == "isnull=false not=false co='a~0' len=2 size=2 loop=2 cat='<a~0>' addc='a~0x' addt='a~0yz' eqe=false lta=false lte=false fmt='[a~0]' trim='a~0' low='a~0' rep='a~0' split=1 sw=true find=null i0=a sub='a'", "anul through a saved image: {got}");
 }
 
-// @EXPECT_FAIL: bytes0 through a saved image
 fn test_bytes0() {
   got = sig(through(text_from_bytes(zero_byte())));
   assert(got == "isnull=false not=false co='~0' len=1 size=1 loop=1 cat='<~0>' addc='~0x' addt='~0yz' eqe=false lta=true lte=false fmt='[~0]' trim='~0' low='~0' rep='~0' split=1 sw=true find=null i0= sub='~0'", "bytes0 through a saved image: {got}");
