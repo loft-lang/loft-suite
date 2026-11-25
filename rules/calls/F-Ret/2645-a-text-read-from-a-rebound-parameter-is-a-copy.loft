@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A TEXT READ FROM A REBOUND PARAMETER IS A COPY (`@FR-F-Ret`: the returned whole value is owned
+// by the caller, never a view).  `fn f(v: vector<text>, o: vector<text>) -> text { v = o; v[0] }`
+// rebinds `v` to a copy of `o` in a store the frame owns and frees.  A text read out of it is
+// frame-local text and is delivered into the caller's buffer — at the tail, at an early
+// `return`, and where only one path rebinds.  Read as a borrow of the argument, it was a view
+// into the freed copy (loft#2645).  A parameter that is not rebound stays a plain borrow.
+//
+// @catches: LOFT_NO_REBOUND_ARG_TEXT_COPY — the switch reads the text as the argument's again, a view into the copy the frame frees before the caller reads it
+//
+// Axes this file MOVES:  where the text is answered (the tail, an early `return`); whether
+//                        every path rebinds (always, one branch); a parameter never rebound.
+// Axes it HOLDS FIXED:   the parameter is a `vector<text>` rebound from another one.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the strict-store use-after-free gate.
+//   HOLDS: every cell, on every backend.
+
+fn rebound(v: vector<text>, o: vector<text>) -> text { v = o; v[0] }
+fn rebound_early(v: vector<text>, o: vector<text>, c: boolean) -> text { v = o; if c { return v[1]; } v[0] }
+fn rebound_on_one_path(v: vector<text>, o: vector<text>, c: boolean) -> text { if c { v = o; } v[0] }
+fn kept(v: vector<text>) -> text { v[0] }
+
+fn test_a_text_of_a_rebound_parameter_is_delivered() {
+  a = ["x", "y"];
+  b = ["bb", "cc"];
+  t = "";
+  for i in 0..3 {
+    t += "{rebound(a, b)} {rebound_early(a, b, true)} {rebound_early(a, b, false)} {rebound_on_one_path(a, b, true)} {rebound_on_one_path(a, b, false)} {kept(a)}|";
+  }
+  assert(t == "bb cc bb bb x x|bb cc bb bb x x|bb cc bb bb x x|", t);
+  assert("{a} {b}" == "[\"x\",\"y\"] [\"bb\",\"cc\"]", "the arguments are untouched: {a} {b}");
+}
