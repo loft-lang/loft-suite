@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // @catches: LOFT_NO_SHADOW_CELL_OWNER — the switch stops naming the closure record that takes a parameter's cell, so a run that builds no closure releases the cell nowhere, which is what this program checks.
 //
-// A PARAMETER A CLOSURE MUTATES IS RELEASED WHERE NO CLOSURE IS BUILT (`@FR-L-CapOwn`,
-// `@FR-H-Free`, loft#2639).  A scalar argument a closure writes lives in a cell of its own,
+// A PARAMETER A CLOSURE MUTATES IS RELEASED WHERE NO CLOSURE IS BUILT (`@FR-L-CapBox`,
+// `@FR-L-CapOwn`, `@FR-H-Free`, loft#2639).  A scalar argument a closure writes lives in a cell of its own,
 // seeded at the function's entry; the closure record that captures it releases it by its
 // cascade.  On a run where the closure is not built, the frame releases the cell itself.  Each
 // test runs the closure on some calls only: built in one arm, built in a loop that may not run,
