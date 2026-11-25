@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INLINE `??` CHAIN THROUGH A FIELD FREES ITS CALL'S STORE (`@FR-H-Free`: every exit releases
+// what the frame owns).  `ch(maybe(c) ?? ob.m ?? d)` may answer the call's fresh store, the field
+// `ob.m` — which lives in `ob`'s store — or `d`.  Handed to a loft function, which only borrows
+// it, the lift owns the value and is freed only where it is neither `ob`'s store nor `d`'s.  Not
+// lifted, the call's store was owned by nothing (loft#2649).  A `for` over the same chain owns
+// what it iterates and is left to the `for` (its own release of the chain is loft#2650).
+//
+// @catches: LOFT_NO_NCC_SUBJECT_ROOT — the switch declines a chain whose middle arm is a field, and the store the call answered leaks
+//
+// Axes this file MOVES:  which arm each pass takes; the field's depth (a field, a nested field).
+// Axes it HOLDS FIXED:   the consumer (a loft function's argument); the keyed kind (hash); the
+//                        chain ends in a local.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK / double-free gate.
+//   HOLDS: every cell, on every backend.
+
+struct H { k: integer, v: integer }
+struct O { m: hash<H[k]> }
+struct P { o: O }
+
+fn mk(k: integer) -> hash<H[k]> { [H { k: k, v: k * 11 }] }
+fn maybe(c: boolean) -> hash<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn ch(x: hash<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+
+fn test_a_chain_through_a_field_frees_only_its_call() {
+  d = mk(9);
+  ob = O { m: mk(3) };
+  p = P { o: O { m: mk(4) } };
+  a = "";
+  for i in 0..4 {
+    a += "{ch(maybe(i == 1) ?? ob.m ?? d)} {ch(maybe(i == 1) ?? p.o.m ?? d)}|";
+  }
+  assert(a == "33 44|11 11|33 44|33 44|", a);
+  assert(ch(ob.m) == 33 && ch(p.o.m) == 44 && ch(d) == 99, "the field and the default are intact");
+}
