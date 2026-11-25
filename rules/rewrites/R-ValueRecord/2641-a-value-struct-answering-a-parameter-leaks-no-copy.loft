@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_VALUE_PARAM_DECLINE — the switch rewrites a function whose value-struct answer names a parameter into a tuple, whose body's copy of that parameter then has no owner, which is what this program checks.
+//
+// A VALUE STRUCT ANSWERING A PARAMETER LEAKS NO COPY (`@FR-R-ValueRecord`, `@FR-H-Free`,
+// loft#2641).  `o ?? self` over a value struct copies the arm it answers (a value struct read
+// out of a parameter is copied), and the record form hands that copy to the caller.  Answered
+// as a tuple of its fields, the copy would have no owner.  Each test reads the answer — a field
+// read off the call, and a local bound to it — over a present and an absent `o`; the leak gate
+// is the channel.
+// Values by hand: k = 0 answers self (10), k = 1..3 answers some(k) (k): 10 + 1 + 2 + 3 = 16.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the leak gate.
+//   HOLDS: every cell, on every backend.
+
+value struct Vo { x: integer }
+operator minus(self: Vo, o: Vo?) -> Vo { o ?? self }
+fn some(k: integer) -> Vo? { if k > 0 { Vo { x: k } } else { null } }
+fn field_read(k: integer) -> integer { a = Vo { x: 10 }; (a - some(k)).x }
+fn bound(k: integer) -> integer { a = Vo { x: 10 }; r = a - some(k); r.x }
+
+fn test_a_field_read_off_the_answer() {
+  t = 0;
+  for k in 0..4 { t += field_read(k); }
+  assert(t == 16, "{t}");
+}
+
+fn test_a_local_bound_to_the_answer() {
+  t = 0;
+  for k in 0..4 { t += bound(k); }
+  assert(t == 16, "{t}");
+}
