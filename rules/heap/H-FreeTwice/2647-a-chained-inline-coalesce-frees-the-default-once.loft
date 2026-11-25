@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CHAINED INLINE `??` FREES THE DEFAULT ONCE (`@FR-H-FreeTwice`: a store is released once).
+// `ch(maybe(a) ?? maybe(b) ?? d)` is a `??` whose default is another `??`.  The lift that owns
+// the inline value reads the whole chain's arms — two calls and `d` — so it compares stores with
+// `d` before it frees: the taken call's store is freed, `d` is left to its own scope.  Read as
+// one owned arm, the inner `??` let the lift free `d` on the passes that answered it, and the
+// frame freed it again at exit (loft#2647).  A chain whose every arm mints is freed whichever arm
+// it took; one ending in a projection compares with the projection's root.
+//
+// @catches: LOFT_NO_NCC_CHAIN_FLAT — the switch reads the inner `??` as one owned arm, and the lift frees the default local the frame frees again
+//
+// Axes this file MOVES:  the chain's last arm (a local, a call that mints, a field); its
+//                        length (two, three); the keyed kind (hash, sorted); which arm each
+//                        pass takes.
+// Axes it HOLDS FIXED:   the chain is an argument of a call, inside a loop.
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the double-free / leak gate.
+//   HOLDS: every cell, on every backend.
+
+struct H { k: integer, v: integer }
+struct O { m: hash<H[k]> }
+
+fn mk(k: integer) -> hash<H[k]> { [H { k: k, v: k * 11 }] }
+fn mks(k: integer) -> sorted<H[k]> { [H { k: k, v: k * 11 }] }
+fn maybe(c: boolean) -> hash<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn maybes(c: boolean) -> sorted<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn ch(x: hash<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+fn cs(x: sorted<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+
+fn test_a_chain_ending_in_a_local_frees_it_once() {
+  d = mk(9);
+  s = mks(9);
+  a = "";
+  for i in 0..4 {
+    a += "{ch(maybe(i == 1) ?? maybe(i == 2) ?? d)} {ch(maybe(i == 1) ?? maybe(i == 2) ?? maybe(i == 3) ?? d)} {cs(maybes(i == 1) ?? maybes(i == 2) ?? s)}|";
+  }
+  assert(a == "99 99 99|11 11 11|11 11 11|99 11 99|", a);
+  assert(ch(d) == 99 && cs(s) == 99, "the defaults are intact");
+}
+
+fn test_a_chain_of_mints_and_one_ending_in_a_field() {
+  ob = O { m: mk(3) };
+  a = "";
+  for i in 0..4 {
+    a += "{ch(maybe(i == 1) ?? maybe(i == 2) ?? mk(7))} {ch(maybe(i == 1) ?? maybe(i == 2) ?? ob.m)}|";
+  }
+  assert(a == "77 33|11 11|11 11|77 33|", a);
+  assert(ch(ob.m) == 33, "the field is intact");
+}
