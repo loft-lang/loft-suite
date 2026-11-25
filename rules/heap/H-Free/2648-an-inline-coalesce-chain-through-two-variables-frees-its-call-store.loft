@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN INLINE `??` CHAIN THROUGH TWO VARIABLES FREES ITS CALL'S STORE (`@FR-H-Free`: every exit
+// releases what the frame owns).  `ch(maybe(c) ?? dn ?? d)` may answer the call's fresh store,
+// `dn`'s or `d`'s.  The lift that owns the inline value is freed only where its store is none of
+// the variables it may be: one guard per variable around the free.  With one comparison only,
+// the lift declined a chain through two variables, and the store the call answered was owned
+// by nothing (loft#2648).
+//
+// @catches: LOFT_NO_NCC_MULTI_WITNESS — the switch declines a chain through two variables, and the store the call answered leaks
+//
+// Axes this file MOVES:  whether the middle variable holds a store or null; the chain's length
+//                        (a call, a variable, a variable; two calls, a variable, a variable);
+//                        which arm each pass takes.
+// Axes it HOLDS FIXED:   the chain is an argument of a call, inside a loop; the keyed kind (hash).
+//
+// @ARMED: LOFT_STRICT_STORES=1 LOFT_POISON=1
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the LEAK gate.
+//   HOLDS: every cell, on every backend.
+
+struct H { k: integer, v: integer }
+
+fn mk(k: integer) -> hash<H[k]> { [H { k: k, v: k * 11 }] }
+fn maybe(c: boolean) -> hash<H[k]>? { if c { [H { k: 1, v: 11 }] } else { null } }
+fn ch(x: hash<H[k]>) -> integer { n = 0; for r in x { n += r.v; } n }
+
+fn test_a_chain_through_two_variables_frees_only_its_call() {
+  d = mk(9);
+  dn: hash<H[k]>? = mk(5);
+  a = "";
+  for i in 0..4 {
+    a += "{ch(maybe(i == 1) ?? dn ?? d)} {ch(maybe(i == 1) ?? maybe(i == 2) ?? dn ?? d)}|";
+  }
+  assert(a == "55 55|11 11|55 11|55 55|", a);
+  dn = null;
+  b = "";
+  for i in 0..3 { b += "{ch(maybe(i == 1) ?? dn ?? d)} "; }
+  assert(b == "99 11 99 ", b);
+  assert(ch(d) == 99, "the default is intact");
+}
