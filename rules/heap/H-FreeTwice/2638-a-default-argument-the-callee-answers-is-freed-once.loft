@@ -56,3 +56,28 @@ fn test_a_unit_variant_default() {
   for _ in 0..2 { s += unit_default(false, true) * 1000 + unit_default(false, false) * 100 + unit_default(true, true) * 10 + unit_default(true, false); }
   assert(s == -930, "{s}");
 }
+
+// ── an-early-return-of-the-second-literal-argument-is-freed-once ──
+//
+// @catches: LOFT_NO_SET_PREAMBLE_HOIST — the switch binds a call whose literal arguments were hoisted through its preamble, so the bind adopts the answer and the second literal's buffer is freed beside it, which is what this section checks.
+//
+// `o = s2_join(Borrowed { base: 3 }, Borrowed { base: a })`, the callee answering its second
+// argument through an early `return`: the literals are built in buffers before the call, and the
+// first bind of the call copies or adopts its answer as it does for named arguments.
+// Values by hand: s2_mark_a(i) = i (the first argument, Unknown), s2_mark_c(i + 10) = i + 11;
+// over i = 0..2: 100 * (0 + 1 + 2) + 11 + 12 + 13 = 336.
+
+enum S2Own { S2Unknown, S2Borrowed { base: integer } }
+fn s2_not_yet() -> S2Own { S2Borrowed { base: 3 } }
+fn s2_join(a: S2Own, c: S2Own) -> S2Own {
+  if a == s2_not_yet() { return c; }
+  a
+}
+fn s2_mark_a(a: integer) -> integer { o = s2_join(S2Unknown, S2Borrowed { base: a }); match o { S2Borrowed { base } => base + 1, _ => a } }
+fn s2_mark_c(a: integer) -> integer { o = s2_join(S2Borrowed { base: 3 }, S2Borrowed { base: a }); match o { S2Borrowed { base } => base + 1, _ => -a } }
+
+fn test_an_early_return_of_the_second_literal() {
+  t = 0;
+  for i in 0..3 { t += s2_mark_a(i) * 100 + s2_mark_c(i + 10); }
+  assert(t == 336, "{t}");
+}
