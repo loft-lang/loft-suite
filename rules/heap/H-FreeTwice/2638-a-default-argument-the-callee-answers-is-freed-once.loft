@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_JOIN_ARG_LIFT — the switch leaves a `??` argument whose default the caller builds in a buffer unbound, so the bind of an answer that is that default adopts the buffer's record and the buffer's own free releases it again, which is what this program checks.
+//
+// A DEFAULT ARGUMENT THE CALLEE ANSWERS IS FREED ONCE (`@FR-H-FreeTwice`, loft#2638).
+// `pick(v[0].n ?? mk(), c)` passes either a view of `v` or a default the caller builds in a buffer
+// of its own, and `pick` may answer its argument.  The answer's bind copies or adopts against
+// one witness; when the default was taken and answered back, it adopted the buffer's record, and
+// the binding and the buffer each released it.  Each test runs the four combinations — the
+// element present or absent, the argument answered or a record `pick` makes — with a default
+// that is a call, a struct literal and a unit variant; the run's re-free check catches a second
+// release.
+// Values by hand, per combination (absent+answered, absent+made, present+answered,
+// present+made): call -1, -1, 7, -1 -> -1031; literal -2, -1, 7, -1 -> -2031; unit -1, 5, 3, 5
+// -> -465.  Two rounds each.
+//
+// @falsified-at: pending
+//   CHANNEL: the VALUES (hand-computed) and the re-free / leak gate.
+//   HOLDS: every cell, on every backend.
+
+struct PkIn { a: integer = 0 }
+struct PkRec { k: integer = 0, n: PkIn? }
+enum Ty { TU, TV { inner: integer } }
+fn mk() -> PkIn { PkIn { a: -1 } }
+fn pick(s: PkIn, c: boolean) -> PkIn { if c { s } else { mk() } }
+fn tpick(t: Ty, c: boolean) -> Ty { if c { t } else { TV { inner: 5 } } }
+fn tval(t: Ty) -> integer { match t { TV { inner } => inner, TU => -1 } }
+fn recs(present: boolean) -> vector<PkRec> { [PkRec { k: 1, n: if present { PkIn { a: 7 } } else { null } }] }
+fn call_default(present: boolean, answered: boolean) -> integer {
+  v = recs(present);
+  pick(v[0].n ?? mk(), answered).a
+}
+fn literal_default(present: boolean, answered: boolean) -> integer {
+  v = recs(present);
+  pick(v[0].n ?? PkIn { a: -2 }, answered).a
+}
+fn unit_default(present: boolean, answered: boolean) -> integer {
+  v: vector<Ty> = if present { [TV { inner: 3 }] } else { [] };
+  tval(tpick(v[0] ?? TU, answered))
+}
+
+fn test_a_call_default() {
+  s = 0;
+  for _ in 0..2 { s += call_default(false, true) * 1000 + call_default(false, false) * 100 + call_default(true, true) * 10 + call_default(true, false); }
+  assert(s == -2062, "{s}");
+}
+
+fn test_a_literal_default() {
+  s = 0;
+  for _ in 0..2 { s += literal_default(false, true) * 1000 + literal_default(false, false) * 100 + literal_default(true, true) * 10 + literal_default(true, false); }
+  assert(s == -4062, "{s}");
+}
+
+fn test_a_unit_variant_default() {
+  s = 0;
+  for _ in 0..2 { s += unit_default(false, true) * 1000 + unit_default(false, false) * 100 + unit_default(true, true) * 10 + unit_default(true, false); }
+  assert(s == -930, "{s}");
+}
