@@ -93,6 +93,28 @@
 //   ARMED: the suite's own LOFT_LEAK_CHECK=1.
 //   HOLDS: every assertion, the leak gate and the refusals are clean on this tree, both backends.
 
+// ── 2653-a-named-record-written-through-a-link-to-a-place-reaches-the-place ──
+//
+// loft#1376 made a literal or a call written through a `&` link to a field or element reach the
+// place; every OTHER value still took a plain `Set` — a named local, another link, a parameter, a
+// projection — and dropped the link in silence on both backends: from a local or a link the
+// variable became an independent copy, from a projection it re-pointed as `l = &g.a` does.
+// `l = &g.a` and `l = g.a` emit the same IR, so the answer is read off the SPELLING: only a value
+// written with a `&` re-points (`@FR-B-Ref-Repoint`), every other one is copied into the place.
+//   c1  field link  <- a named local, then an interior write       → 13q, q 12
+//   c2  element link <- a named local                               → 23r, neighbour 3, q 22
+//   c3  field link  <- another link                                 → 33k, its source 31
+//   c4  field link  <- a plain projection (no `&`)                  → 44g, its source 41
+//   c5  element link <- an element of another vector                → 66W, its source 62
+//   c6  field link  <- a parameter                                  → 71p
+//   c7  field link  <- `&` projection: the re-point boundary        → 5e, the new place 55
+//
+// @falsified-at: f07f92c17 — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1
+//   -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the assertions — c1 reads `1a 12` on the build without loft#2653's fix.
+//   HOLDS: every assertion clean on the fixed tree (1105256302), both backends; LOFT_POISON,
+//   LOFT_STRICT_STORES and the native leak check clean on the same shapes.
+//
 struct S1371 { n: integer }
 struct O1371 { v: vector<integer>, i: S1371 }
 
@@ -334,4 +356,65 @@ fn test_a_whole_write_through_a_link_to_an_out_of_line_field_reaches_the_field()
   // From an independent Python run of the same keys over a multiset.
   assert(n == 20000 && gone == 6667 && size(t8) == 13333, "c8 {n} {gone} {size(t8)}");
   println("2433 ok");
+}
+
+struct P2653 { x: integer, s: text }
+struct H2653 { a: P2653, k: integer }
+
+fn write_param_2653(h: H2653, p: P2653) -> text {
+  l = &h.a;
+  l = p;
+  "{h.a.x}{h.a.s}"
+}
+
+fn test_a_named_record_written_through_a_link_to_a_place_reaches_the_place() {
+  h1 = H2653 { a: P2653 { x: 1, s: "a" }, k: 0 };
+  l1 = &h1.a;
+  q1 = P2653 { x: 11, s: "q" };
+  l1 = q1;
+  q1.x = 12;
+  l1.x = 13;
+  assert("{h1.a.x}{h1.a.s} {q1.x}" == "13q 12", "c1 {h1.a.x}{h1.a.s} {q1.x}");
+
+  v2 = [P2653 { x: 2, s: "b" }, P2653 { x: 3, s: "c" }];
+  e2 = &v2[0];
+  q2 = P2653 { x: 21, s: "r" };
+  e2 = q2;
+  q2.x = 22;
+  e2.x = 23;
+  assert("{v2[0].x}{v2[0].s} {v2[1].x} {q2.x}" == "23r 3 22", "c2 {v2[0].x}{v2[0].s} {v2[1].x} {q2.x}");
+
+  h3 = H2653 { a: P2653 { x: 3, s: "c" }, k: 0 };
+  k3 = H2653 { a: P2653 { x: 31, s: "k" }, k: 0 };
+  l3 = &h3.a;
+  m3 = &k3.a;
+  l3 = m3;
+  l3.x = 33;
+  assert("{h3.a.x}{h3.a.s} {k3.a.x}" == "33k 31", "c3 {h3.a.x}{h3.a.s} {k3.a.x}");
+
+  h4 = H2653 { a: P2653 { x: 4, s: "d" }, k: 0 };
+  g4 = H2653 { a: P2653 { x: 41, s: "g" }, k: 0 };
+  l4 = &h4.a;
+  l4 = g4.a;
+  l4.x = 44;
+  assert("{h4.a.x}{h4.a.s} {g4.a.x}" == "44g 41", "c4 {h4.a.x}{h4.a.s} {g4.a.x}");
+
+  v5 = [P2653 { x: 6, s: "f" }];
+  w5 = [P2653 { x: 61, s: "w" }, P2653 { x: 62, s: "W" }];
+  e5 = &v5[0];
+  e5 = w5[1];
+  e5.x = 66;
+  assert("{v5[0].x}{v5[0].s} {w5[1].x}" == "66W 62", "c5 {v5[0].x}{v5[0].s} {w5[1].x}");
+
+  h6 = H2653 { a: P2653 { x: 7, s: "g" }, k: 0 };
+  r6 = write_param_2653(h6, P2653 { x: 71, s: "p" });
+  assert(r6 == "71p", "c6 {r6}");
+
+  h7 = H2653 { a: P2653 { x: 5, s: "e" }, k: 0 };
+  g7 = H2653 { a: P2653 { x: 51, s: "g" }, k: 0 };
+  l7 = &h7.a;
+  l7 = &g7.a;
+  l7.x = 55;
+  assert("{h7.a.x}{h7.a.s} {g7.a.x}" == "5e 55", "c7 {h7.a.x}{h7.a.s} {g7.a.x}");
+  println("2653 ok");
 }
