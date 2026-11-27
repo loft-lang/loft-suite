@@ -1,0 +1,231 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2665 (`@FR-O-Derived`, `@FR-O-Complete`) — A JOIN ARM'S CALL THAT ANSWERS ITS ARGUMENT
+// OWNS NOTHING.  A join copied as one value into a place — `out += [if t { A } else { f(op) }]`,
+// `Hold { x: if t { A } else { f(op) } }`, `[m ?? f(op)]` — is written out per arm before any
+// analysis reads it, and a bare call arm whose callee MINTS is given the owner a view-typed join
+// gives it: `{ __ref_N = f(op, __ref_N); __ref_N }`, the buffer freed at the frame's exit.  That
+// owner was handed to EVERY loft-defined record call, also one whose return borrows a visible
+// parameter (`fn strip(v: Node) -> Node { v }`, return dep `["v"]`): the buffer then held the
+// caller's `op`, a view into `ops`, and its exit free released `ops`' store, which the caller
+// released again — `a store was freed twice` after the right answer, on both backends.  A view
+// owns nothing (`(O-Derived)`); the arm now asks what the parser's builder of the same block
+// asks (`returns_borrowed_view`), and a borrowing call arm stays the bare call, which the copy
+// reads and nothing frees.
+//
+// @falsified-at: 65cb25190 — interpret 10 of 13 tests fail on a store freed twice -> 0, native
+//   10 of 13 -> 0 (a release build of that ref, `--tests` with LOFT_LEAK_CHECK=1, run by hand)
+// CHANNEL: the double free, which fails the run on both backends after every assert passed
+//   (interpret: `freed twice: store #N freed pc=…`; native: `freed twice: store #N`); the values
+//   are hand-computed and hold on both trees.  Every cell is a test of its own so a run reports
+//   which shapes fail.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the record kind (a struct-enum, a plain struct, one with a text field);
+//                        the join (an `if` arm either side, a `match` arm, `??`); the place (a
+//                        vector literal element, a struct field); the callee (answers its
+//                        parameter, its SECOND parameter, a field of its parameter, a method's
+//                        `self`, defined after the caller).
+// Axes it HOLDS FIXED:   the loop is in the frame that copies; the argument is a loop element.
+//                        The bound-first spelling and a minting callee are the controls that
+//                        were already clean.
+
+enum Node {
+  NdNull,
+  NdInt { n: integer, s: text },
+}
+
+struct Box { n: integer }
+
+struct Wrap { w: Node, k: integer }
+
+struct Hold { x: Node, k: integer }
+
+fn val(op: Node) -> integer { match op { NdInt { n, s } => n + len(s) * 1000, _ => 100 } }
+
+fn total(v: vector<Node>) -> integer {
+  t = 0;
+  for op in v { t += val(op); }
+  t
+}
+
+fn ops3() -> vector<Node> { [NdInt { n: 3, s: "a" }, NdInt { n: 4, s: "bb" }, NdInt { n: 5, s: "ccc" }] }
+
+fn strip(v: Node) -> Node { v }
+
+fn pick(a: Node, b: Node) -> Node {
+  assert(val(a) > 0, "a");
+  b
+}
+
+fn inner(v: Wrap) -> Node { v.w }
+
+fn mint(v: Node) -> Node { NdInt { n: val(v) * 10, s: "" } }
+
+fn ident(self: Node) -> Node { self }
+
+fn if_else_arm(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { NdNull } else { strip(op) }]; }
+  out
+}
+
+fn if_then_arm(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if !terminal { strip(op) } else { NdNull }]; }
+  out
+}
+
+fn match_arm(ops: vector<Node>, k: integer) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [match k { 0 => NdNull, _ => strip(op) }]; }
+  out
+}
+
+fn coalesce_arm(ops: vector<Node>, m: Node?) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [m ?? strip(op)]; }
+  out
+}
+
+fn second_param(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  z = NdInt { n: 9, s: "" };
+  for op in ops { out += [if terminal { NdNull } else { pick(z, op) }]; }
+  out
+}
+
+fn field_of_param(ws: vector<Wrap>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for x in ws { out += [if terminal { NdNull } else { inner(x) }]; }
+  out
+}
+
+fn method_self(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { NdNull } else { op.ident() }]; }
+  out
+}
+
+fn callee_after(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { NdNull } else { strip_later(op) }]; }
+  out
+}
+
+fn strip_later(v: Node) -> Node { v }
+
+fn struct_field(ops: vector<Node>, terminal: boolean) -> integer {
+  t = 0;
+  for op in ops {
+    h = Hold { x: if terminal { NdNull } else { strip(op) }, k: 1 };
+    t += val(h.x) + h.k;
+  }
+  t
+}
+
+fn strip_box(v: Box) -> Box { v }
+
+fn plain_struct(ops: vector<Box>, terminal: boolean) -> vector<Box> {
+  out: vector<Box> = [];
+  for op in ops { out += [if terminal { Box { n: 0 } } else { strip_box(op) }]; }
+  out
+}
+
+fn minting(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { NdNull } else { mint(op) }]; }
+  out
+}
+
+fn bound_first(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops {
+    x = strip(op);
+    out += [if terminal { NdNull } else { x }];
+  }
+  out
+}
+
+// 3 + 1000, 4 + 2000, 5 + 3000 — and the caller's `ops` still reads the same afterwards.
+fn test_an_else_arm_answers_its_argument() {
+  ops = ops3();
+  r = total(if_else_arm(ops, false));
+  assert(r == 6012, "{r}");
+  assert(total(ops) == 6012, "{total(ops)}");
+}
+
+fn test_a_then_arm_answers_its_argument() {
+  ops = ops3();
+  r = total(if_then_arm(ops, false));
+  assert(r == 6012, "{r}");
+  assert(total(ops) == 6012, "{total(ops)}");
+}
+
+fn test_a_match_arm_answers_its_argument() {
+  ops = ops3();
+  r = total(match_arm(ops, 1));
+  assert(r == 6012, "{r}");
+}
+
+fn test_a_coalesce_default_answers_its_argument() {
+  ops = ops3();
+  r = total(coalesce_arm(ops, null));
+  assert(r == 6012, "{r}");
+}
+
+fn test_the_call_answers_its_second_parameter() {
+  ops = ops3();
+  r = total(second_param(ops, false));
+  assert(r == 6012, "{r}");
+}
+
+fn test_the_call_answers_a_field_of_its_parameter() {
+  ws: vector<Wrap> = [Wrap { w: NdInt { n: 3, s: "a" }, k: 1 }, Wrap { w: NdInt { n: 4, s: "bb" }, k: 2 }];
+  r = total(field_of_param(ws, false));
+  assert(r == 3007, "{r}");
+}
+
+fn test_a_method_answers_self() {
+  ops = ops3();
+  r = total(method_self(ops, false));
+  assert(r == 6012, "{r}");
+}
+
+fn test_the_callee_is_defined_after_the_caller() {
+  ops = ops3();
+  r = total(callee_after(ops, false));
+  assert(r == 6012, "{r}");
+}
+
+// 6012 + one `k` per pass.
+fn test_the_place_is_a_struct_field() {
+  ops = ops3();
+  r = struct_field(ops, false);
+  assert(r == 6015, "{r}");
+}
+
+fn test_a_plain_struct() {
+  ops: vector<Box> = [Box { n: 3 }, Box { n: 4 }, Box { n: 5 }];
+  t = 0;
+  for b in plain_struct(ops, false) { t = t * 10 + b.n; }
+  assert(t == 345, "{t}");
+}
+
+// The literal arm on every pass: 100 each.
+fn test_the_literal_arm_every_pass() {
+  r = total(if_else_arm(ops3(), true));
+  assert(r == 300, "{r}");
+}
+
+// Control: a minting callee keeps its owner — (3 + 1000) * 10 …, no text.
+fn test_a_minting_callee() {
+  r = total(minting(ops3(), false));
+  assert(r == 60120, "{r}");
+}
+
+// Control: the call bound first, then joined.
+fn test_bound_first() {
+  r = total(bound_first(ops3(), false));
+  assert(r == 6012, "{r}");
+}
