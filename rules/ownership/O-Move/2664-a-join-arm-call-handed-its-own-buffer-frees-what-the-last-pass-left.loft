@@ -10,8 +10,6 @@
 // that free was missing (loft#2664): N passes of a loop in ONE frame left N - 1 records (the self-hosted
 // `without_terminal_copies` and `located`).
 //
-// CHANNEL: the leak gate; the values (hand-computed) hold on both trees.
-// HOLDS: every cell, on every backend.
 // Axes this file MOVES:  which answer the call gives (its argument, a store it makes, the two
 //                        alternating); a recursive callee; an `if` arm, a `match` arm, both
 //                        `if` arms calling; the literal arm every pass.
@@ -20,6 +18,8 @@
 //
 // @falsified-at: e34568479 — native 6 of 8 tests fail on a store left at exit -> 0 (a release
 //   build of that ref, `--tests --native` with LOFT_LEAK_CHECK=1, run by hand); interpret INERT (C only)
+// CHANNEL: the leak gate; the values (hand-computed) hold on both trees.
+// HOLDS: every cell, on every backend.
 
 enum Node {
   NdNull,
