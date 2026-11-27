@@ -1,0 +1,92 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A COMPREHENSION OVER A DESTINATION CLEARED IN PLACE READS WHAT IT HELD (`@FR-I-Comp`, loft#2663).
+// A build reads what its destination held when the statement BEGAN.  Most destinations take a
+// fresh store and are repointed after the loop, which keeps that by itself; two are emptied IN
+// PLACE before the build instead, and there the loop's reads must go to a snapshot taken first:
+// a local returned as the tail, which shares the caller's return buffer, and a `&vector`
+// parameter, which shares the caller's vector.  Both answered `[]`.
+//
+// Every value by hand: the source is [1, 2, 3]; `k + 1` gives [2, 3, 4], `k * 2` three rounds
+// gives [8, 16, 24], a filter `k > 1` gives [2, 3].
+//
+// Axes this file MOVES:  the destination (a tail-returned local, a `&vector` parameter, an
+//                        explicit-return twin, a plain local twin), filter or not, one rebind or
+//                        a rebind in a loop, the element kind (integer, text, struct).
+// Axes it HOLDS FIXED:   the comprehension reads its destination by name; one statement per build.
+//
+// CHANNEL: the assertions — the cleared destination answers `[]`.
+// Measured by hand: on main 9e84211ef (and the installed 2026.11.20261121) the tail-returned and
+//   `&` cells answer `[]` on --interpret and --native-c; the twins answer right on both.
+
+struct P2663 { x: integer }
+
+fn tail_kept2663() -> vector<integer> {
+  v: vector<integer> = [1, 2, 3];
+  v = [for k in v { k + 1 }];
+  v
+}
+
+fn tail_filtered2663() -> vector<integer> {
+  v: vector<integer> = [1, 2, 3];
+  v = [for k in v if k > 1 { k }];
+  v
+}
+
+fn tail_in_a_loop2663() -> vector<integer> {
+  v: vector<integer> = [1, 2, 3];
+  for _ in 0..3 {
+    v = [for k in v { k * 2 }];
+  }
+  v
+}
+
+fn tail_texts2663() -> vector<text> {
+  v: vector<text> = ["a", "bb"];
+  v = [for k in v { "{k}{k}" }];
+  v
+}
+
+fn tail_records2663() -> vector<P2663> {
+  v: vector<P2663> = [P2663 { x: 1 }, P2663 { x: 2 }];
+  v = [for k in v { P2663 { x: k.x * 10 } }];
+  v
+}
+
+fn explicit_return2663() -> vector<integer> {
+  v: vector<integer> = [1, 2, 3];
+  v = [for k in v { k + 1 }];
+  return v;
+}
+
+fn bump2663(v: &vector<integer>) {
+  v = [for k in v { k + 1 }];
+}
+
+fn test_a_tail_returned_local_reads_what_it_held() {
+  assert("{tail_kept2663()}" == "[2,3,4]", "tail: {tail_kept2663()}");
+  assert("{tail_filtered2663()}" == "[2,3]", "filtered: {tail_filtered2663()}");
+  assert("{tail_in_a_loop2663()}" == "[8,16,24]", "in a loop: {tail_in_a_loop2663()}");
+  assert("{tail_texts2663()}" == "[\"aa\",\"bbbb\"]", "texts: {tail_texts2663()}");
+  assert("{[for p in tail_records2663() { p.x }]}" == "[10,20]", "records");
+}
+
+fn test_a_ref_parameter_reads_what_it_held() {
+  a = [1, 2, 3];
+  bump2663(a);
+  assert("{a}" == "[2,3,4]", "& parameter: {a}");
+}
+
+fn test_the_twins_that_take_a_fresh_store() {
+  assert("{explicit_return2663()}" == "[2,3,4]", "explicit return: {explicit_return2663()}");
+  v: vector<integer> = [1, 2, 3];
+  v = [for k in v { k + 1 }];
+  assert("{v}" == "[2,3,4]", "local: {v}");
+}
+
+fn main() {
+  test_a_tail_returned_local_reads_what_it_held();
+  test_a_ref_parameter_reads_what_it_held();
+  test_the_twins_that_take_a_fresh_store();
+}
