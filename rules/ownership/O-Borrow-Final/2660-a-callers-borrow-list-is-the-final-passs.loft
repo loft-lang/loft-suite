@@ -19,6 +19,7 @@
 //
 // @falsified-at: ebff34f71e — interpret leaked kt=100 Node×5 -> clean, native leaked kt=100 Node×5 -> clean
 // CHANNEL: the leak check — `recv` read as a view of the subject, and its store was never freed.
+//   ARMED: `LOFT_LEAK_CHECK=1`, which the suite runner arms for every cell.
 //   HOLDS: every assertion is green on both trees: the values were right, the store was left.
 
 enum Node {
