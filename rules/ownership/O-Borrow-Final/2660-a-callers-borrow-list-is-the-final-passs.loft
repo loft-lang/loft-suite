@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2660 — `@FR-O-Borrow-Final`: a local's borrow list is the one its FINAL pass computed.
+// `f` answers a recursive call from a match arm, so pass 1 types that call before `f`'s return
+// is known and records `f` as borrowing `n`; pass 2 learns that `f` returns its own buffer.  A
+// caller whose `recv = match … { … => f(lra[0]!) }` kept pass 1's list read `recv` as a view of
+// the subject and never freed it: one `Node` left per call, both backends.
+//
+// Every value by hand: `d` holds the one argument `NdInt { n: 7 }`; `wrap(k)` nests `NdInt { n: k }`
+// `k mod 3` spans deep, which `f` unwraps.
+//
+// Axes this file MOVES:  the match subject a call or a local; one call or a loop of them; the
+//                        arm's call bound first (the issue's workaround, a control); backends.
+// Axes it HOLDS FIXED:   the callee's recursion is in a match arm; the argument views the
+//                        subject (an element of a payload vector); the callee is declared
+//                        ABOVE its caller (one declared below reads a return pass 2 has not
+//                        settled yet: @PLN233 phase 2's cell).
+
+enum Node {
+  NdNull,
+  NdInt { n: integer },
+  NdSpan { pos: integer, inner: Node },
+  NdCall { def_nr: integer, args: vector<Node> }
+}
+
+fn f(n: Node) -> Node { match n { NdSpan { inner } => f(inner), _ => n } }
+
+fn val(x: Node) -> integer { match x { NdInt { n } => n, _ => -1 } }
+
+fn wrap(k: integer) -> Node {
+  r = Node::NdInt { n: k };
+  for i in 0..k % 3 { r = Node::NdSpan { pos: i, inner: r }; }
+  r
+}
+
+// The issue's program: the subject is a call.
+fn probe(code: Node) -> integer {
+  recv = match f(code) { NdCall { args: lra } => f(lra[0]!), _ => Node.NdNull };
+  val(recv)
+}
+
+// The subject is a local.
+fn probe_local(code: Node) -> integer {
+  s = f(code);
+  recv = match s { NdCall { args: lra } => f(lra[0]!), _ => Node.NdNull };
+  val(recv)
+}
+
+// Control: the arm's call bound first, green before the fix.
+fn probe_bound(code: Node) -> integer {
+  recv = match f(code) { NdCall { args: lra } => { t = f(lra[0]!); t }, _ => Node.NdNull };
+  val(recv)
+}
+
+fn main() {
+  d = Node::NdCall { def_nr: 1, args: [Node::NdInt { n: 7 }] };
+  assert(probe(d) == 7, "probe: {probe(d)}");
+  assert(probe_local(d) == 7, "probe_local: {probe_local(d)}");
+  assert(probe_bound(d) == 7, "probe_bound: {probe_bound(d)}");
+  // A loop of calls through spans 0, 1 and 2 deep: 10 + 11 + 12 + 13 = 46.
+  total = 0;
+  for k in 10..14 {
+    total += probe(Node::NdCall { def_nr: k, args: [wrap(k)] });
+  }
+  assert(total == 46, "loop total: {total}");
+  // The subject's other arm: no call, the null answer.
+  assert(probe(Node::NdInt { n: 3 }) == -1, "other arm");
+}
