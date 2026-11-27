@@ -16,6 +16,10 @@
 //                        subject (an element of a payload vector); the callee is declared
 //                        ABOVE its caller (one declared below reads a return pass 2 has not
 //                        settled yet: @PLN233 phase 2's cell).
+//
+// @falsified-at: ebff34f71e — interpret leaked kt=100 Node×5 -> clean, native leaked kt=100 Node×5 -> clean
+// CHANNEL: the leak check — `recv` read as a view of the subject, and its store was never freed.
+//   HOLDS: every assertion is green on both trees: the values were right, the store was left.
 
 enum Node {
   NdNull,

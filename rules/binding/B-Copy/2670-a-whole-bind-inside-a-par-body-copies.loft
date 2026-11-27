@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2670 — `@FR-B-Copy` inside a `par` body: `keep = e` and `keep = r` bind a COPY of the
+// loop's element or result, so a write through `keep` leaves the caller's vector alone, as the
+// same bind in a sequential `for` does.  The par lowering substitutes the element and the result
+// with their accessors, and the copy the bind was decided as went with the variable: `keep`
+// held the caller's record, `99` landed in `s[0]`, on both backends, with no message.
+//
+// Every value by hand: `cells(k)` holds `41, 42, …`; each body writes `99` through `keep`, so the
+// sum is `99` per row, and `s` must still read `41` at index 0 and `41 + i` at index `i`.
+//
+// Axes this file MOVES:  the bound source (the element, a pass-through result, a fresh result);
+//                        the write (a field, read back); one row or three; the sequential twin
+//                        (a control); backends.
+// Axes it HOLDS FIXED:   a struct element of one integer field; one thread.
+//
+// @falsified-at: ebff34f71e — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+// CHANNEL: the assertions — `99` written through `keep` read back from the caller's `s`.
+//   HOLDS: the leak check is clean on both trees; only the values move.
+
+struct Cell { v: integer }
+
+fn same_c(x: Cell) -> Cell { x }
+fn fresh_c(x: Cell) -> Cell { Cell { v: x.v + 100 } }
+
+fn cells(n: integer) -> vector<Cell> {
+  out: vector<Cell> = [];
+  for i in 0..n { out += [Cell { v: 41 + i }]; }
+  out
+}
+
+// The sum of `s`'s fields, to show every row is untouched: 41 + 42 + 43 = 126 for three rows.
+fn total(s: vector<Cell>) -> integer {
+  t = 0;
+  for c in s { t += c.v; }
+  t
+}
+
+fn by_element(k: integer) -> integer {
+  s = cells(k); n = 0;
+  for e in s par(r = same_c(e), 1) { keep = e; keep.v = 99; n += keep.v; }
+  n * 1000 + total(s)
+}
+
+fn by_result(k: integer) -> integer {
+  s = cells(k); n = 0;
+  for e in s par(r = same_c(e), 1) { keep = r; keep.v = 99; n += keep.v; }
+  n * 1000 + total(s)
+}
+
+fn by_fresh_result(k: integer) -> integer {
+  s = cells(k); n = 0;
+  for e in s par(r = fresh_c(e), 1) { keep = r; keep.v = keep.v + 1; n += keep.v; }
+  n * 1000 + total(s)
+}
+
+fn sequential(k: integer) -> integer {
+  s = cells(k); n = 0;
+  for e in s { keep = e; keep.v = 99; n += keep.v; }
+  n * 1000 + total(s)
+}
+
+fn main() {
+  assert(by_element(1) == 99041, "by_element(1): {by_element(1)}");
+  assert(by_element(3) == 297126, "by_element(3): {by_element(3)}");
+  assert(by_result(1) == 99041, "by_result(1): {by_result(1)}");
+  assert(by_result(3) == 297126, "by_result(3): {by_result(3)}");
+  // fresh: (141 + 1) + (142 + 1) + (143 + 1) = 429 for three rows.
+  assert(by_fresh_result(3) == 429126, "by_fresh_result(3): {by_fresh_result(3)}");
+  assert(sequential(3) == 297126, "sequential(3): {sequential(3)}");
+}
