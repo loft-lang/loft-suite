@@ -1,0 +1,373 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2668 (`@FR-O-Detach`, `@FR-R-MoveLast`) — A RECORD REBUILT FROM A VIEW OF ITSELF READS IT
+// BEFORE ITS ALLOC.  `a = mk(i)` (a call: `a` names a store); then `ops = [for x in a.items { … }];
+// a = Bag { items: ops }`.  The move elision of the construction (`a = Bag { items: base }`, the
+// field taking a dead-after vector local) builds `ops` DIRECTLY in `a.items`, which hoists `a`'s
+// allocation to the top of the block, ahead of `ops`'s build.  That allocation is `a`'s DETACH: `a` already names a
+// store, which `OpDatabase` re-initialises in place, so every read of `a` or of a view of its
+// store (`items` matched out of it at any depth, a scalar field, a call taking it) that the hoist
+// crossed read the cleared record — `[]`, an element lost, `0`, "items[0] is null", or a walk
+// that grew the field it was walking and never ended — on both backends, silently.  A binding
+// in the crossed statements was overwritten the same way: `a = mk(i)` rebinding over the built
+// field.  `(O-Detach)`: the detach is sequenced after every read of the binding; the rewrite now
+// declines where a statement it would cross names `a`, a view of its store, or binds `a`, and
+// keeps the copy there.
+//
+// @falsified-at: 4a0aefe1f — 13 of 18 tests fail on the interpreter, 12 of 18 on native (a wrong
+//   value, a panic, a hang) -> 0 (a release build of that ref, `--tests`, each test alone)
+// CHANNEL: the VALUE — the build carrying the defect is leak-free and frees nothing twice, so a
+//   run scored on store lifetimes alone learns nothing; every expected value is hand-computed.
+//   The fix is scored for leaks as well (`LOFT_STRICT_STORES=1`, `LOFT_NATIVE_LEAK_CHECK=1`).
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  the record kind (a plain struct, a struct-enum); where the view comes
+//                        from (the binding's field, `items` matched at depth 1 and 2, a field of
+//                        a matched value, a call taking the binding, a copy taken before the
+//                        build); how the vector is built (a comprehension, appended in a loop,
+//                        elements read by index); the read (a vector, its length, a scalar
+//                        field); a loop around the rebuild; a second construction in the block;
+//                        what the function answers (the binding, a record holding it); a rebind
+//                        of the binding in the crossed statements.
+// Axes it HOLDS FIXED:   the rebuild is a whole-value literal of the binding's own type whose
+//                        one vector field takes the built local at its last use; the first bind
+//                        is a call (a literal first bind is a second allocation, declined
+//                        before).  The build that reads nothing of the binding, the binding
+//                        answered directly and the literal first bind are the controls that
+//                        were clean.
+
+struct It { n: integer }
+
+struct Bag { items: vector<It> }
+
+struct Tb { tag: integer, items: vector<It> }
+
+struct Wrap { k: integer, inner: Bag }
+
+struct Pos { line: integer }
+
+enum Node {
+  Var { n: integer },
+  Span { pos: Pos, inner: Node },
+  Set { var: integer, inner: Node },
+  Ins { items: vector<Node> }
+}
+
+fn mk(i: integer) -> Bag { Bag { items: [It { n: i }, It { n: i + 10 }] } }
+
+fn mk_tb(i: integer) -> Tb { Tb { tag: 9, items: [It { n: i }] } }
+
+fn mk1(i: integer) -> Node { Ins { items: [Var { n: i }, Var { n: i + 10 }] } }
+
+fn mk2(i: integer) -> Node {
+  Span { pos: Pos { line: i }, inner: Ins { items: [Var { n: i }, Var { n: i + 10 }] } }
+}
+
+fn get(b: Bag) -> vector<It> { b.items }
+
+fn ns(b: Bag) -> text {
+  r = "";
+  for x in b.items { r += "{x.n},"; }
+  r
+}
+
+fn show(n: Node) -> text {
+  match n {
+    Var { n } => "{n}",
+    Span { pos, inner } => "@{pos.line}:{show(inner)}",
+    Set { var, inner } => "{var}={show(inner)}",
+    Ins { items } => {
+      r = "[";
+      for x in items { r += "{show(x)},"; }
+      "{r}]"
+    }
+  }
+}
+
+fn rebuilt_in_a_record(i: integer) -> Wrap {
+  a = mk(i);
+  ops: vector<It> = [for x in a.items { x }];
+  a = Bag { items: ops };
+  Wrap { k: 4, inner: a }
+}
+
+// The walk over the cleared `a.items` appended into that same field and never ended.
+fn test_a_comprehension_over_its_own_field() {
+  w = rebuilt_in_a_record(1);
+  assert(ns(w.inner) == "1,11,", ns(w.inner));
+}
+
+fn in_a_branch(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    ops: vector<It> = [for x in a.items { x }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_in_a_branch() {
+  w = in_a_branch(1);
+  assert(ns(w.inner) == "1,11,", ns(w.inner));
+}
+
+fn appended(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    ops: vector<It> = [];
+    for x in a.items { ops += [It { n: x.n * 2 }]; }
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_appended_in_a_loop() {
+  w = appended(1);
+  assert(ns(w.inner) == "2,22,", ns(w.inner));
+}
+
+fn by_index(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    last = a.items[1];
+    ops: vector<It> = [a.items[0]];
+    ops += [last];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_elements_read_by_index() {
+  w = by_index(1);
+  assert(ns(w.inner) == "1,11,", ns(w.inner));
+}
+
+fn a_copy_first(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    v = a.items;
+    ops: vector<It> = [for x in v { x }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+// The copy is taken before the source's build, and still reads `a` before the hoisted alloc.
+fn test_a_copy_taken_before_the_build() {
+  w = a_copy_first(1);
+  assert(ns(w.inner) == "1,11,", ns(w.inner));
+}
+
+fn its_length(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    n = len(a.items);
+    ops: vector<It> = [It { n: n }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_its_length() {
+  w = its_length(1);
+  assert(ns(w.inner) == "2,", ns(w.inner));
+}
+
+fn a_scalar(i: integer) -> integer {
+  a = mk_tb(i);
+  if i > 0 {
+    ops: vector<It> = [It { n: a.tag }];
+    a = Tb { tag: 3, items: ops };
+  }
+  a.tag * 100 + a.items[0].n
+}
+
+fn test_a_scalar_field() {
+  assert(a_scalar(1) == 309, "{a_scalar(1)}");
+}
+
+fn through_a_call(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    ops: vector<It> = [for x in get(a) { It { n: x.n + 1 } }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_through_a_call() {
+  w = through_a_call(1);
+  assert(ns(w.inner) == "2,12,", ns(w.inner));
+}
+
+fn three_passes(i: integer) -> Wrap {
+  a = mk(i);
+  for _k in 0..3 {
+    ops: vector<It> = [for x in a.items { It { n: x.n + 1 } }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_a_loop_around_the_rebuild() {
+  w = three_passes(1);
+  assert(ns(w.inner) == "4,14,", ns(w.inner));
+}
+
+fn two_constructs(i: integer) -> Wrap {
+  a = mk(i);
+  if i > 0 {
+    o1: vector<It> = [It { n: 5 }];
+    b = Bag { items: o1 };
+    o2: vector<It> = [for x in a.items { It { n: x.n + len(b.items) } }];
+    a = Bag { items: o2 };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_a_second_construction_in_the_block() {
+  w = two_constructs(1);
+  assert(ns(w.inner) == "2,12,", ns(w.inner));
+}
+
+fn rebound_first(i: integer) -> Wrap {
+  a = mk(i);
+  ops: vector<It> = [It { n: 7 }, It { n: i }];
+  a = Bag { items: ops };
+  Wrap { k: 4, inner: a }
+}
+
+// `a = mk(i)` stands in the block the alloc was hoisted to the top of: it rebound `a` over the
+// build, and the built elements were appended to `mk`'s.
+fn test_a_rebind_before_the_build() {
+  w = rebound_first(1);
+  assert(ns(w.inner) == "7,1,", ns(w.inner));
+}
+
+fn depth_two(v: integer, i: integer) -> Node {
+  scanned = mk2(i);
+  match scanned {
+    Span { pos, inner } => {
+      match inner {
+        Ins { items } => {
+          ops: vector<Node> = [for x in items { x }];
+          scanned = Ins { items: ops };
+        },
+        _ => {}
+      }
+    },
+    _ => {}
+  }
+  Set { var: v, inner: scanned }
+}
+
+// The issue's shape: one item lost.
+fn test_a_struct_enum_matched_two_deep() {
+  r = depth_two(4, 1);
+  assert(show(r) == "4=[1,11,]", show(r));
+}
+
+fn depth_two_by_index(v: integer, i: integer) -> Node {
+  s = mk2(i);
+  match s {
+    Span { pos, inner } => {
+      match inner {
+        Ins { items } => {
+          last = items[1]!;
+          ops: vector<Node> = [items[0]!];
+          ops += [last];
+          s = Ins { items: ops };
+        },
+        _ => {}
+      }
+    },
+    _ => {}
+  }
+  Set { var: v, inner: s }
+}
+
+fn test_a_struct_enum_read_by_index() {
+  r = depth_two_by_index(4, 1);
+  assert(show(r) == "4=[1,11,]", show(r));
+}
+
+fn depth_one_loop(v: integer, i: integer) -> Node {
+  s = mk1(i);
+  for k in 0..2 {
+    match s {
+      Ins { items } => {
+        ops: vector<Node> = [for x in items { x }];
+        ops += [Var { n: k }];
+        s = Ins { items: ops };
+      },
+      _ => {}
+    }
+  }
+  Set { var: v, inner: s }
+}
+
+fn test_a_struct_enum_matched_once_in_a_loop() {
+  r = depth_one_loop(4, 1);
+  assert(show(r) == "4=[1,11,0,1,]", show(r));
+}
+
+fn field_of_a_match(v: integer, i: integer) -> Node {
+  s = mk2(i);
+  match s {
+    Span { pos, inner } => {
+      if inner is Ins {
+        ops: vector<Node> = [for x in inner.items { x }];
+        s = Ins { items: ops };
+      }
+    },
+    _ => {}
+  }
+  Set { var: v, inner: s }
+}
+
+fn test_a_field_of_a_matched_value() {
+  r = field_of_a_match(4, 1);
+  assert(show(r) == "4=[1,11,]", show(r));
+}
+
+// Control: the binding answered directly.
+fn answered(i: integer) -> Bag {
+  a = mk(i);
+  ops: vector<It> = [for x in a.items { It { n: x.n + 100 } }];
+  a = Bag { items: ops };
+  a
+}
+
+fn test_the_binding_answered_directly() {
+  assert(ns(answered(1)) == "101,111,", ns(answered(1)));
+}
+
+// Control: a build that reads nothing of the binding keeps the elision and its value.
+fn reads_nothing(i: integer) -> Wrap {
+  a = mk(i);
+  for k in 0..3 {
+    ops: vector<It> = [It { n: k }, It { n: i }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_a_build_reading_nothing_of_it() {
+  w = reads_nothing(1);
+  assert(ns(w.inner) == "2,1,", ns(w.inner));
+}
+
+// Control: a literal first bind — a second allocation of the binding.
+fn literal_first(i: integer) -> Wrap {
+  a = Bag { items: [It { n: i }, It { n: i + 10 }] };
+  for _k in 0..3 {
+    ops: vector<It> = [for x in a.items { It { n: x.n + 1 } }];
+    a = Bag { items: ops };
+  }
+  Wrap { k: 4, inner: a }
+}
+
+fn test_a_literal_first_bind() {
+  w = literal_first(1);
+  assert(ns(w.inner) == "4,14,", ns(w.inner));
+}
