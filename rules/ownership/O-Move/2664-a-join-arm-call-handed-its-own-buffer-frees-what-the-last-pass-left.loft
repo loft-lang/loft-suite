@@ -1,0 +1,126 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_C_NO_STASHED_JOIN_FREE — the C writer's join of an arm's call handed its own buffer frees nothing it displaces, so every pass of a loop leaves the record the previous pass put there
+//
+// @FR-O-Move: a store has one owner, and each exit frees it once.  An `if` or `match` arm of
+// a vector literal whose value is an owning call is bound into the call's own buffer
+// (`__ref_N = strip(op, __ref_N)`), and the answer joins: a copy where the call hands back its
+// argument, the call's own store otherwise.  The rebind reads the buffer, so what it displaces
+// is freed AFTER the bind and only where the new value names another store.  On the C backend
+// that free was missing (loft#2664): N passes of a loop in ONE frame left N - 1 records (the self-hosted
+// `without_terminal_copies` and `located`).
+//
+// CHANNEL: the leak gate; the values (hand-computed) hold on both trees.
+// HOLDS: every cell, on every backend.
+// Axes this file MOVES:  which answer the call gives (its argument, a store it makes, the two
+//                        alternating); a recursive callee; an `if` arm, a `match` arm, both
+//                        `if` arms calling; the literal arm every pass.
+// Axes it HOLDS FIXED:   the loop is in the frame that binds; the element lands in a vector
+//                        local.  The bound-first spelling is the control that never leaked.
+//
+// @falsified-at: e34568479 — native 6 of 8 tests fail on a store left at exit -> 0 (a release
+//   build of that ref, `--tests --native` with LOFT_LEAK_CHECK=1, run by hand); interpret INERT (C only)
+
+enum Node {
+  NdNull,
+  NdInt { n: integer },
+  NdSpan { line: integer, inner: Node },
+}
+
+fn strip(v: Node) -> Node { match v { NdNull => NdNull, _ => v } }
+
+fn deep(v: Node) -> Node {
+  match v {
+    NdSpan { line, inner } => NdSpan { line: line + 1, inner: deep(inner) },
+    NdNull => NdNull,
+    _ => v,
+  }
+}
+
+fn val(n: Node) -> integer {
+  match n { NdInt { n } => n, NdSpan { line, inner } => line * 100 + val(inner), _ => 7 }
+}
+
+fn digits(ops: vector<Node>) -> integer {
+  s = 0;
+  for op in ops { s = s * 1000 + val(op); }
+  s
+}
+
+fn if_arm(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { NdNull } else { strip(op) }]; }
+  out
+}
+
+fn if_deep(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { NdNull } else { deep(op) }]; }
+  out
+}
+
+fn match_arm(ops: vector<Node>) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [match op { NdNull => NdInt { n: 9 }, _ => strip(op) }]; }
+  out
+}
+
+fn both_arms(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops { out += [if terminal { strip(op) } else { strip(op) }]; }
+  out
+}
+
+fn bound_first(ops: vector<Node>, terminal: boolean) -> vector<Node> {
+  out: vector<Node> = [];
+  for op in ops {
+    x = if terminal { NdNull } else { strip(op) };
+    out += [x];
+  }
+  out
+}
+
+fn ints() -> vector<Node> { [NdInt { n: 3 }, NdInt { n: 4 }, NdInt { n: 5 }] }
+fn mixed() -> vector<Node> { [NdInt { n: 3 }, NdNull, NdInt { n: 5 }, NdNull] }
+
+fn test_the_call_answers_its_argument_every_pass() {
+  r = digits(if_arm(ints(), false));
+  assert(r == 3004005, "{r}");
+}
+
+fn test_the_call_answers_its_own_store_every_pass() {
+  r = digits(if_arm([NdNull, NdNull, NdNull], false));
+  assert(r == 7007007, "{r}");
+}
+
+fn test_the_two_answers_alternate() {
+  r = digits(if_arm(mixed(), false));
+  assert(r == 3007005007, "{r}");
+}
+
+fn test_a_recursive_callee() {
+  // 202: Span{1 + 1, Int 2}; 907: Span{3 + 1, Span{4 + 1, Null}}; 6.
+  sp = [NdSpan { line: 1, inner: NdInt { n: 2 } }, NdSpan { line: 3, inner: NdSpan { line: 4, inner: NdNull } }, NdInt { n: 6 }];
+  r = digits(if_deep(sp, false));
+  assert(r == 202907006, "{r}");
+}
+
+fn test_a_match_arm() {
+  r = digits(match_arm(mixed()));
+  assert(r == 3009005009, "{r}");
+}
+
+fn test_both_arms_call() {
+  r = digits(both_arms(mixed(), false));
+  assert(r == 3007005007, "{r}");
+}
+
+fn test_bound_first() {
+  r = digits(bound_first(mixed(), false));
+  assert(r == 3007005007, "{r}");
+}
+
+fn test_the_literal_arm_every_pass() {
+  r = digits(if_arm(mixed(), true));
+  assert(r == 7007007007, "{r}");
+}
