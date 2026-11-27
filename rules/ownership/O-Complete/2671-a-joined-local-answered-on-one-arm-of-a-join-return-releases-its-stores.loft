@@ -1,0 +1,211 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-O-Complete`, with `@FR-O-Buffer` and `@FR-O-Move`.
+// @catches: LOFT_NO_JOIN_RETURN_BACKINGS — the switch keeps the stores a joined local views and keys its buffers' frees on the local, which is what this program checks.
+//
+// A local bound from a join of a parameter and a fresh record (`node = if c { f(n) } else { n }`),
+// answered on ONE arm of a join return (`if r != null { r! } else { node }`), releases every store
+// it holds on the run that answers the other arm, and hands its own store over on the run that
+// answers it.  The local owns nothing itself: its arms were lifted into temps (the call's answer,
+// the copy the borrowed arm takes) or built in a buffer, and those were kept because a return
+// source names them, or freed by a guard keyed on the local rather than on the value returned.
+// The first leaked a record per call where `r` answered; the second freed the record handed out
+// where an always-fresh arm built it and `node` answered (loft#2671).
+//
+// Axes this file MOVES:  the fresh arm (a call that may answer its argument, one that always
+//                        mints, one that builds its answer in the caller's buffer, a record
+//                        literal); which arm ran; which value answers; the
+//                        tail (`if`, an explicit `return`); a struct instead of an enum.
+// Axes it HOLDS FIXED:   a join of two values, one call per test in a loop of 10.
+//
+// The controls were already clean: the early-return spelling, a `match` tail with a parameter arm,
+// and two joined locals answered by a plain `if`.  A `??` tail (`alt(node) ?? node`) is the same
+// release, and is left to loft#2673's cell: its promoted temp has a defect of its own.
+//
+// Values by hand: rebuild(S{v}, k) is S{v, k}, of A it answers its argument; fill(S{v}, k) is
+// S{v, k} built in its promoted local; alt(S{v}) is
+// A{v + 100} for v > 3, else null; mk(v) is S{v, A{1}}.  Each test sums ten answers, an A{x}
+// counting x and an S{v} counting v.
+//
+// @falsified-by: tests/falsified/2671-a-joined-local-answered-on-one-arm-of-a-join-return-releases-its-stores.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the exit on both backends: the always-fresh and buffer arms free the answer twice,
+//   which stops the run; the leaks are read with `LOFT_LEAK_CHECK=1` per test (the runner arms it).
+//   ARMED: LOFT_LEAK_CHECK=1 for the leak cells.
+//   HOLDS: every value is the same on both trees where the control runs to it.
+enum N { A { x: integer }, S { v: integer, inner: N } }
+
+struct P { v: integer }
+
+fn rebuild(n: N, k: N) -> N { match n { S { v } => S { v: v, inner: k }, _ => n } }
+fn mk(v: integer) -> N { S { v: v, inner: A { x: 1 } } }
+fn fill(n: N, k: N) -> N {
+  res = S { v: 1, inner: k };
+  match n { S { v } => res.v = v, _ => res.v = 0 }
+  res
+}
+fn alt(n: N) -> N? { match n { S { v } => if v > 3 { A { x: v + 100 } } else { null }, _ => null } }
+fn palt(p: P) -> P? { if p.v > 3 { P { v: p.v + 100 } } else { null } }
+
+fn weight(n: N) -> integer { match n { A { x } => x, S { v } => v } }
+
+// The call that may answer its argument, joined with the parameter.
+fn via_call(n: N, deep: boolean) -> N {
+  node = if deep { rebuild(n, A { x: 7 }) } else { n };
+  r = alt(node);
+  if r != null { r! } else { node }
+}
+
+// A call that builds its answer in the caller's buffer.
+fn via_buffer(n: N, k: N, deep: boolean) -> N {
+  node = if deep { fill(n, k) } else { n };
+  r = alt(node);
+  if r != null { r! } else { node }
+}
+
+// An arm that always mints.
+fn via_mint(n: N, v: integer) -> N {
+  node = if v > 0 { mk(v) } else { n };
+  r = alt(node);
+  if r != null { r! } else { node }
+}
+
+// A record literal in the arm.
+fn via_literal(n: N, v: integer) -> N {
+  node = if v > 0 { S { v: v, inner: A { x: 3 } } } else { n };
+  r = alt(node);
+  if r != null { r! } else { node }
+}
+
+fn via_return(n: N, k: integer) -> N {
+  node = if k > 0 { rebuild(n, A { x: k }) } else { n };
+  r = alt(node);
+  return if r != null { r! } else { node };
+}
+
+fn via_struct(p: P, w: integer) -> P {
+  node = if w > 0 { P { v: w } } else { p };
+  r = palt(node);
+  if r != null { r! } else { node }
+}
+
+// Controls.
+fn early(n: N, deep: boolean) -> N {
+  node = if deep { rebuild(n, A { x: 7 }) } else { n };
+  r = alt(node);
+  if r != null { return r!; }
+  node
+}
+
+fn by_match(n: N, k: integer) -> N {
+  node = if k > 0 { rebuild(n, A { x: k }) } else { n };
+  r = alt(node);
+  match k { 1 => r ?? n, 2 => node, _ => n }
+}
+
+fn two_joins(n: N, a: integer, b: integer, c: boolean) -> N {
+  n1 = if a > 0 { rebuild(n, A { x: a }) } else { n };
+  n2 = if b > 0 { rebuild(n, A { x: b }) } else { n };
+  if c { n1 } else { n2 }
+}
+
+fn test_the_call_arm() {
+  big = S { v: 9, inner: A { x: 2 } };
+  small = S { v: 2, inner: A { x: 2 } };
+  t = 0;
+  for i in 0..10 {
+    // even: the call arm with alt answering 109; odd: the parameter arm answering 2 (`node`).
+    t += weight(via_call(if i % 2 == 0 { big } else { small }, i % 2 == 0));
+  }
+  assert(t == 5 * 109 + 5 * 2, "call arm {t}");
+  t = 0;
+  for i in 0..10 {
+    // the call arm answering `node` (S 2), then the parameter arm with alt answering 109.
+    t += weight(via_call(if i % 2 == 0 { small } else { big }, i % 2 == 0));
+  }
+  assert(t == 5 * 2 + 5 * 109, "call arm swapped {t}");
+  assert(weight(big) == 9 && weight(small) == 2, "parameters {weight(big)} {weight(small)}");
+}
+
+fn test_a_callee_filling_the_buffer() {
+  big = S { v: 9, inner: A { x: 2 } };
+  small = S { v: 2, inner: A { x: 2 } };
+  t = 0;
+  for i in 0..10 {
+    // even: big (109 either arm); odd: small (2 either arm, `node` answering); deep below 6.
+    t += weight(via_buffer(if i % 2 == 0 { big } else { small }, small, i < 6));
+  }
+  assert(t == 5 * 109 + 5 * 2, "buffer arm {t}");
+}
+
+fn test_an_always_fresh_arm() {
+  m = mk(9);
+  t = 0;
+  for i in 0..10 {
+    // i % 3: 0 the parameter (109), 1 mk(1) answered as `node` (1), 2 mk(5) with alt (105).
+    t += weight(via_mint(m, if i % 3 == 0 { 0 } else if i % 3 == 1 { 1 } else { 5 }));
+  }
+  assert(t == 4 * 109 + 3 * 1 + 3 * 105, "fresh arm {t}");
+  assert(weight(m) == 9, "parameter {weight(m)}");
+}
+
+fn test_a_literal_arm() {
+  m = mk(9);
+  t = 0;
+  for i in 0..10 {
+    // i % 3: 0 the parameter (109), 1 the literal answered as `node` (3), 2 the literal with alt (105).
+    t += weight(via_literal(m, if i % 3 == 0 { 0 } else if i % 3 == 1 { 3 } else { 5 }));
+  }
+  assert(t == 4 * 109 + 3 * 3 + 3 * 105, "literal arm {t}");
+}
+
+fn test_an_explicit_return() {
+  big = mk(9);
+  small = mk(2);
+  t = 0;
+  for i in 0..10 {
+    t += weight(via_return(if i % 2 == 0 { big } else { small }, 1));
+  }
+  assert(t == 5 * 109 + 5 * 2, "return {t}");
+}
+
+fn test_a_struct() {
+  q = P { v: 2 };
+  t = 0;
+  for i in 0..10 {
+    // i % 3: 0 the literal with palt (105), 1 the literal answered (1), 2 the parameter answered (2).
+    t += via_struct(q, if i % 3 == 0 { 5 } else if i % 3 == 1 { 1 } else { 0 }).v;
+  }
+  assert(t == 4 * 105 + 3 * 1 + 3 * 2, "struct {t}");
+  assert(q.v == 2, "parameter {q.v}");
+}
+
+fn test_the_controls() {
+  big = mk(9);
+  small = mk(2);
+  t = 0;
+  for i in 0..10 {
+    t += weight(early(if i % 2 == 0 { big } else { small }, true));
+  }
+  assert(t == 5 * 109 + 5 * 2, "early {t}");
+  t = 0;
+  for i in 0..9 {
+    // k = i % 3: 0 answers n (9), 1 answers alt (109), 2 answers node (9).
+    t += weight(by_match(big, i % 3));
+  }
+  assert(t == 3 * 9 + 3 * 109 + 3 * 9, "match {t}");
+  t = 0;
+  for i in 0..10 {
+    t += weight(two_joins(big, i % 2, 1 - i % 2, i % 3 == 0));
+  }
+  assert(t == 10 * 9, "two joins {t}");
+}
+
+fn main() {
+  test_the_call_arm();
+  test_a_callee_filling_the_buffer();
+  test_an_always_fresh_arm();
+  test_a_literal_arm();
+  test_an_explicit_return();
+  test_a_struct();
+  test_the_controls();
+}
