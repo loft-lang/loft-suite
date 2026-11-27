@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2669 — `@FR-O-Witness`: a record local rebound to a call that may answer its own
+// argument, discharged with `!` (`a = condition(a)!`), holds a store of its own after the bind:
+// the discharge's `_ncr_N` copies the answer when it is `a`'s store and adopts it when the callee
+// minted it.  The witness must name that store.  It read the bind as a view (the callee MAY
+// answer `a`), released what it held and was never re-pointed, so the new record was freed by
+// nobody: one `Ex` per rebind, both backends.  `?? a`, a new name and a callee that always mints
+// were clean.
+//
+// Every value by hand: `tag` is 1 for `TyBool`, 2 for `TyText`; `inner` reads the `NdInt` inside
+// an `NdIf` as `n`, a bare `NdInt` as `n * 10`.
+//
+// Axes this file MOVES:  the callee's answer (a fresh record, its argument); one rebind, two, a
+//                        loop of them; the controls (a new name, `?? a`); backends.
+// Axes it HOLDS FIXED:   a struct record local with two struct-enum fields.
+//
+// @falsified-at: ebff34f71e — interpret leaked kt=111 Ex×7 -> clean, native leaked kt=111 Ex×7 -> clean
+// CHANNEL: the leak check — the displaced store was released by nobody.
+//   ARMED: `LOFT_LEAK_CHECK=1`, which the suite runner arms for every cell.
+//   HOLDS: every assertion is green on both trees; only the leak moves.
+
+enum Nd { NdNull, NdInt { n: integer }, NdIf { c: Nd, t: Nd } }
+enum Tp { TyBool, TyNull, TyText, TyOpt { inner: Tp } }
+struct Ex { code: Nd, tp: Tp }
+
+fn ex(c: Nd, t: Tp) -> Ex { Ex { code: c, tp: t } }
+fn condition(x: Ex) -> Ex? {
+  match x.tp { TyText => ex(Nd::NdIf { c: x.code, t: Nd::NdNull }, Tp::TyBool), TyBool => x, _ => null }
+}
+fn tag(a: Ex) -> integer { match a.tp { TyBool => 1, TyText => 2, _ => 0 } }
+fn inner(a: Ex) -> integer {
+  match a.code { NdIf { c } => match c { NdInt { n } => n, _ => -1 }, NdInt { n } => n * 10, _ => -2 }
+}
+
+fn fresh_answer(x0: integer) -> integer {
+  a = ex(Nd::NdInt { n: x0 }, Tp::TyText);
+  a = condition(a)!;
+  tag(a) * 100 + inner(a)
+}
+fn own_answer(x0: integer) -> integer {
+  a = ex(Nd::NdInt { n: x0 }, Tp::TyBool);
+  a = condition(a)!;
+  tag(a) * 100 + inner(a)
+}
+fn twice(x0: integer) -> integer {
+  a = ex(Nd::NdInt { n: x0 }, Tp::TyText);
+  a = condition(a)!;
+  a = condition(a)!;
+  tag(a) * 100 + inner(a)
+}
+fn in_a_loop(x0: integer) -> integer {
+  a = ex(Nd::NdInt { n: x0 }, Tp::TyText);
+  for _i in 0..3 { a = condition(a)!; }
+  tag(a) * 100 + inner(a)
+}
+fn new_name(x0: integer) -> integer {
+  a = ex(Nd::NdInt { n: x0 }, Tp::TyText);
+  c = condition(a)!;
+  tag(c) * 100 + inner(c) + tag(a) * 1000
+}
+fn coalesced(x0: integer) -> integer {
+  a = ex(Nd::NdInt { n: x0 }, Tp::TyText);
+  a = condition(a) ?? a;
+  tag(a) * 100 + inner(a)
+}
+
+fn main() {
+  assert(fresh_answer(4) == 104, "fresh_answer: {fresh_answer(4)}");
+  assert(own_answer(4) == 140, "own_answer: {own_answer(4)}");
+  assert(twice(4) == 104, "twice: {twice(4)}");
+  assert(in_a_loop(4) == 104, "in_a_loop: {in_a_loop(4)}");
+  assert(new_name(4) == 2104, "new_name: {new_name(4)}");
+  assert(coalesced(4) == 104, "coalesced: {coalesced(4)}");
+}
