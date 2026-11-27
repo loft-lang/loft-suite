@@ -1,0 +1,132 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-F-Ret`, with `@FR-O-Buffer`.
+// @catches: LOFT_NO_NCC_ENTRY_GUARD — the switch frees the store the caller handed in at the `??` temp's rebind, which the caller frees again, a fault this program reads.
+// @catches: LOFT_NO_SELF_COPY_GUARD — the switch copies the joined value onto the buffer it already is, so the call's answer reads back cleared, which the asserts read.
+//
+// A COALESCE TAIL ANSWERS THE RECORD ITS CALL ANSWERED.  `fn w(p: P) -> P { palt(p) ?? p }`:
+// pass 1 renames the hidden return buffer onto the `??` temp, and pass 2, which sees the default
+// arm as a view, copies the joined value into that same buffer.  Where the call answered, the
+// value IS the buffer, so the re-mint cleared it and the copy read the cleared record back:
+// `0` for a struct, `null` for an enum, silently, on both backends.  And the temp's rebind freed
+// the store the caller had handed in, which the caller then freed again (loft#2673).
+//
+// Axes this file MOVES:  the subject (a struct, a struct with a text field, a record enum);
+//                        the run (the call answers, the default answers); the default (the
+//                        parameter, a local, a literal, a call, a second `??`); the return
+//                        (dense, nullable); where the answer goes (a read, a rebound local, a
+//                        loop, a vector); the callee (minting, filling its own buffer).
+// Axes it HOLDS FIXED:   one `??` tail per function.
+//
+// The controls were already right: the explicit `return palt(p) ?? p;` and the bound spelling
+// `r = palt(p) ?? p; r`.
+//
+// Values by hand: palt(P{v}) is P{v + 100} for v > 3, else null; palt2 is P{v + 200} for v > 1.
+//
+// @falsified-by: tests/falsified/2673-a-coalesce-tail-answers-the-record-its-call-answered.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 1 assertion failures -> 0
+//   CHANNEL: the asserts and the exit on both backends: a cleared answer fails the value
+//   asserts, and the loop's twice-freed buffer stops the run.
+//   ARMED: none.
+//   HOLDS: the explicit-`return` and bound controls answer alike on both trees.
+struct P { v: integer }
+struct Q { v: integer, t: text }
+enum N { A { x: integer }, S { v: integer, inner: N } }
+
+fn palt(p: P) -> P? { if p.v > 3 { P { v: p.v + 100 } } else { null } }
+fn palt2(p: P) -> P? { if p.v > 1 { P { v: p.v + 200 } } else { null } }
+fn pfill(p: P) -> P? { if p.v > 3 { r = P { v: p.v + 100 }; r } else { null } }
+fn qalt(q: Q) -> Q? { if q.v > 3 { Q { v: q.v + 100, t: "x" } } else { null } }
+fn alt(n: N) -> N? { match n { S { v } => if v > 3 { A { x: v + 100 } } else { null }, _ => null } }
+fn wt(n: N) -> integer { match n { A { x } => x, S { v } => v } }
+fn mk() -> P { P { v: 55 } }
+
+fn by_param(p: P) -> P { palt(p) ?? p }
+fn by_local(p: P) -> P { q = P { v: 7 }; palt(p) ?? q }
+fn by_literal(p: P) -> P { palt(p) ?? P { v: 5 } }
+fn by_call(p: P) -> P { palt(p) ?? mk() }
+fn by_chain(p: P) -> P { palt(p) ?? palt2(p) ?? p }
+fn by_filling(p: P) -> P { pfill(p) ?? p }
+fn nullable(p: P) -> P? { palt(p) ?? p }
+fn text_record(q: Q) -> Q { qalt(q) ?? q }
+fn by_enum(n: N) -> N { alt(n) ?? n }
+fn in_arm(p: P, k: integer) -> P { match k { 0 => palt(p) ?? p, _ => p } }
+
+// Controls.
+fn explicit(p: P) -> P { return palt(p) ?? p; }
+fn bound(p: P) -> P { r = palt(p) ?? p; r }
+
+fn test_the_call_answers() {
+  assert(by_param(P { v: 9 }).v == 109, "param {by_param(P { v: 9 }).v}");
+  assert(by_param(P { v: 2 }).v == 2, "param absent {by_param(P { v: 2 }).v}");
+  assert(by_local(P { v: 9 }).v == 109 && by_local(P { v: 2 }).v == 7, "local");
+  assert(by_chain(P { v: 9 }).v == 109 && by_chain(P { v: 2 }).v == 202, "chain");
+  assert(by_chain(P { v: 1 }).v == 1, "chain absent");
+  assert(nullable(P { v: 9 })!.v == 109 && nullable(P { v: 2 })!.v == 2, "nullable");
+  assert(in_arm(P { v: 9 }, 0).v == 109 && in_arm(P { v: 9 }, 1).v == 9, "arm");
+}
+
+fn test_a_rebound_local() {
+  x = by_param(P { v: 9 });
+  a = x.v;
+  x = by_param(P { v: 2 });
+  b = x.v;
+  x = by_param(P { v: 8 });
+  assert(a == 109 && b == 2 && x.v == 108, "rebound {a} {b} {x.v}");
+}
+
+fn test_in_a_loop() {
+  t = 0;
+  for i in 0..6 {
+    // v = 0, 2, 4, 6, 8, 10: 0 + 2 + 104 + 106 + 108 + 110
+    t += by_param(P { v: i * 2 }).v;
+  }
+  assert(t == 430, "loop {t}");
+  t = 0;
+  for i in 0..6 {
+    // the literal default: 5 + 5 + 104 + 106 + 108 + 110
+    t += by_literal(P { v: i * 2 }).v + by_call(P { v: 0 }).v - 55;
+  }
+  assert(t == 438, "literal default {t}");
+  t = 0;
+  for i in 0..6 {
+    t += by_filling(P { v: i * 2 }).v;
+  }
+  assert(t == 430, "filling callee {t}");
+}
+
+fn test_into_a_vector() {
+  xs: vector<P> = [];
+  for i in 0..4 {
+    xs += [by_param(P { v: i * 3 })];
+  }
+  t = 0;
+  for x in xs {
+    t += x.v;
+  }
+  // v = 0, 3, 6, 9: 0 + 3 + 106 + 109
+  assert(t == 218, "vector {t}");
+}
+
+fn test_other_subjects() {
+  q = text_record(Q { v: 9, t: "a" });
+  r = text_record(Q { v: 2, t: "b" });
+  assert(q.v == 109 && q.t == "x" && r.v == 2 && r.t == "b", "text record {q.v}{q.t} {r.v}{r.t}");
+  e = by_enum(S { v: 9, inner: A { x: 1 } });
+  assert(wt(e) == 109, "enum {wt(e)}");
+  e = by_enum(S { v: 2, inner: A { x: 1 } });
+  assert(wt(e) == 2, "enum absent {wt(e)}");
+}
+
+fn test_the_controls() {
+  assert(explicit(P { v: 9 }).v == 109 && explicit(P { v: 2 }).v == 2, "explicit");
+  assert(bound(P { v: 9 }).v == 109 && bound(P { v: 2 }).v == 2, "bound");
+}
+
+fn main() {
+  test_the_call_answers();
+  test_a_rebound_local();
+  test_in_a_loop();
+  test_into_a_vector();
+  test_other_subjects();
+  test_the_controls();
+}
