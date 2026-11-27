@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-F-Ret` — a function's result is a fresh copy, so a write INTO a call result reaches
+// nothing: `first(s).hp = 3`, `first(s).hp -= 10` and `s.first().hp -= 10` write a temporary
+// freed at the end of the statement, and `s.enemies[0]` keeps its value.  `lost-write` says so
+// at each, as it does for `hurt(first(s), 10)` (loft#894); a method accessor handed to a
+// writing callee (`hurt(s.first(), 10)`) is the same loss.  Before, all four were silent: the
+// lint read only a FREE function's result handed to a callee.
+//
+// The controls stay silent: the place written directly, a fresh result written (nothing the
+// caller could reach is lost), and a result bound to a local first (a copy the program can
+// still read).  The values are the copy's, unchanged: this guards the diagnostic, not a
+// semantics change.
+//
+// @falsified-at: 9e84211ef — 0 `lost-write` reports for the four shapes, 4 here; measured with a
+//   dev build of that tree (the field and method forms were silent, the callee form warned only
+//   for a free function).
+// CHANNEL: the expected warnings; the asserts hold the copy semantics on both trees.
+// WITNESS: each warning's line.
+// HOLDS: the asserts, which answer the same on both trees.
+
+struct Enemy { hp: integer }
+struct State { enemies: vector<Enemy> }
+
+fn mk() -> State { State { enemies: [Enemy { hp: 100 }] } }
+
+fn first(s: State) -> Enemy { s.enemies[0] }
+
+fn top(self: State) -> Enemy { self.enemies[0] }
+
+fn fresh() -> Enemy { Enemy { hp: 1 } }
+
+fn hurt(e: Enemy, d: integer) { e.hp -= d; }
+
+fn main() {
+  s = mk();
+  // @EXPECT_WARNING: this writes into the value RETURNED by a call
+  first(s).hp = 3;
+  // @EXPECT_WARNING: this writes into the value RETURNED by a call
+  first(s).hp -= 10;
+  // @EXPECT_WARNING: this writes into the value RETURNED by a call
+  s.top().hp -= 10;
+  // @EXPECT_WARNING: `hurt` writes to `e`, but the argument here is a value RETURNED by a call
+  hurt(s.top(), 10);
+  assert(s.enemies[0].hp == 100, "every write went into a copy: {s.enemies[0].hp}");
+
+  // The controls.
+  s.enemies[0].hp = 7;
+  assert(s.enemies[0].hp == 7, "the place written directly");
+  fresh().hp = 3;
+  e = first(s);
+  e.hp -= 2;
+  assert(e.hp == 5 && s.enemies[0].hp == 7, "a bound copy carries its own write: {e.hp}");
+}
