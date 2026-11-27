@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Map`, `@FR-I-Filter`, `@FR-I-Reduce` — the source of `map`, `filter` and `reduce` is
+// whatever a `for` walks, because each rule IS its loop: a `hash`, a `sorted`, an `index` and a
+// generator are taken as a vector is, in both spellings (`map(h, f)`, `h.map(f)`), with a named
+// function, a typed lambda and a short `|x|` lambda typed from the source's element.  Each case
+// is checked against its comprehension or loop form and a hand-computed literal.  A text is a
+// `for` source and not a combinator one (iteration.md § Combinators are vector methods): the
+// refusal names the comprehension, and is the only message (loft#2658: the three refused every
+// source but a vector, a lambda's behind *"Cannot infer type for lambda parameter"*).
+//
+// Axes this file MOVES:  the source (hash, sorted, index, generator; a vector as the control);
+//                        the spelling (free, method); the callback (fn-ref, typed lambda, short
+//                        lambda); the answer (integer, text); a walk repeated in a loop (a
+//                        keyed source's snapshot is released each round).
+// Axes it HOLDS FIXED:   one record type keyed on a text; a generator of integers.
+//
+// @falsified-at: 9e84211ef — refused at compile time on both backends, every keyed and generator
+//   case ("map: first argument must be a vector", "Unknown field hash<E[k]>.map", or "Cannot
+//   infer type for lambda parameter"); measured with a dev build of that tree.
+// CHANNEL: the asserts, against the comprehension and the literal; a hash's order is not the
+//          rule's, so its answers are read as a sum or a count.
+// HOLDS: exit, leak and panic are clean on both backends.
+
+struct E { k: text, v: integer }
+
+fn nums(n: integer) -> iterator<integer> {
+  for i in 0..n { yield i; }
+}
+
+fn ten(e: E) -> integer { e.v * 10 }
+
+fn big(e: E) -> boolean { e.v > 1 }
+
+fn addv(a: integer, e: E) -> integer { a + e.v }
+
+fn dbl(x: integer) -> integer { x * 2 }
+
+fn add(a: integer, x: integer) -> integer { a + x }
+
+fn mkh() -> hash<E[k]> { [E { k: "a", v: 1 }, E { k: "b", v: 2 }, E { k: "c", v: 3 }] }
+
+fn mks() -> sorted<E[k]> { [E { k: "b", v: 2 }, E { k: "a", v: 1 }, E { k: "c", v: 3 }] }
+
+fn mki() -> index<E[k]> { [E { k: "b", v: 2 }, E { k: "a", v: 1 }, E { k: "c", v: 3 }] }
+
+fn total(v: vector<integer>) -> integer {
+  t = 0;
+  for x in v { t += x; }
+  t
+}
+
+fn keys(v: vector<E>) -> text {
+  r = "";
+  for e in v { r += e.k; }
+  r
+}
+
+// A hash walks in no order the rule states: sums and counts.  10+20+30 = 60; 1+2+3 = 6.
+fn test_a_hash() {
+  h = mkh();
+  assert(total(map(h, ten)) == 60 && total(map(h, ten)) == total([for e in h { ten(e) }]), "map, fn-ref");
+  assert(total(map(h, fn(e: E) -> integer { e.v * 10 })) == 60, "map, typed lambda");
+  assert(total(h.map(|e| { e.v * 10 })) == 60, "map, method, short lambda");
+  f = filter(h, big);
+  assert(len(f) == 2 && f[0].v + f[1].v == 5, "filter keeps b and c: {len(f)}");
+  assert(len(h.filter(|e| { e.v != 2 })) == 2, "filter, method");
+  assert(reduce(h, 100, addv) == 106 && h.reduce(0, |a, e| { a + e.v }) == 6, "reduce");
+}
+
+// A sorted and an index walk in key order: a, b, c.
+fn test_a_sorted_and_an_index() {
+  s = mks();
+  assert("{map(s, ten)}" == "[10,20,30]" && "{map(s, ten)}" == "{[for e in s { ten(e) }]}", "sorted map");
+  assert("{s.map(|e| { e.v + 1 })}" == "[2,3,4]", "sorted map, method");
+  assert(keys(filter(s, |e| { e.v != 2 })) == "ac" && keys(s.filter(|e| { e.v > 1 })) == "bc", "sorted filter");
+  assert(reduce(s, "", |a, e| { a + e.k }) == "abc", "sorted reduce into a text");
+  assert(s.reduce("", |a, e| { a + e.k + "," }) == "a,b,c,", "sorted reduce, method");
+  assert("{map(s, |e| { e.k + "!" })}" == "[\"a!\",\"b!\",\"c!\"]", "a text answer");
+  x = mki();
+  assert("{map(x, |e| { e.v * 3 })}" == "[3,6,9]", "index map");
+  assert(x.reduce(0, |a, e| { a * 10 + e.v }) == 123, "index reduce, in key order");
+}
+
+// A generator's items, in the order it yields them: 0, 1, 2, 3.
+fn test_a_generator() {
+  assert("{map(nums(4), dbl)}" == "[0,2,4,6]" && "{map(nums(4), dbl)}" == "{[for x in nums(4) { dbl(x) }]}", "map, fn-ref");
+  assert("{map(nums(4), |x| { x * 2 })}" == "[0,2,4,6]", "map, short lambda");
+  assert("{nums(4).map(|x| { x + 1 })}" == "[1,2,3,4]", "map, method");
+  assert("{filter(nums(6), |x| { x % 2 == 1 })}" == "[1,3,5]", "filter");
+  assert(reduce(nums(5), 0, |a, x| { a + x }) == 10 && reduce(nums(5), 1, add) == 11, "reduce");
+  assert(nums(4).reduce(0, |a, x| { a + x * x }) == 14, "reduce, method: 0+1+4+9");
+}
+
+// Fifty rounds, each walking a fresh snapshot of the hash and releasing it.
+fn test_repeated_walks() {
+  h = mkh();
+  t = 0;
+  r = 0;
+  for _ in 0..50 {
+    t += total(map(h, ten));
+    r += reduce(h, 0, addv);
+  }
+  assert(t == 3000 && r == 300, "{t} {r}");
+}
+
+// A filtered record is a fresh store (`(I-Comp)`): writing it leaves the hash alone.
+fn test_a_filtered_record_is_a_copy() {
+  h = mkh();
+  f = filter(h, big);
+  f[0].v = 99;
+  assert(reduce(h, 0, addv) == 6, "the hash is untouched");
+}
+
+// The control: a vector, as before.
+fn test_a_vector() {
+  assert("{map([1, 2, 3], dbl)}" == "[2,4,6]" && "{[1, 2, 3].map(|x| { x * 3 })}" == "[3,6,9]", "map");
+  assert(reduce([1, 2, 3], "", |a, x| { a + "{x}" }) == "123", "reduce into a text");
+}

@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// `@FR-I-Map` — a text is a `for` source and not a combinator one (iteration.md § Combinators
+// are vector methods): `map(t, f)` is refused, and the refusal names the comprehension that maps
+// over a text.  It is the ONLY message: the short lambda is typed with the character a `for`
+// binds, where it was refused first with *"Cannot infer type for lambda parameter"* (loft#2658).
+//
+// @falsified-at: 9e84211ef — the first error was "Cannot infer type for lambda parameter 'c'"
+//   and the refusal said "map: first argument must be a vector"; measured with a dev build of
+//   that tree.
+// CHANNEL: the expected error.
+// WITNESS: the error's text, which names the comprehension.
+// HOLDS: the refusal is the same on both backends.
+
+fn main() {
+  t = "abc";
+  // @EXPECT_ERROR: map: a text is not a map source — walk its characters with a comprehension: `[for c in t { … }]`
+  m = map(t, |c| { c });
+  println("{m}");
+}
