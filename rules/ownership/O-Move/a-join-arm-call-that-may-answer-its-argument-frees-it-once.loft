@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
-// @catches: LOFT_NO_S1_JOIN — the switch binds the arm's call plainly into its own buffer, so where the call answers its argument the buffer names the argument's store and the exit frees that store twice
+// Since loft#2665 the arm's call that answers its argument owns nothing, so the S1 join does not
+// fire on this cell: `LOFT_NO_S1_JOIN` leaves its IR byte-identical and the cell clean on both
+// backends (measured 2026-11-27).  The switch's `@catches` pair left with it; the cell guards the
+// values and the single free, and the O-Derived 2665 cell guards the ownership.
 //
 // @FR-O-Move: a store has one owner, and each exit frees it once.  An `if` arm whose value is
 // an owning call is bound into the call's own buffer (`__ref_N = without_deps(x, __ref_N)`).
