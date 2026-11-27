@@ -15,12 +15,11 @@
 // Axes this file MOVES:  the fresh arm (a call that may answer its argument, one that always
 //                        mints, one that builds its answer in the caller's buffer, a record
 //                        literal); which arm ran; which value answers; the
-//                        tail (`if`, an explicit `return`); a struct instead of an enum.
+//                        tail (`if`, `??`, an explicit `return`); a struct instead of an enum.
 // Axes it HOLDS FIXED:   a join of two values, one call per test in a loop of 10.
 //
 // The controls were already clean: the early-return spelling, a `match` tail with a parameter arm,
-// and two joined locals answered by a plain `if`.  A `??` tail (`alt(node) ?? node`) is the same
-// release, and is left to loft#2673's cell: its promoted temp has a defect of its own.
+// and two joined locals answered by a plain `if`.
 //
 // Values by hand: rebuild(S{v}, k) is S{v, k}, of A it answers its argument; fill(S{v}, k) is
 // S{v, k} built in its promoted local; alt(S{v}) is
@@ -74,6 +73,11 @@ fn via_literal(n: N, v: integer) -> N {
   node = if v > 0 { S { v: v, inner: A { x: 3 } } } else { n };
   r = alt(node);
   if r != null { r! } else { node }
+}
+
+fn via_coalesce(n: N, k: integer) -> N {
+  node = if k > 0 { rebuild(n, A { x: k }) } else { n };
+  alt(node) ?? node
 }
 
 fn via_return(n: N, k: integer) -> N {
@@ -158,6 +162,17 @@ fn test_a_literal_arm() {
   assert(t == 4 * 109 + 3 * 3 + 3 * 105, "literal arm {t}");
 }
 
+fn test_a_coalesce_tail() {
+  big = mk(9);
+  small = mk(2);
+  t = 0;
+  for i in 0..10 {
+    // i % 4: 0 big rebuilt (109), 1 big as is (109), 2 small rebuilt (2), 3 small as is (2).
+    t += weight(via_coalesce(if i % 4 < 2 { big } else { small }, if i % 2 == 0 { 1 } else { 0 }));
+  }
+  assert(t == 6 * 109 + 4 * 2, "coalesce {t}");
+}
+
 fn test_an_explicit_return() {
   big = mk(9);
   small = mk(2);
@@ -205,6 +220,7 @@ fn main() {
   test_a_callee_filling_the_buffer();
   test_an_always_fresh_arm();
   test_a_literal_arm();
+  test_a_coalesce_tail();
   test_an_explicit_return();
   test_a_struct();
   test_the_controls();
