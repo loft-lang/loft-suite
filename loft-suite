@@ -25,7 +25,7 @@
 #
 # A cell's annotations are the ones `loft --tests` reads (`@EXPECT_ERROR`, `@EXPECT_WARNING`,
 # `@EXPECT_FAIL`, `@IGNORE`, `@ARGS`) plus `@STORE_LIMIT: n`, handed to the binary as
-# `LOFT_STORE_LIMIT`, and `@ARMED: LOFT_X=v …`, the instruments the cell's defect is only
+# `LOFT_STORE_LIMIT`, `@LIMIT: n` and `@FRAME_LIMIT: n` as `LOFT_LIMIT` / `LOFT_FRAME_LIMIT`, and `@ARMED: LOFT_X=v …`, the instruments the cell's defect is only
 # visible under (a stale address reads the old bytes until the allocator reuses them, so a
 # plain run passes on the broken build too; `LOFT_POISON=1` overwrites the freed block) —
 # each `LOFT_X=v` is set for both lanes.  Every run arms `LOFT_LEAK_CHECK=1` (a store left behind by a function
@@ -52,6 +52,10 @@ ATTIC = os.path.join(ROOT, "attic")
 # match `@FR-B-View-Base` (21 of the rules are a prefix of another).
 CITE = re.compile(r"@FR-([A-Z][A-Za-z0-9-]*[A-Za-z0-9])(?![A-Za-z0-9-])")
 STORE_LIMIT = re.compile(r"^\s*//\s*@STORE_LIMIT:\s*(\d+)", re.M)
+# The lowered compile limits a cell asks for, as loft's corpus runner set them
+# (`tests/native.rs::program_env`): the compiler reads `LOFT_LIMIT` / `LOFT_FRAME_LIMIT`.
+COMPILE_LIMITS = [(re.compile(r"^\s*//\s*@LIMIT:\s*(\d+)", re.M), "LOFT_LIMIT"),
+                  (re.compile(r"^\s*//\s*@FRAME_LIMIT:\s*(\d+)", re.M), "LOFT_FRAME_LIMIT")]
 ARMED = re.compile(r"^\s*//\s*@ARMED:(.*)$", re.M)
 ARMED_SWITCH = re.compile(r"\b(LOFT_[A-Z0-9_]+)=([^\s`.,;)]+)")
 
@@ -150,6 +154,10 @@ def run_cell(loft, cell, mode, timeout):
     m = STORE_LIMIT.search(src)
     if m:
         env["LOFT_STORE_LIMIT"] = m.group(1)
+    for pattern, var in COMPILE_LIMITS:
+        lim = pattern.search(src)
+        if lim:
+            env[var] = lim.group(1)
     for line in ARMED.findall(src):
         env.update(ARMED_SWITCH.findall(line))
     cmd = [loft, "--tests"]
