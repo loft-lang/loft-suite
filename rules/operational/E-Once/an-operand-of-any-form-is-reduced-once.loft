@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN OPERAND OF ANY FORM IS REDUCED ONCE (`@FR-E-Once`).  An operand written once in a form runs
+// once per execution of that form, whatever expression it is.  A plain variable is reduced once
+// by construction, so every cell here puts a CALL with a counter in the operand's place: the
+// source of a `for` over each collection kind, the index and the right side of a compound
+// write, an argument, a method's receiver, a format hole, a `match` subject, a condition.
+//
+// Every expected count is 1, and every value is computed by hand beside it.
+//
+// Axes this file MOVES:  the form the operand stands in; the collection kind of a walked source.
+// Axes it HOLDS FIXED:   the operand is a call (loft's slot matrix varies its form); one statement.
+//
+// @falsified-at: 99eef5587 (v2026.11.0) — `test_a_for_source_runs_once_for_every_kind` and
+//   `test_a_filtered_for_source_runs_once` fail on both backends: the sorted and the index
+//   source run 5 times for 3 elements (loft#2573).
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: "sorted source ran 5".
+// HOLDS: the vector and hash sources, and every other cell, answer the same on both trees.
+
+struct Ko { k: integer, t: text }
+struct Co { calls: integer = 0 }
+
+fn vec_o(c: Co) -> vector<Ko> { c.calls += 1; [Ko { k: 1, t: "a" }, Ko { k: 2, t: "b" }, Ko { k: 3, t: "c" }] }
+fn sor_o(c: Co) -> sorted<Ko[k]> { c.calls += 1; [Ko { k: 1, t: "a" }, Ko { k: 2, t: "b" }, Ko { k: 3, t: "c" }] }
+fn idx_o(c: Co) -> index<Ko[k]> { c.calls += 1; [Ko { k: 1, t: "a" }, Ko { k: 2, t: "b" }, Ko { k: 3, t: "c" }] }
+fn has_o(c: Co) -> hash<Ko[k]> { c.calls += 1; [Ko { k: 1, t: "a" }, Ko { k: 2, t: "b" }, Ko { k: 3, t: "c" }] }
+fn at_o(c: Co, i: integer) -> integer { c.calls += 1; i }
+fn tx_o(c: Co) -> text { c.calls += 1; "abc" }
+fn add_o(a: integer, b: integer) -> integer { a * 10 + b }
+
+fn test_a_for_source_runs_once_for_every_kind() {
+  a = Co {}; b = Co {}; c = Co {}; d = Co {}; s = 0;
+  for p in vec_o(a) { s += p.k; }
+  for p in sor_o(b) { s += p.k; }
+  for p in idx_o(c) { s += p.k; }
+  for p in has_o(d) { s += p.k; }
+  assert(s == 24, "four walks of 1+2+3: {s}");
+  assert(a.calls == 1, "vector source ran {a.calls}");
+  assert(b.calls == 1, "sorted source ran {b.calls}");
+  assert(c.calls == 1, "index source ran {c.calls}");
+  assert(d.calls == 1, "hash source ran {d.calls}");
+}
+
+fn test_a_filtered_for_source_runs_once() {
+  a = Co {}; b = Co {}; s = 0;
+  for p in vec_o(a) if p.k > 1 { s += p.k; }
+  for p in sor_o(b) if p.k > 1 { s += p.k; }
+  assert(s == 10 && a.calls == 1 && b.calls == 1, "2+3 twice: {s}; sources ran {a.calls} and {b.calls}");
+}
+
+fn test_the_index_and_the_right_side_of_a_write_run_once() {
+  a = Co {}; b = Co {}; v = [10, 20, 30];
+  v[at_o(a, 1)] += at_o(b, 5);
+  assert("{v}" == "[10,25,30]" && a.calls == 1 && b.calls == 1, "{v}; index ran {a.calls}, right side {b.calls}");
+  v[at_o(a, 2)] = at_o(b, 7);
+  assert("{v}" == "[10,25,7]" && a.calls == 2 && b.calls == 2, "{v}; index ran {a.calls}, right side {b.calls}");
+}
+
+fn test_an_argument_a_receiver_and_a_hole_run_once() {
+  a = Co {}; b = Co {}; c = Co {};
+  s = add_o(at_o(a, 1), at_o(a, 3));
+  n = tx_o(b).len();
+  o = "<{at_o(c, 4)}>";
+  assert(s == 13 && a.calls == 2, "two arguments, each once: {s}, {a.calls}");
+  assert(n == 3 && b.calls == 1, "receiver: {n}, {b.calls}");
+  assert(o == "<4>" && c.calls == 1, "hole: {o}, {c.calls}");
+}
+
+fn test_a_subject_and_a_condition_run_once() {
+  a = Co {}; b = Co {}; s = 0;
+  match at_o(a, 2) { 1 => { s = 1; }, 2 => { s = 2; }, _ => { s = 9; } }
+  if at_o(b, 1) == 1 { s += 10; }
+  assert(s == 12 && a.calls == 1 && b.calls == 1, "{s}; subject ran {a.calls}, condition {b.calls}");
+}

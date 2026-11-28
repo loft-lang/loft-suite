@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A RECORD LITERAL'S FIELDS ARE REDUCED IN THE ORDER WRITTEN, EACH ONCE (`@FR-E-Record`).  The
+// order is the literal's, not the declaration's: `T { t: f(), k: g() }` runs `f` then `g` though
+// the type declares `k` first.  A field left out takes its default and runs nothing.
+//
+// Axes this file MOVES:  written order against declared order; a defaulted field; a nested literal.
+// Axes it HOLDS FIXED:   every field value is a call that writes its letter into a log.
+//
+// @falsified-at: none — a conformance guard for a rule written down after the fact; every
+//   cell answered as hand-computed on both backends on the tree it landed on, and loft's slot
+//   matrix (scripts/slot_matrix.py) holds the same rule over every form of operand.
+// CHANNEL: the asserts.
+// ARMED: nothing.
+// WITNESS: each assert's message names the count or the order that moved.
+// HOLDS: every cell on both backends.
+
+struct Pr { k: integer, t: text, n: integer = 7 }
+struct Wr { a: Pr, m: integer }
+struct Lr { log: text = "" }
+
+fn int_r(l: Lr, tag: text, v: integer) -> integer { l.log += tag; v }
+fn txt_r(l: Lr, tag: text) -> text { l.log += tag; "x" }
+
+fn test_fields_run_in_the_order_the_literal_writes_them() {
+  a = Lr {}; b = Lr {}; c = Lr {};
+  p = Pr { t: txt_r(a, "t"), k: int_r(a, "k", 1) };
+  q = Pr { k: int_r(b, "k", 2), n: int_r(b, "n", 3), t: txt_r(b, "t") };
+  w = Wr { m: int_r(c, "m", 5), a: Pr { t: txt_r(c, "t"), k: int_r(c, "k", 6) } };
+  assert(a.log == "tk" && p.k == 1 && p.n == 7, "written t then k: {a.log}; k={p.k} n={p.n}");
+  assert(b.log == "knt" && q.n == 3, "written k, n, t: {b.log}; n={q.n}");
+  assert(c.log == "mtk" && w.m == 5 && w.a.k == 6, "outer m, then the nested literal's t and k: {c.log}");
+}
