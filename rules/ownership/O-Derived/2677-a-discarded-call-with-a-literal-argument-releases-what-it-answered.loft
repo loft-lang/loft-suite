@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-O-Derived`.
+// @catches: LOFT_NO_DROP_SPAN_PEEL — the switch leaves a discarded call's minted record owned by nobody where an argument was lifted ahead of it, which this program reads.
+//
+// A DISCARDED CALL WITH A LITERAL ARGUMENT RELEASES WHAT IT ANSWERED.  `pick(q, [i, 2]);` where
+// `pick` answers its first argument on one path and a record of its own on the other: the
+// statement's result is bound to a temporary the scope frees, as it is without a literal
+// argument.  The literal is lifted ahead of the call into an `Insert`, which arrived wrapped in
+// the statement's source `Span`, and the lift that binds the result looked past it: the record
+// the callee minted was owned by nobody, one per evaluation, on both backends (loft#2677 — the
+// loft front end's `visit(b, t, subject, [], g, false);` leaked two `NdIf` per run).
+//
+// Axes this file MOVES:  the literal argument (a vector, a record); the result (a struct, an
+//                        enum); the call (free, method); the context (a statement, a loop, an
+//                        `if` arm); which path the callee takes (its own record, the argument).
+// Axes it HOLDS FIXED:   the result is discarded.
+//
+// The controls were already clean: the argument bound to a local first, and the result bound.
+//
+// Values by hand: pick answers P{9} for a vector longer than one, else its argument; the
+// argument is never changed, so each test's `q` keeps its value.
+//
+// @falsified-by: tests/falsified/2677-a-discarded-call-with-a-literal-argument-releases-what-it-answered.patch — interpret exit 1 -> 0, interpret leaked kt=101 P×11 -> clean, native exit 1 -> 0, native leaked kt=101 P×11 -> clean
+//   CHANNEL: the leak on both backends, per test under `LOFT_LEAK_CHECK=1`; every value was
+//   right before the fix as well.
+//   ARMED: LOFT_LEAK_CHECK=1, which the runner sets.
+//   HOLDS: every assert answers alike on both trees.
+struct P { v: integer }
+struct Q { a: integer }
+enum N { A { x: integer }, B }
+
+fn pick(p: P, xs: vector<integer>) -> P { if len(xs) > 1 { return P { v: 9 }; } p }
+fn pick_rec(p: P, q: Q) -> P { if q.a > 0 { return P { v: 9 }; } p }
+fn pick_n(n: N, xs: vector<integer>) -> N { if len(xs) > 1 { return A { x: 9 }; } n }
+fn choose(self: P, xs: vector<integer>) -> P { if len(xs) > 1 { return P { v: 9 }; } self }
+
+fn test_a_vector_literal() {
+  q = P { v: 1 };
+  pick(q, [1, 2]);
+  pick(q, [1]);
+  for i in 0..10 {
+    pick(q, [i, 2]);
+  }
+  assert(q.v == 1, "vector {q.v}");
+}
+
+fn test_a_record_literal() {
+  q = P { v: 2 };
+  for i in 0..10 {
+    pick_rec(q, Q { a: i % 2 });
+  }
+  assert(q.v == 2, "record {q.v}");
+}
+
+fn test_an_enum_in_an_arm() {
+  n = B;
+  c = 0;
+  for i in 0..10 {
+    if i % 2 == 0 {
+      pick_n(n, [i, 1]);
+      c += 1;
+    }
+  }
+  assert(c == 5, "enum {c}");
+}
+
+fn test_a_method() {
+  q = P { v: 3 };
+  for i in 0..10 {
+    q.choose([i, 2]);
+  }
+  assert(q.v == 3, "method {q.v}");
+}
+
+fn test_the_controls() {
+  q = P { v: 4 };
+  for i in 0..10 {
+    e = [i, 2];
+    pick(q, e);
+    _r = pick(q, [i, 2]);
+  }
+  assert(q.v == 4, "controls {q.v}");
+}
