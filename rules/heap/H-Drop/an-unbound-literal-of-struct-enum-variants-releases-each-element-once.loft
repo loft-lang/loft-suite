@@ -1,0 +1,110 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// AN UNBOUND LITERAL OF STRUCT-ENUM VARIANTS RELEASES EACH ELEMENT ONCE (`@FR-H-Move`,
+// `@FR-H-Drop`).  `(H-Move)` moves a value placed into an element there, and the element's
+// container releases it once.  A unit variant (`B`) is built in a work-ref and copied into
+// its element; the copy hands the release over when the element's type owns a droppable.  A
+// literal no context types — a `for` source, a format hole — mints its element before the
+// first item is read, and that element must still be typed as the enum's record once the
+// items are known, as a bound literal's and an argument's are.  Typed by a placeholder, the
+// copy kept its release beside the container's and `B`'s hook ran twice.
+//
+// Every cell's trace is exact and hand-computed: `d` the hook, with the variant and its id.
+// Three elements, three releases, in element order: `dA1,dB,dA2`.  A doubled release reads
+// `dA1,dB,dA2,dB`.
+//
+// Axes this file MOVES: where the literal stands (a `for` source · a format hole · a bound
+// local · a call argument).
+//
+// @falsified-at: e1eb468799 — interpret exit 1 -> 0, native-c exit 1 -> 0 (the fix:
+//   loft 9ddc90efad on loft30-gate, `parse_vector`'s `type_placeholder_element`).
+// CHANNEL: assertions on both backends.
+// WITNESS: on the unfixed tree both backends stop at `c1 a for source: dA1,dB,dA2,dB, want
+//   dA1,dB,dA2`: the unit variant's hook ran twice.
+// HOLDS: c3 and c4 are the controls, hinted before and after the fix.
+
+enum E { A { id: integer }, B }
+
+fn OpDrop(self: E) {
+  match self {
+    A { id } => note("dA{id}"),
+    B => note("dB")
+  }
+}
+
+fn trace_path() -> text {
+  return "loft_unbound_variant_literal_trace.tmp";
+}
+
+fn note(s: text) {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  if cur != "" {
+    cur += ",";
+  }
+  cur += s;
+  bytes: vector<u8> = [];
+  for c in cur {
+    bytes += [c as u8 ?? 0];
+  }
+  if !write_bytes(trace_path(), bytes) {
+    println("trace write failed");
+  }
+}
+
+fn drain() -> text {
+  f = file(trace_path());
+  cur = f.content() ?? "";
+  empty: vector<u8> = [];
+  if !write_bytes(trace_path(), empty) {
+    println("trace clear failed");
+  }
+  return cur;
+}
+
+fn ok(nm: text, got: text, want: text) {
+  assert(got == want, "{nm}: {got}, want {want}");
+}
+
+fn count(v: vector<E>) -> integer {
+  len(v)
+}
+
+// c1 — the literal is a `for` loop's source.
+fn c1() -> integer {
+  t = 0;
+  for x in [A { id: 1 }, B, A { id: 2 }] {
+    t += if x is B { 10 } else { 1 };
+  }
+  t
+}
+
+// c2 — the literal is a format hole.
+fn c2() -> integer {
+  s = "{[A { id: 1 }, B, A { id: 2 }]}";
+  len(s)
+}
+
+// c3 — control: the literal is bound to a local.
+fn c3() -> integer {
+  v = [A { id: 1 }, B, A { id: 2 }];
+  len(v)
+}
+
+// c4 — control: the literal is a call's argument.
+fn c4() -> integer {
+  count([A { id: 1 }, B, A { id: 2 }])
+}
+
+fn main() {
+  drain();
+  assert(c1() == 12, "c1 walks three elements");
+  ok("c1 a for source", drain(), "dA1,dB,dA2");
+  assert(c2() > 0, "c2 renders the literal");
+  ok("c2 a format hole", drain(), "dA1,dB,dA2");
+  assert(c3() == 3, "c3 holds three elements");
+  ok("c3 a bound local", drain(), "dA1,dB,dA2");
+  assert(c4() == 3, "c4 counts three elements");
+  ok("c4 a call argument", drain(), "dA1,dB,dA2");
+}

@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A JOIN'S CALL ARM IN A LOOP RELEASES ITS BUFFER ONCE (`@FR-H-FreeTwice`, `@FR-R-Reuse`,
+// loft#2675).  A callee that answers its argument's field on one path and a fresh record on
+// the other builds the fresh one into the caller's hidden buffer.  A join in a loop binds that
+// call arm into a temp of its own, released at the end of every pass.  A buffer refilled once
+// per call site instead of minted per call is sound only where every local the call is bound
+// to asks the buffer before it frees; the temp did not, so the buffer was released by the temp,
+// refilled on the next pass and released again at the frame's exit.
+//
+// Values hand-computed: `run(true)` sums 0 (the `TyRef` element's literal) and 7 (the second
+// element's own field), `run(false)` 0 and 1 (the fresh record).
+//
+// Axes this file MOVES: the callee's answer (its argument's field · the fresh record), the
+// join's other arm (a literal · a call answering a view).
+//
+// @falsified-at: ebff34f71e — interpret and native-c: "a store was freed twice" in `run`
+//   (the fix: loft 7e1b94c78e on loft30-gate, `reuse_record_buffers`' `call_result_locals` gate).
+// CHANNEL: the store-release check on both backends, then the asserts.
+// WITNESS: on the unfixed tree both backends stop in `c1`: `freed `run` … by `__lift_1`,
+//   freed again by `__ref_1``.
+// HOLDS: the two-statement spelling (`c3`) is the control, clean before and after.
+
+enum Ty {
+  TyInt { min: integer },
+  TyRef { n: integer, dep: vector<integer> }
+}
+
+struct Ex { tp: Ty }
+
+fn own(first: boolean, b: Ex) -> Ty {
+  if first {
+    return b.tp;
+  }
+  TyInt { min: 1 }
+}
+
+fn bare(t: Ty) -> Ty {
+  t
+}
+
+fn val(t: Ty) -> integer {
+  match t {
+    TyInt { min } => min,
+    TyRef { n } => n
+  }
+}
+
+fn items() -> vector<Ex> {
+  [Ex { tp: TyRef { n: 5, dep: [1] } }, Ex { tp: TyInt { min: 7 } }]
+}
+
+// c1 — the join's other arm a literal.
+fn c1(first: boolean) -> integer {
+  bs = items();
+  s = 0;
+  for b in bs {
+    atp = if b.tp is TyRef { TyInt { min: 0 } } else { own(first, b) };
+    s += val(atp);
+  }
+  s
+}
+
+// c2 — the join's other arm a call answering a view of its argument.
+fn c2(first: boolean) -> integer {
+  bs = items();
+  s = 0;
+  for b in bs {
+    atp = if b.tp is TyRef { bare(b.tp) } else { own(first, b) };
+    s += val(atp);
+  }
+  s
+}
+
+// c3 — control: the same join written as two statements.
+fn c3(first: boolean) -> integer {
+  bs = items();
+  s = 0;
+  for b in bs {
+    atp = own(first, b);
+    if b.tp is TyRef {
+      atp = TyInt { min: 0 };
+    }
+    s += val(atp);
+  }
+  s
+}
+
+fn main() {
+  assert(c1(true) == 7 && c1(false) == 1, "c1 a literal beside the call: {c1(true)} {c1(false)}");
+  assert(c2(true) == 12 && c2(false) == 6, "c2 a view beside the call: {c2(true)} {c2(false)}");
+  assert(c3(true) == 7 && c3(false) == 1, "c3 two statements: {c3(true)} {c3(false)}");
+}
