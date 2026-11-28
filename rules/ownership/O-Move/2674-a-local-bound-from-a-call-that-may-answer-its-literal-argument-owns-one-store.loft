@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-O-Move`, with `@FR-O-Buffer`.
+// @catches: LOFT_NO_DELIVERED_EVERY_RETURN — the switch reads a callee as handing its literal argument back on every run where only its tail does, so a rebind adopts a store nobody holds, which this program reads.
+// @catches: LOFT_NO_DELIVERED_FIRST_ADOPT — the switch copies a first bind's answer while the literal's buffer stays paired with the binding, so the buffer leaks, which this program reads.
+//
+// A LOCAL BOUND FROM A CALL THAT MAY ANSWER ITS LITERAL ARGUMENT OWNS ONE STORE.  `x = w(P { … })`
+// where `w` hands its parameter back: the binding adopts the literal's store, as a rebind of the
+// same call always did (loft#1575).  The first bind instead copied the answer while the literal's
+// buffer was still paired with the binding as its adopter, so the literal leaked once per first
+// bind.  And a callee that hands its parameter back only at its TAIL (`if p.v > 3 { return
+// P { … }; } p`) was read as handing it back on every run: the rebind adopted plainly, the run
+// that answered the fresh record left the literal to nobody, and the interpreter read the other
+// run's answer out of a released store (`0`, loft#2674).
+//
+// Axes this file MOVES:  the callee (always its parameter, its parameter or a fresh record,
+//                        one of two parameters); the bind (first, rebound, in a loop); the
+//                        record (plain, with a text field, with a vector field, an enum).
+// Axes it HOLDS FIXED:   the argument is a record literal.
+//
+// The control was already right: named locals as the arguments, and each answer bound to a
+// fresh local.
+//
+// Values by hand: id(p) is p; w(P{v}) is P{v + 100} for v > 3, else the argument.
+//
+// @falsified-by: tests/falsified/2674-a-local-bound-from-a-call-that-may-answer-its-literal-argument-owns-one-store.patch — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native leaked kt=101 P×4, kt=102 Q×1, kt=103 H×1, kt=105 S×1 -> clean
+//   CHANNEL: the interpreter's asserts (a rebound local reads a released record) and the
+//   leak on both backends (`LOFT_LEAK_CHECK=1` per test on the interpreter).
+//   ARMED: LOFT_LEAK_CHECK=1, which the runner sets.
+//   HOLDS: the named-local and fresh-local controls answer alike on both trees.
+struct P { v: integer }
+struct Q { v: integer, t: text }
+struct H { v: integer, xs: vector<integer> }
+enum N { A { x: integer }, S { v: integer, inner: N } }
+
+fn id(p: P) -> P { p }
+fn idh(h: H) -> H { h }
+fn w(p: P) -> P { if p.v > 3 { return P { v: p.v + 100 }; } p }
+fn wq(q: Q) -> Q { if q.v > 3 { return Q { v: q.v + 100, t: "n" }; } q }
+fn pick(p: P, q: P) -> P { if p.v > 3 { return q; } p }
+fn wn(n: N) -> N { match n { S { v } => if v > 3 { return A { x: v + 100 }; }, _ => {} } n }
+fn wt(n: N) -> integer { match n { A { x } => x, S { v } => v } }
+
+fn test_a_parameter_handed_back() {
+  t = 0;
+  for i in 0..5 {
+    x = id(P { v: i });
+    t += x.v;
+  }
+  y = id(P { v: 7 });
+  y = id(P { v: 8 });
+  y.v += 1;
+  assert(t == 10 && y.v == 9, "id {t} {y.v}");
+  h = idh(H { v: 1, xs: [1, 2] });
+  h = idh(H { v: 2, xs: [3] });
+  h.xs += [4];
+  assert(h.v == 2 && len(h.xs) == 2 && h.xs[1] == 4, "vector field {h.v} {h.xs}");
+}
+
+fn test_a_parameter_or_a_fresh_record() {
+  x = w(P { v: 9 });
+  a = x.v;
+  x = w(P { v: 2 });
+  assert(a == 109 && x.v == 2, "rebound {a} {x.v}");
+  t = 0;
+  x = w(P { v: 1 });
+  for i in 0..6 {
+    // 0 + 1 + 2 + 3 + 104 + 105
+    x = w(P { v: i });
+    t += x.v;
+  }
+  assert(t == 215 && x.v == 105, "loop {t} {x.v}");
+  q = wq(Q { v: 9, t: "a" });
+  b = q.v;
+  q = wq(Q { v: 2, t: "b" });
+  assert(b == 109 && q.v == 2 && q.t == "b", "text {b} {q.v}{q.t}");
+  n = wn(S { v: 9, inner: A { x: 1 } });
+  c = wt(n);
+  n = wn(S { v: 2, inner: A { x: 1 } });
+  assert(c == 109 && wt(n) == 2, "enum {c} {wt(n)}");
+}
+
+fn test_one_of_two_parameters() {
+  x = pick(P { v: 9 }, P { v: 5 });
+  a = x.v;
+  x = pick(P { v: 2 }, P { v: 6 });
+  assert(a == 5 && x.v == 2, "pick {a} {x.v}");
+}
+
+fn test_the_controls() {
+  a = P { v: 9 };
+  b = P { v: 2 };
+  x = w(a);
+  x = w(b);
+  assert(x.v == 2 && a.v == 9, "named {x.v}");
+  c = w(P { v: 9 });
+  d = w(P { v: 2 });
+  assert(c.v == 109 && d.v == 2, "fresh locals {c.v} {d.v}");
+}
+
+fn main() {
+  test_a_parameter_handed_back();
+  test_a_parameter_or_a_fresh_record();
+  test_one_of_two_parameters();
+  test_the_controls();
+}
