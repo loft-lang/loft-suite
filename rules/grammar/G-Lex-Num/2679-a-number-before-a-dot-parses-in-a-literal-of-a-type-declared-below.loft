@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
 //
-// A NUMBER BEFORE A DOT PARSES IN A LITERAL OF A TYPE DECLARED BELOW (loft#2679).  No formal
-// rule states that a token's spelling, not its spacing or the place its type is declared,
-// decides what it is, so this program sits in the attic: the rule it would cite is the
-// owner's to write.
+// A NUMBER BEFORE A DOT PARSES IN A LITERAL OF A TYPE DECLARED BELOW (`@FR-G-Lex-Num`,
+// loft#2679).  A number directly followed by `..` or `.` is the number, then that operator as a
+// token of its own, and it reads the same spaced or not, wherever the expression stands —
+// including a literal pass 1 steps over because its struct is declared further down.
 //
 // The lexer reads `0..` and `0.abs` as two tokens from one scan and queues the second, the `..`
 // or the `.`.  Queued at the number's own position (the `..`) or at the next token's (the `.`),
