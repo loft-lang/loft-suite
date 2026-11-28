@@ -92,7 +92,7 @@
 //
 // ── a-concat-led-by-a-slice-of-its-destination-frees-the-slice ──
 //
-// @catches: LOFT_NO_SELF_SLICE_DEPS — the switch types the destination with the slice's scratch store, which the exit then never frees
+// @catches: LOFT_NO_SELF_SLICE_DEPS+LOFT_NO_PROMOTED_RETURN_IDENTITY_FREE — the first switch types the destination with the slice's scratch store, and the second withholds that store's free at the exit where the returned destination names it; since loft#2684 either cure alone frees it, so only with both off does the exit leak it
 //
 // @FR-Col-Concat: `a + b` is a new vector and neither operand changes.  A concatenation whose
 // first operand is a slice of its own destination (`out = out[0..at] + [g] + out[at..]`, an
