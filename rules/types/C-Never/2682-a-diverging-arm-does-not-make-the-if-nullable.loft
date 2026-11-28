@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2682 — A DIVERGING ARM DOES NOT MAKE THE `if` NULLABLE (`@FR-C-Never`: `Never ⤳ τ`).  The
+// join of a value `if` whose one arm returns, breaks or continues is the other arm's type, as the
+// `match` spelling already was (loft#2444).  The arm is given its sibling's null behind the
+// `return`, a value no run reaches, and counted as a null arm it typed the join `τ?`: the local
+// became nullable and a gating warning followed at its use, so the program failed under
+// `LOFT_DENY_WARNINGS=1` on both backends while printing the right answers.
+//
+// Answers hand-computed for `c` false, then true.
+//
+// Axes it MOVES:  the diverging arm (then, else, the then of an `else if` chain); the
+//                 divergence (`return` a constant, `return` the local, `break`); the use (a
+//                 bound local, a compound assignment); backends.
+// Held FIXED:     an integer value.
+//
+// @ARMED: LOFT_DENY_WARNINGS=1
+//
+// @falsified-at: ebff34f71e — interpret exit 1 -> 0, native exit 1 -> 0
+// CHANNEL: the gating warning at each use, failed by the armed switch.
+//   ARMED: `LOFT_DENY_WARNINGS=1` (`@ARMED` above); unarmed, both trees pass.
+//   HOLDS: every assertion is green on both trees; the values were right.
+
+fn bound(c: boolean) -> integer { x = if c { return 5 } else { 0 }; x }
+fn compound(c: boolean) -> integer { acc = 10; acc += if c { return 5 } else { 1 }; acc }
+fn returns_itself(c: boolean) -> integer { acc = 10; acc += if c { return acc } else { 1 }; acc }
+fn else_returns(c: boolean) -> integer { x = if c { 0 } else { return 5 }; x }
+fn chain(c: boolean) -> integer { x = if c { return 5 } else if !c { 7 } else { 8 }; x }
+fn breaks(c: boolean) -> integer {
+  t = 0;
+  for i in 0..3 { y = if i == 1 && c { break } else { i }; t += y; }
+  t
+}
+
+fn test_a_diverging_arm_joins_to_the_other_arms_type() {
+  assert(bound(false) == 0 && bound(true) == 5, "bound");
+  assert(compound(false) == 11 && compound(true) == 5, "compound");
+  assert(returns_itself(false) == 11 && returns_itself(true) == 10, "returns_itself");
+  assert(else_returns(false) == 5 && else_returns(true) == 0, "else_returns");
+  assert(chain(false) == 7 && chain(true) == 5, "chain");
+  // breaks: false sums 0 + 1 + 2; true stops at i == 1 after adding 0.
+  assert(breaks(false) == 3 && breaks(true) == 0, "breaks");
+}
