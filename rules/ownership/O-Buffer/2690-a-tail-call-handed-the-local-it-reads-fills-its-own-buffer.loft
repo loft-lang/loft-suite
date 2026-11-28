@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// loft#2690 — `@FR-O-Buffer`: a call's hidden buffer is never a store the call also reads as an
+// argument.  `fn f() -> vector<integer> { x = [32, 34]; w(x) }`, with `w` answering its argument
+// (copied into its buffer) or a fresh vector: pass 1 renamed `x` onto `f`'s return buffer, and
+// the tail call was then handed `x` as its argument AND as its buffer.  `w` clears the buffer
+// before copying its argument in, so it copied nothing: `[]` on both backends, with no
+// message, and a local bound from a call (`x = mk(k)`) also leaked the caller's buffer.
+//
+// Every value by hand: `w(a)` answers `[a[0] + 100]` for an odd first element, else `a`;
+// `mk(k)` is `[k, k + 2]`.
+//
+// Axes this file MOVES:  how `x` is bound (a literal, a call, a call handing back a literal); a
+//                        mutation between (an append); the tail spelled `return w(x);`; the
+//                        element (integer, a record); both answers of `w`; backends.
+// Axes it HOLDS FIXED:   one local renamed onto the buffer; the call at the tail.
+//
+// @falsified-at: ebff34f71e — interpret exit 1 -> 0, interpret 1 assertion failures -> 0, native exit 1 -> 0, native 2 assertion failures -> 0
+// CHANNEL: the assertions — the tail call answered `[]`.
+//   HOLDS: a leak beside it on main (from_call); the values are what moves.
+
+struct P { a: integer }
+
+fn w(a: vector<integer>) -> vector<integer> { if a[0] % 2 == 1 { return [a[0] + 100]; } a }
+fn wp(a: vector<P>) -> vector<P> { if a[0].a % 2 == 1 { return [P { a: a[0].a + 100 }]; } a }
+fn mk(k: integer) -> vector<integer> { [k, k + 2] }
+fn id(v: vector<integer>) -> vector<integer> { v }
+
+fn literal(k: integer) -> vector<integer> { x = [k, k + 2]; w(x) }
+fn from_call(k: integer) -> vector<integer> { x = mk(k); w(x) }
+fn from_a_handed_back_literal(k: integer) -> vector<integer> { x = id([k, k + 2]); w(x) }
+fn appended(k: integer) -> vector<integer> { x = [k, k + 2]; y = mk(k); x += y; w(x) }
+fn returned(k: integer) -> vector<integer> { x = [k, k + 2]; return w(x); }
+fn records(k: integer) -> vector<P> { x = [P { a: k }, P { a: k + 2 }]; wp(x) }
+
+fn test_a_tail_call_handed_the_local_it_reads_fills_its_own_buffer() {
+  assert("{literal(32)} {literal(33)}" == "[32,34] [133]", "literal");
+  assert("{from_call(32)} {from_call(33)}" == "[32,34] [133]", "from_call");
+  assert("{from_a_handed_back_literal(32)} {from_a_handed_back_literal(33)}" == "[32,34] [133]", "handed back");
+  assert("{appended(32)} {appended(33)}" == "[32,34,32,34] [133]", "appended");
+  assert("{returned(32)} {returned(33)}" == "[32,34] [133]", "returned");
+  r = records(32);
+  q = records(33);
+  assert(len(r) == 2 && r[0].a == 32 && len(q) == 1 && q[0].a == 133, "records");
+}
