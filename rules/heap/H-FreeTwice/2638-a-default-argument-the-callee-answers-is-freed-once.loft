@@ -59,7 +59,10 @@ fn test_a_unit_variant_default() {
 
 // ── an-early-return-of-the-second-literal-argument-is-freed-once ──
 //
-// @catches: LOFT_NO_SET_PREAMBLE_HOIST — the switch binds a call whose literal arguments were hoisted through its preamble, so the bind adopts the answer and the second literal's buffer is freed beside it, which is what this section checks.
+// The hoist through the call's preamble (`LOFT_NO_SET_PREAMBLE_HOIST`) is not this section's only
+// cure: the first bind's own adoption of a call that hands its literal argument back
+// (loft#2674) also keeps the second literal's buffer freed once, so neither switch alone
+// re-creates the double free.
 //
 // `o = s2_join(Borrowed { base: 3 }, Borrowed { base: a })`, the callee answering its second
 // argument through an early `return`: the literals are built in buffers before the call, and the
