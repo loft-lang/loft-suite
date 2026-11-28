@@ -1,0 +1,62 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A NUMBER BEFORE A DOT PARSES IN A LITERAL OF A TYPE DECLARED BELOW (loft#2679).  No formal
+// rule states that a token's spelling, not its spacing or the place its type is declared,
+// decides what it is, so this program sits in the attic: the rule it would cite is the
+// owner's to write.
+//
+// The lexer reads `0..` and `0.abs` as two tokens from one scan and queues the second, the `..`
+// or the `.`.  Queued at the number's own position (the `..`) or at the next token's (the `.`),
+// two tokens shared a position, and pass 1, which steps over the braces of a construction of a
+// type it has not met yet token by token and stops on a step that did not move, stopped inside
+// the literal: `Ro { v: [for i in 0..n { i }] }` above `struct Ro` was refused with
+// "Expect token ;".  Declared above its use, or written `0 .. n`, it always parsed.
+//
+// Axes this file MOVES:  the spelling after the number (`..`, `..=`, a slice, a tuple index
+//                        `t.0.1`, a member call `5.abs()`); the struct declared below its use
+//                        or above it.
+// Axes it HOLDS FIXED:   the number is an integer literal written tight against the dot; one
+//                        construction per function.
+//
+// Values by hand, n = 3: `[for i in 0..n { i }]` = [0,1,2]; `0..=n` = [0,1,2,3];
+//   `[for i in 1..3 { i * 10 }]` = [10,20]; `[4,5,6,7][1..3]` = [5,6]; `t = ((11, 22), 33)`,
+//   `t.0.1` = 22; `(-5).abs() + 5.abs()` = 10.
+//
+// CHANNEL: the refusal — the file did not compile on main ebff34f71, on --interpret and --native.
+//
+// @falsified-by: tests/falsified/2679-a-number-before-a-dot-parses-in-a-literal-of-a-type-declared-below.patch — interpret exit 1 -> 0, native exit 1 -> 0
+
+struct Up2679 { v: vector<integer> }
+
+fn excl2679(n: integer) -> text { r = Ro2679 { v: [for i in 0..n { i }] }; "{r.v}" }
+fn incl2679(n: integer) -> text { r = Ro2679 { v: [for i in 0..=n { i }] }; "{r.v}" }
+fn konst2679() -> text { r = Ro2679 { v: [for i in 1..3 { i * 10 }] }; "{r.v}" }
+fn slice2679() -> text { r = Ro2679 { v: [4, 5, 6, 7][1..3] }; "{r.v}" }
+fn tuple2679() -> integer {
+  t = ((11, 22), 33);
+  r = Rn2679 { n: t.0.1 };
+  r.n + t.1 - 33
+}
+fn member2679() -> integer { r = Rn2679 { n: (-5).abs() + 5.abs() }; r.n }
+fn above2679(n: integer) -> text { r = Up2679 { v: [for i in 0..n { i }] }; "{r.v}" }
+
+struct Ro2679 { v: vector<integer> }
+struct Rn2679 { n: integer }
+
+fn test_a_range_in_a_literal_of_a_type_declared_below() {
+  assert(excl2679(3) == "[0,1,2]", "0..n: {excl2679(3)}");
+  assert(incl2679(3) == "[0,1,2,3]", "0..=n: {incl2679(3)}");
+  assert(konst2679() == "[10,20]", "1..3: {konst2679()}");
+  assert(slice2679() == "[5,6]", "slice: {slice2679()}");
+}
+
+fn test_a_dot_after_a_number_in_a_literal_of_a_type_declared_below() {
+  assert(tuple2679() == 22, "t.0.1: {tuple2679()}");
+  assert(member2679() == 10, "5.abs(): {member2679()}");
+}
+
+fn test_the_twin_declared_above() {
+  assert(above2679(3) == "[0,1,2]", "declared above: {above2679(3)}");
+}
+
