@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Jurjen Stellingwerff
 // SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_LOOP_RECORD_RETURN_FREE — the switch leaves the `return` paths without the record's free, which is the leak this program checks.
 //
 // A KEPT LOOP RECORD IS FREED ON A RETURN BEFORE ITS MINT (`@FR-R-LoopRecord`, `@FR-H-FreeAll`,
 // loft#2681).  A record local minted by a literal in a loop body is declared before the loop,
