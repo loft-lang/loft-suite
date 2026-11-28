@@ -1,0 +1,116 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// The rule this cell guards: `@FR-I-Empty`, and the `dead-assignment` lint that must follow it.
+//
+// A WRITE BEFORE A LOOP IS READ WHEN THE BODY RUNS ZERO TIMES.  `hit = false; while k < len(v)
+// { k += 1; hit = true; } hit` answers the `false` for an empty `v`, so the initialiser is not
+// dead.  The lint said it was — "overwritten before being read" — for a `while` body and a
+// comprehension body, though not for a `for` statement, and its advice, deleting the line, makes
+// the empty case wrong.  The warning tier gates `--deny-warnings`, so this file failed as it
+// stands (loft#2676).
+//
+// Axes this file MOVES:  the loop (`while`, a nested `while`, a comprehension, `for`); where the
+//                        write stands in the body (alone, after a `continue`, before or after a
+//                        `break`); the run (empty, one element and more).
+// Axes it HOLDS FIXED:   a boolean flag read after the loop.
+//
+// The lint's TRUE answers (two writes before the loop, two writes inside one pass of the body)
+// are not in this file: an `@EXPECT_WARNING` claims every warning with its text, so they would
+// quiet the very report this file is for.
+//
+// Values by hand: each scan answers whether the body set the flag; [] -> false, [1, 2] -> true,
+// [-1, 3, 4] -> true, except where a `break` on a negative first element stops it first.
+//
+// @falsified-by: tests/falsified/2676-a-write-before-a-loop-is-read-when-the-body-runs-zero-times.patch — interpret exit 1 -> 0, native exit 1 -> 0
+//   CHANNEL: the exit under `--deny-warnings` on both backends: six unexpected `dead-assignment`
+//   warnings fail the file; every value was right before the fix as well.
+//   ARMED: LOFT_DENY_WARNINGS=1, which the suite runner sets.
+//   HOLDS: every assert answers alike on both trees.
+fn plain(v: vector<integer>) -> boolean {
+  hit = false;
+  k = 0;
+  while k < len(v) {
+    k += 1;
+    hit = true;
+  }
+  hit
+}
+
+fn after_continue(v: vector<integer>) -> boolean {
+  hit = false;
+  k = 0;
+  while k < len(v) {
+    k += 1;
+    if v[k - 1] < 0 {
+      continue;
+    }
+    hit = true;
+  }
+  hit
+}
+
+fn before_break(v: vector<integer>) -> boolean {
+  hit = false;
+  k = 0;
+  while k < len(v) {
+    k += 1;
+    if v[k - 1] < 0 {
+      break;
+    }
+    hit = true;
+  }
+  hit
+}
+
+fn after_break(v: vector<integer>) -> boolean {
+  hit = false;
+  k = 0;
+  while k < len(v) {
+    hit = true;
+    k += 1;
+    if v[k - 1] < 0 {
+      break;
+    }
+  }
+  hit
+}
+
+fn nested(v: vector<integer>) -> boolean {
+  hit = false;
+  k = 0;
+  while k < len(v) {
+    j = 0;
+    while j < 1 {
+      j += 1;
+      hit = true;
+    }
+    k += 1;
+  }
+  hit
+}
+
+fn in_a_comprehension(v: vector<integer>) -> boolean {
+  hit = false;
+  ys = [for x in v { hit = true; x }];
+  hit && len(ys) > 0
+}
+
+fn in_a_for(v: vector<integer>) -> boolean {
+  hit = false;
+  for x in v {
+    if x < 0 {
+      break;
+    }
+    hit = true;
+  }
+  hit
+}
+
+fn test_the_loop_forms() {
+  for f in [plain, after_continue, nested, in_a_comprehension] {
+    assert(!f([]) && f([1, 2]) && f([-1, 3, 4]), "a loop form");
+  }
+  assert(!before_break([]) && before_break([1, 2]) && !before_break([-1, 3, 4]), "before break");
+  assert(!after_break([]) && after_break([1, 2]) && after_break([-1, 3, 4]), "after break");
+  assert(!in_a_for([]) && in_a_for([1, 2]) && !in_a_for([-1, 3, 4]), "for");
+}
