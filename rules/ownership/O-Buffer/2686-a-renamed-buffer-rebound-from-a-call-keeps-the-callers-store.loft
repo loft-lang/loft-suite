@@ -1,0 +1,128 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// @catches: LOFT_NO_C_JOIN_ENTRY_GUARD — the switch lets the C writer's joined rebind free the renamed buffer's displaced store without its entry witness, the caller's store, which the caller then frees a second time: what this program checks.
+// @ARMED: LOFT_STRICT_STORES=1
+//
+// A RENAMED BUFFER REBOUND FROM A CALL KEEPS THE CALLER'S STORE (`@FR-O-Buffer`, `@FR-H-FreeTwice`,
+// loft#2686).  `walk` returns `done` mid-body, so the hidden return buffer is renamed onto `done`,
+// an ARGUMENT that holds at entry the store its caller handed.  `done = wrap(w)` rebinds it from
+// a call that may answer its argument, which the C writer lowers as a join; that join freed the
+// store `done` displaced — the caller's — with no entry witness, and the caller freed it again.
+// The interpreter's rebind, and the C writer's other rebinds, decline on the entry witness.
+// Native only, and only under strict stores (a freed block reads back its bytes otherwise).
+//
+// Axes this file MOVES:  rebinds of the buffer (one, two, three more in a loop); the record
+//                        (plain, with a vector field); the caller (a first bind, a rebind in a
+//                        loop, an argument of another call); `later` declared below `walk` and
+//                        the twin declared above it.
+// Axes it HOLDS FIXED:   the early exit returns a literal; `wrap` doubles `k` above 5 and
+//                        answers its argument otherwise.
+//
+// Values by hand: `later(v)` is `v` unless `v.k > 100` (1); an early exit at `w.k == 0` answers
+// -1.  One rebind: 0 -> -1, 3 -> 3, 7 -> 14, 200 -> 1; two: 7 -> 28; four (one + a loop of
+// three): 7 -> 112.  A vector field answers `k * 1000 + len(vs)`.
+//
+// CHANNEL: the strict-store free check on --native (`a store was freed twice`); the values hold.
+// Measured by hand: on 6e6f46970 four of the five tests fail natively, all but the twin declared
+// above; the interpreter is clean throughout.  Of a 36-cell matrix, the 12 cells with `later`
+// declared below and a first-bind or argument caller fail natively.
+//
+// @falsified-by: tests/falsified/2686-a-renamed-buffer-rebound-from-a-call-keeps-the-callers-store.patch — native exit 1 -> 0; interpret INERT (a backend-divergence guard: only the C writer had the defect)
+//   ARMED: LOFT_LEAK_CHECK=1 (the suite runner) and LOFT_STRICT_STORES=1 (`@ARMED`).
+
+struct N2686 { k: integer }
+struct V2686 { k: integer, vs: vector<integer> }
+
+fn wrap2686(n: N2686) -> N2686 { if n.k > 5 { N2686 { k: n.k * 2 } } else { n } }
+fn wrapv2686(n: V2686) -> V2686 { if n.k > 5 { V2686 { k: n.k * 2, vs: [n.k * 2] } } else { n } }
+
+fn walk_one2686(v: N2686, stop: boolean) -> N2686 {
+  w = later2686(v);
+  if w.k == 0 {
+    return N2686 { k: -1 };
+  }
+  done = wrap2686(w);
+  if stop {
+    return done;
+  }
+  done
+}
+
+fn walk_loop2686(v: N2686, stop: boolean) -> N2686 {
+  w = later2686(v);
+  if w.k == 0 {
+    return N2686 { k: -1 };
+  }
+  done = wrap2686(w);
+  for _ in 0..3 {
+    done = wrap2686(done);
+  }
+  if stop {
+    return done;
+  }
+  done
+}
+
+fn walk_vec2686(v: V2686, stop: boolean) -> V2686 {
+  w = laterv2686(v);
+  if w.k == 0 {
+    return V2686 { k: -1, vs: [-1] };
+  }
+  done = wrapv2686(w);
+  done = wrapv2686(done);
+  if stop {
+    return done;
+  }
+  done
+}
+
+fn later2686(v: N2686) -> N2686 { if v.k > 100 { N2686 { k: 1 } } else { v } }
+fn laterv2686(v: V2686) -> V2686 { if v.k > 100 { V2686 { k: 1, vs: [1] } } else { v } }
+
+fn above_later2686(v: N2686) -> N2686 { if v.k > 100 { N2686 { k: 1 } } else { v } }
+fn walk_above2686(v: N2686, stop: boolean) -> N2686 {
+  w = above_later2686(v);
+  if w.k == 0 {
+    return N2686 { k: -1 };
+  }
+  done = wrap2686(w);
+  if stop {
+    return done;
+  }
+  done
+}
+
+fn n2686(k: integer) -> N2686 { N2686 { k: k } }
+fn keep2686(n: N2686) -> integer { n.k }
+fn sv2686(r: V2686) -> integer { r.k * 1000 + len(r.vs) }
+
+fn test_a_first_bind_of_the_answer() {
+  got = "{walk_one2686(n2686(0), false).k} {walk_one2686(n2686(3), true).k} {walk_one2686(n2686(7), false).k} {walk_one2686(n2686(200), true).k}";
+  assert(got == "-1 3 14 1", "one: {got}");
+  got2 = "{walk_loop2686(n2686(3), true).k} {walk_loop2686(n2686(7), false).k}";
+  assert(got2 == "3 112", "loop: {got2}");
+}
+
+fn test_an_argument_of_another_call() {
+  got = "{keep2686(walk_one2686(n2686(3), true))} {keep2686(walk_one2686(n2686(7), true))} {keep2686(walk_loop2686(n2686(7), true))}";
+  assert(got == "3 14 112", "argument: {got}");
+}
+
+fn test_a_record_with_a_vector_field() {
+  got = "{sv2686(walk_vec2686(V2686 { k: 3, vs: [3] }, true))} {sv2686(walk_vec2686(V2686 { k: 7, vs: [7] }, false))}";
+  assert(got == "3001 28001", "vector field: {got}");
+}
+
+fn test_a_rebind_in_a_loop_of_the_caller() {
+  t = 0;
+  for a in [0, 3, 7, 200] {
+    r = walk_one2686(n2686(a), a > 5);
+    t += r.k;
+  }
+  assert(t == -1 + 3 + 14 + 1, "caller loop: {t}");
+}
+
+fn test_the_twin_declared_above() {
+  got = "{walk_above2686(n2686(3), true).k} {walk_above2686(n2686(7), false).k}";
+  assert(got == "3 14", "above: {got}");
+}
