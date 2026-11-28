@@ -1,0 +1,136 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A CALL READS THE FIELD A LITERAL REPLACES BEFORE IT IS CLEARED (`@FR-I-Comp`, `@FR-O-Detach`,
+// loft#2678).  `d.vs[p.i].xs = [first(d, 1)]` builds the literal straight into the field, and
+// the field is emptied before the build: a call that reads the field through what it was handed
+// — the root `d`, the vector `d.vs`, the element `d.vs[1]` — must run before that, as a read
+// written in place (`d.vs[p.i].xs[0]`) already did.  It read the emptied field, silently: `[-1]`
+// where the field held `[7]`, while the same statement with a local index `k` was right.
+//
+// Values by hand: `mk2678()` holds two elements, `vs[0]` = { xs [1], ts ["x"], rs [{a:1}] } and
+// `vs[1]` = { xs [7], ts ["s"], rs [{a:7}] }.  Every statement replaces a field of `vs[1]` with
+// a one-element vector of that field's own first element, so each answer is `[7]`, `["s"]` or a
+// record with `a` 7, length 1, and `vs[0]` keeps its own; a `+=` appends it, so the length is 2.
+//
+// Axes this file MOVES:  the destination's index (a constant, a local, a field read, a computed
+//                        index, a call); what the call is handed (the root, the vector, the
+//                        element by the same and by another index); the element kind (integer,
+//                        text, a record a call answers, a record literal holding the call);
+//                        the build (`=` literal, `=` comprehension, `+=` literal).
+// Axes it HOLDS FIXED:   one statement per build; the destination is a vector field of an
+//                        element of a vector field of a local.
+//
+// CHANNEL: the assertions.
+// Measured by hand: on main ebff34f71 the `=` literal with a field-read or computed index
+//   answered the emptied field for every call shape, the `=` literal with any index for an
+//   element handed by another index spelling and for a record literal holding the call, and
+//   the `=` comprehension with a constant, local or call index for every call shape — 107 of
+//   500 cells of the full matrix, alike on --interpret and --native.  `+=` was right throughout.
+//
+// @falsified-by: tests/falsified/2678-a-call-reads-the-field-a-literal-replaces-before-it-is-cleared.patch — interpret exit 1 -> 0, interpret 5 assertion failures -> 0, native exit 1 -> 0, native 10 assertion failures -> 0
+//   ARMED: LOFT_LEAK_CHECK=1, which the suite runner sets.
+
+struct R2678 { a: integer }
+struct V2678 { xs: vector<integer>, ts: vector<text>, rs: vector<R2678> }
+struct F2678 { vs: vector<V2678> }
+struct P2678 { i: integer }
+
+fn mk2678() -> F2678 {
+  F2678 { vs: [
+    V2678 { xs: [1], ts: ["x"], rs: [R2678 { a: 1 }] },
+    V2678 { xs: [7], ts: ["s"], rs: [R2678 { a: 7 }] }
+  ] }
+}
+
+fn idx2678(n: integer) -> integer { n }
+fn root2678(f: F2678, i: integer) -> integer { f.vs[i].xs[0] ?? -1 }
+fn vec2678(l: vector<V2678>, i: integer) -> integer { l[i].xs[0] ?? -1 }
+fn elem2678(v: V2678?) -> integer { v.xs[0] ?? -1 }
+fn text2678(f: F2678, i: integer) -> text { f.vs[i].ts[0] ?? "?" }
+fn rec2678(f: F2678, i: integer) -> R2678 { R2678 { a: f.vs[i].rs[0].a ?? -1 } }
+fn reca2678(f: F2678, i: integer) -> integer { f.vs[i].rs[0].a ?? -1 }
+fn as2678(rs: vector<R2678>) -> vector<integer> { [for r in rs { r.a }] }
+
+fn test_an_index_by_a_field_read() {
+  p = P2678 { i: 1 };
+  a = mk2678();
+  a.vs[p.i].xs = [root2678(a, 1)];
+  assert("{a.vs[1].xs} {a.vs[0].xs}" == "[7] [1]", "root: {a.vs[1].xs}");
+  b = mk2678();
+  b.vs[p.i].xs = [vec2678(b.vs, 1)];
+  assert("{b.vs[1].xs}" == "[7]", "vector: {b.vs[1].xs}");
+  c = mk2678();
+  c.vs[p.i].xs = [elem2678(c.vs[1])];
+  assert("{c.vs[1].xs}" == "[7]", "element: {c.vs[1].xs}");
+  t = mk2678();
+  t.vs[p.i].ts = [text2678(t, 1)];
+  assert("{t.vs[1].ts} {t.vs[0].ts}" == "[\"s\"] [\"x\"]", "text: {t.vs[1].ts}");
+  r = mk2678();
+  r.vs[p.i].rs = [rec2678(r, 1)];
+  assert("{as2678(r.vs[1].rs)} {as2678(r.vs[0].rs)}" == "[7] [1]", "record: {as2678(r.vs[1].rs)}");
+  l = mk2678();
+  l.vs[p.i].rs = [R2678 { a: reca2678(l, 1) }];
+  assert("{as2678(l.vs[1].rs)}" == "[7]", "record literal: {as2678(l.vs[1].rs)}");
+  // The read written in place was right before: the twin.
+  w = mk2678();
+  w.vs[p.i].xs = [w.vs[p.i].xs[0] ?? -1];
+  assert("{w.vs[1].xs}" == "[7]", "in place: {w.vs[1].xs}");
+}
+
+fn test_an_index_the_statement_computes() {
+  k = 1;
+  a = mk2678();
+  a.vs[k * 1].xs = [root2678(a, 1)];
+  assert("{a.vs[1].xs}" == "[7]", "computed: {a.vs[1].xs}");
+  b = mk2678();
+  b.vs[idx2678(1)].xs = [elem2678(b.vs[1])];
+  assert("{b.vs[1].xs}" == "[7]", "call index: {b.vs[1].xs}");
+}
+
+fn test_an_element_handed_by_another_index() {
+  k = 1;
+  j = 1;
+  a = mk2678();
+  a.vs[1].xs = [elem2678(a.vs[j])];
+  assert("{a.vs[1].xs}" == "[7]", "constant, by j: {a.vs[1].xs}");
+  b = mk2678();
+  b.vs[k].xs = [elem2678(b.vs[1])];
+  assert("{b.vs[1].xs}" == "[7]", "by k, constant: {b.vs[1].xs}");
+  t = mk2678();
+  t.vs[k].ts = [text2678(t, j)];
+  assert("{t.vs[1].ts}" == "[\"s\"]", "text by k: {t.vs[1].ts}");
+}
+
+fn test_a_record_literal_holding_the_call() {
+  k = 1;
+  a = mk2678();
+  a.vs[1].rs = [R2678 { a: reca2678(a, 1) }];
+  assert("{as2678(a.vs[1].rs)}" == "[7]", "constant: {as2678(a.vs[1].rs)}");
+  b = mk2678();
+  b.vs[k].rs = [R2678 { a: reca2678(b, k) }];
+  assert("{as2678(b.vs[1].rs)} {as2678(b.vs[0].rs)}" == "[7] [1]", "local: {as2678(b.vs[1].rs)}");
+}
+
+fn test_a_comprehension_replacing_the_field() {
+  k = 1;
+  a = mk2678();
+  a.vs[1].xs = [for _ in 0..1 { root2678(a, 1) }];
+  assert("{a.vs[1].xs}" == "[7]", "constant: {a.vs[1].xs}");
+  b = mk2678();
+  b.vs[k].ts = [for _ in 0..1 { text2678(b, 1) }];
+  assert("{b.vs[1].ts}" == "[\"s\"]", "local: {b.vs[1].ts}");
+  c = mk2678();
+  c.vs[idx2678(1)].rs = [for _ in 0..1 { rec2678(c, 1) }];
+  assert("{as2678(c.vs[1].rs)}" == "[7]", "call index: {as2678(c.vs[1].rs)}");
+}
+
+fn test_an_append_keeps_the_field() {
+  p = P2678 { i: 1 };
+  a = mk2678();
+  a.vs[p.i].xs += [root2678(a, 1)];
+  assert("{a.vs[1].xs}" == "[7,7]", "append: {a.vs[1].xs}");
+  b = mk2678();
+  b.vs[p.i].rs += [R2678 { a: reca2678(b, 1) }];
+  assert("{as2678(b.vs[1].rs)}" == "[7,7]", "append record: {as2678(b.vs[1].rs)}");
+}
