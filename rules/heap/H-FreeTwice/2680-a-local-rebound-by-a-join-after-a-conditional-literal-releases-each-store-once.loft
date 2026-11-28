@@ -1,0 +1,93 @@
+// Copyright (c) 2026 Jurjen Stellingwerff
+// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// A LOCAL REBOUND BY A JOIN AFTER A CONDITIONAL LITERAL RELEASES EACH STORE ONCE
+// (`@FR-H-FreeTwice`, `@FR-H-Move`, loft#2680).  A record literal is built in a work-ref of
+// the frame, which releases it at the frame's exit unless the binding that took it disarmed it.
+// A local bound to a literal and then, inside an `if`, to another names one of two such
+// stores, and no static fact says which.  A rebind that follows releases the store it
+// displaces there, at the rebind (`@FR-H-Move`), so it must first disarm whichever work-ref
+// names that store; released with neither disarmed, the store was freed by the rebind and
+// again by its work-ref at the exit.
+//
+// Values hand-computed: `shape` answers the field `n` of what the join chose — the call's
+// copy of the inner record (4), or the `if`'s own literal answer (50), or the projection (4) —
+// and 0 where the join chose the fresh `TyVoid`.
+//
+// Axes this file MOVES: the join that rebinds (a `match` with a call arm · an `if` with a call
+// arm · a `match` with a projection arm), and the earlier rebind (conditional · unconditional).
+//
+// @falsified-at: ebff34f71e — interpret and native-c: "a store was freed twice" in `c1`
+//   (the fix: loft b6d58e5ca9 on loft30-gate, the rebind disarms the work-ref naming the displaced store).
+// CHANNEL: the store-release check on both backends, then the asserts.
+// WITNESS: on the unfixed tree both backends stop in `c1`: `freed `c1` … by `__lift_1`,
+//   freed again`.
+// HOLDS: `c4`, the unconditional earlier rebind, is the control, clean before and after.
+
+enum Ty {
+  TyVoid,
+  TyRef { n: integer, dep: vector<integer> },
+  TyVec { inner: Ty }
+}
+
+fn plain(t: Ty) -> Ty {
+  match t {
+    TyRef { n } => TyRef { n: n, dep: [] },
+    _ => t
+  }
+}
+
+fn val(t: Ty) -> integer {
+  match t {
+    TyRef { n } => n,
+    TyVec { } => 50,
+    TyVoid => 0
+  }
+}
+
+// c1 — a conditional literal, then a `match` joining a call and a fresh literal.
+fn c1(cb: Ty) -> integer {
+  lt: Ty = TyVoid;
+  if cb is TyRef {
+    lt = TyRef { n: 9, dep: [] };
+  }
+  lt = match cb { TyVec { inner } => plain(inner), _ => TyVoid };
+  val(lt)
+}
+
+// c2 — the same, the join an `if`.
+fn c2(cb: Ty) -> integer {
+  lt: Ty = TyVoid;
+  if cb is TyRef {
+    lt = TyRef { n: 9, dep: [] };
+  }
+  lt = if cb is TyVec { plain(cb) } else { TyVoid };
+  val(lt)
+}
+
+// c3 — the same, the join's arm a projection.
+fn c3(cb: Ty) -> integer {
+  lt: Ty = TyVoid;
+  if cb is TyRef {
+    lt = TyRef { n: 9, dep: [] };
+  }
+  lt = match cb { TyVec { inner } => inner, _ => TyVoid };
+  val(lt)
+}
+
+// c4 — control: the earlier rebind unconditional.
+fn c4(cb: Ty) -> integer {
+  lt: Ty = TyVoid;
+  lt = TyRef { n: 9, dep: [] };
+  lt = match cb { TyVec { inner } => plain(inner), _ => TyVoid };
+  val(lt)
+}
+
+fn main() {
+  v = TyVec { inner: TyRef { n: 4, dep: [1] } };
+  r = TyRef { n: 2, dep: [] };
+  assert(c1(v) == 4 && c1(r) == 0, "c1 a match after a conditional literal: {c1(v)} {c1(r)}");
+  assert(c2(v) == 50 && c2(r) == 0, "c2 an if after a conditional literal: {c2(v)} {c2(r)}");
+  assert(c3(v) == 4 && c3(r) == 0, "c3 a projection arm: {c3(v)} {c3(r)}");
+  assert(c4(v) == 4 && c4(r) == 0, "c4 an unconditional literal: {c4(v)} {c4(r)}");
+}
